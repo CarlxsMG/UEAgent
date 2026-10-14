@@ -1,0 +1,23 @@
+{
+  "mode": "typed_setter",
+  "cmd_base": "sky_light",
+  "actor_class": "ASkyLight",
+  "article": "a",
+  "component_class": "USkyLightComponent",
+  "accessor": "GetLightComponent()",
+  "set_desc": "Set the properties of a SkyLight actor's USkyLightComponent: intensity, light color, indirect and volumetric intensity, lower-hemisphere color and occlusion. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+  "get_desc": "Read the properties of a SkyLight actor's USkyLightComponent, under the names set_sky_light_properties takes.",
+  "fields": [
+    { "json": "intensity", "setter": "SetIntensity", "readback": "Intensity", "type": "float", "desc": "Optional sky light intensity." },
+    { "json": "light_color", "setter": "SetLightColor", "readback": "LightColor", "type": "linear_color", "desc": "Optional [R,G,B(,A)] light color (stored as FColor).",
+      "reader_comment": ["SetLightColor stores LightColor as an sRGB FColor, so it reads back as 0-255 bytes."] },
+    { "json": "indirect_lighting_intensity", "setter": "SetIndirectLightingIntensity", "readback": "IndirectLightingIntensity", "type": "float", "desc": "Optional indirect lighting intensity scale." },
+    { "json": "volumetric_scattering_intensity", "setter": "SetVolumetricScatteringIntensity", "readback": "VolumetricScatteringIntensity", "type": "float", "desc": "Optional volumetric scattering intensity." },
+    { "json": "lower_hemisphere_color", "setter": "SetLowerHemisphereColor", "readback": "LowerHemisphereColor", "type": "linear_color", "desc": "Optional [R,G,B(,A)] lower-hemisphere color (FLinearColor)." },
+    { "json": "occlusion_tint", "setter": "SetOcclusionTint", "readback": "OcclusionTint", "type": "color_bytes", "desc": "Optional [R,G,B] occlusion tint as 0-255 bytes (FColor)." },
+    { "json": "occlusion_contrast", "setter": "SetOcclusionContrast", "readback": "Contrast", "type": "float", "desc": "Optional AO contrast (0..1).",
+      "reader_comment": ["SetOcclusionContrast writes Contrast."] },
+    { "json": "occlusion_exponent", "setter": "SetOcclusionExponent", "readback": "OcclusionExponent", "type": "float", "desc": "Optional AO exponent." },
+    { "json": "min_occlusion", "setter": "SetMinOcclusion", "readback": "MinOcclusion", "type": "float", "desc": "Optional minimum occlusion (0..1)." }
+  ]
+}

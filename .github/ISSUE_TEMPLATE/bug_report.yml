@@ -1,0 +1,39 @@
+name: Bug report
+description: A tool that fails, lies about its result, or crashes or freezes the editor.
+labels: [bug]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      description: The tool that misbehaved, e.g. `set_blueprint_component_property`.
+    validations:
+      required: true
+  - type: textarea
+    id: call
+    attributes:
+      label: The call
+      description: The parameters you sent (or the prompt, if you only know that).
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Editor log
+      description: The lines around the call from `Saved/Logs/<Project>.log`, or the crash report.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: UEAgent version, Unreal Engine version, operating system and MCP client.
+      placeholder: UEAgent 1.0.0, UE 5.8.1, Windows 11, Claude Code
+    validations:
+      required: true

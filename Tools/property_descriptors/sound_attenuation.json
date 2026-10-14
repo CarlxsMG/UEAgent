@@ -1,0 +1,11 @@
+{
+  "mode": "reflection_merge",
+  "cmd_base": "sound_attenuation",
+  "asset_class": "USoundAttenuation",
+  "path_param": "attenuation_path",
+  "struct_type": "FSoundAttenuationSettings",
+  "struct_field": "Attenuation",
+  "set_desc": "Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial merge + clamp).",
+  "settings_desc": "Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here.",
+  "get_desc": "Read all FSoundAttenuationSettings fields from a USoundAttenuation."
+}

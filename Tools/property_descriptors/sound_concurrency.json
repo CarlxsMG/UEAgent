@@ -1,0 +1,11 @@
+{
+  "mode": "reflection_merge",
+  "cmd_base": "sound_concurrency",
+  "asset_class": "USoundConcurrency",
+  "path_param": "concurrency_path",
+  "struct_type": "FSoundConcurrencySettings",
+  "struct_field": "Concurrency",
+  "set_desc": "Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial merge + clamp).",
+  "settings_desc": "Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched.",
+  "get_desc": "Read all FSoundConcurrencySettings fields from a USoundConcurrency."
+}

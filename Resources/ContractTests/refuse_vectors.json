@@ -1,0 +1,2528 @@
+{
+ "cases": [
+  {
+   "id": "create_material_expression-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "create_material_expression",
+     "params": {
+      "material_path": "/Game/MyGame/M_X",
+      "expression_class_name": "/Script/Engine.MaterialExpressionSetMaterialAttributes"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "create_material_expression: creating a `SetMaterialAttributes` node CRASHES THE EDITOR (assertion in Array.h, not an ensure): the node is created with an empty AttributeSetTypes array and GetInputName indexes Inputs[] out of range. Retrying does not help and it cannot be fixed afterwards: writing attribute_set_types through reflection does not grow Inputs either. WHAT WORKS: use the Displacement pin of MakeMaterialAttributes. If that node is really needed, place it once by hand in the Material Editor and wire it headless afterwards."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "create_material_expression-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "create_material_expression",
+     "params": {
+      "material_path": "/Game/MyGame/M_X",
+      "expression_class_name": "/Script/Engine.MaterialExpressionConstant"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "scatter_foliage_in_box-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "scatter_foliage_in_box",
+     "params": {
+      "foliage_type_path": "/Game/F",
+      "count": 1
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_ism_instance."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "add_foliage_instances-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "add_foliage_instances",
+     "params": {
+      "foliage_type_path": "/Game/F",
+      "transforms": []
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "The foliage tools CRASH THE EDITOR PROCESS (EXCEPTION_ACCESS_VIOLATION in FoliageEdit.dll); splitting the work or lowering the count does not help -- a single instance crashes it too. There is no workaround through these tools. WHAT WORKS: place the instances as an InstancedStaticMeshComponent on a placed actor, with add_instanced_static_mesh_component + add_ism_instance."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Temp/Untitled_1"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/Temp/Untitled_1': loading a map under /Temp/ or /Engine/ CRASHES THE EDITOR (fatal 'World Memory Leaks' in EditorServer.cpp). The resident-world preflight excludes the CURRENT world by design, but a dirty Untitled map still counts as a leak -- and that is exactly the state the editor reopens in after a crash. WHAT WORKS: ask the user to open that map from the editor. If you know what you are doing, force=true skips this check (and will probably crash the editor)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/TEMP/Untitled_1"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/TEMP/Untitled_1': loading a map under /Temp/ or /Engine/ CRASHES THE EDITOR (fatal 'World Memory Leaks' in EditorServer.cpp). The resident-world preflight excludes the CURRENT world by design, but a dirty Untitled map still counts as a leak -- and that is exactly the state the editor reopens in after a crash. WHAT WORKS: ask the user to open that map from the editor. If you know what you are doing, force=true skips this check (and will probably crash the editor)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Engine/Maps/Entry"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/Engine/Maps/Entry': loading a map under /Temp/ or /Engine/ CRASHES THE EDITOR (fatal 'World Memory Leaks' in EditorServer.cpp). The resident-world preflight excludes the CURRENT world by design, but a dirty Untitled map still counts as a leak -- and that is exactly the state the editor reopens in after a crash. WHAT WORKS: ask the user to open that map from the editor. If you know what you are doing, force=true skips this check (and will probably crash the editor)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "\\Temp\\Untitled_1"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/Temp/Untitled_1': loading a map under /Temp/ or /Engine/ CRASHES THE EDITOR (fatal 'World Memory Leaks' in EditorServer.cpp). The resident-world preflight excludes the CURRENT world by design, but a dirty Untitled map still counts as a leak -- and that is exactly the state the editor reopens in after a crash. WHAT WORKS: ask the user to open that map from the editor. If you know what you are doing, force=true skips this check (and will probably crash the editor)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Temp/Untitled_1",
+      "force": true
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Temp/Untitled_1",
+      "force": "true"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "load_level-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/MainMap"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "save_level-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {},
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    },
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {},
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "save_level-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    },
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "save_level(filename='/Game/MyGame/Map/Probe') was ALREADY used in this session, and a second save to the SAME name opens a MODAL DIALOG that freezes the editor for good. The first call does not rename: it DUPLICATES the level and leaves that world resident, so the name stays taken for the rest of the session. WHAT WORKS: use a different name, or call save_level WITHOUT filename to save the level in place (that branch has no such trap)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "save_level-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe/"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    },
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "\\game\\mygame\\map\\probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "save_level(filename='\\game\\mygame\\map\\probe') was ALREADY used in this session, and a second save to the SAME name opens a MODAL DIALOG that freezes the editor for good. The first call does not rename: it DUPLICATES the level and leaves that world resident, so the name stays taken for the rest of the session. WHAT WORKS: use a different name, or call save_level WITHOUT filename to save the level in place (that branch has no such trap)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "save_level-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    },
+    {
+     "op": "check",
+     "command": "save_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Other"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "create_world_partition_map-01",
+   "steps": [
+    {
+     "op": "note",
+     "command": "create_world_partition_map",
+     "params": {
+      "name": "Probe",
+      "package_path": "/Game/MyGame/Map"
+     },
+     "envelope": {
+      "status": "success",
+      "result": {
+       "success": true,
+       "data": {
+        "created": true
+       }
+      }
+     }
+    },
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/Game/MyGame/Map/Probe': that map was CREATED in this session with create_world_partition_map, and its UWorld stays RESIDENT in memory for the rest of the session (world_context_count goes up and it survives collect_garbage). Loading it now is FATAL -- the same 'World Memory Leaks' -- even when the resident world IS the target and its .umap exists on disk: the leak check counts it anyway. WHAT WORKS: do not open that map in this session. It takes a NEW editor session (a fresh session starts without the resident world), or ask the user to open it."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "create_world_partition_map-02",
+   "steps": [
+    {
+     "op": "note",
+     "command": "create_world_partition_map",
+     "params": {
+      "name": "Probe",
+      "package_path": "/Game/MyGame/Map"
+     },
+     "envelope": {
+      "status": "success",
+      "result": {
+       "success": true,
+       "data": {
+        "created": true
+       }
+      }
+     }
+    },
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/MainMap"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "create_world_partition_map-03",
+   "steps": [
+    {
+     "op": "note",
+     "command": "create_world_partition_map",
+     "params": {
+      "name": "Probe",
+      "package_path": "/Game/MyGame/Map"
+     },
+     "envelope": {
+      "status": "error",
+      "error": "nope",
+      "result": {
+       "success": false,
+       "error": "nope"
+      }
+     }
+    },
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/Game/MyGame/Map/Probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "create_world_partition_map-04",
+   "steps": [
+    {
+     "op": "note",
+     "command": "create_world_partition_map",
+     "params": {
+      "name": "Probe",
+      "package_path": "/Game/MyGame/Map/"
+     },
+     "envelope": {
+      "status": "success",
+      "result": {
+       "success": true,
+       "data": {
+        "created": true
+       }
+      }
+     }
+    },
+    {
+     "op": "check",
+     "command": "load_level",
+     "params": {
+      "filename": "/game/mygame/map/probe"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "load_level on '/game/mygame/map/probe': that map was CREATED in this session with create_world_partition_map, and its UWorld stays RESIDENT in memory for the rest of the session (world_context_count goes up and it survives collect_garbage). Loading it now is FATAL -- the same 'World Memory Leaks' -- even when the resident world IS the target and its .umap exists on disk: the leak check counts it anyway. WHAT WORKS: do not open that map in this session. It takes a NEW editor session (a fresh session starts without the resident world), or ask the user to open it."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/MH/MHC_Default"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "MetaHumanCharacter"
+      },
+      "get_assets_in_folder": {
+       "total_found": 12,
+       "count": 12
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "delete_asset on the MetaHumanCharacter '/Game/MyGame/MH/MHC_Default': its baked meshes are still in '/Game/MyGame/MH/Unpacked', and deleting the character first CRASHES THE EDITOR on the next frame (EXCEPTION_ACCESS_VIOLATION; the log reports 'SkeletalMesh ... has no skeleton' milliseconds after the delete returns True). That True is honest about the deletion and silent about what is left dangling. WHAT WORKS: delete the baked meshes FIRST -- delete_directory on '/Game/MyGame/MH/Unpacked' -- and the character AFTERWARDS. NOTE where they are: the build does NOT put them under /Game/MetaHumans/ but under the character's own folder, and they keep the CHARACTER's name."
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/MH/MHC_Default"
+       }
+      ],
+      [
+       "get_assets_in_folder",
+       {
+        "folder_path": "/Game/MyGame/MH/Unpacked",
+        "recursive": true,
+        "max_results": 1
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/MH/MHC_Default"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "MetaHumanCharacter"
+      },
+      "get_assets_in_folder": {
+       "total_found": 0,
+       "count": 0
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/MH/MHC_Default"
+       }
+      ],
+      [
+       "get_assets_in_folder",
+       {
+        "folder_path": "/Game/MyGame/MH/Unpacked",
+        "recursive": true,
+        "max_results": 1
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/SM_X"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "StaticMesh"
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/SM_X"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/SM_X"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "success": false,
+       "error": "boom"
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/SM_X"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/MH/MHC_Default"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "MetaHumanCharacter"
+      },
+      "get_assets_in_folder": {
+       "success": false,
+       "error": "boom"
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "delete_asset on the MetaHumanCharacter '/Game/MyGame/MH/MHC_Default': could not verify whether baked meshes remain in '/Game/MyGame/MH/Unpacked', and deleting the character while they exist CRASHES THE EDITOR on the next frame. Without that check the call is not sent. WHAT WORKS: delete_directory on '/Game/MyGame/MH/Unpacked' first, then the character."
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/MH/MHC_Default"
+       }
+      ],
+      [
+       "get_assets_in_folder",
+       {
+        "folder_path": "/Game/MyGame/MH/Unpacked",
+        "recursive": true,
+        "max_results": 1
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/MH/MHC_X"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "MetaHumanCharacter"
+      },
+      "get_assets_in_folder": {
+       "count": 2
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "delete_asset on the MetaHumanCharacter '/Game/MyGame/MH/MHC_X': its baked meshes are still in '/Game/MyGame/MH/Unpacked', and deleting the character first CRASHES THE EDITOR on the next frame (EXCEPTION_ACCESS_VIOLATION; the log reports 'SkeletalMesh ... has no skeleton' milliseconds after the delete returns True). That True is honest about the deletion and silent about what is left dangling. WHAT WORKS: delete the baked meshes FIRST -- delete_directory on '/Game/MyGame/MH/Unpacked' -- and the character AFTERWARDS. NOTE where they are: the build does NOT put them under /Game/MetaHumans/ but under the character's own folder, and they keep the CHARACTER's name."
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/MH/MHC_X"
+       }
+      ],
+      [
+       "get_assets_in_folder",
+       {
+        "folder_path": "/Game/MyGame/MH/Unpacked",
+        "recursive": true,
+        "max_results": 1
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "MHC_X"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "class": "MetaHumanCharacter"
+      },
+      "get_assets_in_folder": {
+       "total_found": 1,
+       "count": 1
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "delete_asset on the MetaHumanCharacter 'MHC_X': its baked meshes are still in 'MHC_X/Unpacked', and deleting the character first CRASHES THE EDITOR on the next frame (EXCEPTION_ACCESS_VIOLATION; the log reports 'SkeletalMesh ... has no skeleton' milliseconds after the delete returns True). That True is honest about the deletion and silent about what is left dangling. WHAT WORKS: delete the baked meshes FIRST -- delete_directory on 'MHC_X/Unpacked' -- and the character AFTERWARDS. NOTE where they are: the build does NOT put them under /Game/MetaHumans/ but under the character's own folder, and they keep the CHARACTER's name."
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MHC_X"
+       }
+      ],
+      [
+       "get_assets_in_folder",
+       {
+        "folder_path": "MHC_X/Unpacked",
+        "recursive": true,
+        "max_results": 1
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-08",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/Map/MainMap"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "name": "MainMap",
+       "class": "World"
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "delete_asset on '/Game/MyGame/Map/MainMap': that logical path is a MAP (class: World), not an ordinary asset. This call starts deleting the MAP and everything that hangs from it (for a World Partition map, every external actor package that references it). Cancelling the request on the client does NOT stop it: the command keeps running inside the editor, and only killing the process stops it. THE TRAP: if what you meant to delete was the stray `.uasset` the editor can write next to a read-only `.umap` (e.g. a .umap locked by Git LFS), both share the same name and differ only by extension -- which this path does not carry. WHAT WORKS, as an exception to the usual rule: for that stray file, close the editor and delete the file from disk. For the real map there is no way from here: it is not deleted."
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/Map/MainMap"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "delete_asset-09",
+   "steps": [
+    {
+     "op": "check",
+     "command": "delete_asset",
+     "params": {
+      "asset_path": "/Game/MyGame/Core/BP_X"
+     },
+     "probes": {
+      "get_asset_metadata": {
+       "name": "BP_X",
+       "class": "Blueprint"
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_asset_metadata",
+       {
+        "asset_name": "MyGame/Core/BP_X"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "X",
+      "delegate_name": "OnStateChanged"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "BP_X_0",
+      "delegate_name": "OnTakeAnyDamage"
+     },
+     "probes": {
+      "get_object_class": {
+       "success": false,
+       "error": "does not resolve"
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "subscribe_to_delegate('OnTakeAnyDamage' on BP_X_0): could NOT confirm that this delegate is declared by a Blueprint, and without that confirmation the call is not sent. The engine's SPARSE delegates are not a Function but a SparseDelegateFunction; the tool duplicates them as if they were a Function and the editor CRASHES IMMEDIATELY (assertion in GetPropertiesSize, UObjectGlobals.cpp). This guard fails CLOSED on purpose: a fail-open version crashed the editor. WHAT WORKS: subscribe to a dispatcher declared in Blueprint, e.g. on a Blueprint COMPONENT that fires right before the effect you want to observe; `get_event_dispatchers` on the Blueprint ASSET (without the _C suffix) lists the ones that are safe. WARNING: do not chain two subscribe_to_delegate calls in the same batch: if the second one crashes the editor, the first subscription is lost with the process."
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "BP_X_0"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "BP_X_0",
+      "delegate_name": "OnTakeAnyDamage"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "BP_X_C",
+       "class_path": "/Game/Main/BP_X.BP_X_C"
+      },
+      "get_event_dispatchers": {
+       "dispatchers": []
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "subscribe_to_delegate('OnTakeAnyDamage' on BP_X_C): could NOT confirm that this delegate is declared by a Blueprint, and without that confirmation the call is not sent. The engine's SPARSE delegates are not a Function but a SparseDelegateFunction; the tool duplicates them as if they were a Function and the editor CRASHES IMMEDIATELY (assertion in GetPropertiesSize, UObjectGlobals.cpp). This guard fails CLOSED on purpose: a fail-open version crashed the editor. WHAT WORKS: subscribe to a dispatcher declared in Blueprint, e.g. on a Blueprint COMPONENT that fires right before the effect you want to observe; `get_event_dispatchers` on the Blueprint ASSET (without the _C suffix) lists the ones that are safe. WARNING: do not chain two subscribe_to_delegate calls in the same batch: if the second one crashes the editor, the first subscription is lost with the process."
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "BP_X_0"
+       }
+      ],
+      [
+       "get_event_dispatchers",
+       {
+        "blueprint_name": "/Game/Main/BP_X",
+        "include_inherited": false
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "S_0",
+      "delegate_name": "OnTakeAnyDamage"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "BP_Sensor_Range_C",
+       "class_path": "/Game/MyGame/Gameplay/BP_Sensor_Range.BP_Sensor_Range_C"
+      },
+      "get_event_dispatchers": {
+       "dispatchers": [
+        {
+         "name": "OnTakeAnyDamage",
+         "is_inherited": false
+        }
+       ]
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "S_0"
+       }
+      ],
+      [
+       "get_event_dispatchers",
+       {
+        "blueprint_name": "/Game/MyGame/Gameplay/BP_Sensor_Range",
+        "include_inherited": false
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "BP_X.AC_Stats",
+      "delegate_name": "OnTakeAnyDamage"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "AC_Stats_C",
+       "class_path": "/Game/VendorPack/AC_Stats.AC_Stats_C"
+      },
+      "get_event_dispatchers": {
+       "dispatchers": [
+        {
+         "name": "OnTakeAnyDamage",
+         "is_inherited": false
+        }
+       ]
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "BP_X.AC_Stats"
+       }
+      ],
+      [
+       "get_event_dispatchers",
+       {
+        "blueprint_name": "/Game/VendorPack/AC_Stats",
+        "include_inherited": false
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "S_0",
+      "delegate_name": "OnTakeAnyDamage"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "BP_Sensor_Range_C",
+       "class_path": "/Game/Main/BP_Sensor_Range.BP_Sensor_Range_C"
+      },
+      "get_event_dispatchers": {
+       "dispatchers": [
+        {
+         "name": "OnStateChanged",
+         "is_inherited": false
+        },
+        {
+         "name": "OnTakeAnyDamage",
+         "is_inherited": true
+        }
+       ]
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "subscribe_to_delegate('OnTakeAnyDamage' on BP_Sensor_Range_C): could NOT confirm that this delegate is declared by a Blueprint, and without that confirmation the call is not sent. The engine's SPARSE delegates are not a Function but a SparseDelegateFunction; the tool duplicates them as if they were a Function and the editor CRASHES IMMEDIATELY (assertion in GetPropertiesSize, UObjectGlobals.cpp). This guard fails CLOSED on purpose: a fail-open version crashed the editor. WHAT WORKS: subscribe to a dispatcher declared in Blueprint, e.g. on a Blueprint COMPONENT that fires right before the effect you want to observe; `get_event_dispatchers` on the Blueprint ASSET (without the _C suffix) lists the ones that are safe. WARNING: do not chain two subscribe_to_delegate calls in the same batch: if the second one crashes the editor, the first subscription is lost with the process."
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "S_0"
+       }
+      ],
+      [
+       "get_event_dispatchers",
+       {
+        "blueprint_name": "/Game/Main/BP_Sensor_Range",
+        "include_inherited": false
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "PlayerStart_0",
+      "delegate_name": "OnActorHit"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "PlayerStart",
+       "class_path": "/Script/Engine.PlayerStart"
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "subscribe_to_delegate('OnActorHit' on PlayerStart): could NOT confirm that this delegate is declared by a Blueprint, and without that confirmation the call is not sent. The engine's SPARSE delegates are not a Function but a SparseDelegateFunction; the tool duplicates them as if they were a Function and the editor CRASHES IMMEDIATELY (assertion in GetPropertiesSize, UObjectGlobals.cpp). This guard fails CLOSED on purpose: a fail-open version crashed the editor. WHAT WORKS: subscribe to a dispatcher declared in Blueprint, e.g. on a Blueprint COMPONENT that fires right before the effect you want to observe; `get_event_dispatchers` on the Blueprint ASSET (without the _C suffix) lists the ones that are safe. WARNING: do not chain two subscribe_to_delegate calls in the same batch: if the second one crashes the editor, the first subscription is lost with the process."
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "PlayerStart_0"
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "subscribe_to_delegate-08",
+   "steps": [
+    {
+     "op": "check",
+     "command": "subscribe_to_delegate",
+     "params": {
+      "object_path": "Y_0",
+      "delegate_name": "OnDestroyed"
+     },
+     "probes": {
+      "get_object_class": {
+       "class_name": "BP_Y_C"
+      },
+      "get_event_dispatchers": {
+       "dispatchers": [
+        {
+         "name": "OnDestroyed"
+        }
+       ]
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "get_object_class",
+       {
+        "object_path": "Y_0"
+       }
+      ],
+      [
+       "get_event_dispatchers",
+       {
+        "blueprint_name": "BP_Y",
+        "include_inherited": false
+       }
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "get_actor_bounds-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "get_actor_bounds",
+     "params": {
+      "actor_name": "X"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "start_play_in_editor-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "start_play_in_editor",
+     "params": {},
+     "probes": {
+      "is_play_in_editor_active": {
+       "is_pie_active": true
+      }
+     },
+     "expect": {
+      "refused": true,
+      "message": "start_play_in_editor: a PIE session is ALREADY running (is_pie_active: true). Starting now leaves PIE HALF-STARTED, and that does NOT fail: it corrupts the data. Observed: the spawned PlayerController was the engine default instead of the project's class and the pawn ended up without a controller; spawned content appeared at wrong transforms (kilometres away or far below the map), which is easy to misreport as a game bug. WHAT WORKS: stop_play_in_editor, CONFIRM that is_play_in_editor_active returns false (the pie_stopped flag of the stop call is hardcoded to true and proves nothing), and only then start."
+     },
+     "expect_probe_calls": [
+      [
+       "is_play_in_editor_active",
+       {}
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "start_play_in_editor-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "start_play_in_editor",
+     "params": {},
+     "probes": {
+      "is_play_in_editor_active": {
+       "is_pie_active": false
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "is_play_in_editor_active",
+       {}
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "start_play_in_editor-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "start_play_in_editor",
+     "params": {},
+     "probes": {
+      "is_play_in_editor_active": {
+       "success": false,
+       "error": "nope"
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "is_play_in_editor_active",
+       {}
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "start_play_in_editor-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "start_play_in_editor",
+     "params": {},
+     "probes": {
+      "is_play_in_editor_active": {
+       "another": 1
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "is_play_in_editor_active",
+       {}
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "start_play_in_editor-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "start_play_in_editor",
+     "params": {},
+     "probes": {
+      "is_play_in_editor_active": {
+       "is_pie_active": "true"
+      }
+     },
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": [
+      [
+       "is_play_in_editor_active",
+       {}
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "capture_pie_screenshot-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "capture_pie_screenshot",
+     "params": {
+      "include_ui": true
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use read_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "capture_pie_screenshot-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "capture_pie_screenshot",
+     "params": {},
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "capture_pie_screenshot-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "capture_pie_screenshot",
+     "params": {
+      "include_ui": "yes"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "capture_pie_screenshot with include_ui CRASHES THE EDITOR (access violation in D3D12/Slate). And without include_ui it does not serve the usual purpose either: it does NOT render UMG -- the UI is not in the image. To inspect the UI, use read_pie_widgets; for an image of the viewport, capture_viewport; to judge real gameplay, ask the user to play-test it in PIE."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "\nimport unreal\nsds = unreal.get_editor_subsystem(unreal.SubobjectDataSubsystem)\nsds.delete_subobject(ctx, dead)\nsds.rename_subobject(alive, 'CollisionShell')\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script calls both delete_subobject AND rename_subobject. That sequence CRASHES THE EDITOR (fatal in Obj.cpp: 'Renaming on top of an existing object is not allowed') and cannot return an error. The trap is not renaming onto a taken name: the name is FREE in the Blueprint but still TAKEN in the instance ALREADY PLACED in the level, because delete_subobject removes the component from the SCS but does not reach what that instance serialized. RULE: do not rename an SCS component -- if the name matters, create it with the right name, and if it already exists under another name, adapt whatever reads it. WHAT WORKS if it must be done anyway: delete -> compile_blueprint -> save_level -> re-read the instances with list_world_partition_actors -> rename, in SEPARATE CALLS, never both steps in the same script. WARNING: if the name ends in a digit you did not ask for (MyComponent1), Unreal made it unique because a namesake ALREADY exists: find out what it is instead of renaming over it."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nsds = unreal.get_editor_subsystem(unreal.SubobjectDataSubsystem)\nh = sds.add_new_subobject(unreal.AddNewSubobjectParams(parent_handle=root))\nsds.rename_subobject(h, 'Shell')\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nsds.delete_subobject(ctx, dead)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "template = 'sds.delete_subobject(a, b); sds.rename_subobject(c, d)'\nprint(len(template))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "def broken( :\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nprint(unreal.SystemLibrary)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-07",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.set_editor_property('attribute_set_types', [guid])\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (set_editor_property (positional)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-08",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.set_editor_property(name='attribute_set_types', value=[g])\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (set_editor_property (named)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-09",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.set_editor_property(property_name=\"attribute_set_types\", value=[g])\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (set_editor_property (named)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-10",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.attribute_set_types = [g]\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (assignment to .attribute_set_types), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-11",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.attribute_set_types += [g]\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (assignment to .attribute_set_types), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-12",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "print(node.get_editor_property('attribute_set_types'))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-13",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.set_editor_property('desc', 'x')\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-14",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "template = \"x.set_editor_property('attribute_set_types', v)\"\nprint(len(template))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-15",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "a.attribute_set_types = []\nb.set_editor_property('attribute_set_types', v)\nc.attribute_set_types = []\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (assignment to .attribute_set_types, set_editor_property (positional)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-16",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.set_editor_property('attribute_' 'set_types', v)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (set_editor_property (positional)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-17",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.set_editor_property('attribute\\x5fset_types', v)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script WRITES attribute_set_types (set_editor_property (positional)), and that CRASHES THE EDITOR inside the call: assertion in Array.h, 'Array index out of bounds: 1 into an array of size 1'. UMaterialExpressionSetMaterialAttributes keeps TWO parallel arrays (Inputs and AttributeSetTypes); writing AttributeSetTypes through reflection does NOT grow Inputs, and PostEditChangeProperty indexes Inputs[1]. There is no return, so there is no success:false to rely on: the process goes down with every unsaved material edit. The two arrays are only kept in sync by the node's '+' button in the Material Editor (manual work for the user). WHAT WORKS: use the Displacement pin of MakeMaterialAttributes, reachable by name -- there is no need to touch this node. READING the property IS allowed (get_editor_property returns [] without error); only writing it crashes."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-18",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.set_editor_property(b'attribute_set_types', v)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-19",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "if node.attribute_set_types == []:\n    pass\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-20",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "node.attribute_set_types: list = []\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-21",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.set_editor_property(*args)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-22",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.set_editor_property(f'attribute_set_types', v)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-23",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nunreal.SkeletalMergingLibrary.merge_meshes(params)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: SkeletalMergingLibrary.merge_meshes CRASHES THE EDITOR with an assert, not an exception (Assertion failed: (Index >= 0) & (Index < ArrayNum), 'Array index out of bounds: 1 into an array of size 1', not an ensure). It indexes the parallel arrays mesh_section_mappings and uv_transforms_per_mesh by NUMBER OF MESHES without validating them, so with 2 meshes and those arrays empty it crashes and takes everything unsaved with it. With a SINGLE mesh it is harmless: the crash starts at TWO, which is exactly the useful case. IF YOU STILL NEED IT: fill EVERY parallel array to the size of meshes_to_merge before calling it. NOTE: re-skinning has no headless path in UE 5.8: Skeleton is read-only through reflection, no MCP tool assigns a skeleton, SkeletalMeshEditorSubsystem only exposes assign_physics_asset, and IKRetargetBatchOperation is for ANIMATIONS. The step that produces the mesh is done in the editor (right-click the SkeletalMesh -> Skeleton -> Assign Skeleton)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-24",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "doc = 'skip merge_meshes(params) in here'\nprint(len(doc))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-25",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nexp = unreal.TextureExporterPNG()\nunreal.Exporter.run_asset_export_task(task)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: TextureExporterPNG CRASHES THE EDITOR if the texture is not 8 bits per channel (Assertion failed: SupportsTexture(Texture), EditorFactories.cpp, not an ensure). With a texture from an RTF_RGBA16F render target, or TC_HDR, or TC_EDITOR_ICON over float data, there is no return value: there is an assert. And the rule is not 'check the bit depth', it is DO NOT EXPORT AN IMAGE TO LOOK AT IT: to verify a capture, COUNT PIXELS with unreal.RenderingLibrary.read_render_target_raw / read_render_target_uv. IF YOU REALLY NEED A FILE: export_render_target is the supported path, or create the texture from an RTF_RGBA8 render target. NOTE: this guard only sees code sent through execute_python; the same call inside execute_python_file does NOT go through here."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-26",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nunreal.RenderingLibrary.export_render_target(w, rt, d, f)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-27",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nsub.request_auto_rigging(ch, unreal.RigType.JOINTS_ONLY)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: request_auto_rigging CRASHES THE EDITOR IMMEDIATELY (Assertion failed: IsValid(), SharedPointer.h, not an ensure; script stack MetaHumanCharacterEditorSubsystem.RequestAutoRigging), and it is not a local failure: METAHUMAN AUTO-RIGGING IS A CLOUD SERVICE. The observed chain: no Epic session -> EOS_InvalidAuth -> no autorig -> 'Character is not rigged' in the UI -> can_build_meta_human:false -> Assemble disabled. rig_type=JOINTS_ONLY makes no difference. It is not blocked because it is impossible, but because what decides it is the ACCOUNT STATE, which cannot be read from the code: if you believe there is an Epic session, check it FIRST with get_output_log_lines(category_filter='MetaHuman') WITHOUT a verbosity filter -- LogMetaHumanAuth logs at Display, not Error, so with a filter it does NOT show. And save EVERYTHING before any attempt: this is an assert, not an exception."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-28",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "doc = 'note re request_auto_rigging(ch) here'\nprint(len(doc))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-29",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "# a.delete_subobject() b.rename_subobject()\nprint(1)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-30",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "doc = '''\nsds.delete_subobject(a)\nsds.rename_subobject(b)\n'''\nprint(doc)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-31",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.delete_subobject(\n    a)\ny.rename_subobject(\n    b)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script calls both delete_subobject AND rename_subobject. That sequence CRASHES THE EDITOR (fatal in Obj.cpp: 'Renaming on top of an existing object is not allowed') and cannot return an error. The trap is not renaming onto a taken name: the name is FREE in the Blueprint but still TAKEN in the instance ALREADY PLACED in the level, because delete_subobject removes the component from the SCS but does not reach what that instance serialized. RULE: do not rename an SCS component -- if the name matters, create it with the right name, and if it already exists under another name, adapt whatever reads it. WHAT WORKS if it must be done anyway: delete -> compile_blueprint -> save_level -> re-read the instances with list_world_partition_actors -> rename, in SEPARATE CALLS, never both steps in the same script. WARNING: if the name ends in a digit you did not ask for (MyComponent1), Unreal made it unique because a namesake ALREADY exists: find out what it is instead of renaming over it."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-32",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "rename_subobject\n(x)\ndelete_subobject(y)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-33",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.rename_subobject \\\n(a)\nx.delete_subobject(b)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: this script calls both delete_subobject AND rename_subobject. That sequence CRASHES THE EDITOR (fatal in Obj.cpp: 'Renaming on top of an existing object is not allowed') and cannot return an error. The trap is not renaming onto a taken name: the name is FREE in the Blueprint but still TAKEN in the instance ALREADY PLACED in the level, because delete_subobject removes the component from the SCS but does not reach what that instance serialized. RULE: do not rename an SCS component -- if the name matters, create it with the right name, and if it already exists under another name, adapt whatever reads it. WHAT WORKS if it must be done anyway: delete -> compile_blueprint -> save_level -> re-read the instances with list_world_partition_actors -> rename, in SEPARATE CALLS, never both steps in the same script. WARNING: if the name ends in a digit you did not ask for (MyComponent1), Unreal made it unique because a namesake ALREADY exists: find out what it is instead of renaming over it."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-34",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "s = r'it\\'s x.delete_subobject()'\ny.rename_subobject(b)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-35",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "def merge_meshes(p):\n    pass\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-36",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "class TextureExporterPNG(Base):\n    pass\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-37",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "@request_auto_rigging(x)\ndef f():\n    pass\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: request_auto_rigging CRASHES THE EDITOR IMMEDIATELY (Assertion failed: IsValid(), SharedPointer.h, not an ensure; script stack MetaHumanCharacterEditorSubsystem.RequestAutoRigging), and it is not a local failure: METAHUMAN AUTO-RIGGING IS A CLOUD SERVICE. The observed chain: no Epic session -> EOS_InvalidAuth -> no autorig -> 'Character is not rigged' in the UI -> can_build_meta_human:false -> Assemble disabled. rig_type=JOINTS_ONLY makes no difference. It is not blocked because it is impossible, but because what decides it is the ACCOUNT STATE, which cannot be read from the code: if you believe there is an Epic session, check it FIRST with get_output_log_lines(category_filter='MetaHuman') WITHOUT a verbosity filter -- LogMetaHumanAuth logs at Display, not Error, so with a filter it does NOT show. And save EVERYTHING before any attempt: this is an assert, not an exception."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-38",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "f = lambda: x.merge_meshes(p)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: SkeletalMergingLibrary.merge_meshes CRASHES THE EDITOR with an assert, not an exception (Assertion failed: (Index >= 0) & (Index < ArrayNum), 'Array index out of bounds: 1 into an array of size 1', not an ensure). It indexes the parallel arrays mesh_section_mappings and uv_transforms_per_mesh by NUMBER OF MESHES without validating them, so with 2 meshes and those arrays empty it crashes and takes everything unsaved with it. With a SINGLE mesh it is harmless: the crash starts at TWO, which is exactly the useful case. IF YOU STILL NEED IT: fill EVERY parallel array to the size of meshes_to_merge before calling it. NOTE: re-skinning has no headless path in UE 5.8: Skeleton is read-only through reflection, no MCP tool assigns a skeleton, SkeletalMeshEditorSubsystem only exposes assign_physics_asset, and IKRetargetBatchOperation is for ANIMATIONS. The step that produces the mesh is done in the editor (right-click the SkeletalMesh -> Skeleton -> Assign Skeleton)."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-39",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "[a.request_auto_rigging(c) for c in cs]\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: request_auto_rigging CRASHES THE EDITOR IMMEDIATELY (Assertion failed: IsValid(), SharedPointer.h, not an ensure; script stack MetaHumanCharacterEditorSubsystem.RequestAutoRigging), and it is not a local failure: METAHUMAN AUTO-RIGGING IS A CLOUD SERVICE. The observed chain: no Epic session -> EOS_InvalidAuth -> no autorig -> 'Character is not rigged' in the UI -> can_build_meta_human:false -> Assemble disabled. rig_type=JOINTS_ONLY makes no difference. It is not blocked because it is impossible, but because what decides it is the ACCOUNT STATE, which cannot be read from the code: if you believe there is an Epic session, check it FIRST with get_output_log_lines(category_filter='MetaHuman') WITHOUT a verbosity filter -- LogMetaHumanAuth logs at Display, not Error, so with a filter it does NOT show. And save EVERYTHING before any attempt: this is an assert, not an exception."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-40",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x = 'abc\nmerge_meshes(p)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-41",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "merge_meshes(p))\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-42",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.Merge_Meshes(p)\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-43",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "import unreal\nunreal.Rotator(0, 90, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): unreal.Rotator(0, 90, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-44",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-45",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator()"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-46",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, 0, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-47",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(*rot)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-48",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "code = 'unreal.Rotator(0, 90, 0)'"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-49",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "this is not python ("
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-50",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "GeomTools.Rotator(0, 90, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-51",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0.0, 0, 0e0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-52",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, -0.0, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): unreal.Rotator(0, -0.0, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-53",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0x0, 0b0, 0o0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-54",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0j, 0, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): unreal.Rotator(0j, 0, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-55",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(roll=0, pitch=90)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-56",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, pitch=90)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-57",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "x.unreal.Rotator(0, 90, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-58",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "Rotator(0, 90, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): Rotator(0, 90, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-59",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "from unreal import Rotator\nRotator(1, 2, 3)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): Rotator(1, 2, 3)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-60",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "def Rotator(a):\n    pass\n"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-61",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, 9, 0)\nunreal.Rotator(1, 2, 3)\nRotator(5, 5, 5)\nunreal.Rotator(0, 9, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): Rotator(5, 5, 5), unreal.Rotator(0, 9, 0), unreal.Rotator(1, 2, 3)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-62",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(1_000, 0, 0)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): unreal.Rotator(1_000, 0, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-63",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, 0, 0, )"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "execute_python-64",
+   "steps": [
+    {
+     "op": "check",
+     "command": "execute_python",
+     "params": {
+      "command": "unreal.Rotator(0, 9, 0)\nx.delete_subobject(a)\nx.rename_subobject(b)"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "execute_python: unreal.Rotator() called with POSITIONAL arguments -- its order is (roll, pitch, yaw), NOT the (pitch, yaw, roll) it prints in, so Rotator(0, 90, 0) is PITCH 90 and points the actor at the sky. Name the axes: unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0). Offending call(s): unreal.Rotator(0, 9, 0)"
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "get_blueprint_info",
+     "params": {
+      "blueprint_name": "/Game//BP_Door"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "blueprint_name is '/Game//BP_Door', a content path with '//' in it: the engine aborts the editor on a package name like that (CreatePackage is Fatal on it). Write the path with single slashes."
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "batch",
+     "params": {
+      "commands": [
+       {
+        "command": "get_blueprint_info",
+        "params": {
+         "blueprint_name": "/Game/Doors/BP_Door"
+        }
+       },
+       {
+        "command": "delete_asset",
+        "params": {
+         "asset_path": "/Game/Doors//BP_Door"
+        }
+       }
+      ]
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "commands[1].params.asset_path is '/Game/Doors//BP_Door', a content path with '//' in it: the engine aborts the editor on a package name like that (CreatePackage is Fatal on it). Write the path with single slashes."
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "add_comment_node",
+     "params": {
+      "blueprint_name": "/Game/Doors/BP_Door",
+      "comment": "// open on overlap"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "double_slash_path-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "create_material_expression",
+     "params": {
+      "material_path": "///Game/M_Floor",
+      "expression_class_name": "/Script/Engine.MaterialExpressionAdd"
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "material_path is '///Game/M_Floor', a content path with '//' in it: the engine aborts the editor on a package name like that (CreatePackage is Fatal on it). Write the path with single slashes."
+     }
+    }
+   ]
+  }
+ ]
+}

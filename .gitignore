@@ -1,0 +1,9 @@
+# Unreal build artifacts (generated; never commit)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+*.pdb
+
+# Contract self-test reports (mcp.contract.selftest writes them next to each vector file)
+Resources/ContractTests/*.result.json

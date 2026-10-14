@@ -1,0 +1,21 @@
+name: Feature request
+description: Something you want an agent to be able to do in Unreal, that no tool does yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you want to do
+      description: The task, as you would ask an agent to do it.
+    validations:
+      required: true
+  - type: textarea
+    id: closest
+    attributes:
+      label: Closest tools today
+      description: Tools that almost do it, and what is missing. The tool reference is in docs/tools.
+  - type: textarea
+    id: engine
+    attributes:
+      label: Engine API, if you know it
+      description: The class or function of the engine that does it by hand.

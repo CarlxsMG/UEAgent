@@ -1,0 +1,33 @@
+{
+  "mode": "typed_setter",
+  "cmd_base": "exponential_height_fog",
+  "actor_class": "AExponentialHeightFog",
+  "article": "an",
+  "component_class": "UExponentialHeightFogComponent",
+  "accessor": "GetComponent()",
+  "loctext_key": "SetExpHeightFogProperties",
+  "set_desc": "Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent: density and falloff, inscattering, distances, max opacity, volumetric fog, the second fog layer and directional inscattering. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+  "get_desc": "Read the properties of an ExponentialHeightFog actor's UExponentialHeightFogComponent, under the names set_exponential_height_fog_properties takes.",
+  "fields": [
+    { "json": "fog_density", "setter": "SetFogDensity", "readback": "FogDensity", "type": "float", "desc": "Optional global fog density." },
+    { "json": "fog_height_falloff", "setter": "SetFogHeightFalloff", "readback": "FogHeightFalloff", "type": "float", "desc": "Optional height falloff." },
+    { "json": "fog_inscattering_color", "setter": "SetFogInscatteringColor", "readback": "FogInscatteringLuminance", "type": "linear_color", "desc": "Optional [R,G,B(,A)] inscattering color (luminance).",
+      "reader_comment": ["SetFogInscatteringColor writes FogInscatteringLuminance."] },
+    { "json": "fog_max_opacity", "setter": "SetFogMaxOpacity", "readback": "FogMaxOpacity", "type": "float", "desc": "Optional max opacity (0..1)." },
+    { "json": "start_distance", "setter": "SetStartDistance", "readback": "StartDistance", "type": "float", "desc": "Optional fog start distance." },
+    { "json": "end_distance", "setter": "SetEndDistance", "readback": "EndDistance", "type": "float", "desc": "Optional fog end distance." },
+    { "json": "fog_cutoff_distance", "setter": "SetFogCutoffDistance", "readback": "FogCutoffDistance", "type": "float", "desc": "Optional fog cutoff distance." },
+    { "json": "volumetric_fog", "setter": "SetVolumetricFog", "readback": "bEnableVolumetricFog", "type": "bool", "desc": "Optional enable volumetric fog." },
+    { "json": "volumetric_fog_scattering_distribution", "setter": "SetVolumetricFogScatteringDistribution", "readback": "VolumetricFogScatteringDistribution", "type": "float", "desc": "Optional volumetric scattering distribution (-1..1)." },
+    { "json": "volumetric_fog_albedo", "setter": "SetVolumetricFogAlbedo", "readback": "VolumetricFogAlbedo", "type": "color_bytes", "desc": "Optional [R,G,B] volumetric albedo as 0-255 bytes (FColor)." },
+    { "json": "volumetric_fog_emissive", "setter": "SetVolumetricFogEmissive", "readback": "VolumetricFogEmissive", "type": "linear_color", "desc": "Optional [R,G,B(,A)] volumetric emissive color." },
+    { "json": "volumetric_fog_extinction_scale", "setter": "SetVolumetricFogExtinctionScale", "readback": "VolumetricFogExtinctionScale", "type": "float", "desc": "Optional volumetric extinction scale." },
+    { "json": "second_fog_density", "setter": "SetSecondFogDensity", "readback": "SecondFogData.FogDensity", "type": "float", "desc": "Optional second fog layer density." },
+    { "json": "second_fog_height_falloff", "setter": "SetSecondFogHeightFalloff", "readback": "SecondFogData.FogHeightFalloff", "type": "float", "desc": "Optional second fog layer height falloff." },
+    { "json": "second_fog_height_offset", "setter": "SetSecondFogHeightOffset", "readback": "SecondFogData.FogHeightOffset", "type": "float", "desc": "Optional second fog layer height offset." },
+    { "json": "directional_inscattering_exponent", "setter": "SetDirectionalInscatteringExponent", "readback": "DirectionalInscatteringExponent", "type": "float", "desc": "Optional directional inscattering exponent (sun glow tightness)." },
+    { "json": "directional_inscattering_start_distance", "setter": "SetDirectionalInscatteringStartDistance", "readback": "DirectionalInscatteringStartDistance", "type": "float", "desc": "Optional directional inscattering start distance." },
+    { "json": "directional_inscattering_color", "setter": "SetDirectionalInscatteringColor", "readback": "DirectionalInscatteringLuminance", "type": "linear_color", "desc": "Optional [R,G,B(,A)] directional inscattering color (luminance).",
+      "reader_comment": ["SetDirectionalInscatteringColor writes DirectionalInscatteringLuminance; DirectionalInscatteringColor_DEPRECATED", "keeps its default, so it does not round-trip."] }
+  ]
+}

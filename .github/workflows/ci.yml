@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  generated:
+    name: Generated files follow the C++
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Property handlers
+        run: |
+          python Tools/integrate_property_handlers.py
+          git diff --exit-code
+      - name: Tool catalog
+        run: python Tools/codegen_command_catalog.py --check
+      - name: Known-param table
+        run: python Tools/codegen_param_table.py --check
+      - name: Param aliases
+        run: python Tools/codegen_param_aliases.py --check
+      - name: PIE-safety table
+        run: python Tools/codegen_pie_safety.py --check
+      - name: Tool reference
+        run: python Tools/codegen_tool_docs.py --check

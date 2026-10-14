@@ -1,0 +1,106 @@
+#pragma once
+// Tables for the execute_python readback check. Order matters: findings are reported in table
+// order.
+
+#include "../McpReadbackText.h"
+
+namespace McpReadbackPythonTables
+{
+	/** An API name or argument value, and the warning attached to it. */
+	struct FSymbolWarning { const TCHAR* Symbol; const TCHAR* Warning; };
+
+	inline const FSymbolWarning LyingApisDuringPie[] = {
+		{ TEXT("load_asset"), McpReadbackText::RBK_LYING_APIS_DURING_PIE_0 },
+		{ TEXT("load_blueprint_class"), McpReadbackText::RBK_LYING_APIS_DURING_PIE_1 },
+		{ TEXT("get_all_level_actors"), McpReadbackText::RBK_LYING_APIS_DURING_PIE_2 },
+	};
+
+	inline const FSymbolWarning LyingArguments[] = {
+		{ TEXT("bDynamicObstacle"), McpReadbackText::RBK_LYING_ARGUMENTS_0 },
+		{ TEXT("bUseSystemDefaultObstacleAreaClass"), McpReadbackText::RBK_LYING_ARGUMENTS_1 },
+		{ TEXT("edit_layers"), McpReadbackText::RBK_LYING_ARGUMENTS_5 },
+		{ TEXT("runtime_partitions"), McpReadbackText::RBK_LYING_ARGUMENTS_6 },
+		{ TEXT("WidgetTree"), McpReadbackText::RBK_LYING_ARGUMENTS_10 },
+		{ TEXT("user_parameters"), McpReadbackText::RBK_LYING_ARGUMENTS_15 },
+		{ TEXT("default_hlod_layer"), McpReadbackText::RBK_LYING_ARGUMENTS_16 },
+		{ TEXT("enable_tessellation"), McpReadbackText::RBK_LYING_ARGUMENTS_17 },
+		{ TEXT("collision_extents"), McpReadbackText::RBK_LYING_ARGUMENTS_18 },
+		{ TEXT("max_walk_speed"), McpReadbackText::RBK_LYING_ARGUMENTS_19 },
+		{ TEXT("pending_movement_input_vector"), McpReadbackText::RBK_LYING_ARGUMENTS_20 },
+		{ TEXT("agent_radius"), McpReadbackText::RBK_LYING_ARGUMENTS_21 },
+		{ TEXT("agent_height"), McpReadbackText::RBK_LYING_ARGUMENTS_22 },
+		{ TEXT("simple_construction_script"), McpReadbackText::RBK_LYING_ARGUMENTS_23 },
+	};
+
+	inline const FSymbolWarning LyingApis[] = {
+		{ TEXT("reload"), McpReadbackText::RBK_LYING_APIS_2 },
+		{ TEXT("import_from_face_dna"), McpReadbackText::RBK_LYING_APIS_3 },
+		{ TEXT("apply_point_damage"), McpReadbackText::RBK_LYING_APIS_4 },
+		{ TEXT("compare_body_state"), McpReadbackText::RBK_LYING_APIS_5 },
+		{ TEXT("set_skeletal_mesh"), McpReadbackText::RBK_LYING_APIS_6 },
+		{ TEXT("request_gameplay_tag"), McpReadbackText::RBK_LYING_APIS_7 },
+		{ TEXT("save_dirty_packages"), McpReadbackText::RBK_LYING_APIS_8 },
+		{ TEXT("get_assembly_output"), McpReadbackText::RBK_LYING_APIS_9 },
+		{ TEXT("get_water_surface_info_at_location"), McpReadbackText::RBK_LYING_APIS_10 },
+		{ TEXT("fill_data_table_from_json_string"), McpReadbackText::RBK_LYING_APIS_11 },
+		{ TEXT("project_point_to_navigation"), McpReadbackText::RBK_LYING_APIS_12 },
+		{ TEXT("save_current_level"), McpReadbackText::RBK_LYING_APIS_13 },
+		{ TEXT("add_actor_to_data_layers"), McpReadbackText::RBK_LYING_APIS_14 },
+		{ TEXT("can_build_meta_human"), McpReadbackText::RBK_LYING_APIS_15 },
+		{ TEXT("conform_body_to_target"), McpReadbackText::RBK_LYING_APIS_16 },
+		{ TEXT("set_single_slot_selection"), McpReadbackText::RBK_LYING_APIS_17 },
+		{ TEXT("try_add_object_to_edit"), McpReadbackText::RBK_LYING_APIS_18 },
+		{ TEXT("get_body_constraints"), McpReadbackText::RBK_LYING_APIS_19 },
+		{ TEXT("get_anim_pose_at_time"), McpReadbackText::RBK_LYING_APIS_20 },
+		{ TEXT("stop_movement_immediately"), McpReadbackText::RBK_LYING_APIS_21 },
+		{ TEXT("set_collision_profile_name"), McpReadbackText::RBK_LYING_APIS_22 },
+		{ TEXT("sphere_trace_single_for_objects"), McpReadbackText::RBK_LYING_APIS_23 },
+		{ TEXT("get_constraints"), McpReadbackText::RBK_LYING_APIS_24 },
+		{ TEXT("conv_string_to_name"), McpReadbackText::RBK_LYING_APIS_25 },
+		{ TEXT("get_display_name"), McpReadbackText::RBK_LYING_APIS_26 },
+		{ TEXT("get_hint_text"), McpReadbackText::RBK_LYING_APIS_27 },
+		{ TEXT("has_any_tags"), McpReadbackText::RBK_LYING_APIS_28 },
+		{ TEXT("has_mapping_context"), McpReadbackText::RBK_LYING_APIS_29 },
+		{ TEXT("post_edit_change"), McpReadbackText::RBK_LYING_APIS_30 },
+		{ TEXT("break_hit_result"), McpReadbackText::RBK_LYING_APIS_31 },
+		{ TEXT("is_component_tick_enabled"), McpReadbackText::RBK_LYING_APIS_32 },
+		{ TEXT("is_sense_enabled"), McpReadbackText::RBK_LYING_APIS_33 },
+		{ TEXT("is_simulating_physics"), McpReadbackText::RBK_LYING_APIS_34 },
+		{ TEXT("sphere_overlap_actors"), McpReadbackText::RBK_LYING_APIS_35 },
+		{ TEXT("set_global_time_dilation"), McpReadbackText::RBK_LYING_APIS_36 },
+		{ TEXT("get_pending_movement_input_vector"), McpReadbackText::RBK_LYING_APIS_37 },
+		{ TEXT("save_asset"), McpReadbackText::RBK_PYTHON_SAVE_WARNING_0 },
+		{ TEXT("save_loaded_asset"), McpReadbackText::RBK_PYTHON_SAVE_WARNING_0 },
+		{ TEXT("dir"), McpReadbackText::RBK_LYING_APIS_38 },
+		{ TEXT("call_method"), McpReadbackText::RBK_LYING_APIS_40 },
+		{ TEXT("import_text"), McpReadbackText::RBK_LYING_APIS_42 },
+		{ TEXT("to_dict"), McpReadbackText::RBK_LYING_APIS_43 },
+		{ TEXT("get_console_variable_float_value"), McpReadbackText::RBK_LYING_APIS_44 },
+		{ TEXT("delete_all_material_expressions"), McpReadbackText::RBK_LYING_APIS_45 },
+		{ McpReadbackText::RBK_LYING_APIS_0, McpReadbackText::RBK_LYING_APIS_46 },
+		{ TEXT("get_data_layer_instances_from_actor"), McpReadbackText::RBK_LYING_APIS_47 },
+		{ TEXT("get_dirty_content_packages"), McpReadbackText::RBK_LYING_APIS_48 },
+		{ TEXT("get_editor_world"), McpReadbackText::RBK_LYING_APIS_49 },
+		{ McpReadbackText::RBK_LYING_APIS_1, McpReadbackText::RBK_LYING_APIS_50 },
+		{ TEXT("try_add_item_from_wardrobe_item"), McpReadbackText::RBK_LYING_APIS_51 },
+		{ TEXT("get_socket_transform"), McpReadbackText::RBK_LYING_APIS_52 },
+		{ TEXT("sleep"), McpReadbackText::RBK_LYING_APIS_53 },
+		{ TEXT("set_physics_linear_velocity"), McpReadbackText::RBK_LYING_APIS_54 },
+		{ TEXT("find_path_to_actor_synchronously"), McpReadbackText::RBK_LYING_APIS_55 },
+		{ TEXT("find_path_to_location_synchronously"), McpReadbackText::RBK_LYING_APIS_56 },
+		{ TEXT("get_real_time_seconds"), McpReadbackText::RBK_LYING_APIS_57 },
+		{ TEXT("set_skeletal_mesh_asset"), McpReadbackText::RBK_LYING_APIS_58 },
+		{ TEXT("clear_spline_points"), McpReadbackText::RBK_LYING_APIS_59 },
+		{ TEXT("add_spline_point"), McpReadbackText::RBK_LYING_APIS_60 },
+		{ TEXT("move_to_location"), McpReadbackText::RBK_LYING_APIS_61 },
+		{ TEXT("unload_packages"), McpReadbackText::RBK_LYING_APIS_62 },
+		{ TEXT("set_material"), McpReadbackText::RBK_LYING_APIS_63 },
+		{ TEXT("is_swimming"), McpReadbackText::RBK_LYING_APIS_64 },
+		{ TEXT("ObjectIterator"), McpReadbackText::RBK_LYING_APIS_65 },
+		{ TEXT("delete_asset"), McpReadbackText::RBK_LYING_APIS_66 },
+		{ TEXT("set_actor_rotation"), McpReadbackText::RBK_LYING_APIS_67 },
+		{ TEXT("set_actor_location"), McpReadbackText::RBK_LYING_APIS_68 },
+		{ TEXT("set_actor_location_and_rotation"), McpReadbackText::RBK_LYING_APIS_69 },
+		{ TEXT("set_actor_transform"), McpReadbackText::RBK_LYING_APIS_70 },
+	};
+}

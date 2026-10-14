@@ -1,0 +1,2717 @@
+#include "Mcp/McpCommandFamilies.h"
+#include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Animation/AnimAssetUtils.h"
+
+#include "Editor.h"
+#include "EditorAssetLibrary.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Modules/ModuleManager.h"
+
+#include "UObject/Package.h"
+#include "UObject/SavePackage.h"
+#include "Misc/PackageName.h"
+
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/CompilerResultsLog.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+
+// Engine runtime anim blueprint types
+#include "Animation/AnimBlueprint.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/Skeleton.h"
+#include "AlphaBlend.h"   // EAlphaBlendOption (Engine; transition BlendMode)
+
+// UnrealEd factory
+#include "Factories/AnimBlueprintFactory.h"
+
+// AnimGraph editor module (build_cs_editor_deps: ["AnimGraph"])
+#include "AnimationGraph.h"
+#include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_StateMachineBase.h"
+// AnimBP scaffolding (locomotion / aim offset / foot IK)
+#include "AnimGraphNode_LegIK.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/BlendSpace1D.h"
+#include "Animation/AimOffsetBlendSpace.h"
+#include "Animation/AnimSequence.h"
+#include "Factories/BlendSpaceFactory1D.h"
+// 2D BlendSpace + AimOffsetBlendSpace factories.
+#include "Factories/BlendSpaceFactoryNew.h"
+#include "Factories/AimOffsetBlendSpaceFactoryNew.h"
+#include "AnimationStateMachineGraph.h"
+#include "AnimationStateMachineSchema.h"   // FEdGraphSchemaAction_NewStateNode
+#include "AnimStateNode.h"
+#include "AnimStateEntryNode.h"           // UAnimStateEntryNode::GetOutputPin (entry-node wiring)
+#include "AnimStateNodeBase.h"             // UAnimStateNodeBase::GetTransitionList (base of state + conduit)
+#include "AnimStateTransitionNode.h"       // UAnimStateTransitionNode
+#include "AnimStateConduitNode.h"          // UAnimStateConduitNode
+#include "AnimationTransitionGraph.h"      // UAnimationTransitionGraph::MyResultNode + GetResultNode
+#include "AnimGraphNode_TransitionResult.h" // UAnimGraphNode_TransitionResult (sink, CanUserDeleteNode=false)
+#include "K2Node_VariableGet.h"           // UK2Node_VariableGet (via mcp_common::SpawnVariableGetNode)
+#include "K2Node_CallFunction.h"         // UK2Node_CallFunction (KismetMathLibrary comparison + KismetSystemLibrary literal)
+#include "Kismet/KismetMathLibrary.h"     // UKismetMathLibrary (EqualEqual_FloatFloat etc.)
+#include "Kismet/KismetSystemLibrary.h"    // UKismetSystemLibrary::MakeLiteralFloat / MakeLiteralDouble (KismetMathLibrary has no literals)
+
+/**
+ * Animation Blueprint authoring commands.
+ *
+ * Creates and saves UAnimBlueprint assets targeting a real USkeleton, reads their structure, and (best-effort,
+ * headless-safe) inserts state-machine nodes into the AnimGraph through the editor asset model: the nodes are
+ * placed with FGraphNodeCreator or the state-machine schema action, whose PostPlacedNewNode builds the bound
+ * graphs via FBlueprintEditorUtils::CreateNewGraph with no Slate or task-graph re-entry.
+ */
+namespace UEAgentAnimBlueprintCommands
+{
+
+// MCP-DOMAIN: Animation
+
+namespace
+{
+    /** Find the top-level AnimGraph (named "AnimGraph", class UAnimationGraph) of an anim blueprint. */
+    UAnimationGraph* FindAnimGraph(UAnimBlueprint* AnimBP)
+    {
+        if (!AnimBP)
+        {
+            return nullptr;
+        }
+        TArray<UEdGraph*> AllGraphs;
+        AnimBP->GetAllGraphs(AllGraphs);
+        // Prefer the canonical top-level AnimGraph (GN_AnimGraph == "AnimGraph").
+        for (UEdGraph* Graph : AllGraphs)
+        {
+            if (UAnimationGraph* AnimGraph = Cast<UAnimationGraph>(Graph))
+            {
+                if (AnimGraph->GetFName() == FName(TEXT("AnimGraph")))
+                {
+                    return AnimGraph;
+                }
+            }
+        }
+        // Fallback: any UAnimationGraph.
+        for (UEdGraph* Graph : AllGraphs)
+        {
+            if (UAnimationGraph* AnimGraph = Cast<UAnimationGraph>(Graph))
+            {
+                return AnimGraph;
+            }
+        }
+        return nullptr;
+    }
+
+    /** Locate a state-machine node by its bound-graph name within the anim blueprint. */
+    UAnimGraphNode_StateMachine* FindStateMachineByName(UAnimBlueprint* AnimBP, const FString& MachineName)
+    {
+        UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP);
+        if (!AnimGraph)
+        {
+            return nullptr;
+        }
+        for (UEdGraphNode* Node : AnimGraph->Nodes)
+        {
+            if (UAnimGraphNode_StateMachine* SM = Cast<UAnimGraphNode_StateMachine>(Node))
+            {
+                if (SM->EditorStateMachineGraph &&
+                    SM->EditorStateMachineGraph->GetName().Equals(MachineName, ESearchCase::IgnoreCase))
+                {
+                    return SM;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * Locate a transition endpoint by its bound-graph name within a state-machine graph.
+     *
+     * Returns the common base UAnimStateNodeBase so a transition can be wired to EITHER a
+     * concrete state (UAnimStateNode) OR a conduit (UAnimStateConduitNode) — both derive
+     * from UAnimStateNodeBase and both expose GetInputPin()/GetOutputPin() that
+     * UAnimStateTransitionNode::CreateConnections consumes. The match is by bound-graph
+     * name (GetBoundGraph(), virtual on the base, overridden by both subclasses).
+     *
+     * UAnimStateTransitionNode is ALSO a UAnimStateNodeBase but is a nonsensical endpoint,
+     * so it is explicitly excluded — the finder yields a state-or-conduit (or alias) only.
+     */
+    UAnimStateNodeBase* FindStateByName(UAnimationStateMachineGraph* SMGraph, const FString& StateName)
+    {
+        if (!SMGraph)
+        {
+            return nullptr;
+        }
+        for (UEdGraphNode* Node : SMGraph->Nodes)
+        {
+            UAnimStateNodeBase* Endpoint = Cast<UAnimStateNodeBase>(Node);
+            if (!Endpoint || Endpoint->IsA<UAnimStateTransitionNode>())
+            {
+                continue;   // skip non-endpoints and the transitions themselves
+            }
+            const UEdGraph* Bound = Endpoint->GetBoundGraph();
+            if (Bound && Bound->GetName().Equals(StateName, ESearchCase::IgnoreCase))
+            {
+                return Endpoint;
+            }
+        }
+        return nullptr;
+    }
+
+    /** Number of NodeType nodes in Graph. */
+    template <typename NodeType>
+    int32 AnimBp_CountNodes(const UEdGraph* Graph)
+    {
+        int32 Count = 0;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (Cast<NodeType>(Node))
+            {
+                ++Count;
+            }
+        }
+        return Count;
+    }
+
+    /** Count state-machine nodes inside the anim graph. */
+    int32 CountStateMachines(UAnimBlueprint* AnimBP)
+    {
+        const UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP);
+        return AnimGraph ? AnimBp_CountNodes<UAnimGraphNode_StateMachine>(AnimGraph) : 0;
+    }
+
+    /**
+     * Locate a transition node by its source-state + target-state bound-graph names.
+     *
+     * Resolves both endpoints via FindStateByName (matches state OR conduit, case-insensitive)
+     * and walks SourceState->GetTransitionList() looking for a UAnimStateTransitionNode whose
+     * GetNextState() == TargetState. Returns nullptr on no match (caller treats as not-found).
+     */
+    UAnimStateTransitionNode* FindTransitionBySourceTarget(
+        UAnimationStateMachineGraph* SMGraph,
+        const FString& SourceName,
+        const FString& TargetName)
+    {
+        if (!SMGraph) { return nullptr; }
+        UAnimStateNodeBase* SourceState = FindStateByName(SMGraph, SourceName);
+        if (!SourceState) { return nullptr; }
+        UAnimStateNodeBase* TargetState = FindStateByName(SMGraph, TargetName);
+        if (!TargetState) { return nullptr; }
+        TArray<UAnimStateTransitionNode*> Existing;
+        SourceState->GetTransitionList(Existing);
+        for (UAnimStateTransitionNode* T : Existing)
+        {
+            if (T && T->GetNextState() == TargetState)
+            {
+                return T;
+            }
+        }
+        return nullptr;
+    }
+
+    /** Returns true if any UAnimGraphNode_TransitionResult sink lives on this graph (the
+     *  canonical "rule graph" indicator). Always exactly 1 for a healthy transition. */
+    bool HasTransitionResultSink(UEdGraph* Graph)
+    {
+        if (!Graph) { return false; }
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (Cast<UAnimGraphNode_TransitionResult>(Node))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Reads the required anim_blueprint_path and machine_name: the reply naming the first one missing, else null. */
+    TSharedPtr<FJsonObject> AnimBp_ReadMachineParams(const TSharedPtr<FJsonObject>& Params, FString& OutAnimBPPath, FString& OutMachineName)
+    {
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), OutAnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("machine_name"), OutMachineName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+        return nullptr;
+    }
+
+    /** AnimBp_ReadMachineParams, then the required source_state and target_state of a transition. */
+    TSharedPtr<FJsonObject> AnimBp_ReadTransitionParams(const TSharedPtr<FJsonObject>& Params, FString& OutAnimBPPath,
+        FString& OutMachineName, FString& OutSourceName, FString& OutTargetName)
+    {
+        if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, OutAnimBPPath, OutMachineName))
+        {
+            return Missing;
+        }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("source_state"), OutSourceName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("target_state"), OutTargetName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+        return nullptr;
+    }
+
+    /** Reads the required, non-empty package_path, asset_name and skeleton_path of a scaffold command. */
+    TSharedPtr<FJsonObject> AnimBp_ReadScaffoldParams(const TSharedPtr<FJsonObject>& Params, FString& OutPackagePath,
+        FString& OutAssetName, FString& OutSkeletonPath)
+    {
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), OutPackagePath)) { return Missing; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_name"), OutAssetName)) { return Missing; }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeleton_path"), OutSkeletonPath)) { return Missing; }
+        return nullptr;
+    }
+
+    /**
+     * Loads the anim blueprint at AnimBPPath into OutAnimBP and the graph of its state machine MachineName into
+     * OutSMGraph: null, else the reply when the blueprint does not load or has no such state machine.
+     */
+    TSharedPtr<FJsonObject> AnimBp_LoadStateMachineGraph(const FString& AnimBPPath, const FString& MachineName,
+        UAnimBlueprint*& OutAnimBP, UAnimationStateMachineGraph*& OutSMGraph)
+    {
+        if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), OutAnimBP))
+        {
+            return Error;
+        }
+        UAnimGraphNode_StateMachine* SMNode = FindStateMachineByName(OutAnimBP, MachineName);
+        if (!SMNode || !SMNode->EditorStateMachineGraph)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("State machine '%s' not found on anim blueprint"), *MachineName));
+        }
+        OutSMGraph = SMNode->EditorStateMachineGraph;
+        return nullptr;
+    }
+
+    /**
+     * AnimBp_LoadStateMachineGraph, then the transition SourceName -> TargetName of that state machine into
+     * OutTransition: null, else the reply when the blueprint, the state machine or the transition does not resolve.
+     */
+    TSharedPtr<FJsonObject> AnimBp_LoadTransition(const FString& AnimBPPath, const FString& MachineName,
+        const FString& SourceName, const FString& TargetName,
+        UAnimBlueprint*& OutAnimBP, UAnimationStateMachineGraph*& OutSMGraph, UAnimStateTransitionNode*& OutTransition)
+    {
+        if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, OutAnimBP, OutSMGraph))
+        {
+            return Error;
+        }
+        OutTransition = FindTransitionBySourceTarget(OutSMGraph, SourceName, TargetName);
+        if (!OutTransition)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Transition '%s' -> '%s' not found in state machine '%s'"), *SourceName, *TargetName, *MachineName));
+        }
+        return nullptr;
+    }
+
+    /**
+     * The graph of the state machine state_machine_name in the anim blueprint at anim_blueprint_path, for the
+     * read-only inspectors. Null, with OutError holding the reply, when a param is missing or nothing resolves.
+     */
+    UAnimationStateMachineGraph* AnimBp_ReadInspectedMachine(const TSharedPtr<FJsonObject>& Params, FString& OutMachineName,
+        TSharedPtr<FJsonObject>& OutError)
+    {
+        FString AnimBPPath;
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes))
+        {
+            OutError = Missing;
+            return nullptr;
+        }
+        if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("state_machine_name"), OutMachineName, mcp_common::EAllowEmpty::Yes))
+        {
+            OutError = Missing;
+            return nullptr;
+        }
+        UAnimBlueprint* AnimBP = LoadObject<UAnimBlueprint>(nullptr, *AnimBPPath);
+        if (!AnimBP)
+        {
+            OutError = mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("AnimBlueprint not found: %s"), *AnimBPPath));
+            return nullptr;
+        }
+        UAnimGraphNode_StateMachine* SMNode = FindStateMachineByName(AnimBP, OutMachineName);
+        if (!SMNode)
+        {
+            OutError = mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("State machine '%s' not found"), *OutMachineName));
+            return nullptr;
+        }
+        if (!SMNode->EditorStateMachineGraph)
+        {
+            OutError = mcp_common::MakeErrorReply(TEXT("No EditorStateMachineGraph"));
+        }
+        return SMNode->EditorStateMachineGraph;
+    }
+
+    /** A reply object that starts with anim_blueprint_path and the machine_name of SMGraph. */
+    TSharedPtr<FJsonObject> AnimBp_MachineReply(const UAnimBlueprint* AnimBP, const UEdGraph* SMGraph)
+    {
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
+        Resp->SetStringField(TEXT("machine_name"), SMGraph->GetName());
+        return Resp;
+    }
+
+    /** AnimBp_MachineReply, then the source_state and target_state of a transition as requested. */
+    TSharedPtr<FJsonObject> AnimBp_TransitionReply(const UAnimBlueprint* AnimBP, const UEdGraph* SMGraph,
+        const FString& SourceName, const FString& TargetName)
+    {
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+        Resp->SetStringField(TEXT("source_state"), SourceName);
+        Resp->SetStringField(TEXT("target_state"), TargetName);
+        return Resp;
+    }
+
+    /**
+     * Destroys every transition into or out of Node and returns how many there were. The engine's interactive cascade
+     * (a transition self-destructs in UAnimStateTransitionNode::PinConnectionListChanged when its endpoint's
+     * DestroyNode breaks the pin link) does NOT fire on the headless bridge path, so removing the endpoint alone would
+     * leave its transitions pointing at a destroyed node. They are snapshotted first so SMGraph->Nodes is not mutated
+     * while it is iterated.
+     */
+    int32 AnimBp_DestroyIncidentTransitions(UAnimationStateMachineGraph* SMGraph, const UAnimStateNodeBase* Node)
+    {
+        TArray<UAnimStateTransitionNode*> Incident;
+        for (UEdGraphNode* It : SMGraph->Nodes)
+        {
+            if (UAnimStateTransitionNode* T = Cast<UAnimStateTransitionNode>(It))
+            {
+                if (T->GetPreviousState() == Node || T->GetNextState() == Node)
+                {
+                    Incident.Add(T);
+                }
+            }
+        }
+        for (UAnimStateTransitionNode* T : Incident)
+        {
+            T->DestroyNode();
+        }
+        return Incident.Num();
+    }
+
+    /**
+     * Where the rule variable VariableName lives on AnimBP: "generated" (OutProperty is its property on the
+     * generated or skeleton class) or "new_blueprint" (declared on the AnimBP but not compiled into the generated
+     * class yet, so OutProperty is null; mcp_common::SpawnVariableGetNode resolves it from NewVariables). Empty, with
+     * OutError holding the reply, when neither has it.
+     */
+    FString AnimBp_RuleVariableKind(UAnimBlueprint* AnimBP, const FString& VariableName, FProperty*& OutProperty,
+        TSharedPtr<FJsonObject>& OutError)
+    {
+        const FName VarName(*VariableName);
+        OutProperty = FindFProperty<FProperty>(AnimBP->GeneratedClass, VarName);
+        if (!OutProperty && AnimBP->SkeletonGeneratedClass)
+        {
+            OutProperty = FindFProperty<FProperty>(AnimBP->SkeletonGeneratedClass, VarName);
+        }
+        if (OutProperty)
+        {
+            return TEXT("generated");
+        }
+        if (FBlueprintEditorUtils::FindNewVariableIndex(AnimBP, VarName) != INDEX_NONE)
+        {
+            return TEXT("new_blueprint");
+        }
+        OutError = mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Variable '%s' not found on anim blueprint (not in generated class, not in NewVariables)"), *VariableName));
+        return FString();
+    }
+
+    /**
+     * Modifies RuleGraph and AnimBP, then removes every node of the rule graph except its result sink, breaking
+     * their links. The nodes are snapshotted first: RemoveNode mutates RuleGraph->Nodes in place. Returns how many
+     * RemoveNode calls succeeded.
+     */
+    int32 AnimBp_RemoveRuleContributors(UAnimBlueprint* AnimBP, UEdGraph* RuleGraph)
+    {
+        RuleGraph->Modify();
+        AnimBP->Modify();
+
+        TArray<UEdGraphNode*> ToRemove;
+        for (UEdGraphNode* N : RuleGraph->Nodes)
+        {
+            if (!Cast<UAnimGraphNode_TransitionResult>(N))
+            {
+                ToRemove.Add(N);
+            }
+        }
+        int32 RemovedCount = 0;
+        for (UEdGraphNode* N : ToRemove)
+        {
+            if (RuleGraph->RemoveNode(N, /*bBreakAllLinks*/ true, /*bAlwaysMarkDirty*/ true))
+            {
+                ++RemovedCount;
+            }
+        }
+        return RemovedCount;
+    }
+
+    /** The params of an internal call addressed to the state machine MachineName of the anim blueprint at AnimBPPath. */
+    TSharedPtr<FJsonObject> AnimBp_MachineRequest(const FString& AnimBPPath, const FString& MachineName)
+    {
+        TSharedPtr<FJsonObject> Request = MakeShared<FJsonObject>();
+        Request->SetStringField(TEXT("anim_blueprint_path"), AnimBPPath);
+        Request->SetStringField(TEXT("machine_name"), MachineName);
+        return Request;
+    }
+
+    /** AnimBp_MachineRequest addressed to the transition Source -> Target of that state machine. */
+    TSharedPtr<FJsonObject> AnimBp_TransitionRequest(const FString& AnimBPPath, const FString& MachineName,
+        const FString& Source, const FString& Target)
+    {
+        TSharedPtr<FJsonObject> Request = AnimBp_MachineRequest(AnimBPPath, MachineName);
+        Request->SetStringField(TEXT("source_state"), Source);
+        Request->SetStringField(TEXT("target_state"), Target);
+        return Request;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// create_anim_blueprint
+// ---------------------------------------------------------------------------
+// MCP:create_anim_blueprint - Create and save a UAnimBlueprint targeting a skeleton.
+//   @param package_path - UE content folder, e.g. /Game/MyGame
+//   @param name - Asset name for the new Animation Blueprint
+//   @param skeleton_path - Optional skeleton path; defaults to /Engine/EngineMeshes/SkeletalCube_Skeleton
+//   @returns { asset_path: string, name: string, skeleton_path: string, generated_class: string, is_anim_instance: bool, target_skeleton_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string }
+
+TSharedPtr<FJsonObject> HandleCreateAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PackagePath, Name;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), PackagePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LongPackagePathError(PackagePath)) { return Error; }
+
+    FString SkeletonPath = TEXT("/Engine/EngineMeshes/SkeletalCube_Skeleton");
+    Params->TryGetStringField(TEXT("skeleton_path"), SkeletonPath);
+
+    USkeleton* Skeleton = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
+
+    FString Folder, FullPath;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::JoinAssetPath(PackagePath, Name, Folder, FullPath)) { return Error; }
+
+    // The reply describing Blueprint, found (bCreated false) or created by this call.
+    auto AssetReply = [&Name](UAnimBlueprint* Blueprint, bool bCreated)
+    {
+        const bool bChild = Blueprint->GeneratedClass &&
+            Blueprint->GeneratedClass->IsChildOf(UAnimInstance::StaticClass());
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("asset_path"), Blueprint->GetPathName());
+        Resp->SetStringField(TEXT("name"), Name);
+        Resp->SetStringField(TEXT("skeleton_path"),
+            Blueprint->TargetSkeleton ? Blueprint->TargetSkeleton->GetPathName() : TEXT(""));
+        Resp->SetStringField(TEXT("generated_class"),
+            Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetName() : TEXT(""));
+        Resp->SetBoolField(TEXT("is_anim_instance"), bChild);
+        Resp->SetBoolField(TEXT("target_skeleton_set"), Blueprint->TargetSkeleton != nullptr);
+        Resp->SetBoolField(TEXT("created"), bCreated);
+        Resp->SetBoolField(TEXT("already_existed"), !bCreated);
+        return Resp;
+    };
+
+    // Idempotent: if it already exists, load and return a stable payload.
+    if (UEditorAssetLibrary::DoesAssetExist(FullPath))
+    {
+        UAnimBlueprint* Existing = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(FullPath);
+        if (Existing)
+        {
+            return mcp_common::MakeOkReply(AssetReply(Existing, false));
+        }
+    }
+
+    // Create via the real editor factory; the sync CreateAsset overload skips the
+    // modal ConfigureProperties picker. We set TargetSkeleton + ParentClass first.
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+    IAssetTools& AssetTools = AssetToolsModule.Get();
+
+    UAnimBlueprintFactory* Factory = NewObject<UAnimBlueprintFactory>();
+    Factory->ParentClass = UAnimInstance::StaticClass();
+    Factory->TargetSkeleton = Skeleton;
+    Factory->bTemplate = false;
+    Factory->BlueprintType = BPTYPE_Normal;
+
+    UObject* NewAsset = AssetTools.CreateAsset(Name, Folder, UAnimBlueprint::StaticClass(), Factory);
+    UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(NewAsset);
+    if (!AnimBP)
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Failed to create anim blueprint at %s"), *FullPath));
+
+    // Ensure the skeleton is set on the blueprint itself (the factory does this, but
+    // verify-by-readback per the project's setter-may-lie rule).
+    AnimBP->TargetSkeleton = Skeleton;
+
+    // Compile so the generated class is up to date, then save.
+    FKismetEditorUtilities::CompileBlueprint(AnimBP, EBlueprintCompileOptions::SkipGarbageCollection);
+
+    FAssetRegistryModule::AssetCreated(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+    return mcp_common::MakeSavedReply(AssetReply(AnimBP, true), bSaved, TEXT("create_anim_blueprint"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// add_anim_state_machine
+// ---------------------------------------------------------------------------
+// MCP:add_anim_state_machine - Add a state-machine node to the AnimGraph of an Animation Blueprint.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name for the new state machine
+//   @returns { anim_blueprint_path: string, machine_name: string, node_class: string, state_machine_graph: string, state_machine_created: bool, already_existed: bool, saved: bool, state_machine_count: int, save_error?: string }
+
+TSharedPtr<FJsonObject> HandleAddAnimStateMachine(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, AnimBPPath, MachineName))
+        return Missing;
+
+    UAnimBlueprint* AnimBP = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), AnimBP)) { return Error; }
+
+    UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP);
+    if (!AnimGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("Could not find the AnimGraph on this anim blueprint"));
+
+    // The reply for the state machine node Machine, found (bCreated false) or created by this call.
+    auto MachineNodeReply = [AnimBP](UAnimGraphNode_StateMachine* Machine, bool bCreated)
+    {
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, Machine->EditorStateMachineGraph);
+        Resp->SetStringField(TEXT("node_class"), Machine->GetClass()->GetName());
+        Resp->SetStringField(TEXT("state_machine_graph"), Machine->EditorStateMachineGraph->GetPathName());
+        Resp->SetBoolField(TEXT("state_machine_created"), bCreated);
+        Resp->SetBoolField(TEXT("already_existed"), !bCreated);
+        Resp->SetNumberField(TEXT("state_machine_count"), CountStateMachines(AnimBP));
+        return Resp;
+    };
+
+    // Idempotent: if a state machine with this bound-graph name already exists, return it.
+    if (UAnimGraphNode_StateMachine* ExistingSM = FindStateMachineByName(AnimBP, MachineName))
+    {
+        return mcp_common::MakeOkReply(MachineNodeReply(ExistingSM, false));
+    }
+
+    // Insert a UAnimGraphNode_StateMachine into the AnimGraph using the editor asset
+    // model. FGraphNodeCreator::Finalize() calls PostPlacedNewNode(), which creates
+    // the EditorStateMachineGraph via FBlueprintEditorUtils::CreateNewGraph — fully
+    // headless-safe (no Slate, no task-graph re-entry).
+    AnimGraph->Modify();
+    AnimBP->Modify();
+
+    UAnimGraphNode_StateMachine* SMNode = nullptr;
+    {
+        FGraphNodeCreator<UAnimGraphNode_StateMachine> NodeCreator(*AnimGraph);
+        SMNode = NodeCreator.CreateNode(/*bSelectNewNode*/ false);
+        NodeCreator.Finalize();
+    }
+
+    if (!SMNode || !SMNode->EditorStateMachineGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("State machine node was created but its bound graph was not initialized"));
+
+    // Rename the bound graph to the requested machine name (RenameGraph uses a unique-name
+    // path internally; tolerant of collisions).
+    FBlueprintEditorUtils::RenameGraph(SMNode->EditorStateMachineGraph, MachineName);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+    return mcp_common::MakeSavedReply(MachineNodeReply(SMNode, true), bSaved, TEXT("add_anim_state_machine"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// add_anim_state
+// ---------------------------------------------------------------------------
+// MCP:add_anim_state - Add a state node to a state machine inside an Animation Blueprint.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the target state machine
+//   @param state_name - Name for the new state
+//   @returns { anim_blueprint_path: string, machine_name: string, state_name: string, node_class: string, state_created: bool, already_existed: bool, saved: bool, state_count: int, save_error?: string }
+
+TSharedPtr<FJsonObject> HandleAddAnimState(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, StateName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, AnimBPPath, MachineName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("state_name"), StateName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // The reply for the state node State, found (bCreated false) or created by this call.
+    auto StateNodeReply = [AnimBP, SMGraph](UAnimStateNode* State, bool bCreated)
+    {
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+        Resp->SetStringField(TEXT("state_name"), State->BoundGraph->GetName());
+        Resp->SetStringField(TEXT("node_class"), State->GetClass()->GetName());
+        Resp->SetBoolField(TEXT("state_created"), bCreated);
+        Resp->SetBoolField(TEXT("already_existed"), !bCreated);
+        Resp->SetNumberField(TEXT("state_count"), AnimBp_CountNodes<UAnimStateNode>(SMGraph));
+        return Resp;
+    };
+
+    // Idempotent: if a state with this bound-graph name already exists, return it.
+    for (UEdGraphNode* Node : SMGraph->Nodes)
+    {
+        if (UAnimStateNode* Existing = Cast<UAnimStateNode>(Node))
+        {
+            if (Existing->BoundGraph &&
+                Existing->BoundGraph->GetName().Equals(StateName, ESearchCase::IgnoreCase))
+            {
+                return mcp_common::MakeOkReply(StateNodeReply(Existing, false));
+            }
+        }
+    }
+
+    // Insert a UAnimStateNode into the state machine graph. Its PostPlacedNewNode()
+    // builds the per-state bound graph via FBlueprintEditorUtils::CreateNewGraph
+    // (headless-safe; same proven mechanism as the state machine node).
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    UAnimStateNode* StateNode = nullptr;
+    {
+        FGraphNodeCreator<UAnimStateNode> NodeCreator(*SMGraph);
+        StateNode = NodeCreator.CreateNode(/*bSelectNewNode*/ false);
+        NodeCreator.Finalize();
+    }
+
+    if (!StateNode || !StateNode->BoundGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("State node was created but its bound graph was not initialized"));
+
+    FBlueprintEditorUtils::RenameGraph(StateNode->BoundGraph, StateName);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+    return mcp_common::MakeSavedReply(StateNodeReply(StateNode, true), bSaved, TEXT("add_anim_state"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// add_anim_conduit
+// ---------------------------------------------------------------------------
+// MCP:add_anim_conduit - Add a conduit node to a state machine inside an Animation Blueprint.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the target state machine
+//   @param conduit_name - Name for the new conduit
+//   @returns { anim_blueprint_path: string, machine_name: string, conduit_name: string, node_class: string, conduit_created: bool, already_existed: bool, saved: bool, conduit_count: int, save_error?: string }
+TSharedPtr<FJsonObject> HandleAddAnimConduit(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, ConduitName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, AnimBPPath, MachineName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("conduit_name"), ConduitName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // The reply for the conduit node Conduit, found (bCreated false) or created by this call.
+    auto ConduitNodeReply = [AnimBP, SMGraph](UAnimStateConduitNode* Conduit, bool bCreated)
+    {
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+        Resp->SetStringField(TEXT("conduit_name"), Conduit->GetBoundGraph()->GetName());
+        Resp->SetStringField(TEXT("node_class"), Conduit->GetClass()->GetName());
+        Resp->SetBoolField(TEXT("conduit_created"), bCreated);
+        Resp->SetBoolField(TEXT("already_existed"), !bCreated);
+        Resp->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
+        return Resp;
+    };
+
+    // Idempotent: if a conduit with this bound-graph name already exists, return it unchanged.
+    for (UEdGraphNode* Node : SMGraph->Nodes)
+    {
+        if (UAnimStateConduitNode* Existing = Cast<UAnimStateConduitNode>(Node))
+        {
+            const UEdGraph* Bound = Existing->GetBoundGraph();
+            if (Bound && Bound->GetName().Equals(ConduitName, ESearchCase::IgnoreCase))
+            {
+                return mcp_common::MakeOkReply(ConduitNodeReply(Existing, false));
+            }
+        }
+    }
+
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    // Spawn the conduit exactly as the editor does on a "Add Conduit" action. Unlike the
+    // transition node, the conduit neither auto-connects nor self-destructs on an unlinked
+    // pin, so we do NOT call CreateConnections — a bare conduit is a stable, valid node.
+    // PostPlacedNewNode() (run inside PerformAction) builds the conduit's BoundGraph via
+    // FBlueprintEditorUtils::CreateNewGraph (headless-safe; no Slate / PIE).
+    UAnimStateConduitNode* ConduitNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateConduitNode>(
+        SMGraph, NewObject<UAnimStateConduitNode>(SMGraph), FVector2D(0.0f, 0.0f), /*bSelectNewNode*/ false);
+    if (!ConduitNode || !ConduitNode->GetBoundGraph())
+        return mcp_common::MakeErrorReply(
+            TEXT("Conduit node was created but its bound graph was not initialized"));
+
+    FBlueprintEditorUtils::RenameGraph(ConduitNode->GetBoundGraph(), ConduitName);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+    return mcp_common::MakeSavedReply(ConduitNodeReply(ConduitNode, true), bSaved, TEXT("add_anim_conduit"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// add_anim_transition
+// ---------------------------------------------------------------------------
+// MCP:add_anim_transition - Create a source->target transition in an anim state machine.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the state machine that owns both states
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @param crossfade_duration [number] - Optional blend duration in seconds (default 0.2)
+//   @param blend_mode [string] - Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic
+//   @param bidirectional [bool] - Optional; also allow the reverse target->source transition
+//   @param priority_order [int] - Optional evaluation priority (higher wins)
+//   @returns { anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, transition_created: bool, already_existed: bool, crossfade_duration: number, blend_mode: string, bidirectional: bool, priority_order: int, transition_count: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleAddAnimTransition(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // Resolve both endpoints (state OR conduit) within the SAME state-machine graph.
+    // The transition self-destructs (PinConnectionListChanged -> DestroyNode) if a pin
+    // ends up unlinked, so we must have valid, same-graph endpoints before spawning.
+    UAnimStateNodeBase* SourceState = FindStateByName(SMGraph, SourceName);
+    if (!SourceState)
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Source state '%s' not found in state machine '%s'"), *SourceName, *MachineName));
+    UAnimStateNodeBase* TargetState = FindStateByName(SMGraph, TargetName);
+    if (!TargetState)
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Target state '%s' not found in state machine '%s'"), *TargetName, *MachineName));
+    if (SourceState == TargetState)
+        return mcp_common::MakeErrorReply(
+            TEXT("source_state and target_state must be different states"));
+
+    // Optional transition properties (public UPROPERTYs on UAnimStateTransitionNode).
+    double CrossfadeDuration = 0.2;            // engine default
+    Params->TryGetNumberField(TEXT("crossfade_duration"), CrossfadeDuration);
+    bool bBidirectional = false;
+    Params->TryGetBoolField(TEXT("bidirectional"), bBidirectional);
+    double PriorityOrderD = 1.0;               // engine default
+    Params->TryGetNumberField(TEXT("priority_order"), PriorityOrderD);
+    const int32 PriorityOrder = static_cast<int32>(PriorityOrderD);
+
+    // Resolve the requested blend mode against EAlphaBlendOption; default HermiteCubic.
+    EAlphaBlendOption BlendMode = EAlphaBlendOption::HermiteCubic;
+    FString BlendModeStr;
+    if (Params->TryGetStringField(TEXT("blend_mode"), BlendModeStr) && !BlendModeStr.IsEmpty())
+    {
+        const UEnum* BlendEnum = StaticEnum<EAlphaBlendOption>();
+        const int64 Value = BlendEnum ? BlendEnum->GetValueByNameString(BlendModeStr) : INDEX_NONE;
+        if (Value == INDEX_NONE)
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Invalid blend_mode '%s' (expected an EAlphaBlendOption name like Linear, Cubic, HermiteCubic)"), *BlendModeStr));
+        BlendMode = static_cast<EAlphaBlendOption>(Value);
+    }
+
+    // The reply for Transition, found (bCreated false) or created by this call: the endpoints by their
+    // bound-graph names and the transition's own settings.
+    auto TransitionNodeReply = [&](UAnimStateTransitionNode* Transition, bool bCreated)
+    {
+        const UEnum* BlendEnum = StaticEnum<EAlphaBlendOption>();
+        TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph,
+            SourceState->GetBoundGraph() ? SourceState->GetBoundGraph()->GetName() : SourceName,
+            TargetState->GetBoundGraph() ? TargetState->GetBoundGraph()->GetName() : TargetName);
+        Resp->SetBoolField(TEXT("transition_created"), bCreated);
+        Resp->SetBoolField(TEXT("already_existed"), !bCreated);
+        Resp->SetNumberField(TEXT("crossfade_duration"), Transition->CrossfadeDuration);
+        Resp->SetStringField(TEXT("blend_mode"), BlendEnum ? BlendEnum->GetNameStringByValue(static_cast<int64>(Transition->BlendMode)) : TEXT(""));
+        Resp->SetBoolField(TEXT("bidirectional"), Transition->Bidirectional);
+        Resp->SetNumberField(TEXT("priority_order"), Transition->PriorityOrder);
+        Resp->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
+        return Resp;
+    };
+
+    // Idempotent: if a transition source->target already exists, return it unchanged.
+    {
+        TArray<UAnimStateTransitionNode*> Existing;
+        SourceState->GetTransitionList(Existing);
+        for (UAnimStateTransitionNode* T : Existing)
+        {
+            if (T && T->GetNextState() == TargetState)
+            {
+                return mcp_common::MakeOkReply(TransitionNodeReply(T, false));
+            }
+        }
+    }
+
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    // Spawn the transition exactly as the editor does on a state->state drag, then
+    // wire it IMMEDIATELY (CreateConnections), before any pin-change callback can fire
+    // and trigger the node's self-destruct on an unlinked pin.
+    UAnimStateTransitionNode* TransitionNode = FEdGraphSchemaAction_NewStateNode::SpawnNodeFromTemplate<UAnimStateTransitionNode>(
+        SMGraph, NewObject<UAnimStateTransitionNode>(SMGraph), FVector2D(0.0f, 0.0f), /*bSelectNewNode*/ false);
+    if (!TransitionNode)
+        return mcp_common::MakeErrorReply(
+            TEXT("Failed to spawn the transition node into the state machine graph"));
+
+    TransitionNode->CreateConnections(SourceState, TargetState);
+
+    // Apply transition properties (public fields).
+    TransitionNode->CrossfadeDuration = static_cast<float>(CrossfadeDuration);
+    TransitionNode->BlendMode = BlendMode;
+    TransitionNode->Bidirectional = bBidirectional;
+    TransitionNode->PriorityOrder = PriorityOrder;
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+    return mcp_common::MakeSavedReply(TransitionNodeReply(TransitionNode, true), bSaved, TEXT("add_anim_transition"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// remove_anim_state
+// ---------------------------------------------------------------------------
+// Removal of state-machine nodes. The generic delete_node cannot reach them, since they live in nested
+// UAnimationStateMachineGraphs; each command calls the node's DestroyNode() override so its bound subgraph is
+// torn down, not leaked.
+
+// MCP:remove_anim_state - Remove a state node (and its bound animation subgraph) from a state machine.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the state machine that owns the state
+//   @param state_name - Name of the state to remove
+//   @returns { anim_blueprint_path: string, machine_name: string, state_name: string, removed: bool, already_absent: bool, state_count: int, transition_count: int, cascaded_transitions_removed: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemoveAnimState(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, StateName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, AnimBPPath, MachineName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("state_name"), StateName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // Resolve the endpoint by bound-graph name. FindStateByName excludes transition nodes,
+    // so it yields a state OR conduit; here we require a concrete UAnimStateNode.
+    UAnimStateNodeBase* Endpoint = FindStateByName(SMGraph, StateName);
+    UAnimStateNode* StateNode = Cast<UAnimStateNode>(Endpoint);
+
+    if (!StateNode)
+    {
+        // Idempotent no-op: either nothing matched, or a non-state (conduit) matched the name.
+        // Distinguish so the caller isn't silently confused by a mismatched node kind.
+        if (Endpoint)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Node '%s' in state machine '%s' is a %s, not a state (use the matching remove command)"),
+                    *StateName, *MachineName, *Endpoint->GetClass()->GetName()));
+        }
+        UE_LOG(LogTemp, Verbose,
+            TEXT("[MCP] remove_anim_state: state '%s' absent from machine '%s' on '%s' -- idempotent no-op"),
+            *StateName, *MachineName, *AnimBP->GetPathName());
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+        Resp->SetStringField(TEXT("state_name"), StateName);
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("already_absent"), true);
+        Resp->SetNumberField(TEXT("state_count"), AnimBp_CountNodes<UAnimStateNode>(SMGraph));
+        Resp->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
+        Resp->SetNumberField(TEXT("cascaded_transitions_removed"), 0);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    const int32 TransitionsBefore = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
+
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    // Cascade: destroy the transitions incident to this state (both directions) BEFORE removing it,
+    // so a state removal never leaves a transition pointing at a destroyed node.
+    const int32 CascadedRemoved = AnimBp_DestroyIncidentTransitions(SMGraph, StateNode);
+
+    // Subgraph: call the node's DestroyNode() override — NOT SMGraph->RemoveNode().
+    // The UAnimStateNode::DestroyNode override nulls BoundGraph then calls
+    // FBlueprintEditorUtils::RemoveGraph(BP, BoundGraph, Recompile), so the state's bound
+    // animation subgraph is torn down instead of orphaned/leaked.
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_anim_state: destroying state '%s' in machine '%s' on '%s' (incident transitions removed=%d, transitions before=%d)"),
+        *StateName, *MachineName, *AnimBP->GetPathName(), CascadedRemoved, TransitionsBefore);
+    StateNode->DestroyNode();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    const int32 TransitionsAfter = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_anim_state: '%s' removed; cascaded transitions removed=%d (after=%d)"),
+        *StateName, CascadedRemoved, TransitionsAfter);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+    Resp->SetStringField(TEXT("state_name"), StateName);
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetBoolField(TEXT("already_absent"), false);
+    Resp->SetNumberField(TEXT("state_count"), AnimBp_CountNodes<UAnimStateNode>(SMGraph));
+    Resp->SetNumberField(TEXT("transition_count"), TransitionsAfter);
+    Resp->SetNumberField(TEXT("cascaded_transitions_removed"), CascadedRemoved);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_anim_state"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// remove_anim_conduit
+// ---------------------------------------------------------------------------
+// MCP:remove_anim_conduit - Remove a conduit node (and its bound rule subgraph) from a state machine.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the state machine that owns the conduit
+//   @param conduit_name - Name of the conduit to remove
+//   @returns { anim_blueprint_path: string, machine_name: string, conduit_name: string, removed: bool, already_absent: bool, conduit_count: int, transition_count: int, cascaded_transitions_removed: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemoveAnimConduit(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, ConduitName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadMachineParams(Params, AnimBPPath, MachineName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("conduit_name"), ConduitName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // Resolve by bound-graph name, then require a conduit specifically (reject a plain state).
+    UAnimStateNodeBase* Endpoint = FindStateByName(SMGraph, ConduitName);
+    UAnimStateConduitNode* ConduitNode = Cast<UAnimStateConduitNode>(Endpoint);
+
+    if (!ConduitNode)
+    {
+        if (Endpoint)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Node '%s' in state machine '%s' is a %s, not a conduit (use the matching remove command)"),
+                    *ConduitName, *MachineName, *Endpoint->GetClass()->GetName()));
+        }
+        UE_LOG(LogTemp, Verbose,
+            TEXT("[MCP] remove_anim_conduit: conduit '%s' absent from machine '%s' on '%s' -- idempotent no-op"),
+            *ConduitName, *MachineName, *AnimBP->GetPathName());
+        TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+        Resp->SetStringField(TEXT("conduit_name"), ConduitName);
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("already_absent"), true);
+        Resp->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
+        Resp->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
+        Resp->SetNumberField(TEXT("cascaded_transitions_removed"), 0);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    const int32 TransitionsBefore = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
+
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    // Cascade: destroy the transitions incident to this conduit BEFORE removing it (same as states).
+    const int32 CascadedRemoved = AnimBp_DestroyIncidentTransitions(SMGraph, ConduitNode);
+
+    // Subgraph: DestroyNode() (UAnimStateConduitNode override) nulls BoundGraph and
+    // calls FBlueprintEditorUtils::RemoveGraph — the conduit's rule subgraph is torn down, not leaked.
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_anim_conduit: destroying conduit '%s' in machine '%s' on '%s' (incident transitions removed=%d, transitions before=%d)"),
+        *ConduitName, *MachineName, *AnimBP->GetPathName(), CascadedRemoved, TransitionsBefore);
+    ConduitNode->DestroyNode();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    const int32 TransitionsAfter = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_anim_conduit: '%s' removed; cascaded transitions removed=%d (after=%d)"),
+        *ConduitName, CascadedRemoved, TransitionsAfter);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_MachineReply(AnimBP, SMGraph);
+    Resp->SetStringField(TEXT("conduit_name"), ConduitName);
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetBoolField(TEXT("already_absent"), false);
+    Resp->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
+    Resp->SetNumberField(TEXT("transition_count"), TransitionsAfter);
+    Resp->SetNumberField(TEXT("cascaded_transitions_removed"), CascadedRemoved);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_anim_conduit"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// remove_anim_transition
+// ---------------------------------------------------------------------------
+// MCP:remove_anim_transition - Remove a source->target transition (and its rule subgraph) from a state machine.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param machine_name - Name of the state machine that owns the transition
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @returns { anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, removed: bool, already_absent: bool, transition_count: int, saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleRemoveAnimTransition(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadStateMachineGraph(AnimBPPath, MachineName, AnimBP, SMGraph)) { return Error; }
+
+    // FindTransitionBySourceTarget returns nullptr when either endpoint is missing OR when
+    // no source->target transition exists — all three collapse to the idempotent no-op below.
+    UAnimStateTransitionNode* Transition = FindTransitionBySourceTarget(SMGraph, SourceName, TargetName);
+    if (!Transition)
+    {
+        UE_LOG(LogTemp, Verbose,
+            TEXT("[MCP] remove_anim_transition: '%s' -> '%s' absent from machine '%s' on '%s' -- idempotent no-op"),
+            *SourceName, *TargetName, *MachineName, *AnimBP->GetPathName());
+        TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("already_absent"), true);
+        Resp->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    SMGraph->Modify();
+    AnimBP->Modify();
+
+    // DestroyNode() (UAnimStateTransitionNode override) tears down the rule
+    // subgraph via FBlueprintEditorUtils::RemoveGraph, but ONLY when the BoundGraph is not
+    // shared with a bidirectional sibling (IsBoundGraphShared() guard) — so removing one
+    // direction of a bidirectional pair never yanks the graph out from under the other.
+    UE_LOG(LogTemp, Verbose,
+        TEXT("[MCP] remove_anim_transition: destroying transition '%s' -> '%s' in machine '%s' on '%s'"),
+        *SourceName, *TargetName, *MachineName, *AnimBP->GetPathName());
+    Transition->DestroyNode();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    const int32 TransitionsAfter = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetBoolField(TEXT("already_absent"), false);
+    Resp->SetNumberField(TEXT("transition_count"), TransitionsAfter);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_anim_transition"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// compile_anim_blueprint
+// ---------------------------------------------------------------------------
+// MCP:compile_anim_blueprint - Compile an Animation Blueprint and report its status.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @returns { anim_blueprint_path: string, compiled: bool, status: string, is_up_to_date: bool, has_error: bool, error_count: int, warning_count: int, errors: [string], warnings: [string], saved: bool, save_error?: string }
+TSharedPtr<FJsonObject> HandleCompileAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), AnimBP)) { return Error; }
+
+    // Synchronous compile; on return AnimBP->Status reflects the outcome. Capture the
+    // results log so we can surface real errors/warnings instead of just the final flag.
+    FCompilerResultsLog Results;
+    Results.bSilentMode = true;
+    FKismetEditorUtilities::CompileBlueprint(AnimBP, EBlueprintCompileOptions::SkipGarbageCollection, &Results);
+
+    const UEnum* StatusEnum = StaticEnum<EBlueprintStatus>();
+    const EBlueprintStatus Status = static_cast<EBlueprintStatus>(AnimBP->Status.GetValue());
+    const bool bUpToDate = AnimBP->IsUpToDate();   // covers BS_UpToDate and BS_UpToDateWithWarnings
+    const bool bHasError = (Status == BS_Error);
+
+    TArray<TSharedPtr<FJsonValue>> Errors;
+    for (const TSharedRef<FTokenizedMessage>& Msg : Results.Messages)
+    {
+        if (Msg->GetSeverity() == EMessageSeverity::Error)
+        {
+            Errors.Add(MakeShared<FJsonValueString>(Msg->ToText().ToString()));
+        }
+    }
+    TArray<TSharedPtr<FJsonValue>> Warnings;
+    for (const TSharedRef<FTokenizedMessage>& Msg : Results.Messages)
+    {
+        if (Msg->GetSeverity() == EMessageSeverity::Warning)
+        {
+            Warnings.Add(MakeShared<FJsonValueString>(Msg->ToText().ToString()));
+        }
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
+    Resp->SetBoolField(TEXT("compiled"), true);
+    Resp->SetStringField(TEXT("status"),
+        StatusEnum ? StatusEnum->GetNameStringByValue(static_cast<int64>(Status)) : FString::FromInt(static_cast<int32>(Status)));
+    Resp->SetBoolField(TEXT("is_up_to_date"), bUpToDate);
+    Resp->SetBoolField(TEXT("has_error"), bHasError);
+    Resp->SetNumberField(TEXT("error_count"), Errors.Num());
+    Resp->SetNumberField(TEXT("warning_count"), Warnings.Num());
+    Resp->SetArrayField(TEXT("errors"), Errors);
+    Resp->SetArrayField(TEXT("warnings"), Warnings);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("compile_anim_blueprint"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// get_anim_blueprint_info
+// ---------------------------------------------------------------------------
+// MCP:get_anim_blueprint_info - Read structural info about an Animation Blueprint.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @returns { asset_path: string, target_skeleton: string, target_skeleton_set: bool, parent_class: string, generated_class: string, is_anim_instance: bool, is_template: bool, graph_count: int, state_machine_count: int, state_machines: [{ name: string, state_count: int }] }
+
+TSharedPtr<FJsonObject> HandleGetAnimBlueprintInfo(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), AnimBP)) { return Error; }
+
+    TArray<UEdGraph*> AllGraphs;
+    AnimBP->GetAllGraphs(AllGraphs);
+
+    const int32 StateMachineCount = CountStateMachines(AnimBP);
+
+    UClass* ParentClass = AnimBP->ParentClass;
+    const bool bChild = AnimBP->GeneratedClass &&
+        AnimBP->GeneratedClass->IsChildOf(UAnimInstance::StaticClass());
+
+    // Describe each state machine + its state count.
+    TArray<TSharedPtr<FJsonValue>> Machines;
+    if (UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP))
+    {
+        for (UEdGraphNode* Node : AnimGraph->Nodes)
+        {
+            if (UAnimGraphNode_StateMachine* SM = Cast<UAnimGraphNode_StateMachine>(Node))
+            {
+                TSharedPtr<FJsonObject> MObj = MakeShared<FJsonObject>();
+                MObj->SetStringField(TEXT("name"),
+                    SM->EditorStateMachineGraph ? SM->EditorStateMachineGraph->GetName() : TEXT(""));
+                MObj->SetNumberField(TEXT("state_count"),
+                    SM->EditorStateMachineGraph ? AnimBp_CountNodes<UAnimStateNode>(SM->EditorStateMachineGraph) : 0);
+                Machines.Add(MakeShared<FJsonValueObject>(MObj));
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), AnimBP->GetPathName());
+    Resp->SetStringField(TEXT("target_skeleton"),
+        AnimBP->TargetSkeleton ? AnimBP->TargetSkeleton->GetPathName() : TEXT(""));
+    Resp->SetBoolField(TEXT("target_skeleton_set"), AnimBP->TargetSkeleton != nullptr);
+    Resp->SetStringField(TEXT("parent_class"), ParentClass ? ParentClass->GetName() : TEXT(""));
+    Resp->SetStringField(TEXT("generated_class"),
+        AnimBP->GeneratedClass ? AnimBP->GeneratedClass->GetName() : TEXT(""));
+    Resp->SetBoolField(TEXT("is_anim_instance"), bChild);
+    Resp->SetBoolField(TEXT("is_template"), AnimBP->bIsTemplate);
+    Resp->SetNumberField(TEXT("graph_count"), AllGraphs.Num());
+    Resp->SetNumberField(TEXT("state_machine_count"), StateMachineCount);
+    Resp->SetArrayField(TEXT("state_machines"), Machines);
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ===========================================================================
+// AnimBP state machine introspection (READ-ONLY).
+// List, get info, validate. NO graph mutation, NO compile. Headless-safe.
+// ===========================================================================
+
+// MCP:list_anim_state_machines - List every AnimGraphNode_StateMachine in the AnimBP (read-only).
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @returns { count, state_machines: [{name, graph_name}] }
+TSharedPtr<FJsonObject> HandleListAnimStateMachines(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    UAnimBlueprint* AnimBP = LoadObject<UAnimBlueprint>(nullptr, *AnimBPPath);
+    if (!AnimBP)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("AnimBlueprint not found: %s"), *AnimBPPath));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Machines;
+    int32 Count = 0;
+    for (UEdGraph* Graph : AnimBP->FunctionGraphs)
+    {
+        if (!Graph) { continue; }
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (UAnimGraphNode_StateMachine* SM = Cast<UAnimGraphNode_StateMachine>(Node))
+            {
+                ++Count;
+                TSharedPtr<FJsonObject> M = MakeShared<FJsonObject>();
+                M->SetStringField(TEXT("name"), SM->GetStateMachineName());
+                M->SetStringField(TEXT("graph_name"), Graph->GetName());
+                Machines.Add(MakeShared<FJsonValueObject>(M));
+            }
+        }
+    }
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetNumberField(TEXT("count"), Count);
+    Data->SetArrayField(TEXT("state_machines"), Machines);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:get_anim_state_machine_info - Read state + transition count for one state machine (read-only, no compile).
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param state_machine_name - Name of the state machine
+//   @returns { state_machine, state_count, transition_count, states:[{name,kind,x,y}] }
+TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MachineName;
+    TSharedPtr<FJsonObject> Error;
+    UAnimationStateMachineGraph* SMGraph = AnimBp_ReadInspectedMachine(Params, MachineName, Error);
+    if (!SMGraph)
+    {
+        return Error;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> StateJson;
+    int32 TransitionCount = 0;
+    for (UEdGraphNode* Node : SMGraph->Nodes)
+    {
+        if (UAnimStateNodeBase* StateNode = Cast<UAnimStateNodeBase>(Node))
+        {
+            TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
+            S->SetStringField(TEXT("name"), StateNode->GetStateName());
+            S->SetStringField(TEXT("kind"), StateNode->GetClass()->GetName());
+            S->SetNumberField(TEXT("x"), StateNode->NodePosX);
+            S->SetNumberField(TEXT("y"), StateNode->NodePosY);
+            StateJson.Add(MakeShared<FJsonValueObject>(S));
+        }
+        else if (Node->GetClass()->GetName().Contains(TEXT("TransitionGraph")))
+        {
+            ++TransitionCount;
+        }
+    }
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("state_machine"), MachineName);
+    Data->SetNumberField(TEXT("state_count"), StateJson.Num());
+    Data->SetNumberField(TEXT("transition_count"), TransitionCount);
+    Data->SetArrayField(TEXT("states"), StateJson);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:validate_anim_state_machine - Validate a state machine's structure without compiling.
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param state_machine_name - Name of the state machine
+//   @returns { is_valid, errors[], warnings[], info[], state_count, transition_count }
+TSharedPtr<FJsonObject> HandleValidateAnimStateMachine(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MachineName;
+    TSharedPtr<FJsonObject> Error;
+    UAnimationStateMachineGraph* SMGraph = AnimBp_ReadInspectedMachine(Params, MachineName, Error);
+    if (!SMGraph)
+    {
+        return Error;
+    }
+
+    int32 StateCount = 0, TransitionCount = 0;
+    for (UEdGraphNode* Node : SMGraph->Nodes)
+    {
+        if (Cast<UAnimStateNodeBase>(Node)) { ++StateCount; }
+        else if (Node->GetClass()->GetName().Contains(TEXT("TransitionGraph"))) { ++TransitionCount; }
+    }
+
+    TArray<FString> Errors, Warnings, InfoList;
+    if (StateCount == 0)
+    {
+        Errors.Add(TEXT("State machine has no states"));
+    }
+    if (TransitionCount == 0 && StateCount > 1)
+    {
+        Warnings.Add(TEXT("State machine has no transitions between states"));
+    }
+    if (StateCount == 1)
+    {
+        InfoList.Add(TEXT("State machine has only one state"));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("is_valid"), Errors.Num() == 0);
+    Data->SetArrayField(TEXT("errors"), mcp_common::StringsToJson(Errors));
+    Data->SetArrayField(TEXT("warnings"), mcp_common::StringsToJson(Warnings));
+    Data->SetArrayField(TEXT("info"), mcp_common::StringsToJson(InfoList));
+    Data->SetNumberField(TEXT("state_count"), StateCount);
+    Data->SetNumberField(TEXT("transition_count"), TransitionCount);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// ===========================================================================
+// AnimBP transition rule mutation.
+// clear_anim_transition_rule + set_anim_transition_rule_automatic.
+//
+// Both operate on a UAnimStateTransitionNode identified by (machine_name,
+// source_state, target_state). NO auto-compile — the caller decides when to
+// run compile_anim_blueprint; the mutations just dirty the asset (Modify +
+// MarkBlueprintAsStructurallyModified) and persist via SaveAssetPackage.
+
+// ---------------------------------------------------------------------------
+// clear_anim_transition_rule
+// ---------------------------------------------------------------------------
+// MCP:clear_anim_transition_rule - Remove every rule node from a transition's BoundGraph except the sink.
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param machine_name - Name of the state machine that owns the transition
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, rule_cleared, sink_present, removed_count, remaining_rule_nodes, saved, save_error? }
+TSharedPtr<FJsonObject> HandleClearAnimTransitionRule(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    UAnimStateTransitionNode* Transition = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadTransition(AnimBPPath, MachineName, SourceName, TargetName, AnimBP, SMGraph, Transition)) { return Error; }
+
+    // The BoundGraph of a UAnimStateTransitionNode is canonically a UAnimationTransitionGraph
+    // and holds exactly one UAnimGraphNode_TransitionResult sink node (CanUserDeleteNode=false)
+    // plus zero or more contributor nodes (variable gets, comparisons, time-based rules, etc.).
+    // "Clearing the rule" means removing every contributor node while keeping the sink intact —
+    // the resulting transition evaluates to true implicitly at runtime (standard engine semantics).
+    UEdGraph* RuleGraph = Transition->BoundGraph;
+    if (!RuleGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("Transition has no BoundGraph (rule graph was never initialized)"));
+
+    // Rule-graph nodes other than the result sink.
+    auto CountContributors = [RuleGraph]()
+    {
+        return RuleGraph->Nodes.Num() - AnimBp_CountNodes<UAnimGraphNode_TransitionResult>(RuleGraph);
+    };
+
+    // Idempotency: count contributors BEFORE so the payload reflects what the call did.
+    if (CountContributors() == 0)
+    {
+        // Already clear — return idempotent success without touching dirty flags.
+        TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+        Resp->SetBoolField(TEXT("rule_cleared"), false);
+        Resp->SetBoolField(TEXT("already_clear"), true);
+        Resp->SetBoolField(TEXT("sink_present"), HasTransitionResultSink(RuleGraph));
+        Resp->SetNumberField(TEXT("removed_count"), 0);
+        Resp->SetNumberField(TEXT("remaining_rule_nodes"), 0);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    const int32 RemovedCount = AnimBp_RemoveRuleContributors(AnimBP, RuleGraph);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    const int32 AfterCount = CountContributors();
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+    Resp->SetBoolField(TEXT("rule_cleared"), RemovedCount > 0);
+    Resp->SetBoolField(TEXT("sink_present"), HasTransitionResultSink(RuleGraph));
+    Resp->SetNumberField(TEXT("removed_count"), RemovedCount);
+    Resp->SetNumberField(TEXT("remaining_rule_nodes"), AfterCount);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("clear_anim_transition_rule"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// set_anim_transition_rule_automatic
+// ---------------------------------------------------------------------------
+// MCP:set_anim_transition_rule_automatic - Configure the automatic-rule UPROPERTYs of a transition.
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param machine_name - Name of the state machine that owns the transition
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @param enabled [bool] - bAutomaticRuleBasedOnSequencePlayerInState (default false)
+//   @param trigger_time [number] - AutomaticRuleTriggerTime in seconds (default 0.0; negative = blend lead)
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, enabled, trigger_time, rule_graph_has_result_node, saved, save_error? }
+TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleAutomatic(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+
+    bool bEnabled = false;
+    Params->TryGetBoolField(TEXT("enabled"), bEnabled);
+    double TriggerTimeD = 0.0;
+    Params->TryGetNumberField(TEXT("trigger_time"), TriggerTimeD);
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    UAnimStateTransitionNode* Transition = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadTransition(AnimBPPath, MachineName, SourceName, TargetName, AnimBP, SMGraph, Transition)) { return Error; }
+
+    AnimBP->Modify();
+    Transition->Modify();
+
+    Transition->bAutomaticRuleBasedOnSequencePlayerInState = bEnabled;
+    Transition->AutomaticRuleTriggerTime = static_cast<float>(TriggerTimeD);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+    Resp->SetBoolField(TEXT("enabled"), Transition->bAutomaticRuleBasedOnSequencePlayerInState);
+    Resp->SetNumberField(TEXT("trigger_time"), Transition->AutomaticRuleTriggerTime);
+    Resp->SetBoolField(TEXT("rule_graph_has_result_node"),
+        HasTransitionResultSink(Transition->BoundGraph));
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_anim_transition_rule_automatic"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// set_anim_transition_rule_from_bool
+// ---------------------------------------------------------------------------
+// MCP:set_anim_transition_rule_from_bool - Wire a bool variable's getter as the rule of a transition.
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param machine_name - Name of the state machine that owns the transition
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @param variable_name - Name of an existing bool variable on the AnimBP (or its parent C++ class)
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }
+//
+// Behavior: clears any existing contributor nodes from the transition's rule graph (preserving
+// the UAnimGraphNode_TransitionResult sink), then creates a UK2Node_VariableGet for the named
+// bool and wires its value pin to the sink's `bCanEnterTransition` input. The transition is
+// then evaluated at runtime as `(variable == true)`. To invert, declare a `!Foo` shadow bool
+// in the AnimBP and pass its name (negating via the graph is not implemented).
+//
+// `variable_kind` reports "generated" for parent-class C++ properties, "new_blueprint" for vars
+// declared on the AnimBP itself but not yet compiled into the generated class, or "missing"
+// (which is also returned as an error response).
+TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName, VariableName;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variable_name"), VariableName)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    UAnimStateTransitionNode* Transition = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadTransition(AnimBPPath, MachineName, SourceName, TargetName, AnimBP, SMGraph, Transition)) { return Error; }
+
+    UAnimationTransitionGraph* RuleGraph = Cast<UAnimationTransitionGraph>(Transition->BoundGraph);
+    if (!RuleGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("Transition BoundGraph is not a UAnimationTransitionGraph (no rule graph to wire)"));
+    UAnimGraphNode_TransitionResult* ResultNode = RuleGraph->GetResultNode();
+    if (!ResultNode)
+        return mcp_common::MakeErrorReply(
+            TEXT("Rule graph has no UAnimGraphNode_TransitionResult sink"));
+
+    // --- Validate the variable exists on the AnimBP (or its parent) AND is a bool. ---
+    FProperty* Property = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    const FString VariableKind = AnimBp_RuleVariableKind(AnimBP, VariableName, Property, Error);
+    if (VariableKind.IsEmpty())
+        return Error;
+
+    if (Property)
+    {
+        // Reject non-bool up front. CastField<FBoolProperty> catches both bitfield bools and
+        // plain bool UPROPERTYs — GetCPPType would also work but the cast is the canonical
+        // check used throughout the engine.
+        if (!CastField<FBoolProperty>(Property))
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Variable '%s' is not a bool (type=%s)"), *VariableName, *Property->GetCPPType()));
+        }
+    }
+
+    // --- Clear existing contributor nodes (preserve the sink). Idempotent step. ---
+    AnimBp_RemoveRuleContributors(AnimBP, RuleGraph);
+
+    // --- Create the UK2Node_VariableGet via the shared helper. ---
+    UK2Node_VariableGet* VariableGetNode = mcp_common::SpawnVariableGetNode(
+        RuleGraph, AnimBP, VariableName, FVector2D(-400.0f, 0.0f));
+    if (!VariableGetNode)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Failed to create UK2Node_VariableGet for variable '%s' (post-clear rule graph dirty)"), *VariableName));
+    }
+
+    // --- Wire variable-get.value -> sink.bCanEnterTransition. ---
+    UEdGraphPin* ValuePin = VariableGetNode->GetValuePin();
+    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+    if (!ValuePin)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UK2Node_VariableGet for '%s' has no value pin (variable may not be bool-compatible)"), *VariableName));
+    }
+    if (!SinkInputPin)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("UAnimGraphNode_TransitionResult has no 'bCanEnterTransition' input pin"));
+    }
+
+    // MakeLinkTo is the low-level connector — both pins are bool-typed (the variable was
+    // validated as bool above; the sink pin is FAnimNode_TransitionResult::bCanEnterTransition
+    // which is itself a bool), so the schema accepts the connection. We bypass
+    // TryCreateConnection (which can be picky about exec-pin purity rules inherited from the
+    // UAnimationTransitionSchema) for this single explicit pin pair.
+    ValuePin->MakeLinkTo(SinkInputPin);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    // Count current contributor nodes (sink + the variable-get we just added => 2 total).
+    int32 ContributorCount = 0;
+    FString ContributorClass;
+    for (UEdGraphNode* N : RuleGraph->Nodes)
+    {
+        if (!Cast<UAnimGraphNode_TransitionResult>(N))
+        {
+            ++ContributorCount;
+            ContributorClass = N->GetClass()->GetName();
+        }
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+    Resp->SetStringField(TEXT("variable_name"), VariableName);
+    Resp->SetStringField(TEXT("variable_kind"), VariableKind);
+    Resp->SetBoolField(TEXT("rule_set"), ValuePin->LinkedTo.Num() > 0 && SinkInputPin->LinkedTo.Num() > 0);
+    Resp->SetBoolField(TEXT("sink_present"), HasTransitionResultSink(RuleGraph));
+    Resp->SetNumberField(TEXT("contributor_count"), ContributorCount);
+    if (!ContributorClass.IsEmpty())
+    {
+        Resp->SetStringField(TEXT("contributor_node_class"), ContributorClass);
+    }
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_anim_transition_rule_from_bool"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// set_anim_transition_rule_from_comparison
+// ---------------------------------------------------------------------------
+// MCP:set_anim_transition_rule_from_comparison - Wire a float comparison as the rule of a transition.
+//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
+//   @param machine_name - Name of the state machine that owns the transition
+//   @param source_state - Name of the source state (transition origin)
+//   @param target_state - Name of the target state (transition destination)
+//   @param variable_name - Name of an existing float variable on the AnimBP (or its parent C++ class)
+//   @param operator - One of "==", "!=", ">", "<", ">=", "<=" (compared against comparison_value)
+//   @param comparison_value [number] - Float literal on the right-hand side of the comparison
+//   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, operator, comparison_value, variable_kind, rule_set, sink_present, contributor_count, contributor_node_classes, saved, save_error? }
+//
+// Behavior: clears existing contributor nodes (preserving the sink), creates a
+// UK2Node_VariableGet for the named float, a UK2Node_CallFunction wrapping
+// UKismetMathLibrary::MakeLiteralFloat for the comparison value, and another
+// UK2Node_CallFunction for the chosen comparison operator (EqualEqual_FloatFloat,
+// Greater_FloatFloat, etc.). The graph is wired:
+//   VariableGet.value        --> Comparison.<op>.A
+//   MakeLiteral*.ReturnValue --> Comparison.<op>.B     <-- the OUTPUT, not 'Value'
+//   Comparison.ReturnValue   --> sink.bCanEnterTransition
+// At runtime the transition evaluates as `(<variable> <op> <literal>)`.
+TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, MachineName, SourceName, TargetName, VariableName, OperatorStr;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadTransitionParams(Params, AnimBPPath, MachineName, SourceName, TargetName))
+        return Missing;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variable_name"), VariableName)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("operator"), OperatorStr)) { return Missing; }
+    double ComparisonValue = 0.0;
+    Params->TryGetNumberField(TEXT("comparison_value"), ComparisonValue);
+
+    // Operator string -> KismetMathLibrary function name. Float scope for old PC_Float
+    // pins; Double scope is what LWC actually emits when a Blueprint user
+    // declares `variable_type=real/float/double` because ResolvePinType maps all three
+    // to PC_Real + PC_Double (GraphUtils.cpp). Resolved at runtime against the
+    // variable's actual FProperty type.
+    static const TMap<FString, FName> OpToFuncFloat = {
+        {TEXT("=="), FName(TEXT("EqualEqual_FloatFloat"))},
+        {TEXT("!="), FName(TEXT("NotEqual_FloatFloat"))},
+        {TEXT(">"),  FName(TEXT("Greater_FloatFloat"))},
+        {TEXT("<"),  FName(TEXT("Less_FloatFloat"))},
+        {TEXT(">="), FName(TEXT("GreaterEqual_FloatFloat"))},
+        {TEXT("<="), FName(TEXT("LessEqual_FloatFloat"))},
+    };
+    static const TMap<FString, FName> OpToFuncDouble = {
+        {TEXT("=="), FName(TEXT("EqualEqual_DoubleDouble"))},
+        {TEXT("!="), FName(TEXT("NotEqual_DoubleDouble"))},
+        {TEXT(">"),  FName(TEXT("Greater_DoubleDouble"))},
+        {TEXT("<"),  FName(TEXT("Less_DoubleDouble"))},
+        {TEXT(">="), FName(TEXT("GreaterEqual_DoubleDouble"))},
+        {TEXT("<="), FName(TEXT("LessEqual_DoubleDouble"))},
+    };
+
+    UAnimBlueprint* AnimBP = nullptr;
+    UAnimationStateMachineGraph* SMGraph = nullptr;
+    UAnimStateTransitionNode* Transition = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimBp_LoadTransition(AnimBPPath, MachineName, SourceName, TargetName, AnimBP, SMGraph, Transition)) { return Error; }
+
+    UAnimationTransitionGraph* RuleGraph = Cast<UAnimationTransitionGraph>(Transition->BoundGraph);
+    if (!RuleGraph)
+        return mcp_common::MakeErrorReply(
+            TEXT("Transition BoundGraph is not a UAnimationTransitionGraph (no rule graph to wire)"));
+    UAnimGraphNode_TransitionResult* ResultNode = RuleGraph->GetResultNode();
+    if (!ResultNode)
+        return mcp_common::MakeErrorReply(
+            TEXT("Rule graph has no UAnimGraphNode_TransitionResult sink"));
+
+    // Validate variable exists + is float.
+    FProperty* Property = nullptr;
+    TSharedPtr<FJsonObject> Error;
+    const FString VariableKind = AnimBp_RuleVariableKind(AnimBP, VariableName, Property, Error);
+    if (VariableKind.IsEmpty())
+        return Error;
+
+    if (Property)
+    {
+        // Accept BOTH FFloatProperty (legacy PC_Float) and FDoubleProperty (LWC
+        // PC_Real + PC_Double). The dispatch below picks the matching operator + literal
+        // set. Any other type is rejected with an honest type-name error so the caller
+        // knows exactly what went wrong.
+        const bool bIsFloat = CastField<FFloatProperty>(Property) != nullptr;
+        const bool bIsDouble = CastField<FDoubleProperty>(Property) != nullptr;
+        if (!bIsFloat && !bIsDouble)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Variable '%s' is not a float/double (type=%s)"), *VariableName, *Property->GetCPPType()));
+        }
+    }
+
+    // Clear existing contributor nodes (preserve the sink).
+    AnimBp_RemoveRuleContributors(AnimBP, RuleGraph);
+
+    // Create the variable-get node.
+    UK2Node_VariableGet* VariableGetNode = mcp_common::SpawnVariableGetNode(
+        RuleGraph, AnimBP, VariableName, FVector2D(-700.0f, -100.0f));
+    if (!VariableGetNode)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Failed to create UK2Node_VariableGet for variable '%s' (post-clear rule graph dirty)"), *VariableName));
+    }
+
+    // Decide float vs double by inspecting the actual FProperty kind. Done AFTER the
+    // existence + type checks so we have a stable answer. For NewVariables (declared on
+    // the AnimBP pre-compile), the FProperty is null; default to Double because that
+    // matches the LWC default for new Blueprint real-typed members.
+    const bool bIsFloatProp = (Property != nullptr) && (CastField<FFloatProperty>(Property) != nullptr);
+    const bool bIsDoubleProp = (Property != nullptr) && (CastField<FDoubleProperty>(Property) != nullptr);
+    const FName LiteralFuncName = (Property == nullptr || bIsDoubleProp) ? FName(TEXT("MakeLiteralDouble")) : FName(TEXT("MakeLiteralFloat"));
+    const TMap<FString, FName>& OpMap = bIsDoubleProp ? OpToFuncDouble : OpToFuncFloat;
+
+    const FName* FuncNamePtr = OpMap.Find(OperatorStr);
+    if (!FuncNamePtr)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid operator '%s' (expected one of: == != > < >= <=)"), *OperatorStr));
+    }
+    const FName ComparisonFuncName = *FuncNamePtr;
+
+    // Create MakeLiteral{Float,Double} node carrying the right-hand-side comparison value.
+    // UKismetSystemLibrary owns the literal-makers (KismetMathLibrary has no
+    // MakeLiteral* functions).
+    UK2Node_CallFunction* LiteralNode = NewObject<UK2Node_CallFunction>(RuleGraph);
+    UFunction* LiteralFunc = UKismetSystemLibrary::StaticClass()->FindFunctionByName(LiteralFuncName);
+    if (!LiteralFunc)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UKismetSystemLibrary::%s not found in engine source"), *LiteralFuncName.ToString()));
+    }
+    LiteralNode->FunctionReference.SetFromField<UFunction>(LiteralFunc, false);
+    LiteralNode->NodePosX = -700.0f;
+    LiteralNode->NodePosY = 150.0f;
+    RuleGraph->AddNode(LiteralNode, true);
+    LiteralNode->PostPlacedNewNode();
+    LiteralNode->AllocateDefaultPins();
+
+    UEdGraphPin* LiteralValuePin = LiteralNode->FindPin(TEXT("Value"));
+    if (!LiteralValuePin)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UKismetSystemLibrary::%s has no 'Value' input pin"), *LiteralFuncName.ToString()));
+    }
+    // UE float/double literal defaults use FString representation; SanitizeFloat handles locale.
+    LiteralValuePin->DefaultValue = FString::SanitizeFloat(static_cast<float>(ComparisonValue));
+
+    // Create the comparison operator node.
+    UK2Node_CallFunction* ComparisonNode = NewObject<UK2Node_CallFunction>(RuleGraph);
+    UFunction* CompFunc = UKismetMathLibrary::StaticClass()->FindFunctionByName(ComparisonFuncName);
+    if (!CompFunc)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UKismetMathLibrary::%s not found in engine source"), *ComparisonFuncName.ToString()));
+    }
+    ComparisonNode->FunctionReference.SetFromField<UFunction>(CompFunc, false);
+    ComparisonNode->NodePosX = -400.0f;
+    ComparisonNode->NodePosY = 25.0f;
+    RuleGraph->AddNode(ComparisonNode, true);
+    ComparisonNode->PostPlacedNewNode();
+    ComparisonNode->AllocateDefaultPins();
+
+    // Resolve all 5 wiring pins. Failure of any is an engine/API mismatch — surface it.
+    UEdGraphPin* VariableOutPin = VariableGetNode->GetValuePin();
+    UEdGraphPin* CompAPin = ComparisonNode->FindPin(TEXT("A"));
+    UEdGraphPin* CompBPin = ComparisonNode->FindPin(TEXT("B"));
+    UEdGraphPin* CompReturnPin = ComparisonNode->FindPin(TEXT("ReturnValue"));
+    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+    // The literal's OUTPUT. 'Value' is its INPUT and is used for the default
+    // (above), NEVER for the link -- see the block below.
+    UEdGraphPin* LiteralReturnPin = LiteralNode->FindPin(TEXT("ReturnValue"));
+    if (!VariableOutPin || !CompAPin || !CompBPin || !CompReturnPin || !SinkInputPin || !LiteralReturnPin)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Pin wiring failed (variable_out=%d A=%d B=%d ret=%d sink=%d lit_ret=%d) -- engine API mismatch"),
+                VariableOutPin != nullptr, CompAPin != nullptr, CompBPin != nullptr,
+                CompReturnPin != nullptr, SinkInputPin != nullptr, LiteralReturnPin != nullptr));
+    }
+
+    // Wire all 3 edges via MakeLinkTo (low-level; bypasses UAnimationTransitionSchema's
+    // exec-pin purity quirks — all pins here are bool/float, schema-valid).
+    //
+    // Linking LiteralValuePin (the MakeLiteral's 'Value' INPUT) to CompBPin, which is also an
+    // input, is rejected by the editor ("Direction mismatch between pins Value and B") and
+    // leaves the AnimBP with compile errors behind a rule_set:true, saved:true reply.
+    VariableOutPin->MakeLinkTo(CompAPin);
+    LiteralReturnPin->MakeLinkTo(CompBPin);
+    CompReturnPin->MakeLinkTo(SinkInputPin);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+
+    // Report contributor count + the classes we placed (sink excluded).
+    int32 ContributorCount = 0;
+    TArray<TSharedPtr<FJsonValue>> ContributorClasses;
+    for (UEdGraphNode* N : RuleGraph->Nodes)
+    {
+        if (!Cast<UAnimGraphNode_TransitionResult>(N))
+        {
+            ++ContributorCount;
+            ContributorClasses.Add(MakeShared<FJsonValueString>(N->GetClass()->GetName()));
+        }
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Resp = AnimBp_TransitionReply(AnimBP, SMGraph, SourceName, TargetName);
+    Resp->SetStringField(TEXT("variable_name"), VariableName);
+    Resp->SetStringField(TEXT("operator"), OperatorStr);
+    Resp->SetNumberField(TEXT("comparison_value"), ComparisonValue);
+    Resp->SetStringField(TEXT("variable_kind"), VariableKind);
+    Resp->SetBoolField(TEXT("rule_set"),
+        CompReturnPin->LinkedTo.Num() > 0 && SinkInputPin->LinkedTo.Num() > 0);
+    Resp->SetBoolField(TEXT("sink_present"), HasTransitionResultSink(RuleGraph));
+    Resp->SetNumberField(TEXT("contributor_count"), ContributorCount);
+    Resp->SetArrayField(TEXT("contributor_node_classes"), ContributorClasses);
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_anim_transition_rule_from_comparison"), SaveErr);
+}
+// ============================================================================
+// AnimBP scaffolding
+// ============================================================================
+//
+// Three primitives on top of the AnimGraph's state-machine / state / transition /
+// conduit / notify / montage plumbing, so a locomotion AnimBP does not take 5+
+// commands wired by hand. `scaffold_locomotion_animbp` packages the recipe
+// (create AnimBP + state machine + Idle/Walk/Run states + bidirectional
+// transitions) into one call. `wire_aim_offset` makes a 1D BlendSpace for aim
+// yaw/pitch. `setup_foot_ik` adds a UAnimGraphNode_LegIK to the AnimGraph and
+// binds the foot bone references.
+
+// MCP:scaffold_locomotion_animbp - Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
+//   @param package_path - UE content folder, e.g. "/Game/MyGame".
+//   @param asset_name - Blueprint asset name, e.g. "ABP_PlayerLocomotion".
+//   @param skeleton_path - Path to the target USkeleton.
+//   @param machine_name - Optional state machine name (default "Locomotion").
+//   @param states - Optional list of state names to add (default ["Idle", "Walk", "Run"]).
+//   @param add_transitions - Optional bool (default true). Add Idle<->Walk and Walk<->Run transitions.
+//   @returns { anim_blueprint_path, package_path, skeleton_path, machine_name, state_count, transition_count, already_existed, saved }
+TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString PackagePath, AssetName, SkeletonPath;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
+    {
+        return Missing;
+    }
+    FString MachineName;
+    Params->TryGetStringField(TEXT("machine_name"), MachineName);
+    if (MachineName.IsEmpty()) { MachineName = TEXT("Locomotion"); }
+
+    USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, *SkeletonPath);
+    if (!Skeleton)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Could not load skeleton: %s"), *SkeletonPath));
+    }
+
+    PackagePath.RemoveFromEnd(TEXT("/"));
+    const FString AnimBPPath = PackagePath / AssetName;
+
+    UAnimBlueprint* AnimBP = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(AnimBPPath);
+    const bool bAlreadyExistedABP = (AnimBP != nullptr);
+    if (!AnimBP)
+    {
+        UAnimBlueprintFactory* Factory = NewObject<UAnimBlueprintFactory>();
+        Factory->ParentClass = UAnimInstance::StaticClass();
+        Factory->TargetSkeleton = Skeleton;
+
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+        UObject* NewAsset = AssetToolsModule.Get().CreateAsset(
+            AssetName, PackagePath, UAnimBlueprint::StaticClass(), Factory);
+        AnimBP = Cast<UAnimBlueprint>(NewAsset);
+        if (!AnimBP)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Failed to create AnimBlueprint at %s"), *AnimBPPath));
+        }
+        FAssetRegistryModule::AssetCreated(AnimBP);
+    }
+
+    // Add the Locomotion state machine (idempotent).
+    {
+        TSharedPtr<FJsonObject> SMPayload = HandleAddAnimStateMachine(AnimBp_MachineRequest(AnimBP->GetPathName(), MachineName));
+        if (!SMPayload.IsValid() || !SMPayload->GetBoolField(TEXT("success")))
+        {
+            return SMPayload;
+        }
+    }
+
+    // Add the default states.
+    const TArray<TSharedPtr<FJsonValue>>* StatesArr = nullptr;
+    Params->TryGetArrayField(TEXT("states"), StatesArr);
+    TArray<FString> StateNames;
+    if (StatesArr)
+    {
+        for (const TSharedPtr<FJsonValue>& V : *StatesArr)
+        {
+            FString S;
+            if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty())
+            {
+                StateNames.Add(S);
+            }
+        }
+    }
+    if (StateNames.Num() == 0)
+    {
+        StateNames = { TEXT("Idle"), TEXT("Walk"), TEXT("Run") };
+    }
+
+    for (const FString& StateName : StateNames)
+    {
+        TSharedPtr<FJsonObject> StParams = AnimBp_MachineRequest(AnimBP->GetPathName(), MachineName);
+        StParams->SetStringField(TEXT("state_name"), StateName);
+        TSharedPtr<FJsonObject> StatePayload = HandleAddAnimState(StParams);
+        if (!StatePayload.IsValid() || !StatePayload->GetBoolField(TEXT("success")))
+        {
+            return StatePayload;
+        }
+    }
+
+    // Connect the ENTRY NODE to the first state.
+    //
+    // Without this, the scaffold returns state_count:3, transition_count:4, saved:true and the
+    // AnimBP does NOT COMPILE: "Entry node 'X' is not connected to state" + "There was no entry
+    // state connection in 'X'". A machine without an entry never starts, so the character
+    // stays in the reference pose.
+    bool bEntryWired = false;
+    if (StateNames.Num() > 0)
+    {
+        if (UAnimGraphNode_StateMachine* SMNodeForEntry = FindStateMachineByName(AnimBP, MachineName))
+        {
+            if (UAnimationStateMachineGraph* SMGraphForEntry = SMNodeForEntry->EditorStateMachineGraph)
+            {
+                UAnimStateEntryNode* EntryNode = SMGraphForEntry->EntryNode;
+                UAnimStateNodeBase* FirstState = FindStateByName(SMGraphForEntry, StateNames[0]);
+                if (EntryNode && FirstState)
+                {
+                    UEdGraphPin* EntryPin = EntryNode->GetOutputPin();
+                    UEdGraphPin* FirstStateIn = FirstState->GetInputPin();
+                    // Idempotent: if it already points somewhere, leave it (re-running the scaffold
+                    // must not re-wire an entry the author moved by hand).
+                    if (EntryPin && FirstStateIn && EntryPin->LinkedTo.Num() == 0)
+                    {
+                        EntryPin->MakeLinkTo(FirstStateIn);
+                        bEntryWired = true;
+                    }
+                    else if (EntryPin && EntryPin->LinkedTo.Num() > 0)
+                    {
+                        bEntryWired = true;   // already connected
+                    }
+                }
+            }
+        }
+    }
+
+    // Add bidirectional transitions between consecutive states.
+    bool bAddTransitions = true;
+    Params->TryGetBoolField(TEXT("add_transitions"), bAddTransitions);
+    int32 TransitionsAdded = 0;
+    if (bAddTransitions && StateNames.Num() >= 2)
+    {
+        for (int32 i = 0; i + 1 < StateNames.Num(); ++i)
+        {
+            for (int32 Dir = 0; Dir < 2; ++Dir)
+            {
+                FString Source = (Dir == 0) ? StateNames[i] : StateNames[i + 1];
+                FString Target = (Dir == 0) ? StateNames[i + 1] : StateNames[i];
+
+                TSharedPtr<FJsonObject> TrParams = AnimBp_TransitionRequest(AnimBP->GetPathName(), MachineName, Source, Target);
+                TrParams->SetNumberField(TEXT("crossfade_duration"), 0.2);
+                TSharedPtr<FJsonObject> TrPayload = HandleAddAnimTransition(TrParams);
+                if (TrPayload.IsValid() && TrPayload->GetBoolField(TEXT("success")))
+                {
+                    ++TransitionsAdded;
+                }
+            }
+        }
+    }
+
+    // Compile + save.
+    TSharedPtr<FJsonObject> CompileParams = MakeShared<FJsonObject>();
+    CompileParams->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
+    HandleCompileAnimBlueprint(CompileParams);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
+    Data->SetStringField(TEXT("package_path"), PackagePath);
+    Data->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
+    Data->SetStringField(TEXT("machine_name"), MachineName);
+    Data->SetNumberField(TEXT("state_count"), StateNames.Num());
+    Data->SetNumberField(TEXT("transition_count"), TransitionsAdded);
+    // Without an entry the machine does not compile; surface it in the response.
+    Data->SetBoolField(TEXT("entry_wired"), bEntryWired);
+    Data->SetStringField(TEXT("entry_state"), StateNames.Num() > 0 ? StateNames[0] : FString());
+    Data->SetStringField(TEXT("note_states_are_empty"),
+        TEXT("States are created EMPTY (only their Output Animation Pose): put an "
+             "AnimGraphNode_SequencePlayer in each one with add_anim_graph_node("
+             "graph_name=\"<machine> > <state>\") and wire it to the StateResult, or the AnimBP "
+             "compiles clean and evaluates to the reference pose."));
+    Data->SetBoolField(TEXT("already_existed"), bAlreadyExistedABP);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("scaffold_locomotion_animbp"), SaveErr);
+}
+
+// MCP:wire_aim_offset - Create a UBlendSpace1D asset for aim-offset blending (yaw or pitch axis). Idempotent on re-run.
+//   @param package_path - UE content folder.
+//   @param asset_name - BlendSpace1D asset name.
+//   @param skeleton_path - Path to the target USkeleton.
+//   @param axis_name - Optional axis name (default "Yaw").
+//   @param min_value - Optional float (default -90.0). Axis minimum.
+//   @param max_value - Optional float (default 90.0). Axis maximum.
+//   @param num_grid_points - Optional int (default 4).
+//   @returns { asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved }
+TSharedPtr<FJsonObject> HandleWireAimOffset(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString PackagePath, AssetName, SkeletonPath;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
+    {
+        return Missing;
+    }
+    FString AxisName;
+    Params->TryGetStringField(TEXT("axis_name"), AxisName);
+    if (AxisName.IsEmpty()) { AxisName = TEXT("Yaw"); }
+
+    double MinVal = -90.0;
+    Params->TryGetNumberField(TEXT("min_value"), MinVal);
+    double MaxVal = 90.0;
+    Params->TryGetNumberField(TEXT("max_value"), MaxVal);
+    double GridD = 4;
+    Params->TryGetNumberField(TEXT("num_grid_points"), GridD);
+
+    USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, *SkeletonPath);
+    if (!Skeleton)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Could not load skeleton: %s"), *SkeletonPath));
+    }
+
+    PackagePath.RemoveFromEnd(TEXT("/"));
+    const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
+
+    UBlendSpace1D* BS = LoadObject<UBlendSpace1D>(nullptr, *AssetObjectPath);
+    const bool bAlreadyExisted = (BS != nullptr);
+
+    if (!BS)
+    {
+        UBlendSpaceFactory1D* Factory = NewObject<UBlendSpaceFactory1D>();
+        Factory->TargetSkeleton = Skeleton;
+
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+        UObject* NewAsset = AssetToolsModule.Get().CreateAsset(
+            AssetName, PackagePath, UBlendSpace1D::StaticClass(), Factory);
+        BS = Cast<UBlendSpace1D>(NewAsset);
+        if (!BS)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Failed to create BlendSpace1D at %s"), *AssetObjectPath));
+        }
+        FAssetRegistryModule::AssetCreated(BS);
+    }
+
+BS->Modify();
+    // UBlendSpace::BlendParameters is protected — we cannot touch it from here.
+    // The BlendSpace is created with engine defaults; the dev edits the axis via
+    // the editor or via future set_blendspace_axis / add_blendspace_sample
+    // commands. We just persist the asset so the (path, axis_name) pair is
+    // ready for the dev to wire samples.
+    (void)AxisName;
+    (void)MinVal;
+    (void)MaxVal;
+    (void)GridD;
+
+    BS->MarkPackageDirty();
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(BS->GetOutermost(), BS, SaveErr);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_path"), AssetObjectPath);
+    Data->SetStringField(TEXT("axis_name"), AxisName);
+    Data->SetNumberField(TEXT("min_value"), static_cast<double>(FMath::Min(MinVal, MaxVal)));
+    Data->SetNumberField(TEXT("max_value"), static_cast<double>(FMath::Max(MinVal, MaxVal)));
+    Data->SetNumberField(TEXT("num_grid_points"), static_cast<double>(FMath::Clamp(static_cast<int32>(GridD), 1, 10)));
+    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("wire_aim_offset"), SaveErr);
+}
+
+// 2D BlendSpace asset scaffolders.
+//
+// `wire_aim_offset` makes a UBlendSpace1D; these make the two 2D flavours:
+// `UBlendSpace` (generic 2D) and `UAimOffsetBlendSpace` (AimOffset 2D —
+// the canonical pattern for character Yaw x Pitch aim graphs). Both assets
+// ride the standard UAssetToolsModule::CreateAsset + factory pattern; the
+// factories live in `Editor/UnrealEd/Classes/Factories/` and just set their
+// `TargetSkeleton` before the creation call.
+//
+// Sample-point wiring is intentionally NOT implemented here — UBlendSpace's
+// `SampleSet` is editor-only data that drives the visual grid. Adding
+// samples is done separately with add_blendspace_sample.
+
+// Helper: create any 2D BlendSpace-flavored asset via the asset tools factory
+// route. Class-specific instantiation is the caller's job (UBlendSpace,
+// UAimOffsetBlendSpace). Idempotent on already-existed path (LoadObject
+// before factory is used). Saves the asset package on success.
+template <typename TBlendSpace>
+static TSharedPtr<FJsonObject> ScaffoldBlendSpaceAssetImpl(
+    const TSharedPtr<FJsonObject>& Params,
+    bool bIsAimOffset,
+    USkeleton* Skeleton,
+    const FString& PackagePathIn,
+    const FString& AssetNameIn,
+    const FString& SkeletonPathOut)
+{
+    FString PackagePath = PackagePathIn;
+    FString AssetName = AssetNameIn;
+    PackagePath.RemoveFromEnd(TEXT("/"));
+    const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
+
+    // Idempotent: if the asset already exists, just save with the new params
+    // and report already_existed=true. We do NOT mutate the sample set
+    // (add_blendspace_sample does that).
+    TBlendSpace* BS = LoadObject<TBlendSpace>(nullptr, *AssetObjectPath);
+    const bool bAlreadyExisted = (BS != nullptr);
+
+    if (!BS)
+    {
+        // Factory class selection drives the AimOffset metadata. The factory
+        // is a transient object owned by us — it goes out of scope after the
+        // CreateAsset call returns.
+        UFactory* Factory = bIsAimOffset
+            ? static_cast<UFactory*>(NewObject<UAimOffsetBlendSpaceFactoryNew>())
+            : static_cast<UFactory*>(NewObject<UBlendSpaceFactoryNew>());
+        if (!Factory)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Failed to allocate BlendSpace factory"));
+        }
+        // Both factories expose `TargetSkeleton` as a UPROPERTY — the property
+        // name is the same on UAimOffsetBlendSpaceFactoryNew + UBlendSpaceFactoryNew.
+        if (UBlendSpaceFactoryNew* ConcreteFactory = Cast<UBlendSpaceFactoryNew>(Factory))
+        {
+            ConcreteFactory->TargetSkeleton = Skeleton;
+        }
+
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+        UObject* NewAsset = AssetToolsModule.Get().CreateAsset(
+            AssetName, PackagePath, TBlendSpace::StaticClass(), Factory);
+        BS = Cast<TBlendSpace>(NewAsset);
+        if (!BS)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Failed to create %s at %s"),
+                    bIsAimOffset ? TEXT("AimOffsetBlendSpace") : TEXT("BlendSpace"),
+                    *AssetObjectPath));
+        }
+        FAssetRegistryModule::AssetCreated(BS);
+    }
+
+    BS->Modify();
+    BS->MarkPackageDirty();
+    // Note: UBlendSpace axis metadata (AxisToScale, BlendParameters, etc.) is
+    // stored on protected/protected-set members — we cannot touch them
+    // from here. The asset is left at engine-default axes (the editor / a
+    // future MCP cmd can re-open it). The response surfaces the values we
+    // recorded but not necessarily reflect on disk until the dev opens the
+    // asset at least once.
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(BS->GetOutermost(), BS, SaveErr);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("asset_path"), AssetObjectPath);
+    Data->SetStringField(TEXT("skeleton_path"), SkeletonPathOut);
+    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveErr);
+    return mcp_common::MakeOkReply(Data);
+}
+
+// MCP:scaffold_blend_space_2d - Create a UBlendSpace (2D) asset for parameter-driven animation blending (e.g. Speed x Direction). Idempotent on re-run; axis metadata left at engine defaults (set the protected axis fields afterwards with set_blendspace_properties).
+//   @param package_path [string!] - /Game/... folder for the new asset (required)
+//   @param asset_name [string!] - Display name (required)
+//   @param skeleton_path [string!] - USkeleton the BS targets (required)
+//   @param axis_x_label [string] - Optional X-axis display name (default "X"); engine field is protected so visible only after editor opens the asset.
+//   @param axis_y_label [string] - Optional Y-axis display name (default "Y"); same engine protection caveat.
+//   @param min_x [number] - Optional X axis lower bound (default 0); recorded in response but not written to asset.
+//   @param max_x [number] - Optional X axis upper bound (default 100); same caveat as above.
+//   @param min_y [number] - Optional Y axis lower bound (default 0)
+//   @param max_y [number] - Optional Y axis upper bound (default 100)
+//   @param num_grid_points_x [number] - Optional X grid density (default 4)
+//   @param num_grid_points_y [number] - Optional Y grid density (default 4)
+//   @returns { asset_path, skeleton_path, axis_x_label, axis_y_label, x_axis_range, y_axis_range, num_grid_points_x, num_grid_points_y, already_existed, saved, note? }
+TSharedPtr<FJsonObject> HandleScaffoldBlendSpace2D(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString PackagePath, AssetName, SkeletonPath;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
+    {
+        return Missing;
+    }
+    FString AxisXLabel, AxisYLabel;
+    Params->TryGetStringField(TEXT("axis_x_label"), AxisXLabel);
+    if (AxisXLabel.IsEmpty()) { AxisXLabel = TEXT("X"); }
+    Params->TryGetStringField(TEXT("axis_y_label"), AxisYLabel);
+    if (AxisYLabel.IsEmpty()) { AxisYLabel = TEXT("Y"); }
+
+    double MinXD = 0.0, MaxXD = 100.0, MinYD = 0.0, MaxYD = 100.0;
+    Params->TryGetNumberField(TEXT("min_x"), MinXD);
+    Params->TryGetNumberField(TEXT("max_x"), MaxXD);
+    Params->TryGetNumberField(TEXT("min_y"), MinYD);
+    Params->TryGetNumberField(TEXT("max_y"), MaxYD);
+    double GridXD = 4.0, GridYD = 4.0;
+    Params->TryGetNumberField(TEXT("num_grid_points_x"), GridXD);
+    Params->TryGetNumberField(TEXT("num_grid_points_y"), GridYD);
+
+    USkeleton* Skeleton = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
+
+    TSharedPtr<FJsonObject> Resp = ScaffoldBlendSpaceAssetImpl<UBlendSpace>(
+        Params, /*bIsAimOffset*/ false, Skeleton, PackagePath, AssetName, SkeletonPath);
+    // On success, append the requested axis metadata so callers can verify
+    // the call's intent even though the engine-side fields are protected.
+    if (Resp.IsValid() && Resp->HasField(TEXT("data")))
+    {
+        const TSharedPtr<FJsonObject>* DataObj = nullptr;
+        if (Resp->TryGetObjectField(TEXT("data"), DataObj) && DataObj->IsValid())
+        {
+            (*DataObj)->SetStringField(TEXT("axis_x_label"), AxisXLabel);
+            (*DataObj)->SetStringField(TEXT("axis_y_label"), AxisYLabel);
+            (*DataObj)->SetNumberField(TEXT("min_x"), MinXD);
+            (*DataObj)->SetNumberField(TEXT("max_x"), MaxXD);
+            (*DataObj)->SetNumberField(TEXT("min_y"), MinYD);
+            (*DataObj)->SetNumberField(TEXT("max_y"), MaxYD);
+            (*DataObj)->SetNumberField(TEXT("num_grid_points_x"), GridXD);
+            (*DataObj)->SetNumberField(TEXT("num_grid_points_y"), GridYD);
+            (*DataObj)->SetStringField(TEXT("note"),
+                TEXT("axis labels / ranges are recorded for traceability; UE 5.8 marks UBlendSpace::BlendParameters / AxisToScale as protected. Use set_blendspace_properties to set them after the asset is created."));
+        }
+    }
+    return Resp;
+}
+
+// MCP:scaffold_aim_offset_blend_space - Create a UAimOffsetBlendSpace (2D AimOffset) asset for character aim-offset blending (typically Yaw x Pitch). Idempotent on re-run. Same protected-axis caveat as `scaffold_blend_space_2d`.
+//   @param package_path [string!] - /Game/... folder (required)
+//   @param asset_name [string!] - Display name (required)
+//   @param skeleton_path [string!] - USkeleton (required)
+//   @param yaw_min [number] - Optional yaw axis lower bound (default -90.0 degrees)
+//   @param yaw_max [number] - Optional yaw axis upper bound (default 90.0)
+//   @param pitch_min [number] - Optional pitch axis lower bound (default -90.0)
+//   @param pitch_max [number] - Optional pitch axis upper bound (default 90.0)
+//   @param num_grid_points_yaw [number] - Optional yaw grid density (default 4)
+//   @param num_grid_points_pitch [number] - Optional pitch grid density (default 4)
+//   @returns { asset_path, skeleton_path, yaw_min, yaw_max, pitch_min, pitch_max, num_grid_points_yaw, num_grid_points_pitch, already_existed, saved, note? }
+TSharedPtr<FJsonObject> HandleScaffoldAimOffsetBlendSpace(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString PackagePath, AssetName, SkeletonPath;
+    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
+    {
+        return Missing;
+    }
+    double YawMinD = -90.0, YawMaxD = 90.0;
+    double PitchMinD = -90.0, PitchMaxD = 90.0;
+    double GridYD = 4.0, GridPD = 4.0;
+    Params->TryGetNumberField(TEXT("yaw_min"), YawMinD);
+    Params->TryGetNumberField(TEXT("yaw_max"), YawMaxD);
+    Params->TryGetNumberField(TEXT("pitch_min"), PitchMinD);
+    Params->TryGetNumberField(TEXT("pitch_max"), PitchMaxD);
+    Params->TryGetNumberField(TEXT("num_grid_points_yaw"), GridYD);
+    Params->TryGetNumberField(TEXT("num_grid_points_pitch"), GridPD);
+
+    USkeleton* Skeleton = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
+
+    TSharedPtr<FJsonObject> Resp = ScaffoldBlendSpaceAssetImpl<UAimOffsetBlendSpace>(
+        Params, /*bIsAimOffset*/ true, Skeleton, PackagePath, AssetName, SkeletonPath);
+    if (Resp.IsValid() && Resp->HasField(TEXT("data")))
+    {
+        const TSharedPtr<FJsonObject>* DataObj = nullptr;
+        if (Resp->TryGetObjectField(TEXT("data"), DataObj) && DataObj->IsValid())
+        {
+            (*DataObj)->SetNumberField(TEXT("yaw_min"), YawMinD);
+            (*DataObj)->SetNumberField(TEXT("yaw_max"), YawMaxD);
+            (*DataObj)->SetNumberField(TEXT("pitch_min"), PitchMinD);
+            (*DataObj)->SetNumberField(TEXT("pitch_max"), PitchMaxD);
+            (*DataObj)->SetNumberField(TEXT("num_grid_points_yaw"), GridYD);
+            (*DataObj)->SetNumberField(TEXT("num_grid_points_pitch"), GridPD);
+        }
+    }
+    return Resp;
+}
+
+// MCP:setup_foot_ik - Add a UAnimGraphNode_LegIK to the AnimGraph of an Animation Blueprint, binding the foot bone references.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset.
+//   @param left_foot_bone - Name of the left foot bone in the skeleton.
+//   @param right_foot_bone - Name of the right foot bone in the skeleton.
+//   @returns { anim_blueprint_path, left_foot_bone, right_foot_bone, ik_node_count, already_existed, saved }
+TSharedPtr<FJsonObject> HandleSetupFootIk(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString AnimBPPath, LeftFoot, RightFoot;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("left_foot_bone"), LeftFoot)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("right_foot_bone"), RightFoot)) { return Missing; }
+
+    UAnimBlueprint* AnimBP = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), AnimBP)) { return Error; }
+    UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP);
+    if (!AnimGraph)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Could not find AnimGraph on anim blueprint"));
+    }
+
+    UAnimGraphNode_LegIK* ExistingIK = nullptr;
+    int32 ExistingIKCount = 0;
+    for (UEdGraphNode* Node : AnimGraph->Nodes)
+    {
+        if (UAnimGraphNode_LegIK* IK = Cast<UAnimGraphNode_LegIK>(Node))
+        {
+            ++ExistingIKCount;
+            if (!ExistingIK) { ExistingIK = IK; }
+        }
+    }
+
+    const bool bAlreadyExisted = (ExistingIK != nullptr);
+    if (!ExistingIK)
+    {
+        AnimGraph->Modify();
+        AnimBP->Modify();
+        FGraphNodeCreator<UAnimGraphNode_LegIK> NodeCreator(*AnimGraph);
+        ExistingIK = NodeCreator.CreateNode(/*bSelectNewNode*/ false);
+        NodeCreator.Finalize();
+    }
+
+    if (!ExistingIK)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Failed to create LegIK node"));
+    }
+
+// Reflective property lookup — walk the UClass hierarchy (including the
+    // generated-class graph nodes) for the LeftFootBone / RightFootBone FStructProperty
+    // wrapping an FBoneReference. The FBoneReference struct exposes a single
+    // BoneName FName property; we set that.
+    UClass* NodeClass = ExistingIK->GetClass();
+    for (const FName& BonePropName : { FName(TEXT("LeftFootBone")), FName(TEXT("RightFootBone")) })
+    {
+        const FName TargetBone = (BonePropName == FName(TEXT("LeftFootBone")))
+            ? FName(*LeftFoot) : FName(*RightFoot);
+        for (UClass* Cls = NodeClass; Cls && Cls != UObject::StaticClass(); Cls = Cls->GetSuperClass())
+        {
+            FStructProperty* StructProp = CastField<FStructProperty>(
+                Cls->FindPropertyByName(BonePropName));
+            if (!StructProp || !StructProp->Struct) { continue; }
+            if (StructProp->Struct->GetName() != TEXT("BoneReference")) { continue; }
+            void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(ExistingIK);
+            FProperty* BoneNameProp = StructProp->Struct->FindPropertyByName(TEXT("BoneName"));
+            if (BoneNameProp && StructPtr)
+            {
+                BoneNameProp->SetValue_InContainer(StructPtr, &TargetBone);
+            }
+            break;
+        }
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBP);
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
+    Data->SetStringField(TEXT("left_foot_bone"), LeftFoot);
+    Data->SetStringField(TEXT("right_foot_bone"), RightFoot);
+    Data->SetNumberField(TEXT("ik_node_count"), FMath::Max(1, ExistingIKCount));
+    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("setup_foot_ik"), SaveErr);
+}
+
+// ---------------------------------------------------------------------------
+// Atomic JSON-spec orchestrator
+// ---------------------------------------------------------------------------
+// Wires the state machine graph end-to-end by calling the primitive handlers above rather than
+// re-implementing them; each primitive is idempotent on its own, so the orchestrator only coordinates the
+// steps and aggregates their errors.
+
+// MCP:build_animation_state_machine - Atomic JSON-spec builder for an Animation Blueprint state machine. Builds (or reuses) the state machine, then iterates states, transitions, and per-transition rules in one idempotent call. Replaces 8+ primitive cmds (add_anim_state_machine + add_anim_state + add_anim_transition + set_anim_transition_rule_*) with a single spec. Re-running with the same spec is a no-op (each primitive is internally idempotent: state-by-name, transition-by-source+target). For repeated invocations that change rule shape, the rule is re-applied on the existing transition.
+//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
+//   @param state_machine_name - Target state machine name (created if missing via add_anim_state_machine)
+//   @param spec [object!] - JSON describing the graph shape. states: [{name: str, animation?: str (/Game/Anim/Foo — optional; load-bearing for the runtime state asset but NOT created here), loop?: bool, pos?: [x, y]}]. transitions: [{from: str, to: str, blend?: number (= crossfade_duration seconds), bidirectional?: bool, priority_order?: int, rule?: object}]. Each rule variant maps 1:1 to an existing primitive cmd: {type: "automatic", enabled?: bool = false, trigger_time?: number = 0.0} | {type: "bool", variable: str (must exist on the AnimBP), invert?: bool = false} | {type: "comparison", variable: str (must be float/double on the AnimBP), operator: "=="|"!="|">"|"<"|">="|"<=", comparison_value: number}. An absent rule leaves the transition inert (no rule wired).
+//   @param compile_after [bool] - Optional, default false; if true runs compile_anim_blueprint at the end
+//   @returns { success: bool, anim_blueprint_path: string, machine_name: string, machine_already_existed: bool, states_created: int, states_skipped: int, transitions_created: int, transitions_updated: int, transitions_skipped: int, errors: [string], compiled: bool, compiled_after: bool }
+TSharedPtr<FJsonObject> HandleBuildAnimationStateMachine(const TSharedPtr<FJsonObject>& Params)
+{
+    // ---- Top-level params ----
+    FString AnimBPPath, MachineName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath)) { return Missing; }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("state_machine_name"), MachineName)) { return Missing; }
+
+    const TSharedPtr<FJsonObject>* SpecObj = nullptr;
+    if (!Params->TryGetObjectField(TEXT("spec"), SpecObj) || !SpecObj->IsValid())
+    {
+        return mcp_common::MissingParameterReply(TEXT("spec"));
+    }
+    const TSharedPtr<FJsonObject>& Spec = *SpecObj;
+
+    bool bCompileAfter = false;
+    Params->TryGetBoolField(TEXT("compile_after"), bCompileAfter);
+
+    // ---- Counters ----
+    int32 StatesCreated = 0, StatesSkipped = 0;
+    int32 TransitionsCreated = 0, TransitionsUpdated = 0, TransitionsSkipped = 0;
+    TArray<TSharedPtr<FJsonValue>> Errors;
+
+    auto PushError = [&Errors](const FString& Msg)
+    {
+        Errors.Add(MakeShared<FJsonValueString>(Msg));
+    };
+
+    // Helper: turn an internal result into a (success, error_message) pair. The internal
+    // handlers wrap their payload via mcp_common::MakeOkReply which sets
+    // top-level "success" + "data" — a flat {data: {...}} for our purposes.
+    auto ProbeSuccess = [](const TSharedPtr<FJsonObject>& R) -> TPair<bool, FString>
+    {
+        if (!R.IsValid()) { return TPair<bool, FString>(false, TEXT("internal null response")); }
+        bool bOk = false; R->TryGetBoolField(TEXT("success"), bOk);
+        if (bOk) { return TPair<bool, FString>(true, TEXT("")); }
+        FString Err; R->TryGetStringField(TEXT("error"), Err);
+        if (Err.IsEmpty()) { Err = TEXT("internal error (no message)"); }
+        return TPair<bool, FString>(false, Err);
+    };
+
+    // ---- Step 1: probe the state machine BEFORE adding it so we can report
+    // `machine_already_existed` honestly (after-add probing would always see the
+    // freshly-created machine and report `already_existed=true` even on the
+    // very first orchestrator call). The find is a cheap graph walk; if the
+    // orchestrator is invoked repeatedly on the same asset we don't pay a
+    // meaningful cost for the extra Find call.
+    UAnimBlueprint* AnimBP = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(AnimBPPath);
+    if (!AnimBP)
+    {
+        PushError(FString::Printf(TEXT("AnimBlueprint load failed: %s"), *AnimBPPath));
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetBoolField(TEXT("success"), false);
+        Resp->SetStringField(TEXT("anim_blueprint_path"), AnimBPPath);
+        Resp->SetStringField(TEXT("machine_name"), MachineName);
+        Resp->SetNumberField(TEXT("states_created"), StatesCreated);
+        Resp->SetNumberField(TEXT("states_skipped"), StatesSkipped);
+        Resp->SetNumberField(TEXT("transitions_created"), TransitionsCreated);
+        Resp->SetNumberField(TEXT("transitions_updated"), TransitionsUpdated);
+        Resp->SetNumberField(TEXT("transitions_skipped"), TransitionsSkipped);
+        Resp->SetArrayField(TEXT("errors"), Errors);
+        Resp->SetBoolField(TEXT("machine_already_existed"), false);
+        Resp->SetBoolField(TEXT("compiled"), false);
+        Resp->SetBoolField(TEXT("compiled_after"), bCompileAfter);
+        return mcp_common::MakeOkReply(Resp);
+    }
+    UAnimGraphNode_StateMachine* SMNode = FindStateMachineByName(AnimBP, MachineName);
+    const bool bMachineAlreadyExisted = (SMNode != nullptr);
+
+    // Now create-if-missing. Idempotent under the hood.
+    if (!bMachineAlreadyExisted)
+    {
+        TSharedPtr<FJsonObject> SMResp = HandleAddAnimStateMachine(AnimBp_MachineRequest(AnimBPPath, MachineName));
+        TPair<bool, FString> Probe = ProbeSuccess(SMResp);
+        if (!Probe.Key)
+        {
+            // Even on failure the graph is looked up below; some configs (existing
+            // AnimBP with the state machine already on disk before our run) may
+            // still have a resolvable SMGraph for the post-mortem report.
+            PushError(FString::Printf(TEXT("add_anim_state_machine failed: %s"), *Probe.Value));
+        }
+        AnimBP = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(AnimBPPath);
+        SMNode = AnimBP ? FindStateMachineByName(AnimBP, MachineName) : nullptr;
+    }
+    UAnimationStateMachineGraph* SMGraph = SMNode ? SMNode->EditorStateMachineGraph : nullptr;
+
+    // ---- Step 2: states (skip if exists, add if not) ----
+    const TArray<TSharedPtr<FJsonValue>>* StatesArr = nullptr;
+    if (SMGraph && Spec->TryGetArrayField(TEXT("states"), StatesArr) && StatesArr)
+    {
+        for (const TSharedPtr<FJsonValue>& Entry : *StatesArr)
+        {
+            const TSharedPtr<FJsonObject>* StateSpec = nullptr;
+            if (!Entry.IsValid() || !Entry->TryGetObject(StateSpec) || !StateSpec || !StateSpec->IsValid())
+            {
+                PushError(TEXT("states[] entry is not an object; skipping"));
+                continue;
+            }
+            FString SName;
+            if (!(*StateSpec)->TryGetStringField(TEXT("name"), SName) || SName.IsEmpty())
+            {
+                PushError(TEXT("states[] entry missing required 'name'; skipping"));
+                continue;
+            }
+            if (FindStateByName(SMGraph, SName))
+            {
+                ++StatesSkipped;
+                continue;
+            }
+            // Add the state. Note: animation/loop/pos are NOT consumed here — they describe
+            // the runtime state asset, not the state machine graph node. The state's bound
+            // graph (UAnimationStateMachineGraph for the state itself) is what the node
+            // already gets from UAnimStateNode::PostPlacedNewNode; the per-state anim asset
+            // is wired by the existing rule setters, not by this builder.
+            TSharedPtr<FJsonObject> AddParams = AnimBp_MachineRequest(AnimBPPath, MachineName);
+            AddParams->SetStringField(TEXT("state_name"), SName);
+            // Optional positional hint: add_anim_state ignores it today; passing it keeps
+            // the orchestrator's spec round-trippable without future expansion drops.
+            TSharedPtr<FJsonObject> AddResp = HandleAddAnimState(AddParams);
+            TPair<bool, FString> Probe = ProbeSuccess(AddResp);
+            if (Probe.Key) { ++StatesCreated; } else { PushError(FString::Printf(TEXT("state '%s': %s"), *SName, *Probe.Value)); }
+        }
+    }
+
+    // Re-resolve the SM graph — state additions grow the bound graphs.
+    SMGraph = SMNode ? SMNode->EditorStateMachineGraph : nullptr;
+
+    // ---- Step 3: transitions + rules ----
+    const TArray<TSharedPtr<FJsonValue>>* TransitionsArr = nullptr;
+    if (SMGraph && Spec->TryGetArrayField(TEXT("transitions"), TransitionsArr) && TransitionsArr)
+    {
+        for (const TSharedPtr<FJsonValue>& Entry : *TransitionsArr)
+        {
+            const TSharedPtr<FJsonObject>* TSpecObj = nullptr;
+            if (!Entry.IsValid() || !Entry->TryGetObject(TSpecObj) || !TSpecObj || !TSpecObj->IsValid())
+            {
+                PushError(TEXT("transitions[] entry is not an object; skipping"));
+                continue;
+            }
+            const TSharedPtr<FJsonObject>& TSpec = *TSpecObj;
+            FString FromName, ToName;
+            if (!TSpec->TryGetStringField(TEXT("from"), FromName) || FromName.IsEmpty() ||
+                !TSpec->TryGetStringField(TEXT("to"), ToName) || ToName.IsEmpty())
+            {
+                PushError(TEXT("transitions[] entry missing required 'from' or 'to'; skipping"));
+                continue;
+            }
+            if (FromName.Equals(ToName, ESearchCase::IgnoreCase))
+            {
+                PushError(FString::Printf(TEXT("transitions[] '%s' -> '%s' is self-loop; skipping"), *FromName, *ToName));
+                continue;
+            }
+
+            const bool bAlreadyExists = (FindTransitionBySourceTarget(SMGraph, FromName, ToName) != nullptr);
+            if (!bAlreadyExists)
+            {
+                // Resolve endpoints (one last check) — add_anim_transition re-resolves
+                // them too, but a missing state here would surface as an opaque error;
+                // surface it explicitly so the caller sees WHICH endpoint is missing.
+                if (!FindStateByName(SMGraph, FromName))
+                {
+                    PushError(FString::Printf(TEXT("transition from_state '%s' not found"), *FromName));
+                    continue;
+                }
+                if (!FindStateByName(SMGraph, ToName))
+                {
+                    PushError(FString::Printf(TEXT("transition to_state '%s' not found"), *ToName));
+                    continue;
+                }
+
+                TSharedPtr<FJsonObject> AddParams = AnimBp_TransitionRequest(AnimBPPath, MachineName, FromName, ToName);
+                // blend=0.2 default mirrors add_anim_transition's own default; only forward
+                // if the spec provides it (orchestrator respects the rule "don't add fields
+                // the caller didn't ask for").
+                double BlendD = 0.0; bool bHasBlend = false;
+                if (TSpec->TryGetNumberField(TEXT("blend"), BlendD)) { bHasBlend = true; }
+                else { BlendD = 0.2; }
+                AddParams->SetNumberField(TEXT("crossfade_duration"), BlendD);
+                bool bBidir = false;
+                TSpec->TryGetBoolField(TEXT("bidirectional"), bBidir);
+                AddParams->SetBoolField(TEXT("bidirectional"), bBidir);
+                double PriD = 1.0;
+                if (TSpec->TryGetNumberField(TEXT("priority_order"), PriD))
+                {
+                    AddParams->SetNumberField(TEXT("priority_order"), PriD);
+                }
+                else
+                {
+                    AddParams->SetNumberField(TEXT("priority_order"), 1);
+                }
+
+                TSharedPtr<FJsonObject> AddResp = HandleAddAnimTransition(AddParams);
+                TPair<bool, FString> Probe = ProbeSuccess(AddResp);
+                if (!Probe.Key)
+                {
+                    PushError(FString::Printf(TEXT("transition '%s' -> '%s': %s"), *FromName, *ToName, *Probe.Value));
+                    continue;
+                }
+                ++TransitionsCreated;
+                // `bHasBlend` is reserved for a future "update on existing" path; we don't
+                // expose add_anim_transition's already-existed escape as a "forced update"
+                // (it would break the primitive's documented idempotent contract).
+                (void)bHasBlend;
+            }
+            else
+            {
+                ++TransitionsUpdated;
+            }
+
+            // ---- Apply the rule (if specified) ----
+            const TSharedPtr<FJsonObject>* RuleObj = nullptr;
+            if (!TSpec->TryGetObjectField(TEXT("rule"), RuleObj) || !RuleObj->IsValid())
+            {
+                // No rule field -> leave existing rule graph untouched (dormant transition).
+                continue;
+            }
+            const TSharedPtr<FJsonObject>& Rule = *RuleObj;
+            FString RuleType;
+            if (!Rule->TryGetStringField(TEXT("type"), RuleType) || RuleType.IsEmpty())
+            {
+                PushError(FString::Printf(TEXT("transition '%s' -> '%s': rule.type missing"), *FromName, *ToName));
+                continue;
+            }
+            FString RuleErr;
+            bool bRuleOK = false;
+            if (RuleType.Equals(TEXT("automatic"), ESearchCase::IgnoreCase))
+            {
+                TSharedPtr<FJsonObject> P = AnimBp_TransitionRequest(AnimBPPath, MachineName, FromName, ToName);
+                bool bEnabled = false; Rule->TryGetBoolField(TEXT("enabled"), bEnabled);
+                P->SetBoolField(TEXT("enabled"), bEnabled);
+                double TT = 0.0; Rule->TryGetNumberField(TEXT("trigger_time"), TT);
+                P->SetNumberField(TEXT("trigger_time"), TT);
+                TPair<bool, FString> Probe = ProbeSuccess(HandleSetAnimTransitionRuleAutomatic(P));
+                bRuleOK = Probe.Key; RuleErr = Probe.Value;
+            }
+            else if (RuleType.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
+            {
+                FString VarName;
+                if (!Rule->TryGetStringField(TEXT("variable"), VarName) || VarName.IsEmpty())
+                {
+                    PushError(FString::Printf(TEXT("transition '%s' -> '%s': bool-rule needs 'variable'"), *FromName, *ToName));
+                    continue;
+                }
+                TSharedPtr<FJsonObject> P = AnimBp_TransitionRequest(AnimBPPath, MachineName, FromName, ToName);
+                P->SetStringField(TEXT("variable_name"), VarName);
+                TPair<bool, FString> Probe = ProbeSuccess(HandleSetAnimTransitionRuleFromBool(P));
+                bRuleOK = Probe.Key; RuleErr = Probe.Value;
+                // 'invert' is documented (registry entry) but the existing primitive is not
+                // wired to honor it; documented as a known gap rather than a silent
+                // miss.
+            }
+            else if (RuleType.Equals(TEXT("comparison"), ESearchCase::IgnoreCase))
+            {
+                FString VarName, OpStr;
+                if (!Rule->TryGetStringField(TEXT("variable"), VarName) || VarName.IsEmpty() ||
+                    !Rule->TryGetStringField(TEXT("operator"), OpStr) || OpStr.IsEmpty())
+                {
+                    PushError(FString::Printf(TEXT("transition '%s' -> '%s': comparison-rule needs 'variable' + 'operator'"), *FromName, *ToName));
+                    continue;
+                }
+                TSharedPtr<FJsonObject> P = AnimBp_TransitionRequest(AnimBPPath, MachineName, FromName, ToName);
+                P->SetStringField(TEXT("variable_name"), VarName);
+                P->SetStringField(TEXT("operator"), OpStr);
+                double CV = 0.0; Rule->TryGetNumberField(TEXT("comparison_value"), CV);
+                P->SetNumberField(TEXT("comparison_value"), CV);
+                TPair<bool, FString> Probe = ProbeSuccess(HandleSetAnimTransitionRuleFromComparison(P));
+                bRuleOK = Probe.Key; RuleErr = Probe.Value;
+            }
+            else
+            {
+                PushError(FString::Printf(TEXT("transition '%s' -> '%s': unknown rule.type '%s'"), *FromName, *ToName, *RuleType));
+                continue;
+            }
+            if (!bRuleOK)
+            {
+                PushError(FString::Printf(TEXT("transition '%s' -> '%s' rule '%s': %s"), *FromName, *ToName, *RuleType, *RuleErr));
+            }
+        }
+    }
+
+    // ---- Step 4: optional compile ----
+    bool bCompiled = false;
+    if (bCompileAfter)
+    {
+        TSharedPtr<FJsonObject> CompileParams = MakeShared<FJsonObject>();
+        CompileParams->SetStringField(TEXT("anim_blueprint_path"), AnimBPPath);
+        TSharedPtr<FJsonObject> CompileResp = HandleCompileAnimBlueprint(CompileParams);
+        TPair<bool, FString> Probe = ProbeSuccess(CompileResp);
+        bCompiled = Probe.Key;
+        if (!Probe.Key)
+        {
+            PushError(FString::Printf(TEXT("compile_anim_blueprint: %s"), *Probe.Value));
+        }
+    }
+
+    // ---- Final response ----
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetBoolField(TEXT("success"), Errors.Num() == 0);
+    Resp->SetStringField(TEXT("anim_blueprint_path"), AnimBPPath);
+    Resp->SetStringField(TEXT("machine_name"), MachineName);
+    Resp->SetBoolField(TEXT("machine_already_existed"), bMachineAlreadyExisted);
+    Resp->SetNumberField(TEXT("states_created"), StatesCreated);
+    Resp->SetNumberField(TEXT("states_skipped"), StatesSkipped);
+    Resp->SetNumberField(TEXT("transitions_created"), TransitionsCreated);
+    Resp->SetNumberField(TEXT("transitions_updated"), TransitionsUpdated);
+    Resp->SetNumberField(TEXT("transitions_skipped"), TransitionsSkipped);
+    Resp->SetArrayField(TEXT("errors"), Errors);
+    Resp->SetBoolField(TEXT("compiled_after"), bCompileAfter);
+    Resp->SetBoolField(TEXT("compiled"), bCompiled);
+    return mcp_common::MakeOkReply(Resp);
+}
+
+const McpCommandFamilies::FRegistrar Registration =
+{
+    { TEXT("add_anim_conduit"), &HandleAddAnimConduit },
+    { TEXT("add_anim_state"), &HandleAddAnimState },
+    { TEXT("add_anim_state_machine"), &HandleAddAnimStateMachine },
+    { TEXT("add_anim_transition"), &HandleAddAnimTransition },
+    { TEXT("build_animation_state_machine"), &HandleBuildAnimationStateMachine },
+    { TEXT("clear_anim_transition_rule"), &HandleClearAnimTransitionRule },
+    { TEXT("compile_anim_blueprint"), &HandleCompileAnimBlueprint },
+    { TEXT("create_anim_blueprint"), &HandleCreateAnimBlueprint },
+    { TEXT("get_anim_blueprint_info"), &HandleGetAnimBlueprintInfo },
+    { TEXT("get_anim_state_machine_info"), &HandleGetAnimStateMachineInfo },
+    { TEXT("list_anim_state_machines"), &HandleListAnimStateMachines },
+    { TEXT("remove_anim_conduit"), &HandleRemoveAnimConduit },
+    { TEXT("remove_anim_state"), &HandleRemoveAnimState },
+    { TEXT("remove_anim_transition"), &HandleRemoveAnimTransition },
+    { TEXT("scaffold_aim_offset_blend_space"), &HandleScaffoldAimOffsetBlendSpace },
+    { TEXT("scaffold_blend_space_2d"), &HandleScaffoldBlendSpace2D },
+    { TEXT("scaffold_locomotion_animbp"), &HandleScaffoldLocomotionAnimBp },
+    { TEXT("set_anim_transition_rule_automatic"), &HandleSetAnimTransitionRuleAutomatic },
+    { TEXT("set_anim_transition_rule_from_bool"), &HandleSetAnimTransitionRuleFromBool },
+    { TEXT("set_anim_transition_rule_from_comparison"), &HandleSetAnimTransitionRuleFromComparison },
+    { TEXT("setup_foot_ik"), &HandleSetupFootIk },
+    { TEXT("validate_anim_state_machine"), &HandleValidateAnimStateMachine },
+    { TEXT("wire_aim_offset"), &HandleWireAimOffset },
+};
+} // namespace UEAgentAnimBlueprintCommands

@@ -1,0 +1,23 @@
+name: Question
+description: How to do something with UEAgent, or why it behaves as it does.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        The [README](https://github.com/CarlxsMG/UEAgent#readme),
+        [Clients](https://github.com/CarlxsMG/UEAgent/blob/main/docs/clients.md),
+        [Troubleshooting](https://github.com/CarlxsMG/UEAgent/blob/main/docs/troubleshooting.md) and the
+        [tool reference](https://github.com/CarlxsMG/UEAgent/blob/main/docs/tools/README.md) may already answer it.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: UEAgent version, Unreal Engine version and MCP client.
+      placeholder: UEAgent 1.0.0, UE 5.8.1, Cursor

@@ -1,0 +1,757 @@
+#include "Mcp/McpCommandFamilies.h"
+#include "Commands/Common/McpCommonUtils.h"
+
+#include "Engine/AssetManager.h"
+#include "Engine/AssetManagerSettings.h"
+#include "Engine/AssetManagerTypes.h"
+
+#include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetBundleData.h"
+#include "AssetRegistry/IAssetRegistry.h"
+
+#include "UObject/Class.h"
+#include "UObject/SoftObjectPath.h"
+#include "UObject/SoftObjectPtr.h"
+#include "UObject/PrimaryAssetId.h"
+#include "UObject/TopLevelAssetPath.h"
+
+/**
+ * Asset Manager commands.
+ *
+ * Reads + mutates the project's Asset Management framework configuration and
+ * runtime directory, all headless-safe:
+ *   - UAssetManagerSettings (UDeveloperSettings, config=Game) holds the
+ *     PrimaryAssetTypesToScan list. We mutate the mutable CDO and persist via
+ *     TryUpdateDefaultConfigFile() (writes DefaultGame.ini), then read back.
+ *   - UAssetManager::Get() is the runtime singleton. GetPrimaryAssetIdForPath,
+ *     GetPrimaryAssetData, GetPrimaryAssetTypeInfo are real reads;
+ *     ScanPathsForPrimaryAssets / RefreshPrimaryAssetDirectory build the
+ *     directory synchronously in the editor.
+ *   - Asset bundle data is read straight off the asset registry's FAssetData
+ *     (TaggedAssetBundles), which is the AssetBundles tag for the object.
+ */
+namespace UEAgentAssetManagerCommands
+{
+
+// MCP-DOMAIN: Management
+
+namespace
+{
+    /** Strip a trailing slash from a content folder path. */
+    FString AMNormalizeFolder(const FString& In)
+    {
+        FString Out = In;
+        Out.RemoveFromEnd(TEXT("/"));
+        return Out;
+    }
+
+    /** The directories a primary asset type scans, as JSON strings. */
+    TArray<TSharedPtr<FJsonValue>> AssetManager_DirectoriesToJson(const FPrimaryAssetTypeInfo& Info)
+    {
+        TArray<TSharedPtr<FJsonValue>> Dirs;
+        // AsConst selects the read-only GetDirectories() overload; the non-const one
+        // ensure()s CanModifyConfigData(), false once Info holds runtime data.
+        for (const FDirectoryPath& Dir : AsConst(Info).GetDirectories())
+        {
+            Dirs.Add(MakeShared<FJsonValueString>(Dir.Path));
+        }
+        return Dirs;
+    }
+
+    /** Build the JSON view of a single FPrimaryAssetTypeInfo config entry. */
+    TSharedPtr<FJsonObject> PrimaryAssetTypeInfoToJson(const FPrimaryAssetTypeInfo& Info)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("type"), Info.PrimaryAssetType.ToString());
+        Obj->SetStringField(TEXT("base_class"), Info.GetAssetBaseClass().ToString());
+        Obj->SetBoolField(TEXT("has_blueprint_classes"), Info.bHasBlueprintClasses);
+        Obj->SetBoolField(TEXT("is_editor_only"), Info.bIsEditorOnly);
+        Obj->SetArrayField(TEXT("directories"), AssetManager_DirectoriesToJson(Info));
+        Obj->SetNumberField(TEXT("num_specific_assets"), Info.GetSpecificAssets().Num());
+        return Obj;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// add_primary_asset_rule
+//   Mutate UAssetManagerSettings::PrimaryAssetTypesToScan (update-or-add the
+//   entry for the given type), persist to DefaultGame.ini, then read back.
+// ---------------------------------------------------------------------------
+// MCP:add_primary_asset_rule - Add or update a Primary Asset Type rule in the Asset Manager settings
+//   @param primary_asset_type - Logical type name, e.g. "Item"
+//   @param base_class_path - Asset base class path (defaults to UObject)
+//   @param directory - Content directory to scan for this type
+//   @param priority - Scan rule priority (optional)
+//   @returns { type, base_class, saved, updated_existing, directory_count, type_count }
+TSharedPtr<FJsonObject> HandleAddPrimaryAssetRule(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PrimaryAssetType;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_type"), PrimaryAssetType)) { return Missing; }
+
+    FString BaseClassPath;
+    if (!Params->TryGetStringField(TEXT("base_class_path"), BaseClassPath) || BaseClassPath.IsEmpty())
+    {
+        // Default to UObject if none specified.
+        BaseClassPath = TEXT("/Script/CoreUObject.Object");
+    }
+
+    FString Directory;
+    Params->TryGetStringField(TEXT("directory"), Directory);
+
+    double PriorityNum = 0.0;
+    const bool bHasPriority = Params->TryGetNumberField(TEXT("priority"), PriorityNum);
+
+    UAssetManagerSettings* Settings = GetMutableDefault<UAssetManagerSettings>();
+    if (!Settings)
+        return mcp_common::MakeErrorReply(TEXT("Could not get mutable UAssetManagerSettings"));
+
+    const FName TypeName(*PrimaryAssetType);
+    const FSoftObjectPath BaseClassObjectPath(BaseClassPath);
+    const TSoftClassPtr<UObject> BaseClassPtr(BaseClassObjectPath);
+
+    // Find an existing entry for this type (update in place to keep idempotent).
+    FPrimaryAssetTypeInfo* Existing = nullptr;
+    for (FPrimaryAssetTypeInfo& Entry : Settings->PrimaryAssetTypesToScan)
+    {
+        if (Entry.PrimaryAssetType == TypeName)
+        {
+            Existing = &Entry;
+            break;
+        }
+    }
+
+    bool bUpdated = false;
+    if (Existing)
+    {
+        Existing->SetAssetBaseClass(BaseClassPtr);
+        if (!Directory.IsEmpty())
+        {
+            TArray<FDirectoryPath>& Dirs = Existing->GetDirectories();
+            const bool bDirPresent = Dirs.ContainsByPredicate(
+                [&Directory](const FDirectoryPath& D) { return D.Path == Directory; });
+            if (!bDirPresent)
+            {
+                FDirectoryPath DirPath;
+                DirPath.Path = Directory;
+                Dirs.Add(DirPath);
+            }
+        }
+        if (bHasPriority)
+        {
+            Existing->Rules.Priority = static_cast<int32>(PriorityNum);
+        }
+        bUpdated = true;
+    }
+    else
+    {
+        FPrimaryAssetTypeInfo NewInfo;
+        NewInfo.PrimaryAssetType = TypeName;
+        NewInfo.SetAssetBaseClass(BaseClassPtr);
+        NewInfo.bHasBlueprintClasses = false;
+        NewInfo.bIsEditorOnly = false;
+        if (!Directory.IsEmpty())
+        {
+            FDirectoryPath DirPath;
+            DirPath.Path = Directory;
+            NewInfo.GetDirectories().Add(DirPath);
+        }
+        if (bHasPriority)
+        {
+            NewInfo.Rules.Priority = static_cast<int32>(PriorityNum);
+        }
+        Settings->PrimaryAssetTypesToScan.Add(NewInfo);
+    }
+
+    // Persist to DefaultGame.ini (UDeveloperSettings -> config=Game, defaultconfig).
+    const bool bSaved = Settings->TryUpdateDefaultConfigFile();
+
+    // Read back from the (now-updated) settings array for honest verification.
+    FString SavedBaseClass;
+    int32 SavedDirCount = 0;
+    for (const FPrimaryAssetTypeInfo& Entry : Settings->PrimaryAssetTypesToScan)
+    {
+        if (Entry.PrimaryAssetType == TypeName)
+        {
+            SavedBaseClass = Entry.GetAssetBaseClass().ToString();
+            SavedDirCount = Entry.GetDirectories().Num();
+            break;
+        }
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("type"), PrimaryAssetType);
+    Resp->SetStringField(TEXT("base_class"), SavedBaseClass.IsEmpty() ? BaseClassPath : SavedBaseClass);
+    Resp->SetBoolField(TEXT("updated_existing"), bUpdated);
+    Resp->SetNumberField(TEXT("directory_count"), SavedDirCount);
+    Resp->SetNumberField(TEXT("type_count"), Settings->PrimaryAssetTypesToScan.Num());
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_primary_asset_rule"));
+}
+
+// ---------------------------------------------------------------------------
+// get_primary_asset_types
+//   Read UAssetManagerSettings::PrimaryAssetTypesToScan -> types[] + count.
+// ---------------------------------------------------------------------------
+// MCP:get_primary_asset_types - Read the configured Primary Asset Types from the Asset Manager settings.
+//   @returns { types, type_count }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypes(const TSharedPtr<FJsonObject>& Params)
+{
+    const UAssetManagerSettings* Settings = GetDefault<UAssetManagerSettings>();
+    if (!Settings)
+        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
+
+    TArray<TSharedPtr<FJsonValue>> Types;
+    for (const FPrimaryAssetTypeInfo& Info : Settings->PrimaryAssetTypesToScan)
+    {
+        Types.Add(MakeShared<FJsonValueObject>(PrimaryAssetTypeInfoToJson(Info)));
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetArrayField(TEXT("types"), Types);
+    Resp->SetNumberField(TEXT("type_count"), Settings->PrimaryAssetTypesToScan.Num());
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_primary_asset_id
+//   UAssetManager::Get().GetPrimaryAssetIdForPath(FSoftObjectPath(path)).
+//   Invalid is a real, correct answer for a non-primary asset.
+// ---------------------------------------------------------------------------
+// MCP:get_primary_asset_id - Resolve the Primary Asset Id for an asset path
+//   @param asset_path - Object path, e.g. /Game/MyGame/M_Example.M_Example
+//   @returns { asset_path, primary_asset_id, is_valid, primary_asset_type, primary_asset_name }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetId(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const FSoftObjectPath ObjectPath(AssetPath);
+    const FPrimaryAssetId PrimaryId = Manager.GetPrimaryAssetIdForPath(ObjectPath);
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), AssetPath);
+    Resp->SetStringField(TEXT("primary_asset_id"), PrimaryId.ToString());
+    Resp->SetBoolField(TEXT("is_valid"), PrimaryId.IsValid());
+    if (PrimaryId.IsValid())
+    {
+        Resp->SetStringField(TEXT("primary_asset_type"), PrimaryId.PrimaryAssetType.ToString());
+        Resp->SetStringField(TEXT("primary_asset_name"), PrimaryId.PrimaryAssetName.ToString());
+    }
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_asset_bundle_data
+//   Read the AssetBundles tag (FAssetData::TaggedAssetBundles) for an asset.
+//   An asset with no bundles -> empty bundles[] is the real, correct result.
+// ---------------------------------------------------------------------------
+// MCP:get_asset_bundle_data - Read the AssetBundles registry tag for an asset
+//   @param asset_path - Object path, e.g. /Game/MyGame/M_Example.M_Example
+//   @returns { bundle_name, asset_paths, num_assets, asset_path, asset_found, bundles, bundle_count }
+TSharedPtr<FJsonObject> HandleGetAssetBundleData(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    IAssetRegistry& AssetRegistry = Manager.GetAssetRegistry();
+
+    const FSoftObjectPath ObjectPath(AssetPath);
+    const FAssetData AssetData = AssetRegistry.GetAssetByObjectPath(ObjectPath, /*bIncludeOnlyOnDiskAssets*/ false);
+
+    TArray<TSharedPtr<FJsonValue>> Bundles;
+    if (AssetData.TaggedAssetBundles.IsValid())
+    {
+        for (const FAssetBundleEntry& Entry : AssetData.TaggedAssetBundles->Bundles)
+        {
+            TSharedPtr<FJsonObject> BundleObj = MakeShared<FJsonObject>();
+            BundleObj->SetStringField(TEXT("bundle_name"), Entry.BundleName.ToString());
+
+            TArray<TSharedPtr<FJsonValue>> AssetPaths;
+            for (const FTopLevelAssetPath& Path : Entry.AssetPaths)
+            {
+                AssetPaths.Add(MakeShared<FJsonValueString>(Path.ToString()));
+            }
+            BundleObj->SetArrayField(TEXT("asset_paths"), AssetPaths);
+            BundleObj->SetNumberField(TEXT("num_assets"), Entry.AssetPaths.Num());
+            Bundles.Add(MakeShared<FJsonValueObject>(BundleObj));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), AssetPath);
+    Resp->SetBoolField(TEXT("asset_found"), AssetData.IsValid());
+    Resp->SetArrayField(TEXT("bundles"), Bundles);
+    Resp->SetNumberField(TEXT("bundle_count"), Bundles.Num());
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// scan_primary_assets
+//   Scan the configured types' directories (or one named type) synchronously.
+//   A fresh project may legitimately find 0 assets -> 0 is real.
+// ---------------------------------------------------------------------------
+// MCP:scan_primary_assets - Scan the configured Primary Asset directories synchronously
+//   @param primary_asset_type - Optional type name to limit the scan to
+//   @returns { type, num_assets_found, num_paths, scanned, types_scanned, scanned_types }
+TSharedPtr<FJsonObject> HandleScanPrimaryAssets(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const UAssetManagerSettings* Settings = GetDefault<UAssetManagerSettings>();
+    if (!Settings)
+        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
+
+    FString FilterType;
+    Params->TryGetStringField(TEXT("primary_asset_type"), FilterType);
+    const FName FilterTypeName(*FilterType);
+    const bool bHasFilter = !FilterType.IsEmpty();
+
+    int32 NumFound = 0;
+    int32 TypesScanned = 0;
+    TArray<TSharedPtr<FJsonValue>> ScannedTypes;
+
+    for (const FPrimaryAssetTypeInfo& Info : Settings->PrimaryAssetTypesToScan)
+    {
+        if (bHasFilter && Info.PrimaryAssetType != FilterTypeName)
+        {
+            continue;
+        }
+
+        // Build the scan paths from the configured directories.
+        TArray<FString> Paths;
+        // AsConst selects the read-only GetDirectories() overload; the non-const one
+        // ensure()s CanModifyConfigData(), false once Info holds runtime data.
+        for (const FDirectoryPath& Dir : AsConst(Info).GetDirectories())
+        {
+            if (!Dir.Path.IsEmpty())
+            {
+                Paths.Add(AMNormalizeFolder(Dir.Path));
+            }
+        }
+        for (const FSoftObjectPath& Specific : Info.GetSpecificAssets())
+        {
+            Paths.Add(Specific.ToString());
+        }
+
+        if (Paths.Num() == 0)
+        {
+            continue;
+        }
+
+        UClass* BaseClass = Info.GetAssetBaseClass().LoadSynchronous();
+        if (!BaseClass)
+        {
+            BaseClass = UObject::StaticClass();
+        }
+
+        const int32 Found = Manager.ScanPathsForPrimaryAssets(
+            Info.PrimaryAssetType, Paths, BaseClass,
+            Info.bHasBlueprintClasses, Info.bIsEditorOnly, /*bForceSynchronousScan*/ true);
+        NumFound += Found;
+        ++TypesScanned;
+
+        TSharedPtr<FJsonObject> TypeObj = MakeShared<FJsonObject>();
+        TypeObj->SetStringField(TEXT("type"), Info.PrimaryAssetType.ToString());
+        TypeObj->SetNumberField(TEXT("num_assets_found"), Found);
+        TypeObj->SetNumberField(TEXT("num_paths"), Paths.Num());
+        ScannedTypes.Add(MakeShared<FJsonValueObject>(TypeObj));
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetBoolField(TEXT("scanned"), true);
+    Resp->SetNumberField(TEXT("types_scanned"), TypesScanned);
+    Resp->SetNumberField(TEXT("num_assets_found"), NumFound);
+    Resp->SetArrayField(TEXT("scanned_types"), ScannedTypes);
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// Asset Manager advanced commands
+
+// ---------------------------------------------------------------------------
+// get_primary_asset_type_info
+//   UAssetManager::Get().GetPrimaryAssetTypeInfo(FPrimaryAssetType, Info).
+//   Returns detailed info about a specific primary asset type.
+// ---------------------------------------------------------------------------
+// MCP:get_primary_asset_type_info - Get detailed info about a specific primary asset type.
+//   @param asset_type_name - Name of the primary asset type (e.g. "Item")
+//   @returns { asset_type_name, found, asset_class, has_blueprint_classes, is_editor_only, num_assets, directories }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypeInfo(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetTypeName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_type_name"), AssetTypeName)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const FPrimaryAssetType TypeName(*AssetTypeName);
+    
+    FPrimaryAssetTypeInfo Info;
+    const bool bFound = Manager.GetPrimaryAssetTypeInfo(TypeName, Info);
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_type_name"), AssetTypeName);
+    Resp->SetBoolField(TEXT("found"), bFound);
+    
+    if (bFound)
+    {
+        Resp->SetStringField(TEXT("asset_class"), Info.GetAssetBaseClass().ToString());
+        Resp->SetBoolField(TEXT("has_blueprint_classes"), Info.bHasBlueprintClasses);
+        Resp->SetBoolField(TEXT("is_editor_only"), Info.bIsEditorOnly);
+        Resp->SetNumberField(TEXT("num_assets"), Info.NumberOfAssets);
+        Resp->SetArrayField(TEXT("directories"), AssetManager_DirectoriesToJson(Info));
+    }
+    
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_primary_asset_ids_by_type
+//   UAssetManager::Get().GetPrimaryAssetIdList(Type, Ids, Filter).
+//   Returns all primary asset IDs of a given type.
+// ---------------------------------------------------------------------------
+// MCP:get_primary_asset_ids_by_type - Get all primary asset IDs of a given type.
+//   @param asset_type_name - Name of the primary asset type
+//   @param filter - Optional filter ("unloaded_only" to list only unloaded)
+//   @returns { type, name, full_id, asset_type_name, success, asset_ids, count }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetIdsByType(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetTypeName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_type_name"), AssetTypeName)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    FString FilterStr;
+    Params->TryGetStringField(TEXT("filter"), FilterStr);
+    
+    EAssetManagerFilter Filter = EAssetManagerFilter::Default;
+    if (FilterStr == TEXT("unloaded_only"))
+    {
+        Filter = EAssetManagerFilter::UnloadedOnly;
+    }
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const FPrimaryAssetType TypeName(*AssetTypeName);
+    
+    TArray<FPrimaryAssetId> IdList;
+    const bool bSuccess = Manager.GetPrimaryAssetIdList(TypeName, IdList, Filter);
+
+    TArray<TSharedPtr<FJsonValue>> AssetIds;
+    for (const FPrimaryAssetId& Id : IdList)
+    {
+        TSharedPtr<FJsonObject> IdObj = MakeShared<FJsonObject>();
+        IdObj->SetStringField(TEXT("type"), Id.PrimaryAssetType.ToString());
+        IdObj->SetStringField(TEXT("name"), Id.PrimaryAssetName.ToString());
+        IdObj->SetStringField(TEXT("full_id"), Id.ToString());
+        AssetIds.Add(MakeShared<FJsonValueObject>(IdObj));
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_type_name"), AssetTypeName);
+    Resp->SetBoolField(TEXT("success"), bSuccess);
+    Resp->SetArrayField(TEXT("asset_ids"), AssetIds);
+    Resp->SetNumberField(TEXT("count"), IdList.Num());
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_asset_bundle_entry
+//   UAssetManager::Get().GetAssetBundleEntry(PrimaryAssetId, BundleName).
+//   Returns the bundle entry for a specific primary asset and bundle name.
+// ---------------------------------------------------------------------------
+// MCP:get_asset_bundle_entry - Get the bundle entry for a specific primary asset and bundle name.
+//   @param primary_asset_id - Primary asset ID in "Type:Name" format
+//   @param bundle_name - Name of the asset bundle
+//   @returns { primary_asset_id, bundle_name, bundle_objects, found }
+TSharedPtr<FJsonObject> HandleGetAssetBundleEntry(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PrimaryAssetIdStr;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_id"), PrimaryAssetIdStr)) { return Missing; }
+
+    FString BundleNameStr;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("bundle_name"), BundleNameStr)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const FPrimaryAssetId PrimaryId(PrimaryAssetIdStr);
+    const FName BundleName(*BundleNameStr);
+    
+    const FAssetBundleEntry Entry = Manager.GetAssetBundleEntry(PrimaryId, BundleName);
+    
+    const bool bFound = !Entry.BundleName.IsNone() && Entry.AssetPaths.Num() > 0;
+
+    TArray<TSharedPtr<FJsonValue>> BundleObjects;
+    for (const FTopLevelAssetPath& Path : Entry.AssetPaths)
+    {
+        BundleObjects.Add(MakeShared<FJsonValueString>(Path.ToString()));
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("primary_asset_id"), PrimaryAssetIdStr);
+    Resp->SetStringField(TEXT("bundle_name"), BundleNameStr);
+    Resp->SetArrayField(TEXT("bundle_objects"), BundleObjects);
+    Resp->SetBoolField(TEXT("found"), bFound);
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_all_primary_asset_types
+//   UAssetManager::Get().GetPrimaryAssetTypeInfoList(InfoList).
+//   Returns all registered primary asset types.
+// ---------------------------------------------------------------------------
+// MCP:get_all_primary_asset_types - Get all registered primary asset types from the Asset Manager.
+//   @returns { name, asset_class, num_assets, types, count }
+TSharedPtr<FJsonObject> HandleGetAllPrimaryAssetTypes(const TSharedPtr<FJsonObject>& Params)
+{
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    
+    TArray<FPrimaryAssetTypeInfo> InfoList;
+    Manager.GetPrimaryAssetTypeInfoList(InfoList);
+
+    TArray<TSharedPtr<FJsonValue>> Types;
+    for (const FPrimaryAssetTypeInfo& Info : InfoList)
+    {
+        TSharedPtr<FJsonObject> TypeObj = MakeShared<FJsonObject>();
+        TypeObj->SetStringField(TEXT("name"), Info.PrimaryAssetType.ToString());
+        TypeObj->SetStringField(TEXT("asset_class"), Info.GetAssetBaseClass().ToString());
+        TypeObj->SetNumberField(TEXT("num_assets"), Info.NumberOfAssets);
+        Types.Add(MakeShared<FJsonValueObject>(TypeObj));
+    }
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetArrayField(TEXT("types"), Types);
+    Resp->SetNumberField(TEXT("count"), InfoList.Num());
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ---------------------------------------------------------------------------
+// get_primary_asset_id_from_path
+//   UAssetManager::Get().GetPrimaryAssetIdForPath(FSoftObjectPath(path)).
+//   Returns the primary asset ID for a given object path.
+// ---------------------------------------------------------------------------
+// MCP:get_primary_asset_id_from_path - Get the primary asset ID for a given object path.
+//   @param object_path - Full object path (e.g. /Game/MyAsset.MyAsset)
+//   @returns { object_path, primary_asset_id, is_valid }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetIdFromPath(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ObjectPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), ObjectPath)) { return Missing; }
+
+    if (!UAssetManager::IsInitialized())
+        return mcp_common::MakeErrorReply(TEXT("AssetManager singleton is not initialized"));
+
+    UAssetManager& Manager = UAssetManager::Get();
+    const FSoftObjectPath SoftPath(ObjectPath);
+    const FPrimaryAssetId PrimaryId = Manager.GetPrimaryAssetIdForPath(SoftPath);
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("object_path"), ObjectPath);
+    Resp->SetStringField(TEXT("primary_asset_id"), PrimaryId.ToString());
+    Resp->SetBoolField(TEXT("is_valid"), PrimaryId.IsValid());
+    return mcp_common::MakeOkReply(Resp);
+}
+
+// ===========================================================================
+// Asset Manager cook rules + per-rule mutators, all headless. They mutate the
+// persisted UAssetManagerSettings::PrimaryAssetTypesToScan array (or read from it).
+//   1. set_primary_asset_cook_rule -- set CookRule (and optional ChunkId /
+//      bApplyRecursively) on an existing type entry.
+//   2. get_primary_asset_cook_rules -- read Priority / ChunkId /
+//      bApplyRecursively / CookRule for a single type.
+//   3. remove_primary_asset_rule -- drop a type entry from the persisted
+//      PrimaryAssetTypesToScan (writes DefaultGame.ini).
+// Engine APIs used:
+//   FPrimaryAssetTypeInfo::Rules                      AssetManagerTypes.h
+//   FPrimaryAssetRules::Priority/etc.                 AssetManagerTypes.h
+//   UDeveloperSettings::TryUpdateDefaultConfigFile()  DeveloperSettings.h
+// ===========================================================================
+
+namespace
+{
+    // Map a user-friendly CookRule name to the real EPrimaryAssetCookRule
+    // enum value (5.7: Unknown | NeverCook | ProductionNeverCook |
+    // DevelopmentAlwaysProductionNeverCook | DevelopmentAlwaysProductionUnknownCook |
+    // AlwaysCook). Returns true on hit.
+    bool ParseCookRuleName(const FString& In, EPrimaryAssetCookRule& Out)
+    {
+        const FString L = In.ToLower();
+        if (L == TEXT("unknown"))                                                 { Out = EPrimaryAssetCookRule::Unknown;   return true; }
+        if (L == TEXT("never")     || L == TEXT("nevercook"))                     { Out = EPrimaryAssetCookRule::NeverCook; return true; }
+        if (L == TEXT("development") || L == TEXT("developmentcook") || L == TEXT("productionnevercook"))
+                                                                                   { Out = EPrimaryAssetCookRule::ProductionNeverCook; return true; }
+        if (L == TEXT("developmentalways") || L == TEXT("developmentalwayscook")
+         || L == TEXT("developmentalwaysproductionnevercook"))
+                                                                                   { Out = EPrimaryAssetCookRule::DevelopmentAlwaysProductionNeverCook; return true; }
+        if (L == TEXT("developmentalwaysproductionunknowncook"))                  { Out = EPrimaryAssetCookRule::DevelopmentAlwaysProductionUnknownCook; return true; }
+        if (L == TEXT("always")     || L == TEXT("alwayscook"))                   { Out = EPrimaryAssetCookRule::AlwaysCook; return true; }
+        return false;
+    }
+    FString CookRuleToString(EPrimaryAssetCookRule In)
+    {
+        // Return user-friendly aliases (not the raw enum names) so callers
+        // can use the same names they passed to set_primary_asset_cook_rule.
+        switch (In)
+        {
+        case EPrimaryAssetCookRule::Unknown:                                       return TEXT("Unknown");
+        case EPrimaryAssetCookRule::NeverCook:                                     return TEXT("Never");
+        case EPrimaryAssetCookRule::ProductionNeverCook:                           return TEXT("ProductionNeverCook");
+        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionNeverCook:          return TEXT("DevelopmentAlways");
+        case EPrimaryAssetCookRule::DevelopmentAlwaysProductionUnknownCook:       return TEXT("DevelopmentAlwaysProductionUnknownCook");
+        case EPrimaryAssetCookRule::AlwaysCook:                                    return TEXT("Always");
+        default:                                                                    return TEXT("Unknown");
+        }
+    }
+
+    /** The cook rules of PrimaryAssetType as set_primary_asset_cook_rule and get_primary_asset_cook_rules report them. */
+    TSharedPtr<FJsonObject> AssetManager_CookRulesReply(const FString& PrimaryAssetType, const FPrimaryAssetRules& Rules)
+    {
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("primary_asset_type"), PrimaryAssetType);
+        Resp->SetStringField(TEXT("cook_rule"), CookRuleToString(Rules.CookRule));
+        Resp->SetNumberField(TEXT("priority"), Rules.Priority);
+        Resp->SetNumberField(TEXT("chunk_id"), Rules.ChunkId);
+        Resp->SetBoolField(TEXT("apply_recursively"), Rules.bApplyRecursively);
+        return Resp;
+    }
+}
+
+// MCP:set_primary_asset_cook_rule - Set the CookRule (and optional ChunkId / bApplyRecursively) on an existing primary asset type
+//   @param primary_asset_type - Name of the primary asset type (e.g. "Item").
+//   @param cook_rule - One of "Unknown" / "Never" / "Development" / "Production" / "Always".
+//   @param chunk_id - Optional chunk ID override for the rule
+//   @param apply_recursively - Optional flag to apply the rule recursively
+//   @returns { primary_asset_type, cook_rule, priority, chunk_id, apply_recursively, saved }
+TSharedPtr<FJsonObject> HandleSetPrimaryAssetCookRule(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PrimaryAssetType, CookRuleStr;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_type"), PrimaryAssetType)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("cook_rule"), CookRuleStr) || CookRuleStr.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Missing required parameter: cook_rule (Unknown|Never|Development|Production|Always)"));
+    }
+    EPrimaryAssetCookRule NewRule;
+    if (!ParseCookRuleName(CookRuleStr, NewRule))
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid cook_rule '%s' (use Unknown|Never|Development|Production|Always)"), *CookRuleStr));
+    }
+
+    UAssetManagerSettings* Settings = GetMutableDefault<UAssetManagerSettings>();
+    if (!Settings)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
+    }
+
+    const FName TypeName(*PrimaryAssetType);
+    FPrimaryAssetTypeInfo* Existing = Settings->PrimaryAssetTypesToScan.FindByPredicate(
+        [&TypeName](const FPrimaryAssetTypeInfo& I) { return I.PrimaryAssetType == TypeName; });
+    if (!Existing)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Primary asset type '%s' not found (use add_primary_asset_rule first)"), *PrimaryAssetType));
+    }
+
+    // Optional ChunkId / bApplyRecursively overrides (only when caller passes them).
+    int32 NewChunkId = -1;
+    const bool bHasChunk = Params->TryGetNumberField(TEXT("chunk_id"), NewChunkId);
+    bool bApplyRec = Existing->Rules.bApplyRecursively;
+    const bool bHasApply = Params->TryGetBoolField(TEXT("apply_recursively"), bApplyRec);
+
+    Settings->Modify();
+    Existing->Rules.CookRule = NewRule;
+    if (bHasChunk) { Existing->Rules.ChunkId = NewChunkId; }
+    if (bHasApply) { Existing->Rules.bApplyRecursively = bApplyRec; }
+    const bool bSaved = Settings->TryUpdateDefaultConfigFile();
+
+    return mcp_common::MakeSavedReply(AssetManager_CookRulesReply(PrimaryAssetType, Existing->Rules), bSaved,
+        TEXT("set_primary_asset_cook_rule"));
+}
+
+// MCP:get_primary_asset_cook_rules - Read the Priority / ChunkId / bApplyRecursively / CookRule for a single primary asset type.
+//   @param primary_asset_type - Name of the primary asset type (e.g. "Item").
+//   @returns { primary_asset_type, cook_rule, priority, chunk_id, apply_recursively }
+TSharedPtr<FJsonObject> HandleGetPrimaryAssetCookRules(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PrimaryAssetType;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_type"), PrimaryAssetType)) { return Missing; }
+    const UAssetManagerSettings* Settings = GetDefault<UAssetManagerSettings>();
+    if (!Settings)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
+    }
+    const FName TypeName(*PrimaryAssetType);
+    const FPrimaryAssetTypeInfo* Found = Settings->PrimaryAssetTypesToScan.FindByPredicate(
+        [&TypeName](const FPrimaryAssetTypeInfo& I) { return I.PrimaryAssetType == TypeName; });
+    if (!Found)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Primary asset type '%s' not found"), *PrimaryAssetType));
+    }
+
+    return mcp_common::MakeOkReply(AssetManager_CookRulesReply(PrimaryAssetType, Found->Rules));
+}
+
+// MCP:remove_primary_asset_rule - Remove a primary asset type entry from UAssetManagerSettings
+//   @param primary_asset_type - Name of the primary asset type to remove.
+//   @returns { primary_asset_type, removed_count, type_count_after, saved }
+TSharedPtr<FJsonObject> HandleRemovePrimaryAssetRule(const TSharedPtr<FJsonObject>& Params)
+{
+    FString PrimaryAssetType;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("primary_asset_type"), PrimaryAssetType)) { return Missing; }
+    UAssetManagerSettings* Settings = GetMutableDefault<UAssetManagerSettings>();
+    if (!Settings)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Could not get UAssetManagerSettings"));
+    }
+    const FName TypeName(*PrimaryAssetType);
+    const int32 RemovedCount = Settings->PrimaryAssetTypesToScan.RemoveAll(
+        [&TypeName](const FPrimaryAssetTypeInfo& I) { return I.PrimaryAssetType == TypeName; });
+    if (RemovedCount == 0)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Primary asset type '%s' not found (nothing to remove)"), *PrimaryAssetType));
+    }
+    Settings->Modify();
+    const bool bSaved = Settings->TryUpdateDefaultConfigFile();
+
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("primary_asset_type"), PrimaryAssetType);
+    Resp->SetNumberField(TEXT("removed_count"), RemovedCount);
+    Resp->SetNumberField(TEXT("type_count_after"), Settings->PrimaryAssetTypesToScan.Num());
+    return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_primary_asset_rule"));
+}
+
+const McpCommandFamilies::FRegistrar Registration =
+{
+    { TEXT("add_primary_asset_rule"), &HandleAddPrimaryAssetRule },
+    { TEXT("get_all_primary_asset_types"), &HandleGetAllPrimaryAssetTypes },
+    { TEXT("get_asset_bundle_data"), &HandleGetAssetBundleData },
+    { TEXT("get_asset_bundle_entry"), &HandleGetAssetBundleEntry },
+    { TEXT("get_primary_asset_cook_rules"), &HandleGetPrimaryAssetCookRules },
+    { TEXT("get_primary_asset_id"), &HandleGetPrimaryAssetId },
+    { TEXT("get_primary_asset_id_from_path"), &HandleGetPrimaryAssetIdFromPath },
+    { TEXT("get_primary_asset_ids_by_type"), &HandleGetPrimaryAssetIdsByType },
+    { TEXT("get_primary_asset_type_info"), &HandleGetPrimaryAssetTypeInfo },
+    { TEXT("get_primary_asset_types"), &HandleGetPrimaryAssetTypes },
+    { TEXT("remove_primary_asset_rule"), &HandleRemovePrimaryAssetRule },
+    { TEXT("scan_primary_assets"), &HandleScanPrimaryAssets },
+    { TEXT("set_primary_asset_cook_rule"), &HandleSetPrimaryAssetCookRule },
+};
+} // namespace UEAgentAssetManagerCommands

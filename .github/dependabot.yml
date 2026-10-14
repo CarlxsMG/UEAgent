@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Keeps the CI's actions (checkout, setup-python) up to date.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

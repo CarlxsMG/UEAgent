@@ -1,0 +1,487 @@
+#include "Mcp/McpCommandFamilies.h"
+#include "Commands/Common/McpCommonUtils.h"
+
+#include "UsdWrappers/ForwardDeclarations.h"
+#include "UsdWrappers/UsdPrim.h"
+#include "UsdWrappers/UsdStage.h"
+#include "UsdWrappers/UsdVariantSets.h"
+#include "UsdWrappers/SdfPath.h"
+#include "UsdWrappers/SdfPrimSpec.h"  // UE::FSdfPrimSpec — for Prim.GetPrimStack().Last() (edit-target guard)
+#include "UnrealUSDWrapper.h"           // EUsdListPosition enum
+#include "Commands/USD/UEAgentUsdRegistry.h"  // stage registry + helpers shared by the USD handlers
+
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "Serialization/JsonTypes.h"
+#include "Templates/SharedPointer.h"
+
+/**
+ * USD variant-set commands.
+ *
+ * Reads, creates, mutates and selects variant sets on USD prims via the
+ * UnrealUSDWrapper headless API (no UObject, no World, no PIE).
+ *
+ * Engine APIs (module UnrealUSDWrapper, Public/UsdWrappers/):
+ *   - UE::FUsdVariantSets::AddVariantSet / GetNames / GetVariantSet /
+ *     HasVariantSet / GetVariantSelection / SetSelection /
+ *     GetAllVariantSelections (UsdVariantSets.h)
+ *   - UE::FUsdVariantSet::AddVariant / GetVariantNames / ClearVariantSelection /
+ *     IsValid (UsdVariantSets.h)
+ *   - UE::FUsdPrim::GetVariantSets() (UsdPrim.h)
+ *   - UE::FUsdStage::SetEditTarget(Layer) (UsdStage.h)
+ *
+ * Plugin: USDCore (must be enabled).
+ *
+ * Construction note: UE::FUsdVariantSets and UE::FUsdVariantSet can ONLY be
+ * constructed by UE::FUsdPrim (friend classes). The wrapper enforces this by
+ * deleting the implicit copy ctor — the code must use the chain
+ * `Prim.GetVariantSets().GetVariantSet(name)` and then call FUsdVariantSet
+ * methods on the result. Building the FUsdVariantSet from a raw name string
+ * is not possible without a Prim handle.
+ *
+ * Edit-target guard: mutations to variant
+ * sets (AddVariantSet / AddVariant / SetSelection / ClearVariantSelection)
+ * write to the stage's current edit target layer. Commands that author
+ * variant data first call UsdVariant_TargetStrongestPrimLayer, which sets the
+ * edit target to the layer of `Prim.GetPrimStack().Last()`, so the mutation
+ * lands on the strongest spec for the prim (rather than the session layer or
+ * a weaker sublayer).
+ */
+namespace UEAgentUsdVariantCommands
+{
+
+// MCP-DOMAIN: USD
+
+namespace
+{
+	// Build a {variant_set_name: variant_name} JSON object from a TMap.
+	TSharedPtr<FJsonObject> SelectionsToJson(const TMap<FString, FString>& Selections)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		for (const TPair<FString, FString>& Pair : Selections)
+		{
+			Obj->SetStringField(Pair.Key, Pair.Value);
+		}
+		return Obj;
+	}
+
+	// The stage the stage_name param names (UEAgent::UsdRegistry::FindNamedStage): null, or the error reply.
+	TSharedPtr<FJsonObject> UsdVariant_ResolveStage(const TSharedPtr<FJsonObject>& Params, UE::FUsdStage& OutStage,
+		FString& OutStageName)
+	{
+		OutStage = UE::FUsdStage();
+		OutStageName.Reset();
+
+		if (!Params.IsValid())
+		{
+			return mcp_common::MakeErrorReply(TEXT("params object is null"));
+		}
+
+		FString StageName;
+		Params->TryGetStringField(TEXT("stage_name"), StageName);
+		const FString LookupError = UEAgent::UsdRegistry::FindNamedStage(StageName, TEXT("cached"), OutStage);
+		if (!LookupError.IsEmpty())
+		{
+			return mcp_common::MakeErrorReply(LookupError);
+		}
+		OutStageName = StageName;
+		return nullptr;
+	}
+
+	// UsdVariant_ResolveStage, then the required prim_path, validated: null, or the error reply of the first that fails.
+	TSharedPtr<FJsonObject> UsdVariant_ResolveStageAndPrimPath(const TSharedPtr<FJsonObject>& Params, UE::FUsdStage& OutStage,
+		FString& OutStageName, FString& OutPrimPath)
+	{
+		if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStage(Params, OutStage, OutStageName))
+		{
+			return Error;
+		}
+		if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("prim_path"), OutPrimPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+		FString PathError;
+		if (!UEAgent::UsdCommon::IsValidPrimPath(OutPrimPath, PathError))
+		{
+			return mcp_common::MakeErrorReply(PathError);
+		}
+		return nullptr;
+	}
+
+	// The prim at PrimPath on Stage: null, or the error reply naming StageName when there is none.
+	TSharedPtr<FJsonObject> UsdVariant_FindPrim(const UE::FUsdStage& Stage, const FString& StageName, const FString& PrimPath,
+		UE::FUsdPrim& OutPrim)
+	{
+		OutPrim = Stage.GetPrimAtPath(UE::FSdfPath(*PrimPath));
+		if (!OutPrim.IsValid())
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("prim '%s' does not exist on stage '%s' (DefinePrim first)"),
+					*PrimPath, *StageName));
+		}
+		return nullptr;
+	}
+
+	// The variant set VariantSetName of VSets: null, or the error reply when the prim at PrimPath does not author
+	// it (Hint ends that message) or it fails to construct.
+	TSharedPtr<FJsonObject> UsdVariant_GetVariantSet(const UE::FUsdVariantSets& VSets, const FString& VariantSetName,
+		const FString& PrimPath, const TCHAR* Hint, UE::FUsdVariantSet& OutSet)
+	{
+		if (!VSets.HasVariantSet(VariantSetName))
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("variant set '%s' not found on prim '%s'%s"), *VariantSetName, *PrimPath, Hint));
+		}
+		OutSet = VSets.GetVariantSet(VariantSetName);
+		if (!OutSet.IsValid())
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("variant set '%s' reported present but failed to construct"), *VariantSetName));
+		}
+		return nullptr;
+	}
+
+	// Edit-target guard: points Stage at the strongest layer that authors Prim, so what is written next lands
+	// next to the prim spec rather than on the session layer or a weaker sublayer. GetPrimStack returns the
+	// per-prim spec list; its last entry is the strongest spec, the "strongest layer where the prim is defined".
+	void UsdVariant_TargetStrongestPrimLayer(UE::FUsdStage& Stage, const UE::FUsdPrim& Prim)
+	{
+		const TArray<UE::FSdfPrimSpec> PrimStack = Prim.GetPrimStack();
+		if (PrimStack.Num() > 0)
+		{
+			UE::FSdfLayer EditLayer = PrimStack.Last().GetLayer();
+			if (EditLayer)
+			{
+				Stage.SetEditTarget(EditLayer);
+			}
+		}
+	}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// list_usd_variant_sets
+// ---------------------------------------------------------------------------
+// MCP:list_usd_variant_sets - List every variant set authored on a prim, plus the current selection for each set (selections map may be empty when no selection is authored)
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim to inspect
+//   @returns { prim_path: string, names: [string], selections: object, count: int }
+
+TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	// FUsdVariantSets is constructed only by FUsdPrim (friend access). For a
+	// valid prim, GetVariantSets() always returns a non-invalid instance.
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	const TArray<FString> Names = VSets.GetNames();
+	const TMap<FString, FString> Selections = VSets.GetAllVariantSelections();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetArrayField(TEXT("names"), mcp_common::StringsToJson(Names));
+	Data->SetObjectField(TEXT("selections"), SelectionsToJson(Selections));
+	Data->SetNumberField(TEXT("count"), Names.Num());
+	return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// get_usd_variant_set_info
+// ---------------------------------------------------------------------------
+// MCP:get_usd_variant_set_info - Read the variant names and current selection for a single variant set on a prim
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Name of the variant set to inspect
+//   @returns { prim_path: string, variant_set_name: string, variants: [string], current_selection: string, variant_count: int }
+
+TSharedPtr<FJsonObject> HandleGetUsdVariantSetInfo(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	// FUsdVariantSet is also friend-constructed only by FUsdPrim or
+	// FUsdVariantSets. The bool conversion is well-defined on a missing set
+	// in pxr::, but HasVariantSet is the explicit guard.
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	UE::FUsdVariantSet VSet;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, VariantSetName, PrimPath, TEXT(""), VSet))
+	{
+		return Error;
+	}
+
+	const TArray<FString> Variants = VSet.GetVariantNames();
+	const FString Selection = VSet.GetVariantSelection();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetArrayField(TEXT("variants"), mcp_common::StringsToJson(Variants));
+	Data->SetStringField(TEXT("current_selection"), Selection);
+	Data->SetNumberField(TEXT("variant_count"), Variants.Num());
+	return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// add_usd_variant_set
+// ---------------------------------------------------------------------------
+// MCP:add_usd_variant_set - Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present)
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that will author the variant set
+//   @param variant_set_name [string!] - Name of the variant set to create
+//   @param position [string] - One of FrontOfPrependList / BackOfPrependList / FrontOfAppendList / BackOfAppendList (default BackOfPrependList, matching the USD wrapper default)
+//   @returns { prim_path: string, variant_set_name: string, created: bool, already_existed: bool, position: string }
+
+TSharedPtr<FJsonObject> HandleAddUsdVariantSet(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	FString PositionStr = TEXT("BackOfPrependList");
+	Params->TryGetStringField(TEXT("position"), PositionStr);
+	const EUsdListPosition Position = UEAgent::UsdCommon::ParseListPosition(PositionStr);
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+
+	// Idempotency: HasVariantSet guard. If the set is already present,
+	// return already_existed:true WITHOUT calling AddVariantSet again — the
+	// USD wrapper's AddVariantSet is destructive when called twice (it
+	// re-orders the list op on the same name).
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetStringField(TEXT("position"), PositionStr);
+
+	if (VSets.HasVariantSet(VariantSetName))
+	{
+		Data->SetBoolField(TEXT("created"), false);
+		Data->SetBoolField(TEXT("already_existed"), true);
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	// The new variant set lands next to the prim spec.
+	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
+
+	UE::FUsdVariantSet NewSet = VSets.AddVariantSet(VariantSetName, Position);
+	Data->SetBoolField(TEXT("created"), NewSet.IsValid());
+	Data->SetBoolField(TEXT("already_existed"), false);
+	return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// add_usd_variant
+// ---------------------------------------------------------------------------
+// MCP:add_usd_variant - Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present)
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Variant set that will receive the new variant
+//   @param variant_name [string!] - Name of the variant to add
+//   @param position [string] - One of FrontOfPrependList / BackOfPrependList / FrontOfAppendList / BackOfAppendList (default BackOfPrependList)
+//   @returns { prim_path: string, variant_set_name: string, variant_name: string, added: bool, already_existed: bool, position: string }
+
+TSharedPtr<FJsonObject> HandleAddUsdVariant(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	FString VariantName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_name"), VariantName)) { return Missing; }
+
+	FString PositionStr = TEXT("BackOfPrependList");
+	Params->TryGetStringField(TEXT("position"), PositionStr);
+	const EUsdListPosition Position = UEAgent::UsdCommon::ParseListPosition(PositionStr);
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	UE::FUsdVariantSet VSet;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, VariantSetName, PrimPath, TEXT(" (add_usd_variant_set first)"), VSet))
+	{
+		return Error;
+	}
+
+	// Idempotency: explicit contains check before AddVariant. The wrapper's
+	// HasAuthoredVariant is also fine here — it returns true when the variant
+	// has been authored in ANY spec, which is what we care about.
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetStringField(TEXT("variant_name"), VariantName);
+	Data->SetStringField(TEXT("position"), PositionStr);
+
+	if (VSet.HasAuthoredVariant(VariantName))
+	{
+		Data->SetBoolField(TEXT("added"), false);
+		Data->SetBoolField(TEXT("already_existed"), true);
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
+
+	const bool Added = VSet.AddVariant(VariantName, Position);
+	Data->SetBoolField(TEXT("added"), Added);
+	Data->SetBoolField(TEXT("already_existed"), false);
+	return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// set_usd_variant_selection
+// ---------------------------------------------------------------------------
+// MCP:set_usd_variant_selection - Set the active variant for a variant set; HasVariantSet guard prevents the FUsdVariantSet from going invalid when the set is missing
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Variant set to select a variant from
+//   @param variant_name [string!] - Variant to activate (must already be present — use add_usd_variant first)
+//   @returns { prim_path: string, variant_set_name: string, variant_name: string, set: bool }
+
+TSharedPtr<FJsonObject> HandleSetUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	FString VariantName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_name"), VariantName)) { return Missing; }
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	// HasVariantSet guard before calling SetSelection — known gotcha:
+	// SetSelection on a missing set leaves the prim invalid in pxr::.
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	if (!VSets.HasVariantSet(VariantSetName))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("variant set '%s' not found on prim '%s' (add_usd_variant_set first)"),
+				*VariantSetName, *PrimPath));
+	}
+
+	// SetSelection lives on FUsdVariantSets (single-shot API across variant
+	// sets — it does NOT require constructing an FUsdVariantSet first).
+	const bool Set = VSets.SetSelection(VariantSetName, VariantName);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetStringField(TEXT("variant_name"), VariantName);
+	Data->SetBoolField(TEXT("set"), Set);
+	return mcp_common::MakeOkReply(Data);
+}
+
+// ---------------------------------------------------------------------------
+// clear_usd_variant_selection
+// ---------------------------------------------------------------------------
+// MCP:clear_usd_variant_selection - Clear the active variant selection on a variant set (leaves the set and its variants intact — only the selection arc is removed); HasVariantSet guard
+//   @param stage_name [string!] - Stage cache key
+//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
+//   @param variant_set_name [string!] - Variant set whose selection should be cleared
+//   @returns { prim_path: string, variant_set_name: string, cleared: bool }
+
+TSharedPtr<FJsonObject> HandleClearUsdVariantSelection(const TSharedPtr<FJsonObject>& Params)
+{
+	UE::FUsdStage Stage;
+	FString StageName;
+	FString PrimPath;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
+	{
+		return Error;
+	}
+
+	FString VariantSetName;
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
+
+	UE::FUsdPrim Prim;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
+	{
+		return Error;
+	}
+
+	// ClearVariantSelection lives on FUsdVariantSet (not FUsdVariantSets) —
+	// unlike SetSelection, this API does require constructing the per-set
+	// handle. Friend access from VSets is fine.
+	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
+	UE::FUsdVariantSet VSet;
+	if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, VariantSetName, PrimPath, TEXT(" (add_usd_variant_set first)"), VSet))
+	{
+		return Error;
+	}
+
+	// ClearVariantSelection writes to the edit target.
+	UsdVariant_TargetStrongestPrimLayer(Stage, Prim);
+
+	const bool Cleared = VSet.ClearVariantSelection();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
+	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
+	Data->SetBoolField(TEXT("cleared"), Cleared);
+	return mcp_common::MakeOkReply(Data);
+}
+
+const McpCommandFamilies::FRegistrar Registration =
+{
+	{ TEXT("add_usd_variant"), &HandleAddUsdVariant },
+	{ TEXT("add_usd_variant_set"), &HandleAddUsdVariantSet },
+	{ TEXT("clear_usd_variant_selection"), &HandleClearUsdVariantSelection },
+	{ TEXT("get_usd_variant_set_info"), &HandleGetUsdVariantSetInfo },
+	{ TEXT("list_usd_variant_sets"), &HandleListUsdVariantSets },
+	{ TEXT("set_usd_variant_selection"), &HandleSetUsdVariantSelection },
+};
+} // namespace UEAgentUsdVariantCommands

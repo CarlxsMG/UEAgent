@@ -1,0 +1,104 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+class FJsonObject;
+
+/**
+ * The tool catalog served by the native MCP server (FMcpHttpServer).
+ *
+ * Loaded from <Plugin>/Resources/command_catalog.json -- the JSON that
+ * Tools/codegen_command_catalog.py generates from the handlers' `// MCP:` and `@param`
+ * annotations -- and the `tools/list` answer is built HERE, in C++:
+ *
+ *   - per-parameter types and descriptions (straight from the catalog)
+ *   - closed enums deduced from the description (a STRICT heuristic)
+ *   - `force` on the commands that are unsafe with PIE running (from McpPieSafety)
+ *   - parameter aliases + relaxed canonical names (from McpParamAliases)
+ *   - rotation: the schema also accepts the {roll,pitch,yaw} OBJECT
+ *
+ * Whatever is not in the schema cannot be sent by the client, so the three escape hatches
+ * above (`force`, aliases, rotation object) are declared in the schema itself (otherwise they
+ * would be unreachable).
+ *
+ * Immutable once built. Network threads read it without locks through GetCurrent(), which
+ * returns a TSharedPtr<const ...>; reloading = replacing the whole pointer.
+ */
+class UEAGENT_API FMcpToolCatalog
+{
+public:
+	struct FParam
+	{
+		FString Name;
+		/** string | number | integer | boolean | array | object | any */
+		FString JsonType;
+		bool bRequired = false;
+		FString Description;
+		/** Closed set of values (strings only). Empty = not a provable enum. */
+		TArray<FString> EnumValues;
+		/** Array-typed rotation parameter: its schema also accepts the object form. */
+		bool bIsRotation = false;
+	};
+
+	struct FTool
+	{
+		FString Name;
+		FString Domain;
+		FString Description;
+		TArray<FParam> Params;
+		/** Canonical names that were required and become optional in the schema because they
+		 *  accept aliases: CheckRequired enforces the requirement, counting either spelling. */
+		TMap<FString, TArray<FString>> RelaxedRequired;
+		/** The `inputSchema` tools/list carries for it (describe_tool returns it as is). */
+		TSharedPtr<FJsonObject> InputSchema;
+
+		const FParam* FindParam(const FString& ParamName) const;
+	};
+
+	/** Reads and builds. Returns null and fills OutError if the file is missing or cannot be parsed. */
+	static TSharedPtr<const FMcpToolCatalog> LoadFromFile(const FString& Path, FString& OutError);
+
+	/** <Plugin>/Resources/command_catalog.json, as an absolute path. */
+	static FString DefaultCatalogPath();
+
+	/** The current catalog (may be null if it could not be loaded). Safe from any thread. */
+	static TSharedPtr<const FMcpToolCatalog> GetCurrent();
+	static void SetCurrent(TSharedPtr<const FMcpToolCatalog> NewCatalog);
+
+	const FTool* FindTool(const FString& ToolName) const;
+	const TArray<FTool>& GetTools() const { return Tools; }
+	int32 NumTools() const { return Tools.Num(); }
+	int32 NumParams() const { return TotalParams; }
+	const FString& GetSourcePath() const { return SourcePath; }
+
+	/** The `{"tools":[...]}` object already serialized to UTF-8: tools/list sends it as is. */
+	const TArray<uint8>& GetToolsListUtf8() const { return ToolsListUtf8; }
+	/** The same for the compact list: the meta-tools of Mcp/McpMetaTools.h instead of the catalog. */
+	const TArray<uint8>& GetCompactToolsListUtf8() const { return CompactToolsListUtf8; }
+
+	/**
+	 * Missing required parameters (a null counts as absent). Returns the error message, or empty
+	 * if everything is present. For a relaxed canonical name, any of its spellings counts.
+	 */
+	FString CheckRequired(const FTool& Tool, const TSharedPtr<FJsonObject>& Args) const;
+
+	/** Does the parameter NAME read as a rotation: rot, *rotation or *rotator? */
+	static bool LooksLikeRotationName(const FString& ParamName);
+
+	/**
+	 * Rewrites in place the {roll,pitch,yaw} object form into the wire array [pitch, yaw, roll]
+	 * for CommandType's rotation parameters. Only touches objects whose keys are ALL axes and whose
+	 * values are numbers: any other shape is left intact for the handler to decide. Game thread
+	 * (called by DispatchSingleCommand, so it also covers `batch`). Returns how many parameters
+	 * it rewrote.
+	 */
+	static int32 NormalizeRotationParams(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+
+private:
+	TArray<FTool> Tools;
+	TMap<FString, int32> IndexByName;
+	TArray<uint8> ToolsListUtf8;
+	TArray<uint8> CompactToolsListUtf8;
+	FString SourcePath;
+	int32 TotalParams = 0;
+};

@@ -1,0 +1,26 @@
+{
+  "mode": "typed_setter",
+  "cmd_base": "volumetric_cloud",
+  "actor_class": "AVolumetricCloud",
+  "article": "a",
+  "component_class": "UVolumetricCloudComponent",
+  "accessor": "FindComponentByClass<UVolumetricCloudComponent>()",
+  "accessor_comment": ["AVolumetricCloud has no public component getter, so the component is found by class."],
+  "header_comment": ["SetReflectionViewSampleCountScale and SetShadowReflectionViewSampleCountScale are left out: the fields", "they write are Value-suffixed, next to deprecated fields of the plain name."],
+  "set_desc": "Set the properties of a VolumetricCloud actor's UVolumetricCloudComponent: layer and planet geometry, ground albedo, tracing distances and sample counts. Only the supplied fields change (applied_count counts them) and the reply reads every property back. ground_albedo is [R,G,B] in 0-255 bytes.",
+  "get_desc": "Read the properties of a VolumetricCloud actor's UVolumetricCloudComponent, under the names set_volumetric_cloud_properties takes.",
+  "fields": [
+    { "json": "layer_bottom_altitude", "setter": "SetLayerBottomAltitude", "readback": "LayerBottomAltitude", "type": "float", "desc": "Optional layer bottom altitude (km)." },
+    { "json": "layer_height", "setter": "SetLayerHeight", "readback": "LayerHeight", "type": "float", "desc": "Optional layer height (km)." },
+    { "json": "planet_radius", "setter": "SetPlanetRadius", "readback": "PlanetRadius", "type": "float", "desc": "Optional planet radius (km)." },
+    { "json": "ground_albedo", "setter": "SetGroundAlbedo", "readback": "GroundAlbedo", "type": "color_bytes", "desc": "Optional [R,G,B] ground albedo as 0-255 bytes (FColor)." },
+    { "json": "tracing_start_max_distance", "setter": "SetTracingStartMaxDistance", "readback": "TracingStartMaxDistance", "type": "float", "desc": "Optional tracing start max distance." },
+    { "json": "tracing_max_distance", "setter": "SetTracingMaxDistance", "readback": "TracingMaxDistance", "type": "float", "desc": "Optional tracing max distance." },
+    { "json": "sky_light_cloud_bottom_occlusion", "setter": "SetSkyLightCloudBottomOcclusion", "readback": "SkyLightCloudBottomOcclusion", "type": "float", "desc": "Optional sky light cloud bottom occlusion (0..1)." },
+    { "json": "view_sample_count_scale", "setter": "SetViewSampleCountScale", "readback": "ViewSampleCountScale", "type": "float", "desc": "Optional view sample count scale." },
+    { "json": "shadow_view_sample_count_scale", "setter": "SetShadowViewSampleCountScale", "readback": "ShadowViewSampleCountScale", "type": "float", "desc": "Optional shadow view sample count scale." },
+    { "json": "shadow_tracing_distance", "setter": "SetShadowTracingDistance", "readback": "ShadowTracingDistance", "type": "float", "desc": "Optional shadow tracing distance (km)." },
+    { "json": "stop_tracing_transmittance_threshold", "setter": "SetStopTracingTransmittanceThreshold", "readback": "StopTracingTransmittanceThreshold", "type": "float", "desc": "Optional stop-tracing transmittance threshold." },
+    { "json": "use_per_sample_atmospheric_light_transmittance", "setter": "SetbUsePerSampleAtmosphericLightTransmittance", "readback": "bUsePerSampleAtmosphericLightTransmittance", "type": "bool", "bitfield": true, "desc": "Optional per-sample atmospheric light transmittance." }
+  ]
+}

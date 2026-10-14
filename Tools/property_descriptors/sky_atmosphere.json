@@ -1,0 +1,23 @@
+{
+  "mode": "typed_setter",
+  "cmd_base": "sky_atmosphere",
+  "actor_class": "ASkyAtmosphere",
+  "article": "a",
+  "component_class": "USkyAtmosphereComponent",
+  "accessor": "GetComponent()",
+  "set_desc": "Set the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent. Only the supplied fields change (applied_count counts them) and the reply reads every property back. Colors are [R,G,B] or [R,G,B,A].",
+  "get_desc": "Read the atmosphere properties of a SkyAtmosphere actor's USkyAtmosphereComponent, under the names set_sky_atmosphere_properties takes.",
+  "fields": [
+    { "json": "rayleigh_scattering", "setter": "SetRayleighScattering", "readback": "RayleighScattering", "type": "linear_color", "desc": "Optional [R,G,B(,A)] Rayleigh scattering color." },
+    { "json": "rayleigh_scattering_scale", "setter": "SetRayleighScatteringScale", "readback": "RayleighScatteringScale", "type": "float", "desc": "Optional Rayleigh scattering scale." },
+    { "json": "mie_scattering", "setter": "SetMieScattering", "readback": "MieScattering", "type": "linear_color", "desc": "Optional [R,G,B(,A)] Mie scattering color." },
+    { "json": "mie_scattering_scale", "setter": "SetMieScatteringScale", "readback": "MieScatteringScale", "type": "float", "desc": "Optional Mie scattering scale." },
+    { "json": "mie_anisotropy", "setter": "SetMieAnisotropy", "readback": "MieAnisotropy", "type": "float", "desc": "Optional Mie anisotropy (0..1)." },
+    { "json": "ground_albedo", "setter": "SetGroundAlbedo", "readback": "GroundAlbedo", "type": "color_bytes", "desc": "Optional [R,G,B] ground albedo as 0-255 bytes (FColor)." },
+    { "json": "bottom_radius", "setter": "SetBottomRadius", "readback": "BottomRadius", "type": "float", "desc": "Optional planet bottom radius (km)." },
+    { "json": "atmosphere_height", "setter": "SetAtmosphereHeight", "readback": "AtmosphereHeight", "type": "float", "desc": "Optional atmosphere height (km)." },
+    { "json": "multi_scattering_factor", "setter": "SetMultiScatteringFactor", "readback": "MultiScatteringFactor", "type": "float", "desc": "Optional multi-scattering factor (0..2)." },
+    { "json": "aerial_perspective_view_distance_scale", "setter": "SetAerialPespectiveViewDistanceScale", "readback": "AerialPespectiveViewDistanceScale", "type": "float", "desc": "Optional aerial perspective view distance scale." },
+    { "json": "height_fog_contribution", "setter": "SetHeightFogContribution", "readback": "HeightFogContribution", "type": "float", "desc": "Optional height fog contribution (0..1)." }
+  ]
+}

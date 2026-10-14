@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/CarlxsMG/UEAgent/security/advisories/new
+    about: Report it privately, not in a public issue.
+  - name: Troubleshooting
+    url: https://github.com/CarlxsMG/UEAgent/blob/main/docs/troubleshooting.md
+    about: The usual reasons a client cannot connect or a call is refused, and what to do.
