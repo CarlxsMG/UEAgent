@@ -58,6 +58,8 @@ A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` mar
 - The plugin builds with no warning of its own.
 - Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py` and
   `ruff check Tools`.
+- `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
+  headless editor and checks the server end to end over HTTP.
 - The contract self-tests pass in the editor: `mcp.contract.selftest` on each vector file in
   `Resources/ContractTests`, and the automation test `Automation RunTests UEAgent.ClaudeCode`.
 - A change of behavior says how it was measured: the call before and after, in a headless editor

@@ -17,6 +17,8 @@
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h" // ULevelEditorSubsystem::IsInPlayInEditor -- the same check is_play_in_editor_active uses
 #include "Editor.h"                     // GEditor + FEditorDelegates (PIE ownership guard)
 #include "ScopedTransaction.h"         // FScopedTransaction -- one undo step per call
+#include "Mcp/McpActivity.h"           // the Activity panel's record of each call
+#include "HAL/PlatformTime.h"          // FPlatformTime -- each call's duration
 #include "HAL/IConsoleManager.h"       // mcp.UndoStepPerCall
 #include "FileHelpers.h"                // FEditorFileUtils::GetOnLoadMapStartDelegate -- fires for ANY map open, UI included
 #include "Editor/EditorEngine.h"        // UEditorEngine::PlayWorld (full definition for GEditor->PlayWorld)
@@ -1370,6 +1372,9 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& CommandType, con
 
     TUniqueFunction<void()> Work = [this, CommandType, Params, SessionId, Promise = MoveTemp(Promise)]() mutable
     {
+        const FDateTime Started = FDateTime::Now();
+        const double StartSeconds = FPlatformTime::Seconds();
+
         // The contract's re-reads are this same dispatch, unwrapped the way the model sees it.
         const McpReadback::FSend Send = [this](const FString& ProbeCommand, const TSharedPtr<FJsonObject>& ProbeParams) -> TSharedPtr<FJsonObject>
         {
@@ -1406,6 +1411,7 @@ TFuture<FString> UUEAgentBridge::EnqueueToolCall(const FString& CommandType, con
             Result = McpReadback::Verify(CommandType, ContractParams, Result, Send, Before);
         }
         Result = McpReadback::AnnotateOffload(CommandType, Result);
+        McpActivity::Record(CommandType, Started, (FPlatformTime::Seconds() - StartSeconds) * 1000.0, Result, bRefused);
 
         TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
         Outcome->SetBoolField(TEXT("is_error"), bRefused);

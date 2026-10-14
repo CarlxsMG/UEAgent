@@ -43,6 +43,12 @@ Yes. Every tool call is one undo step, named after the tool ("UEAgent: spawn_act
 the call saved stays saved until you save again. `mcp.UndoStepPerCall 0` in the editor console
 leaves undo to each tool.
 
+## How do I see what the agent did?
+
+Open **Activity** from the MCP menu in the editor's status bar: the last 200 tool calls, newest
+first, each with its time, duration, outcome (OK, a readback warning, failed or refused) and detail.
+`mcp.activity` in the editor console prints the same list to the log.
+
 ## Which clients work?
 
 Any MCP client that speaks Streamable HTTP. [Clients](clients.md) has the setup for Claude Code,

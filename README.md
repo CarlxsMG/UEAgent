@@ -19,6 +19,8 @@
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Docs" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
 </p>
 
+<p align="center"><b>English</b> · <a href="README.es.md">Español</a></p>
+
 ---
 
 UEAgent is an Unreal Engine 5.8 editor plugin that lets AI agents operate the editor through the
@@ -41,7 +43,8 @@ Streamable HTTP from inside the editor, with no Python or Node process in betwee
   moved or deleted by any tool, and calls that are unreliable while Play-in-Editor runs are refused
   while it runs.
 - **Built for real sessions.** Several agents can share one editor: protocol work runs on network
-  threads, and every tool call runs on the game thread through one queue.
+  threads, and every tool call runs on the game thread through one queue. The **Activity** panel
+  (status bar > MCP > Activity) lists each call with its duration and outcome.
 
 ```mermaid
 flowchart LR
@@ -150,6 +153,7 @@ Unreal build it, or build the editor target from your IDE. When the editor start
 | `mcp.contract.selftest <vectors.json> [quit]` | run the contract vectors (see `Resources/ContractTests`) |
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = only report saves under a read-only root instead of refusing them |
 | `mcp.UndoStepPerCall 0\|1` | 0 = leave the undo buffer to each tool instead of one undo step per call |
+| `mcp.activity [N]` | print the last N tool calls (default 20) to the log, as the Activity panel lists them |
 
 ## Security
 

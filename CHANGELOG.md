@@ -9,6 +9,10 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - A logo, and the plugin's icon in the editor's Plugins window.
 - Every tool call is one undo step, named after the tool: Ctrl+Z reverts a call, and a `batch` as a
   whole. `mcp.UndoStepPerCall 0` turns it off.
+- An **Activity** panel (status bar > MCP > Activity) lists the last 200 tool calls with their duration
+  and outcome; `mcp.activity` prints them to the log.
+- `Tools/smoke_test.py` checks a running server end to end over HTTP, and with `--launch` starts a
+  headless editor to run the checks that edit the level too.
 - `initialize` gives every agent short instructions (readback verdicts, refusals, `batch`), in the
   full tool list too.
 - Fixed: the undo tools read the editor's undo buffer backwards. `get_undo_state` swapped the undo

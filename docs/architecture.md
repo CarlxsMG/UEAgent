@@ -61,7 +61,8 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    instead of a plain `success: true`.
 
 A refusal reaches the client as a tool error (`isError: true`); a call that ran and failed answers
-with its own `success: false`.
+with its own `success: false`. Either way the call goes into the session's activity record
+(`Mcp/McpActivity`), which the Activity panel shows.
 
 Content under a **Read Only Content Root** is protected where it is written: the shared save helper
 refuses to save a package there, and the tools that rename, move or delete check the roots too.

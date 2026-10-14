@@ -1,6 +1,7 @@
 #include "McpEditorUI.h"
 
 #include "UEAgentBridge.h"
+#include "Mcp/McpActivityPanel.h"
 #include "Mcp/McpClaudeCode.h"
 #include "Mcp/McpPreconditions.h"
 #include "Mcp/McpToolCatalog.h"
@@ -324,6 +325,11 @@ namespace McpEditorUIPrivate
 			}
 			Menu.AddWidget(InfoBlock(Lines), FText::GetEmpty(), /*bNoIndent*/ true);
 			Menu.AddMenuEntry(
+				LOCTEXT("Activity", "Activity..."),
+				LOCTEXT("ActivityTip", "The last tool calls the agents made in this editor: time, duration, outcome and detail."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Recent"),
+				FUIAction(FExecuteAction::CreateStatic(&McpActivityPanel::Open)));
+			Menu.AddMenuEntry(
 				LOCTEXT("Restart", "Restart the server"),
 				LOCTEXT("RestartTip", "Closes the open connections, reloads the tool catalog and listens again with the current settings. This is what applies a port or token change."),
 				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh"),
@@ -498,6 +504,7 @@ void McpEditorUI::Startup()
 	using namespace McpEditorUIPrivate;
 	ToolMenusStartupHandle = UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&RegisterStatusBar));
 	EditorInitializedHandle = FEditorDelegates::OnEditorInitialized.AddStatic(&OnEditorInitialized);
+	McpActivityPanel::Register();
 }
 
 void McpEditorUI::Shutdown()
@@ -519,6 +526,7 @@ void McpEditorUI::Shutdown()
 		ToolMenusStartupHandle.Reset();
 	}
 	UToolMenus::UnregisterOwner(OwnerName);
+	McpActivityPanel::Unregister();
 }
 
 #undef LOCTEXT_NAMESPACE
