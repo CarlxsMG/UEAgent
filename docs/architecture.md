@@ -26,6 +26,9 @@ default). An acceptor thread hands each connection to a thread of its own, up to
   switches to SSE after 10 seconds and sends a progress notification at least every 15; if the
   client hangs up, the call still finishes and its result is dropped.
 
+`initialize` gives every agent short instructions: how to read a readback verdict and a refusal,
+and when to reach for `batch` or `execute_python`.
+
 Every request is checked before anything else: its `Host` must be the loopback and its `Origin`, if
 any, local (against DNS rebinding), and with an auth token set, its `Authorization: Bearer` must
 match. Headers are capped at 64 KB and a body at 256 MB.
@@ -49,7 +52,10 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    scans the Python that `execute_python` is about to run (`Mcp/McpPythonScan`). When a check exists to
    prevent a crash and cannot verify, it refuses; any other check lets the call through.
 5. **The tool.** Each command family registers its tools in a route table
-   (`Mcp/McpCommandFamilies`), and the registry runs the one named.
+   (`Mcp/McpCommandFamilies`), and the registry runs the one named, inside one undo transaction
+   named after it ("UEAgent: spawn_actor"): Ctrl+Z reverts the whole call, and a `batch` as one
+   step. The tools that drive the undo buffer themselves (`undo`, `begin_transaction`...) run
+   outside it, and a call that changes nothing leaves no entry.
 6. **Readback** (`Mcp/McpReadback`). The state is re-read in the same pass, so a write that did not
    stick, a zero that proves nothing or a change that landed in the wrong world is reported as such
    instead of a plain `success: true`.

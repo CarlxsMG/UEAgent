@@ -27,7 +27,7 @@ namespace McpMetaTools
 	/** The compact `{"tools":[...]}` object, serialized to UTF-8. */
 	TArray<uint8> BuildToolsListUtf8(const FMcpToolCatalog& Catalog);
 
-	/** The `instructions` that `initialize` carries in compact mode. */
+	/** The paragraph the compact mode puts before the agent instructions that `initialize` carries. */
 	FString Instructions(const FMcpToolCatalog& Catalog);
 
 	/**

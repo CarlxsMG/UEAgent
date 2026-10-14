@@ -41,6 +41,18 @@ namespace McpHttpServerPrivate
 
 	static const TCHAR* const McpPath = TEXT("/mcp");
 
+	// What every agent gets in `initialize`: how to read the answers, and how to avoid the usual refusals.
+	static const TCHAR* const AgentInstructions =
+		TEXT("UEAgent drives the Unreal Editor this server runs in. Tool calls run on the editor's game thread, one at a time.\n")
+		TEXT("- Read every answer: its success is checked. A `readback` whose `verdict` is not `ok` means the call did not do what ")
+		TEXT("it reported; its `note` says why and how to check. `unknown_params` lists the arguments the tool ignored.\n")
+		TEXT("- A refusal (isError) comes before the call runs: the call is known to crash or freeze the editor, or is unreliable ")
+		TEXT("while Play-in-Editor runs. The message says what to do instead; stop PIE before compiling Blueprints or saving.\n")
+		TEXT("- Look assets and actors up instead of guessing their names, and name assets by their full path (/Game/...).\n")
+		TEXT("- For many small edits, use `batch`: one call, one pass on the game thread.\n")
+		TEXT("- After editing a Blueprint graph, compile it and read the compiler's messages.\n")
+		TEXT("- When no tool fits, `execute_python` runs Unreal's Python API in the editor.");
+
 	constexpr int32 MaxHeaderBytes = 64 * 1024;
 	constexpr int64 MaxBodyBytes = 256ll * 1024 * 1024;   // a larger request body is refused
 	constexpr double IdleCloseSeconds = 60.0;             // an idle keep-alive connection is closed after 60 s...
@@ -938,10 +950,12 @@ bool FMcpHttpConnection::HandleJsonRpc(const McpHttpServerPrivate::FHttpRequest&
 		Result->SetObjectField(TEXT("capabilities"), Capabilities);
 		Result->SetObjectField(TEXT("serverInfo"), ServerInfo);
 		const TSharedPtr<const FMcpToolCatalog> Catalog = FMcpToolCatalog::GetCurrent();
+		FString Instructions = AgentInstructions;
 		if (bCompactTools && Catalog.IsValid())
 		{
-			Result->SetStringField(TEXT("instructions"), McpMetaTools::Instructions(*Catalog));
+			Instructions = McpMetaTools::Instructions(*Catalog) + TEXT("\n\n") + Instructions;
 		}
+		Result->SetStringField(TEXT("instructions"), Instructions);
 		return SendJson(200, MakeRpcResult(Id, Result), bKeepAlive) && bKeepAlive;
 	}
 

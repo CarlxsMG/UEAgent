@@ -2849,17 +2849,34 @@ namespace
 
 namespace UEAgentEditorCommandsImpl
 {
+    // The engine's GetUndoCount() is how many transactions have been UNDONE -- the redo side. What undo
+    // can still revert is the rest of the queue.
+    int32 UndoableCount(UTransactor* Trans)
+    {
+        return Trans->GetQueueLength() - Trans->GetUndoCount();
+    }
+
+    // The title of the entry undo (or redo) would apply next. CanUndo/CanRedo fill their text only with
+    // the REASON they cannot, so the title comes from the transaction's context.
+    FString NextLabel(UTransactor* Trans, bool bUndo)
+    {
+        if (bUndo)
+        {
+            return Trans->CanUndo() ? Trans->GetUndoContext(/*bCheckWhetherUndoPossible=*/false).Title.ToString() : FString();
+        }
+        return Trans->CanRedo() ? Trans->GetRedoContext().Title.ToString() : FString();
+    }
+
     // Undoes one transaction (redoes, when bUndo is false) and reports on Result what applied and what is next.
     void StepUndoStack(UTransactor* Trans, bool bUndo, const TSharedPtr<FJsonObject>& Result)
     {
         const bool bApplied = bUndo ? Trans->Undo(/*bCanRedo=*/true) : Trans->Redo();
-        FText NextLabel;
-        const bool bCanStepAgain = bUndo ? Trans->CanUndo(&NextLabel) : Trans->CanRedo(&NextLabel);
+        const bool bCanStepAgain = bUndo ? Trans->CanUndo() : Trans->CanRedo();
 
         Result->SetBoolField(TEXT("applied"), bApplied);
-        Result->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+        Result->SetNumberField(TEXT("undo_count"), UndoableCount(Trans));
         Result->SetBoolField(bUndo ? TEXT("can_undo") : TEXT("can_redo"), bCanStepAgain);
-        Result->SetStringField(bUndo ? TEXT("next_undo") : TEXT("next_redo"), bCanStepAgain ? NextLabel.ToString() : FString());
+        Result->SetStringField(bUndo ? TEXT("next_undo") : TEXT("next_redo"), NextLabel(Trans, bUndo));
     }
 
     // Undoes (redoes, when bUndo is false) up to `count` transactions, default and minimum 1, stopping
@@ -2887,7 +2904,7 @@ namespace UEAgentEditorCommandsImpl
 
         Result->SetNumberField(TEXT("requested"), Count);
         Result->SetNumberField(bUndo ? TEXT("actually_undone") : TEXT("actually_redone"), Applied);
-        Result->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+        Result->SetNumberField(TEXT("undo_count"), UndoableCount(Trans));
     }
 }
 
@@ -2923,7 +2940,7 @@ TSharedPtr<FJsonObject> HandleBeginTransaction(const TSharedPtr<FJsonObject>& Pa
         ResultObj->SetStringField(TEXT("description"), Description);
         ResultObj->SetNumberField(TEXT("transaction_index"), ActiveTransactionIndex);
         ResultObj->SetBoolField(TEXT("already_open"), true);
-        ResultObj->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+        ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
         return ResultObj;
     }
 
@@ -2939,7 +2956,7 @@ TSharedPtr<FJsonObject> HandleBeginTransaction(const TSharedPtr<FJsonObject>& Pa
     ResultObj->SetStringField(TEXT("description"), Description);
     ResultObj->SetNumberField(TEXT("transaction_index"), NewIndex);
     ResultObj->SetBoolField(TEXT("already_open"), false);
-    ResultObj->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     ResultObj->SetStringField(TEXT("primary_object"), PrimaryObject ? PrimaryObject->GetPathName() : FString());
     return ResultObj;
 }
@@ -2967,7 +2984,7 @@ TSharedPtr<FJsonObject> HandleEndTransaction(const TSharedPtr<FJsonObject>& Para
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), EndedIndex != INDEX_NONE);
     ResultObj->SetNumberField(TEXT("transaction_index"), ClosedIdx);
-    ResultObj->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     return ResultObj;
 }
 
@@ -2994,7 +3011,7 @@ TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetNumberField(TEXT("transaction_index"), ClosedIdx);
-    ResultObj->SetNumberField(TEXT("undo_count"), Trans->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     return ResultObj;
 }
 
@@ -3049,56 +3066,60 @@ TSharedPtr<FJsonObject> HandleRedoMultiple(const TSharedPtr<FJsonObject>& Params
 }
 
 // MCP:can_undo - Cheap yes/no on whether anything is undoable right now, plus the LABEL of the entry undo would revert -- read that label before undoing so you do not roll back someone else's edit. Prefer get_undo_state when you also want counts and the redo side in the same call.
-//   @returns { can_undo: bool, label: string (title of the transaction undo would revert) }
+//   @returns { can_undo: bool, label: string (title of the transaction undo would revert), reason?: string (why not, when can_undo is false) }
 TSharedPtr<FJsonObject> HandleCanUndo(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-    FText Label;
-    const bool bCan = Trans->CanUndo(&Label);
+    FText Reason;
+    const bool bCan = Trans->CanUndo(&Reason);
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("can_undo"), bCan);
-    ResultObj->SetStringField(TEXT("label"), bCan ? Label.ToString() : FString());
+    ResultObj->SetStringField(TEXT("label"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/true));
+    if (!bCan && !Reason.IsEmpty())
+    {
+        ResultObj->SetStringField(TEXT("reason"), Reason.ToString());
+    }
     return ResultObj;
 }
 
 // MCP:can_redo - Cheap yes/no on whether anything can be re-applied, plus the LABEL of the entry redo would restore. can_redo:false right after an undo normally means a new edit has since wiped the redo stack. Prefer get_undo_state for the whole picture in one call.
-//   @returns { can_redo: bool, label: string (title of the transaction redo would restore) }
+//   @returns { can_redo: bool, label: string (title of the transaction redo would restore), reason?: string (why not, when can_redo is false) }
 TSharedPtr<FJsonObject> HandleCanRedo(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-    FText Label;
-    const bool bCan = Trans->CanRedo(&Label);
+    FText Reason;
+    const bool bCan = Trans->CanRedo(&Reason);
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("can_redo"), bCan);
-    ResultObj->SetStringField(TEXT("label"), bCan ? Label.ToString() : FString());
+    ResultObj->SetStringField(TEXT("label"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/false));
+    if (!bCan && !Reason.IsEmpty())
+    {
+        ResultObj->SetStringField(TEXT("reason"), Reason.ToString());
+    }
     return ResultObj;
 }
 
 // MCP:get_undo_state - One call that answers everything you need before touching undo/redo: both counts, both next-entry LABELS, and whether a transaction is still OPEN (transaction_open -- the thing that silently swallows later edits into someone else's batch). Read this instead of chaining can_undo + can_redo, and read it BEFORE undo/undo_multiple so you know what you are about to revert.
-//   @returns { can_undo, can_redo, undo_count, redo_count, next_undo, next_redo, transaction_open, transaction_index }
+//   @returns { can_undo, can_redo, undo_count (entries undo can still revert), redo_count (undone entries redo can restore), next_undo, next_redo, transaction_open, transaction_index }
 TSharedPtr<FJsonObject> HandleGetUndoState(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
 
-    FText UndoLabel, RedoLabel;
-    const bool bCanUndo = Trans->CanUndo(&UndoLabel);
-    const bool bCanRedo = Trans->CanRedo(&RedoLabel);
-    const int32 UndoCount = Trans->GetUndoCount();
-    // Redo count = total queue length minus undo count (transactions that have
-    // been undone sit between the active boundary and the top of the buffer).
-    const int32 TotalLen  = Trans->GetQueueLength();
-    const int32 RedoCount = TotalLen - UndoCount;
+    const bool bCanUndo = Trans->CanUndo();
+    const bool bCanRedo = Trans->CanRedo();
+    const int32 UndoCount = UEAgentEditorCommandsImpl::UndoableCount(Trans);
+    const int32 RedoCount = Trans->GetUndoCount();  // the engine counts the undone entries
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("can_undo"), bCanUndo);
     ResultObj->SetBoolField(TEXT("can_redo"), bCanRedo);
     ResultObj->SetNumberField(TEXT("undo_count"), UndoCount);
     ResultObj->SetNumberField(TEXT("redo_count"), RedoCount);
-    ResultObj->SetStringField(TEXT("next_undo"), bCanUndo ? UndoLabel.ToString() : FString());
-    ResultObj->SetStringField(TEXT("next_redo"), bCanRedo ? RedoLabel.ToString() : FString());
+    ResultObj->SetStringField(TEXT("next_undo"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/true));
+    ResultObj->SetStringField(TEXT("next_redo"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/false));
     ResultObj->SetBoolField(TEXT("transaction_open"), ActiveTransactionIndex != INDEX_NONE);
     ResultObj->SetNumberField(TEXT("transaction_index"), ActiveTransactionIndex);
     return ResultObj;
@@ -3133,8 +3154,8 @@ TSharedPtr<FJsonObject> HandleGetTransactionHistory(const TSharedPtr<FJsonObject
         Entry->SetBoolField(TEXT("is_transient"), Tx->IsTransient());
         Entry->SetStringField(TEXT("primary_object"),
             Tx->GetContext().PrimaryObject ? Tx->GetContext().PrimaryObject->GetPathName() : FString());
-        // is_undone: a transaction's been undone iff it's at index >= UndoCount.
-        Entry->SetBoolField(TEXT("is_undone"), Idx >= TransBuffer->GetUndoCount());
+        // The engine counts the undone entries (GetUndoCount), and they are the last ones in the queue.
+        Entry->SetBoolField(TEXT("is_undone"), Idx >= TotalLen - TransBuffer->GetUndoCount());
         Entries.Add(MakeShared<FJsonValueObject>(Entry));
     }
 
@@ -3156,14 +3177,14 @@ TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObjec
     Params->TryGetStringField(TEXT("reason"), Reason);
     if (Reason.IsEmpty()) { Reason = TEXT("MCP reset_transaction_buffer"); }
 
-    const int32 Before = Trans->GetUndoCount();
+    const int32 Before = UEAgentEditorCommandsImpl::UndoableCount(Trans);
     Trans->Reset(FText::FromString(Reason));
     ActiveTransactionIndex = INDEX_NONE; // any open tx is gone after Reset
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetNumberField(TEXT("undo_count_before"), Before);
-    ResultObj->SetNumberField(TEXT("undo_count_after"), Trans->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count_after"), UEAgentEditorCommandsImpl::UndoableCount(Trans));
     return ResultObj;
 }
 
@@ -3186,7 +3207,7 @@ TSharedPtr<FJsonObject> HandleSetUndoBarrier(const TSharedPtr<FJsonObject>& Para
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     ResultObj->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
-    ResultObj->SetNumberField(TEXT("undo_count"), TransBuffer->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
     ResultObj->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
     return ResultObj;
 }
@@ -3206,7 +3227,7 @@ TSharedPtr<FJsonObject> HandleRemoveUndoBarrier(const TSharedPtr<FJsonObject>& P
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetBoolField(TEXT("removed"), bRemoved);
     ResultObj->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
-    ResultObj->SetNumberField(TEXT("undo_count"), TransBuffer->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
     return ResultObj;
 }
 
@@ -3224,7 +3245,7 @@ TSharedPtr<FJsonObject> HandleClearUndoBarriers(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetBoolField(TEXT("had_barrier"), bHadBarrier);
-    ResultObj->SetNumberField(TEXT("undo_count"), TransBuffer->GetUndoCount());
+    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
     ResultObj->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
     return ResultObj;
 }

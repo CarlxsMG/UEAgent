@@ -36,6 +36,13 @@ assets, and launch processes. Keep the project under source control, and list ve
 **Read Only Content Roots** so that no tool can save, rename, move or delete it. See
 [Security](https://github.com/CarlxsMG/UEAgent/blob/main/README.md#security).
 
+## Can I undo what the agent did?
+
+Yes. Every tool call is one undo step, named after the tool ("UEAgent: spawn_actor"), so Ctrl+Z, or
+**Edit > Undo History**, reverts it; a `batch` is one step. Undo restores the editor's state: a file
+the call saved stays saved until you save again. `mcp.UndoStepPerCall 0` in the editor console
+leaves undo to each tool.
+
 ## Which clients work?
 
 Any MCP client that speaks Streamable HTTP. [Clients](clients.md) has the setup for Claude Code,

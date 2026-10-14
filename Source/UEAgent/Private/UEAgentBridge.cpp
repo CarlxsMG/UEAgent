@@ -16,6 +16,8 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h" // ULevelEditorSubsystem::IsInPlayInEditor -- the same check is_play_in_editor_active uses
 #include "Editor.h"                     // GEditor + FEditorDelegates (PIE ownership guard)
+#include "ScopedTransaction.h"         // FScopedTransaction -- one undo step per call
+#include "HAL/IConsoleManager.h"       // mcp.UndoStepPerCall
 #include "FileHelpers.h"                // FEditorFileUtils::GetOnLoadMapStartDelegate -- fires for ANY map open, UI included
 #include "Editor/EditorEngine.h"        // UEditorEngine::PlayWorld (full definition for GEditor->PlayWorld)
 #include "Dom/JsonObject.h"
@@ -983,6 +985,72 @@ namespace McpBridgeParams
 // own so the `batch` meta-command can call it in a loop within a single game-thread pass.
 //
 // Game thread only: it runs from a queued work item, or in a loop for `batch`.
+// Each tool call is ONE undo step, named after the tool ("UEAgent: spawn_actor"), so Ctrl+Z reverts a
+// call as a whole. The handlers' own FScopedTransactions nest into it. A call that changes nothing leaves
+// no entry: the engine drops a transaction without changes, and one that only touched PIE objects
+// (FTransaction::IsTransient). A tool that resets the buffer mid-call (a map load) is safe too:
+// UTransBuffer::Reset purges the open transaction, and End tolerates the purge.
+namespace McpUndoStep
+{
+    // Whether calls get their undo step (1, the default) or leave the buffer to the handlers (0). The
+    // console variable references this int32, as mcp.ReadOnlyRootEnforcement does.
+    int32 GMcpUndoStepPerCall = 1;
+
+    FAutoConsoleVariableRef CVarMcpUndoStepPerCall(
+        TEXT("mcp.UndoStepPerCall"),
+        GMcpUndoStepPerCall,
+        TEXT("1 (default) = each MCP tool call is one undo step, named after the tool. ")
+        TEXT("0 = calls leave the undo buffer to each tool, as before."),
+        ECVF_Default);
+
+    // The tools that drive or read the undo buffer themselves stay outside: undo and redo refuse to run
+    // inside a transaction, the history readers would see it open, and build_blueprint_graph rolls back
+    // with UndoTransaction, which an enclosing transaction would block.
+    static bool ManagesUndoBuffer(const FString& CommandType)
+    {
+        static const TSet<FString> Commands = {
+            TEXT("undo"), TEXT("redo"), TEXT("undo_multiple"), TEXT("redo_multiple"),
+            TEXT("can_undo"), TEXT("can_redo"), TEXT("get_undo_state"), TEXT("get_transaction_history"),
+            TEXT("begin_transaction"), TEXT("end_transaction"), TEXT("cancel_transaction"),
+            TEXT("reset_transaction_buffer"), TEXT("set_undo_barrier"), TEXT("remove_undo_barrier"),
+            TEXT("clear_undo_barriers"), TEXT("build_blueprint_graph") };
+        return Commands.Contains(CommandType);
+    }
+
+    // A `batch` is one step for all its commands, unless it opens its own transaction
+    // (`transaction: true`) or holds a command that has to run outside one.
+    static bool ShouldWrap(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+    {
+        if (GMcpUndoStepPerCall == 0 || ManagesUndoBuffer(CommandType))
+        {
+            return false;
+        }
+        if (CommandType != TEXT("batch"))
+        {
+            return true;
+        }
+        bool bOwnTransaction = false;
+        const TArray<TSharedPtr<FJsonValue>>* Commands = nullptr;
+        if (!Params.IsValid() || (Params->TryGetBoolField(TEXT("transaction"), bOwnTransaction) && bOwnTransaction)
+            || !Params->TryGetArrayField(TEXT("commands"), Commands) || !Commands)
+        {
+            return false;
+        }
+        for (const TSharedPtr<FJsonValue>& Item : *Commands)
+        {
+            const TSharedPtr<FJsonObject>* ItemObject = nullptr;
+            FString SubCommand;
+            if (!Item.IsValid() || !Item->TryGetObject(ItemObject) || !ItemObject
+                || !(*ItemObject)->TryGetStringField(TEXT("command_type"), SubCommand)
+                || ManagesUndoBuffer(SubCommand) || SubCommand == TEXT("batch"))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
 TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
     // PIE-safety gate. It goes HERE and not in the queued work item -- where the PIE OWNERSHIP
@@ -1070,7 +1138,13 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
 
     try
     {
-        TSharedPtr<FJsonObject> ResultJson = McpCommandFamilies::Run(CommandType, Params);
+        TSharedPtr<FJsonObject> ResultJson;
+        {
+            const FScopedTransaction UndoStep(TEXT("UEAgent"),
+                FText::Format(NSLOCTEXT("UEAgent", "UndoStep", "UEAgent: {0}"), FText::FromString(CommandType)),
+                nullptr, McpUndoStep::ShouldWrap(CommandType, Params));
+            ResultJson = McpCommandFamilies::Run(CommandType, Params);
+        }
 
             // collateral-dirty attribution -- harvest (opt-in only; see the
             // McpCollateralDirty comment block near the top of this file for why this uses

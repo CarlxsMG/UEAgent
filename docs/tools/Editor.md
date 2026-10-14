@@ -143,7 +143,7 @@ Cheap yes/no on whether anything can be re-applied, plus the LABEL of the entry 
 
 No parameters.
 
-**Returns:** `{ can_redo: bool, label: string (title of the transaction redo would restore) }`
+**Returns:** `{ can_redo: bool, label: string (title of the transaction redo would restore), reason?: string (why not, when can_redo is false) }`
 
 ## `can_undo`
 
@@ -151,7 +151,7 @@ Cheap yes/no on whether anything is undoable right now, plus the LABEL of the en
 
 No parameters.
 
-**Returns:** `{ can_undo: bool, label: string (title of the transaction undo would revert) }`
+**Returns:** `{ can_undo: bool, label: string (title of the transaction undo would revert), reason?: string (why not, when can_undo is false) }`
 
 ## `cancel_transaction`
 
@@ -652,7 +652,7 @@ One call that answers everything you need before touching undo/redo: both counts
 
 No parameters.
 
-**Returns:** `{ can_undo, can_redo, undo_count, redo_count, next_undo, next_redo, transaction_open, transaction_index }`
+**Returns:** `{ can_undo, can_redo, undo_count (entries undo can still revert), redo_count (undone entries redo can restore), next_undo, next_redo, transaction_open, transaction_index }`
 
 ## `get_view_type`
 

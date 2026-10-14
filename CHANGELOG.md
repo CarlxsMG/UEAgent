@@ -7,6 +7,13 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - Documentation: architecture, FAQ, examples, and a Privacy section in the README, all on a website
   with search (carlxsmg.github.io/UEAgent). Questions go to GitHub Discussions.
 - A logo, and the plugin's icon in the editor's Plugins window.
+- Every tool call is one undo step, named after the tool: Ctrl+Z reverts a call, and a `batch` as a
+  whole. `mcp.UndoStepPerCall 0` turns it off.
+- `initialize` gives every agent short instructions (readback verdicts, refusals, `batch`), in the
+  full tool list too.
+- Fixed: the undo tools read the editor's undo buffer backwards. `get_undo_state` swapped the undo
+  and redo counts, `get_transaction_history` reported every entry as undone, and the labels of
+  `can_undo`, `can_redo` and `get_undo_state` came back empty.
 - `Tools/package_release.py` builds and self-tests the release archives, and RELEASING.md describes
   a release. The CI also checks the documentation's links and lints `Tools/`.
 

@@ -36,9 +36,10 @@ Streamable HTTP from inside the editor, with no Python or Node process in betwee
   - *preconditions* refuse the calls known to crash or freeze the editor, and say what to do instead;
   - *readback* re-reads the state after the call, and reports as failed a write that did not stick,
     a zero that proves nothing or a change that landed in the wrong PIE world.
-- **Safe with your content.** Vendored libraries listed as **Read Only Content Roots** cannot be
-  saved, renamed, moved or deleted by any tool, and calls that are unreliable while Play-in-Editor
-  runs are refused while it runs.
+- **Safe with your content.** Every tool call is one undo step, named after the tool, so Ctrl+Z
+  reverts it. Vendored libraries listed as **Read Only Content Roots** cannot be saved, renamed,
+  moved or deleted by any tool, and calls that are unreliable while Play-in-Editor runs are refused
+  while it runs.
 - **Built for real sessions.** Several agents can share one editor: protocol work runs on network
   threads, and every tool call runs on the game thread through one queue.
 
@@ -148,6 +149,7 @@ Unreal build it, or build the editor target from your IDE. When the editor start
 | `mcp.claude.status [path]` / `mcp.claude.connect [path]` | inspect / write the `.mcp.json` entry |
 | `mcp.contract.selftest <vectors.json> [quit]` | run the contract vectors (see `Resources/ContractTests`) |
 | `mcp.ReadOnlyRootEnforcement 0\|1` | 0 = only report saves under a read-only root instead of refusing them |
+| `mcp.UndoStepPerCall 0\|1` | 0 = leave the undo buffer to each tool instead of one undo step per call |
 
 ## Security
 
