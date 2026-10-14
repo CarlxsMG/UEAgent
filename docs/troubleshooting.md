@@ -52,5 +52,6 @@ from source (Visual Studio 2022 with the C++ toolchain).
 
 ## Still stuck
 
-Open an issue with the **Bug report** template, with the lines around the call from
+Ask in [Discussions](https://github.com/CarlxsMG/UEAgent/discussions/categories/q-a), or, if it looks
+like a bug, open an issue with the **Bug report** template and the lines around the call from
 `Saved/Logs/<Project>.log`.

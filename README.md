@@ -154,8 +154,9 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains how the
-code is organized, how a tool is added and what is checked before a change is merged.
+Questions and ideas go to [Discussions](https://github.com/CarlxsMG/UEAgent/discussions). Bug reports
+and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains how the code is organized,
+how a tool is added and what is checked before a change is merged.
 
 ## License
 
