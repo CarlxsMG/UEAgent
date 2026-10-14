@@ -932,9 +932,12 @@ def build(args) -> int:
             only_old = sorted(set(have) - set(want))
             changed = sorted(k for k in want.keys() & have.keys() if want[k] != have[k])
             print("CATALOG DRIFT vs C++ — re-run with --write")
-            if only_new: print(f"  missing in catalog: {only_new[:10]}")
-            if only_old: print(f"  stale in catalog:   {only_old[:10]}")
-            if changed: print(f"  param mismatch:     {changed[:10]}")
+            if only_new:
+                print(f"  missing in catalog: {only_new[:10]}")
+            if only_old:
+                print(f"  stale in catalog:   {only_old[:10]}")
+            if changed:
+                print(f"  param mismatch:     {changed[:10]}")
             return 1
         print("  catalog structurally in sync with the C++ bridge")
         return 0

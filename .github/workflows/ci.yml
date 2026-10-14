@@ -28,3 +28,27 @@ jobs:
         run: python Tools/codegen_pie_safety.py --check
       - name: Tool reference
         run: python Tools/codegen_tool_docs.py --check
+
+  docs:
+    name: Documentation links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Relative links and anchors
+        run: python Tools/check_doc_links.py
+
+  lint:
+    name: Python tools lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: ruff
+        run: |
+          pip install ruff==0.14.11
+          ruff check Tools

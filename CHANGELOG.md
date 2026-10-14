@@ -2,6 +2,13 @@
 
 Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+- Documentation: architecture, FAQ, examples, and a Privacy section in the README. Questions go to
+  GitHub Discussions.
+- `Tools/package_release.py` builds and self-tests the release archives, and RELEASING.md describes
+  a release. The CI also checks the documentation's links and lints `Tools/`.
+
 ## 1.0.0 - 2026-10-14
 
 First public release.

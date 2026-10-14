@@ -75,6 +75,8 @@ flowchart LR
 | "Cut a shot: camera cut, a fade in, and the intro sound at frame 0." | `create_level_sequence`, `add_camera_cut_track`, `add_fade_track_to_sequence`, `add_audio_section` |
 | "Which of my assets still reference the vendor pack, and which classes inherit from it?" | `audit_asset_references`, `audit_class_purity`, `run_map_check` |
 
+More in [Examples](docs/examples.md).
+
 ## Clients
 
 | Client | Notes |
@@ -95,6 +97,17 @@ For a client that cannot take the whole catalog, the server lists three meta-too
 Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
 by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then
 `?tools=full` gives one client the whole list back).
+
+## Documentation
+
+| | |
+|---|---|
+| [Clients](docs/clients.md) | Connecting Claude Code, Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI and Codex |
+| [Examples](docs/examples.md) | Prompts that work well, and the tools they use |
+| [Tool reference](docs/tools/README.md) | Every tool, by domain |
+| [FAQ](docs/faq.md) | Versions, safety, cost |
+| [Troubleshooting](docs/troubleshooting.md) | When a client cannot connect or a call is refused |
+| [Architecture](docs/architecture.md) | How a call travels through the editor, and the contract around it |
 
 ## Requirements
 
@@ -151,6 +164,12 @@ Unreal build it, or build the editor target from your IDE. When the editor start
   renaming, moving or deleting anything under the roots you list.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## Privacy
+
+UEAgent makes no network connection of its own: no telemetry, no analytics, no update checks. The
+server only listens on 127.0.0.1, and a tool's answer goes to the MCP client you connected, on the
+same machine. What that client then sends to its model provider is up to the client.
 
 ## Contributing
 

@@ -1,0 +1,19 @@
+# How GitHub groups the merged pull requests when it generates release notes
+# (`gh release create --generate-notes`, or "Generate release notes" on the web).
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: New tools and features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"

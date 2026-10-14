@@ -1,7 +1,8 @@
 # Contributing to UEAgent
 
 Thanks for helping. This file explains how the code is laid out, how a tool is added and what a
-change has to pass.
+change has to pass. How a call travels through the editor is in
+[docs/architecture.md](docs/architecture.md), and how a release is made in [RELEASING.md](RELEASING.md).
 
 ## Ground rules
 
@@ -55,7 +56,8 @@ A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` mar
 ## Before a pull request
 
 - The plugin builds with no warning of its own.
-- Every generator passes `--check`; CI runs them on each push.
+- Every generator passes `--check`; CI runs them on each push, with `Tools/check_doc_links.py` and
+  `ruff check Tools`.
 - The contract self-tests pass in the editor: `mcp.contract.selftest` on each vector file in
   `Resources/ContractTests`, and the automation test `Automation RunTests UEAgent.ClaudeCode`.
 - A change of behavior says how it was measured: the call before and after, in a headless editor
