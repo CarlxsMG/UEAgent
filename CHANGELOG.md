@@ -4,6 +4,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.1.0 - 2026-10-14
+
 - Documentation: architecture, FAQ, examples, and a Privacy section in the README, all on a website
   with search (carlxsmg.github.io/UEAgent). Questions go to GitHub Discussions.
 - A logo, and the plugin's icon in the editor's Plugins window.
