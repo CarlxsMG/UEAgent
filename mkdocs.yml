@@ -54,6 +54,7 @@ nav:
   - Home: index.md
   - Clients: clients.md
   - Examples: examples.md
+  - Skills: skills.md
   - Tool reference: tools/README.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md

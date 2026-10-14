@@ -1,0 +1,14 @@
+{
+  "name": "ueagent",
+  "displayName": "UEAgent",
+  "version": "1.1.0",
+  "description": "A skill that turns any Unreal Editor workflow into a reusable skill built on UEAgent's MCP tools, and three skills made with it.",
+  "author": {
+    "name": "CarlxsMG",
+    "url": "https://github.com/CarlxsMG"
+  },
+  "homepage": "https://carlxsmg.github.io/UEAgent/",
+  "repository": "https://github.com/CarlxsMG/UEAgent",
+  "license": "MIT",
+  "keywords": ["unreal-engine", "ue5", "mcp", "skills", "blueprints"]
+}

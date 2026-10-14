@@ -33,6 +33,7 @@ after.
 | | |
 |---|---|
 | [Examples](examples.md) | Prompts that work well, and the tools they use |
+| [Skills](skills.md) | The Claude Code plugin: a skill builder and three skills made with it |
 | [FAQ](faq.md) | Versions, safety, cost |
 | [Troubleshooting](troubleshooting.md) | When a client cannot connect or a call is refused |
 | [Architecture](architecture.md) | How a call travels through the editor, and the contract around it |

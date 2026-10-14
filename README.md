@@ -97,6 +97,23 @@ With `?tools=compact` at the end of the URL, the server lists three tools that s
 run the rest, for clients that cap how many tools a server may list: see
 [compact tool list](docs/clients.md#compact-tool-list).
 
+## Claude Code skills
+
+This repository is also a Claude Code plugin marketplace. Install its plugin in Claude Code:
+
+```
+/plugin install ueagent --marketplace CarlxsMG/UEAgent
+```
+
+| Skill | |
+|---|---|
+| `/ueagent:skill-builder` | Turns a workflow you want to repeat into a new skill: it finds the tools, rehearses the task in the editor, checks the result and writes the `SKILL.md` |
+| `/ueagent:blueprint-actor` | A Blueprint actor from a description: components, graph, a clean compile, and an instance in the level |
+| `/ueagent:project-audit` | What is broken and what can go, most serious first |
+| `/ueagent:level-lighting` | Outdoor lighting (sun, sky, sky light, fog) and a screenshot |
+
+Claude also loads them by itself when a request matches. More in [Skills](docs/skills.md).
+
 ## Documentation
 
 Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
@@ -105,6 +122,7 @@ Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.gith
 |---|---|
 | [Clients](docs/clients.md) | Connecting Claude Code, Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI and Codex |
 | [Examples](docs/examples.md) | Prompts that work well, and the tools they use |
+| [Skills](docs/skills.md) | The Claude Code plugin: a skill builder and three skills made with it |
 | [Tool reference](docs/tools/README.md) | Every tool, by domain |
 | [FAQ](docs/faq.md) | Versions, safety, cost |
 | [Troubleshooting](docs/troubleshooting.md) | When a client cannot connect or a call is refused |

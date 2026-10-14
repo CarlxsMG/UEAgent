@@ -1,0 +1,15 @@
+{
+  "name": "ueagent",
+  "description": "Claude Code skills for UEAgent, the MCP server built into the Unreal Editor.",
+  "owner": {
+    "name": "CarlxsMG",
+    "url": "https://github.com/CarlxsMG"
+  },
+  "plugins": [
+    {
+      "name": "ueagent",
+      "source": "./claude-code",
+      "description": "A skill that turns any Unreal Editor workflow into a reusable skill built on UEAgent's tools, and three skills made with it: a Blueprint actor, a project audit and level lighting."
+    }
+  ]
+}

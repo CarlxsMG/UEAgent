@@ -4,6 +4,11 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+- A Claude Code plugin, `ueagent`, installed from this repository
+  (`/plugin install ueagent --marketplace CarlxsMG/UEAgent`): `skill-builder` turns an editor
+  workflow into a new skill, and `blueprint-actor`, `project-audit` and `level-lighting` are skills
+  made with it.
+
 ## 1.1.0 - 2026-10-14
 
 - Documentation: architecture, FAQ, examples, and a Privacy section in the README, all on a website

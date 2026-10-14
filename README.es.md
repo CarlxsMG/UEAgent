@@ -102,6 +102,23 @@ Con `?tools=compact` al final de la URL, el servidor lista tres herramientas que
 ejecutan el resto, para los clientes que limitan cuántas herramientas puede listar un servidor:
 consulta la [lista compacta](docs/clients.md#compact-tool-list).
 
+## Skills de Claude Code
+
+Este repositorio también es un marketplace de plugins de Claude Code. Instala su plugin en Claude Code:
+
+```
+/plugin install ueagent --marketplace CarlxsMG/UEAgent
+```
+
+| Skill | |
+|---|---|
+| `/ueagent:skill-builder` | Convierte un flujo que quieres repetir en una skill nueva: busca las herramientas, ensaya la tarea en el editor, comprueba el resultado y escribe el `SKILL.md` |
+| `/ueagent:blueprint-actor` | Un actor Blueprint a partir de una descripción: componentes, grafo, compilación limpia y una instancia en el nivel |
+| `/ueagent:project-audit` | Qué está roto y qué sobra, de lo más grave a lo menos |
+| `/ueagent:level-lighting` | Iluminación exterior (sol, cielo, sky light, niebla) y una captura |
+
+Claude también las carga solo cuando una petición encaja. Más en [Skills](docs/skills.md).
+
 ## Documentación
 
 También en la web, con buscador: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
@@ -110,6 +127,7 @@ También en la web, con buscador: [carlxsmg.github.io/UEAgent](https://carlxsmg.
 |---|---|
 | [Clients](docs/clients.md) | Conectar Claude Code, Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI y Codex |
 | [Examples](docs/examples.md) | Peticiones que funcionan bien, y las herramientas que usan |
+| [Skills](docs/skills.md) | El plugin de Claude Code: un constructor de skills y tres skills hechas con él |
 | [Tool reference](docs/tools/README.md) | Todas las herramientas, por dominio |
 | [FAQ](docs/faq.md) | Versiones, seguridad, coste |
 | [Troubleshooting](docs/troubleshooting.md) | Cuando un cliente no conecta o una llamada se rechaza |
