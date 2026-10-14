@@ -4,8 +4,9 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
-- Documentation: architecture, FAQ, examples, and a Privacy section in the README. Questions go to
-  GitHub Discussions.
+- Documentation: architecture, FAQ, examples, and a Privacy section in the README, all on a website
+  with search (carlxsmg.github.io/UEAgent). Questions go to GitHub Discussions.
+- A logo, and the plugin's icon in the editor's Plugins window.
 - `Tools/package_release.py` builds and self-tests the release archives, and RELEASING.md describes
   a release. The CI also checks the documentation's links and lints `Tools/`.
 

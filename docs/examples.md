@@ -67,5 +67,5 @@ itself: the lists only show what each task touches. Every tool is described in t
 
 - Name things exactly: `/Game/Characters/BP_Hero` beats "the hero".
 - After a graph edit, ask the agent to compile and fix what the compiler reports.
-- For a client that cannot take every tool, use the [compact tool list](../README.md#compact-tool-list):
+- For a client that cannot take every tool, use the [compact tool list](clients.md#compact-tool-list):
   the agent then finds these tools with `find_tools`.

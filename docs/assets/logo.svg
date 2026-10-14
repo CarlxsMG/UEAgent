@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>UEAgent</title>
+  <defs>
+    <linearGradient id="ueagent-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2A2F7A"/>
+      <stop offset="1" stop-color="#0B0E26"/>
+    </linearGradient>
+    <linearGradient id="ueagent-wire" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#ueagent-bg)"/>
+  <path d="M30 100 L64 26 L98 100" fill="none" stroke="url(#ueagent-wire)" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M46 72 C58 59 70 85 82 72" fill="none" stroke="#FFFFFF" stroke-width="6.5" stroke-linecap="round"/>
+  <circle cx="46" cy="72" r="6.5" fill="#FFFFFF"/>
+  <circle cx="82" cy="72" r="6.5" fill="#FFFFFF"/>
+  <path d="M100 18 l4 9 9 4 -9 4 -4 9 -4 -9 -9 -4 9 -4 z" fill="#22D3EE"/>
+</svg>

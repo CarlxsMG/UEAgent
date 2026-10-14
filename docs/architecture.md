@@ -1,7 +1,7 @@
 # Architecture
 
 How a call travels from an MCP client to the editor and back, and the contract around it. For the
-code layout and how to add a tool, see [CONTRIBUTING.md](../CONTRIBUTING.md).
+code layout and how to add a tool, see [CONTRIBUTING.md](https://github.com/CarlxsMG/UEAgent/blob/main/CONTRIBUTING.md).
 
 ```mermaid
 flowchart LR

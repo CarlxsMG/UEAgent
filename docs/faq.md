@@ -16,7 +16,8 @@ Building from source needs Visual Studio 2022 with the C++ toolchain.
 
 ## Does it cost anything?
 
-No. UEAgent is free and open source under the [MIT License](../LICENSE), for personal and commercial
+No. UEAgent is free and open source under the
+[MIT License](https://github.com/CarlxsMG/UEAgent/blob/main/LICENSE), for personal and commercial
 projects alike. The MCP client and the model behind it may have costs of their own.
 
 ## Does it send my project anywhere?
@@ -33,7 +34,7 @@ to the clients you configure. Calls known to crash or freeze the editor are refu
 But a connected agent acts with the editor's rights: it can run Python, save, rename and delete
 assets, and launch processes. Keep the project under source control, and list vendored content in
 **Read Only Content Roots** so that no tool can save, rename, move or delete it. See
-[Security](../README.md#security).
+[Security](https://github.com/CarlxsMG/UEAgent/blob/main/README.md#security).
 
 ## Which clients work?
 
@@ -43,7 +44,7 @@ Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI and Codex.
 ## My client cannot take 2,000 tools
 
 Connect it with `?tools=compact` at the end of the URL: it then lists three tools that search,
-describe and run the rest. See [Compact tool list](../README.md#compact-tool-list).
+describe and run the rest. See [Compact tool list](clients.md#compact-tool-list).
 
 ## Can several agents use the same editor?
 

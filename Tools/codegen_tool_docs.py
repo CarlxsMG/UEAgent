@@ -72,7 +72,7 @@ def index_page(domains: list[dict]) -> str:
     total = sum(len(d["commands"]) for d in domains)
     lines = [HEADER, "", "# Tool reference", "",
              f"{total} tools in {len(domains)} domains. Every tool also describes itself over MCP "
-             "(`tools/list`, or `describe_tool` in the [compact tool list](../../README.md#compact-tool-list)); "
+             "(`tools/list`, or `describe_tool` in the [compact tool list](../clients.md#compact-tool-list)); "
              "this reference is the same catalog, readable.", "",
              "| Domain | Tools | Some of them |", "|---|---|---|"]
     for d in domains:

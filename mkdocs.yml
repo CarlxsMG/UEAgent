@@ -1,0 +1,60 @@
+# The documentation site (https://carlxsmg.github.io/UEAgent/), built from docs/ by
+# .github/workflows/docs.yml with Material for MkDocs.
+site_name: UEAgent
+site_description: The MCP server for Unreal Engine 5, built into the editor.
+site_url: https://carlxsmg.github.io/UEAgent/
+repo_url: https://github.com/CarlxsMG/UEAgent
+repo_name: CarlxsMG/UEAgent
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 CarlxsMG. Released under the MIT License.
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Clients: clients.md
+  - Examples: examples.md
+  - Tool reference: tools/README.md
+  - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
+  - Architecture: architecture.md

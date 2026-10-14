@@ -3,6 +3,7 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
+site/
 *.pdb
 
 # Contract self-test reports (mcp.contract.selftest writes them next to each vector file)

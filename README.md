@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="UEAgent logo" width="120">
+</p>
+
 <h1 align="center">UEAgent</h1>
 
 <p align="center">
@@ -12,6 +16,7 @@
   <img alt="2,000+ tools" src="https://img.shields.io/badge/tools-2%2C000%2B-2EA44F">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Docs" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
 </p>
 
 ---
@@ -82,23 +87,15 @@ More in [Examples](docs/examples.md).
 | Client | Notes |
 |---|---|
 | Claude Code | One-click connection from the editor's status bar. Loads tools on demand, so the full catalog is fine. |
-| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Any client with Streamable HTTP: see [the setup for each one](docs/clients.md). A client that loads every tool up front needs the [compact tool list](#compact-tool-list). |
+| Cursor, VS Code, Windsurf, Claude Desktop, Gemini CLI, Codex | Any client with Streamable HTTP: see [the setup for each one](docs/clients.md). A client that loads every tool up front needs the [compact tool list](docs/clients.md#compact-tool-list). |
 
-### Compact tool list
-
-For a client that cannot take the whole catalog, the server lists three meta-tools instead:
-
-| Tool | |
-|---|---|
-| `find_tools` | searches the tools by words and/or domain; with no arguments, lists the domains |
-| `describe_tool` | one tool's description and input schema |
-| `call_tool` | runs a tool by name, with the same checks and readback as a direct call |
-
-Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
-by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then
-`?tools=full` gives one client the whole list back).
+With `?tools=compact` at the end of the URL, the server lists three tools that search, describe and
+run the rest, for clients that cap how many tools a server may list: see
+[compact tool list](docs/clients.md#compact-tool-list).
 
 ## Documentation
+
+Also on the web, with search: [carlxsmg.github.io/UEAgent](https://carlxsmg.github.io/UEAgent/).
 
 | | |
 |---|---|

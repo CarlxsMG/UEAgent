@@ -5,8 +5,21 @@ While the editor is open, UEAgent serves MCP over Streamable HTTP at `http://127
 Streamable HTTP can connect.
 
 Every client below except Claude Code loads all the tools up front, so the examples ask for the
-[compact tool list](../README.md#compact-tool-list) with `?tools=compact`: three meta-tools that
-search, describe and run the rest. Remove it to give a client every tool.
+[compact tool list](#compact-tool-list) with `?tools=compact`. Remove it to give a client every tool.
+
+## Compact tool list
+
+For a client that cannot take the whole catalog, the server lists three meta-tools instead:
+
+| Tool | |
+|---|---|
+| `find_tools` | Searches the tools by words and/or domain; with no arguments, lists the domains |
+| `describe_tool` | One tool's description and input schema |
+| `call_tool` | Runs a tool by name, with the same checks and readback as a direct call |
+
+Ask for it per client with the URL `http://127.0.0.1:55561/mcp?tools=compact`, or for every client
+by starting the editor with the environment variable `UEAGENT_TOOLS=compact` (then `?tools=full`
+gives one client the whole list back).
 
 ## Claude Code
 

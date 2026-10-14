@@ -2,7 +2,7 @@
 
 # Tool reference
 
-2097 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` in the [compact tool list](../../README.md#compact-tool-list)); this reference is the same catalog, readable.
+2097 tools in 55 domains. Every tool also describes itself over MCP (`tools/list`, or `describe_tool` in the [compact tool list](../clients.md#compact-tool-list)); this reference is the same catalog, readable.
 
 | Domain | Tools | Some of them |
 |---|---|---|
