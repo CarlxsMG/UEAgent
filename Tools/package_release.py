@@ -61,7 +61,7 @@ def export_head(destination: Path) -> str:
 def build_plugin(engine: Path, source: Path, package: Path, log: Path) -> None:
     run_uat = engine / "Engine" / "Build" / "BatchFiles" / "RunUAT.bat"
     command = [str(run_uat), "BuildPlugin", f"-Plugin={source / 'UEAgent.uplugin'}", f"-Package={package}",
-               "-TargetPlatforms=Win64", "-WaitMutex"]  # wait for another AutomationTool rather than fail
+               "-TargetPlatforms=Win64", "-WaitForUATMutex"]  # wait for another AutomationTool rather than fail
     if (engine / "Engine" / "Build" / "InstalledBuild.txt").exists():
         command.append("-Rocket")  # an installed engine (Epic Games Launcher), not a source build
     print(f"BuildPlugin ... (log: {log})")
