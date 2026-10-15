@@ -68,6 +68,12 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   a context and a key, which that form takes neither of. Its `trigger_type`, and the `modifier_type`
   of `add_input_modifier`, are required in the schema instead of being refused by the handler, and a
   key with no context is refused rather than read as the action.
+- A call that passes only the other spelling of a required parameter reaches the tool, which accepts
+  it: the catalog marks each other spelling of an alias chain `aliasOf` the required one, and the
+  server counts any of them, as it does for the dispatcher's aliases. `export_data_table_as_json`
+  with only `data_table` was refused with "missing required parameter 'table_path'". That covers 81
+  required parameters of 53 tools: the schema no longer lists them as required, and a call with no
+  spelling of one is refused naming all of them.
 
 ## 1.1.0 - 2026-10-14
 

@@ -99,8 +99,9 @@ REQUIRED_RE = re.compile(
 # fails only if BOTH are missing, so ONE is enough. (Two real requirements are written
 # with `||`, which does not match here.) Marking them all `required` would make a correct
 # call IMPOSSIBLE: the schema would demand both names -- send one and it asks for the other.
-# So the FIRST read of the chain stays `required` and the rest become OPTIONAL ALIASES,
-# which is also accurate: the handler really accepts any of them.
+# So ONE member of the chain stays `required` (`_prefer_documented` picks which) and the rest
+# become OPTIONAL ALIASES, each marked `aliasOf` it (`_mark_aliases`). The server reads that
+# mark to accept any spelling for the required one, which is what the handler does.
 _NEG_READ_RE = re.compile(
     r'!\s*Params\s*->\s*(?:Try)?Get'
     r'(?:String|Number|Integer|Bool|Array|Object|StringArray)Field'
@@ -165,6 +166,27 @@ def _prefer_documented(params: list[dict], chains: dict[str, str]) -> None:
             doc["required"] = True
 
 
+def _mark_aliases(params: list[dict], chains: dict[str, str]) -> None:
+    """Mark each other spelling of a chain `aliasOf` the member that represents it.
+
+    That member is the required one, or the first one published when no member is
+    required. The flag stays on that member alone, so the server would refuse a call
+    that passes only an alias although the handler accepts it: the server reads
+    `aliasOf` (FMcpToolCatalog::LoadFromFile, Tools/catalog_server.py) to drop the
+    member from the schema's `required` and to accept any spelling of it, as it does
+    for the dispatcher's alias table."""
+    by_chain: dict[str, list[dict]] = {}
+    for p in params:
+        key = chains.get(p["name"])
+        if key:
+            by_chain.setdefault(key, []).append(p)
+    for members in by_chain.values():
+        canonical = next((p for p in members if p.get("required")), members[0])
+        for p in members:
+            if p is not canonical:
+                p["aliasOf"] = canonical["name"]
+
+
 def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
     """The params a command publishes, built from the C++ alone.
 
@@ -192,6 +214,7 @@ def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
     # documents -- otherwise the schema demands an undocumented alias and leaves
     # optional the only one that says what it is for.
     _prefer_documented(params, chains)
+    _mark_aliases(params, chains)
     params.sort(key=lambda p: not p.get("required", False))
     return params
 
@@ -920,12 +943,12 @@ def build(args) -> int:
     }
 
     # 5b) Check mode: compare the STRUCTURAL surface (commands + params
-    # names/types/required) against the on-disk catalog. Descriptions are
+    # names/types/required/aliasOf) against the on-disk catalog. Descriptions are
     # prose, so they're ignored. Non-zero exit on drift.
     if getattr(args, "check", False):
         def surface(cat):
             return {
-                c["name"]: [(p["name"], p.get("jsonType"), bool(p.get("required")))
+                c["name"]: [(p["name"], p.get("jsonType"), bool(p.get("required")), p.get("aliasOf"))
                             for p in c.get("params", [])]
                 for d in cat.get("domains", []) for c in d.get("commands", [])
             }
