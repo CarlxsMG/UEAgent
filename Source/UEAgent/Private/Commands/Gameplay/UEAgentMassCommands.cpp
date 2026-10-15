@@ -250,10 +250,10 @@ TSharedPtr<FJsonObject> HandleCreateMassEntityConfig(
 // ---------------------------------------------------------------------------
 // add_mass_trait
 // ---------------------------------------------------------------------------
-// MCP:add_mass_trait - Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, nothing is added, though added is still true (compare trait_count). trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
+// MCP:add_mass_trait - Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
 //   @param config_path - Asset path to the UMassEntityConfig
 //   @param trait_class - Trait class name to add (e.g. UMassMovementTrait)
-//   @returns { config_path, trait_class, trait_path, trait_count, added, saved }
+//   @returns { config_path, trait_class, trait_path, trait_count, added, already_existed, saved }
 TSharedPtr<FJsonObject> HandleAddMassTrait(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -276,12 +276,30 @@ TSharedPtr<FJsonObject> HandleAddMassTrait(
 		return Error;
 	}
 
+	// UMassEntityConfigAsset::AddTrait returns the trait of exactly that class when the config already holds one,
+	// without adding anything, so the existing trait is looked up first (same exact-class match) and reported as
+	// a no-op: nothing is added and nothing is saved.
+	if (const UMassEntityTraitBase* Existing = Config->GetConfig().FindTrait(TraitClass, /*bExactMatch=*/true))
+	{
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("config_path"), Config->GetPathName());
+		Data->SetStringField(TEXT("trait_class"), TraitClass->GetName());
+		Data->SetStringField(TEXT("trait_path"), Existing->GetPathName());
+		Data->SetNumberField(TEXT("trait_count"), Config->GetConfig().GetTraits().Num());
+		Data->SetBoolField(TEXT("added"), false);
+		Data->SetBoolField(TEXT("already_existed"), true);
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	const int32 TraitCountBefore = Config->GetConfig().GetTraits().Num();
 	UMassEntityTraitBase* NewTrait = Config->AddTrait(TraitClass);
 	if (!NewTrait)
 	{
 		return mcp_common::MakeErrorReply(
 			TEXT("AddTrait returned null (trait is abstract or factory failed)"));
 	}
+	const int32 TraitCount = Config->GetConfig().GetTraits().Num();
 	Config->MarkPackageDirty();
 	const bool bSaved = mcp_common::SaveAssetPackage(Config->GetPackage(), Config);
 
@@ -289,8 +307,9 @@ TSharedPtr<FJsonObject> HandleAddMassTrait(
 	Data->SetStringField(TEXT("config_path"), Config->GetPathName());
 	Data->SetStringField(TEXT("trait_class"), TraitClass->GetName());
 	Data->SetStringField(TEXT("trait_path"), NewTrait->GetPathName());
-	Data->SetNumberField(TEXT("trait_count"), Config->GetConfig().GetTraits().Num());
-	Data->SetBoolField(TEXT("added"), true);
+	Data->SetNumberField(TEXT("trait_count"), TraitCount);
+	Data->SetBoolField(TEXT("added"), TraitCount > TraitCountBefore);
+	Data->SetBoolField(TEXT("already_existed"), false);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_mass_trait"));
 }
 

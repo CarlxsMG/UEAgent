@@ -8,14 +8,14 @@
 
 *Additive, idempotent.*
 
-Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, nothing is added, though added is still true (compare trait_count). trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
+Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, itself or through its parent config chain, nothing is added or saved and the reply has added=false, already_existed=true and that trait's trait_path. trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `config_path` | string | yes | Asset path to the UMassEntityConfig |
 | `trait_class` | string | yes | Trait class name to add (e.g. UMassMovementTrait) |
 
-**Returns:** `{ config_path, trait_class, trait_path, trait_count, added, saved }`
+**Returns:** `{ config_path, trait_class, trait_path, trait_count, added, already_existed, saved }`
 
 ## `add_mass_trait_to_entity`
 

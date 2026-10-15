@@ -4711,10 +4711,15 @@ namespace
         {
             return nullptr;
         }
-        // First try as a class name in any loaded package.
+        // First try as a class name in any loaded package. A short name such as "StaticMesh" or "Texture"
+        // also names an engine class (UStaticMesh, UTexture), so only a data interface class is taken here;
+        // anything else falls through to the /Script/Niagara lookup below.
         if (UClass* Found = FindFirstObject<UClass>(*InType))
         {
-            return Found;
+            if (Found->IsChildOf(UNiagaraDataInterface::StaticClass()))
+            {
+                return Found;
+            }
         }
         // Fallback: load from /Script/Niagara.* if short name.
         const FString FullPath = FString::Printf(TEXT("/Script/Niagara.NiagaraDataInterface%s"),
@@ -4774,11 +4779,11 @@ namespace
 // pass the SHORT name (no "User." prefix) and we add it as-is - same pattern
 // as HandleSetNiagaraUserParameter.
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_data_interface - Add a new UNiagaraDataInterface user-parameter binding to a Niagara system.
+// MCP:add_niagara_data_interface - Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (added false, already_exists true, nothing saved); one with this name and any other type is an error. The inverse is remove_niagara_data_interface.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the new user-parameter (no "User." prefix)
-//   @param data_interface_class - Data interface class name (e.g. "StaticMesh", "Texture"); resolved from /Script/Niagara.NiagaraDataInterface<Name> if not already loaded
-//   @returns { system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool }
+//   @param data_interface_class - Data interface class name (e.g. "StaticMesh", "Texture"): a loaded data interface class with that name, else /Script/Niagara.NiagaraDataInterface<Name>
+//   @returns { system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddNiagaraDataInterface(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4811,14 +4816,30 @@ TSharedPtr<FJsonObject> HandleAddNiagaraDataInterface(const TSharedPtr<FJsonObje
     const FNiagaraTypeDefinition TypeDef(DIClass);
     const FNiagaraVariable NewVar(TypeDef, FName(*ParameterName));
 
+    // The store keys parameters by name AND type, so AddParameter would add a second user parameter of the
+    // same name next to one of another type. The lookup is by name only: the same class is the state asked
+    // for (nothing is written or saved), any other type is an error.
     FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
-    if (Exposed.FindParameterVariable(NewVar))
+    if (const FNiagaraVariableWithOffset* Existing = Exposed.FindParameterVariable(NewVar, /*IgnoreType=*/true))
     {
+        const FNiagaraTypeDefinition ExistingType = Existing->GetType();
+        if (ExistingType.GetClass() != DIClass)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("User parameter '%s' already exists with type '%s', not '%s'; remove it first to change its type"),
+                *ParameterName, *ExistingType.GetName(), *DIClass->GetName()));
+        }
         TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
         Result->SetStringField(TEXT("data_interface_class"), DIClass->GetName());
+        Result->SetBoolField(TEXT("added"), false);
         Result->SetBoolField(TEXT("already_exists"), true);
+        Result->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Result);
     }
+
+    // The exposed store is a property of the system, so the system is what the transaction records.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddNiagaraDI", "Add Niagara Data Interface (MCP)"));
+    System->Modify();
 
     int32 NewOffset = INDEX_NONE;
     const bool bAdded = Exposed.AddParameter(NewVar, /*bInitialize=*/true, /*bTriggerRebind=*/true, &NewOffset);
@@ -4829,22 +4850,24 @@ TSharedPtr<FJsonObject> HandleAddNiagaraDataInterface(const TSharedPtr<FJsonObje
     }
 
     System->RequestCompile(true);
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
     Result->SetStringField(TEXT("data_interface_class"), DIClass->GetName());
     Result->SetStringField(TEXT("data_interface_class_path"), DIClass->GetPathName());
     Result->SetNumberField(TEXT("offset"), NewOffset);
     Result->SetBoolField(TEXT("added"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("add_niagara_data_interface"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // remove_niagara_data_interface
 // ---------------------------------------------------------------------------
-// MCP:remove_niagara_data_interface - Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name.
+// MCP:remove_niagara_data_interface - Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name, inside an undo transaction, request a recompile and save the system; success requires the save. A name with no user parameter, or a user parameter that is not a data interface, is an error and nothing is changed.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter to remove (no "User." prefix)
-//   @returns { system_path: string, parameter_name: string, removed: bool }
+//   @returns { system_path: string, parameter_name: string, data_interface_class: string, removed: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4857,30 +4880,48 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonO
 
     FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
     const FNiagaraTypeDefinition DITypeDef(UNiagaraDataInterface::StaticClass());
-    FNiagaraVariable VarToRemove(DITypeDef, FName(*ParameterName));
     // The redirect store keys its TMap by short name and the value carries the
     // FULL "User.X" variable with the concrete DI subclass as its type. Our wire
     // payload only knows the short name + the base UNiagaraDataInterface type,
     // so the type-strict operator== on the TMap would fail. Use IgnoreType=true
     // for the name-only lookup, then rebuild the FNiagaraVariable from the
     // resolved entry so RemoveParameter sees the exact stored signature.
-    const FNiagaraVariableWithOffset* Found = Exposed.FindParameterVariable(VarToRemove, /*IgnoreType=*/true);
-    if (Found)
-    {
-        VarToRemove = FNiagaraVariable(Found->GetType(), Found->GetName());
-    }
-    const bool bRemoved = Exposed.RemoveParameter(VarToRemove);
-    if (!bRemoved)
+    const FNiagaraVariableWithOffset* Found =
+        Exposed.FindParameterVariable(FNiagaraVariable(DITypeDef, FName(*ParameterName)), /*IgnoreType=*/true);
+    if (!Found)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Failed to remove parameter '%s' (not found)"), *ParameterName));
     }
+    // The name-only lookup also finds user parameters of any other type; this tool only removes data interfaces.
+    if (!Found->IsDataInterface())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("User parameter '%s' is a '%s', not a data interface; nothing was removed"),
+            *ParameterName, *Found->GetType().GetName()));
+    }
+    const FNiagaraVariable VarToRemove(Found->GetType(), Found->GetName());
+    const FString DIClassName = Found->GetType().GetName();
+
+    // The exposed store is a property of the system, so the system is what the transaction records.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveNiagaraDI", "Remove Niagara Data Interface (MCP)"));
+    System->Modify();
+
+    const bool bRemoved = Exposed.RemoveParameter(VarToRemove);
+    if (!bRemoved)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Failed to remove parameter '%s' of type '%s'"), *ParameterName, *DIClassName));
+    }
 
     System->RequestCompile(true);
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
+    Result->SetStringField(TEXT("data_interface_class"), DIClassName);
     Result->SetBoolField(TEXT("removed"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_niagara_data_interface"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -4933,12 +4974,12 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
 // UNiagaraDataInterfaceTexture). Uses reflection: we FindPropertyByName
 // the DI's UPROPERTY that matches the asset class.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_asset - Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), then requests a system recompile. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error. The tool does not save the system, mark it dirty or open an undo transaction: persist it with save_asset. For non-asset fields use set_niagara_data_interface_default.
+// MCP:set_niagara_data_interface_asset - Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), inside an undo transaction, reads it back, requests a system recompile and saves the system; success requires the read-back and the save. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error and nothing is written. For non-asset fields use set_niagara_data_interface_default.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter DI to mutate
 //   @param asset_path - Asset path of the UObject to assign (must be the right subclass)
 //   @param property_name - Optional FObjectProperty name on the DI; defaults to the first FObjectProperty
-//   @returns { system_path: string, parameter_name: string, property_name: string, asset_path: string, set: bool }
+//   @returns { system_path: string, parameter_name: string, property_name: string, asset_path: string, set: bool (the property reads back the asset), saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5002,14 +5043,31 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceAsset(const TSharedPtr<FJso
             FString::Printf(TEXT("Asset '%s' is not a %s"), *AssetPath, *ConcreteObjProp->PropertyClass->GetName()));
     }
 
-    ConcreteObjProp->SetObjectPropertyValue(ConcreteObjProp->ContainerPtrToValuePtr<void>(DI), Asset);
+    // The DI is a subobject of the system: both are recorded so the edit can be undone, and the system's
+    // package is what gets saved.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraDIAsset", "Set Niagara DI Asset (MCP)"));
+    System->Modify();
+    DI->Modify();
+
+    void* ValuePtr = ConcreteObjProp->ContainerPtrToValuePtr<void>(DI);
+    ConcreteObjProp->SetObjectPropertyValue(ValuePtr, Asset);
+    const bool bSet = ConcreteObjProp->GetObjectPropertyValue(ValuePtr) == Asset;
     System->RequestCompile(true);
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
     Result->SetStringField(TEXT("property_name"), ObjProp->GetName());
     Result->SetStringField(TEXT("asset_path"), Asset->GetPathName());
-    Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("set"), bSet);
+    if (!bSet)
+    {
+        mcp_common::AddSaveOutcome(Result, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(
+            TEXT("set_niagara_data_interface_asset: property '%s' does not read back '%s'"),
+            *ObjProp->GetName(), *Asset->GetPathName()));
+    }
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_asset"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5018,12 +5076,12 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceAsset(const TSharedPtr<FJso
 // on the DI's user-exposed defaults, distinct from the bound asset above).
 // Uses ImportText_Direct against an arbitrary property by name.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_default - Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), then requests a system recompile. A missing DI or property, or text that does not parse, is an error. The tool does not save the system, mark it dirty or open an undo transaction (persist with save_asset); value is echoed, not read back. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
+// MCP:set_niagara_data_interface_default - Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter DI to mutate
 //   @param property_name - Name of the FProperty on the DI to set
 //   @param value - String representation of the value (parsed by FProperty::ImportText_Direct)
-//   @returns { system_path: string, parameter_name: string, property_name: string, value: string, set: bool }
+//   @returns { system_path: string, parameter_name: string, property_name: string, value: string, value_read_back: string, set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceDefault(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5051,19 +5109,38 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceDefault(const TSharedPtr<FJ
             FString::Printf(TEXT("Property '%s' not found on %s"), *PropertyName, *DI->GetClass()->GetName()));
     }
     void* Addr = Prop->ContainerPtrToValuePtr<void>(DI);
-    // FProperty has ImportText_Direct, not ImportText.
-    if (!Prop->ImportText_Direct(*Value, Addr, DI, PPF_None))
+
+    // Parse into a copy first: ImportText_Direct can write part of a struct before it fails, and a value that
+    // does not parse must leave the DI untouched. FProperty has ImportText_Direct, not ImportText.
+    void* Parsed = Prop->AllocateAndInitializeValue();
+    Prop->CopySingleValue(Parsed, Addr);
+    if (!Prop->ImportText_Direct(*Value, Parsed, DI, PPF_None))
     {
+        Prop->DestroyAndFreeValue(Parsed);
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Failed to parse value '%s' as %s"), *Value, *Prop->GetClass()->GetName()));
     }
+
+    // The DI is a subobject of the system: both are recorded so the edit can be undone, and the system's
+    // package is what gets saved.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraDIDefault", "Set Niagara DI Default (MCP)"));
+    System->Modify();
+    DI->Modify();
+    Prop->CopySingleValue(Addr, Parsed);
+    Prop->DestroyAndFreeValue(Parsed);
+
+    FString ReadBack;
+    Prop->ExportTextItem_Direct(ReadBack, Addr, nullptr, DI, PPF_None);
     System->RequestCompile(true);
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
     Result->SetStringField(TEXT("property_name"), Prop->GetName());
     Result->SetStringField(TEXT("value"), Value);
+    Result->SetStringField(TEXT("value_read_back"), ReadBack);
     Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_default"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5122,12 +5199,12 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaceInfo(const TSharedPtr<FJson
 // for ColorCurve, "XCurve"/"YCurve"/"ZCurve" for VectorCurve). We resolve it by
 // reflection, replace its keys, then rebuild the DI's LUT via the curve base.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_curve - Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.
+// MCP:set_niagara_data_interface_curve - Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system, inside an undo transaction that records the DI; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter curve DI (no "User." prefix)
 //   @param keys - Array of { time: number, value: number } keys to set (replaces all existing keys on the channel)
 //   @param curve_property - Optional FRichCurve UPROPERTY to author (default "Curve"; e.g. "RedCurve"/"XCurve" on Color/Vector curve DIs)
-//   @returns { system_path: string, parameter_name: string, curve_property: string, key_count: int, keys: [{time,value}], set: bool, saved: bool }
+//   @returns { system_path: string, parameter_name: string, curve_property: string, key_count: int, keys: [{time,value}], set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString SystemPath;
@@ -5159,8 +5236,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceCurve(const TSharedPtr<FJso
                 *CurvePropName, *DI->GetClass()->GetName()));
     }
 
+    // The curve lives on the DI, a subobject of the system: both are recorded so the edit can be undone.
     const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraDICurve", "Set Niagara DI Curve (MCP)"));
     System->Modify();
+    DI->Modify();
 
     FRichCurve* Curve = CurveProp->ContainerPtrToValuePtr<FRichCurve>(DI);
     Curve->Reset();
@@ -5199,7 +5278,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceCurve(const TSharedPtr<FJso
     Result->SetNumberField(TEXT("key_count"), Curve->GetNumKeys());
     Result->SetArrayField(TEXT("keys"), OutKeys);
     Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_curve"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_curve"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5214,7 +5293,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceCurve(const TSharedPtr<FJso
 //   @param parameter_name - Short name of the user-parameter array DI (no "User." prefix)
 //   @param values - Array of numbers to store (replaces all existing array contents)
 //   @param array_property - Optional array UPROPERTY to set (default "FloatData"; e.g. "IntData" for the int32 array DI)
-//   @returns { system_path: string, parameter_name: string, array_property: string, element_type: string, count: int, values: [number], set: bool, saved: bool }
+//   @returns { system_path: string, parameter_name: string, array_property: string, element_type: string, count: int, values: [number], set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceArray(const TSharedPtr<FJsonObject>& Params)
 {
     FString SystemPath;
@@ -5252,8 +5331,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceArray(const TSharedPtr<FJso
                 *ArrayPropName, *DI->GetClass()->GetName(), *ArrProp->Inner->GetClass()->GetName()));
     }
 
+    // The array lives on the DI, a subobject of the system: both are recorded so the edit can be undone.
     const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraDIArray", "Set Niagara DI Array (MCP)"));
     System->Modify();
+    DI->Modify();
 
     FScriptArrayHelper Helper(ArrProp, ArrProp->ContainerPtrToValuePtr<void>(DI));
     Helper.Resize(ValuesArr->Num());
@@ -5287,7 +5368,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceArray(const TSharedPtr<FJso
     Result->SetNumberField(TEXT("count"), Helper.Num());
     Result->SetArrayField(TEXT("values"), OutValues);
     Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_array"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_array"), SaveError);
 }
 // ========================================================================== //
 // Niagara system authoring advanced

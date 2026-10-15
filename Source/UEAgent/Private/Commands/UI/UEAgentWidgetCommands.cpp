@@ -1146,7 +1146,8 @@ namespace
     /**
      * The tree edit of add_widget_to_blueprint and add_widget_extended: constructs WidgetClass as WidgetName under the
      * panel ParentName (the root widget when empty) and registers it as a Blueprint variable. A widget already named
-     * WidgetName is returned as it is. False with OutError when the widget cannot be added.
+     * WidgetName is returned as it is when its class is WidgetClass. False with OutError when the widget cannot be
+     * added, or the name is held by a widget of another class.
      */
     bool AddWidgetToTree_Widget(UWidgetBlueprint* WidgetBP, UClass* WidgetClass, const FString& WidgetType,
                                 const FString& WidgetName, const FString& ParentName,
@@ -1169,9 +1170,19 @@ namespace
         }
 
         // Idempotent: if a widget with this name already exists, return it (so re-runs
-        // and repeated authoring calls succeed instead of hard-failing).
+        // and repeated authoring calls succeed instead of hard-failing). Only a widget of the
+        // requested class is the same widget; another class under that name is a conflict the
+        // caller has to resolve. Authoritative classes, so a recompiled nested Widget Blueprint
+        // still compares equal to its generated class.
         if (UWidget* ExistingWidget = WidgetTree->FindWidget(FName(*WidgetName)))
         {
+            if (ExistingWidget->GetClass()->GetAuthoritativeClass() != WidgetClass->GetAuthoritativeClass())
+            {
+                OutError = FString::Printf(
+                    TEXT("A widget named '%s' already exists in the tree with class %s, not %s; pick another widget_name or remove that widget first"),
+                    *WidgetName, *ExistingWidget->GetClass()->GetName(), *WidgetClass->GetName());
+                return false;
+            }
             Out.Widget = ExistingWidget;
             Out.Parent = ExistingWidget->GetParent();
             Out.Slot = ExistingWidget->Slot;
@@ -1828,7 +1839,7 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // add_widget_to_blueprint
 // ---------------------------------------------------------------------------
-// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name is returned as is (already_existed true), even if its class differs, without compiling or saving although saved reads true. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes; a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel (the curated basic names; see list_widget_types), OR any native widget class path (e.g. /Script/UMG.Throbber), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
@@ -1871,10 +1882,13 @@ TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>
     }
     if (Added.bAlreadyExisted)
     {
+        // Nothing was added. The widget is on disk only when the package holds no unsaved
+        // change; otherwise the blueprint is compiled and saved like a fresh add.
+        FString SaveErr;
+        const bool bSaved = !WidgetBP->GetPackage()->IsDirty() || SaveWidgetBlueprint(WidgetBP, SaveErr);
         TSharedPtr<FJsonObject> Resp = AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, /*bAdded=*/ true);
         Resp->SetBoolField(TEXT("already_existed"), true);
-        Resp->SetBoolField(TEXT("saved"), true);
-        return mcp_common::MakeOkReply(Resp);
+        return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_widget_to_blueprint"), SaveErr);
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
@@ -2003,16 +2017,31 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
             FString::Printf(TEXT("Widget '%s' is not parented under a CanvasPanel (slot is not a CanvasPanelSlot)"), *WidgetName));
     }
 
+    // Which of the six fields the call carries, read before anything is touched: a call with none
+    // of them is refused with the slot exactly as it was.
+    const TArray<TSharedPtr<FJsonValue>>* AnchorsArr = nullptr;
+    const bool bSetAnchors = Params->TryGetArrayField(TEXT("anchors"), AnchorsArr) && AnchorsArr && AnchorsArr->Num() >= 4;
+    const TArray<TSharedPtr<FJsonValue>>* OffsetsArr = nullptr;
+    const bool bSetOffsets = Params->TryGetArrayField(TEXT("offsets"), OffsetsArr) && OffsetsArr && OffsetsArr->Num() >= 4;
+    const TArray<TSharedPtr<FJsonValue>>* PositionArr = nullptr;
+    const bool bSetPosition = Params->TryGetArrayField(TEXT("position"), PositionArr) && PositionArr && PositionArr->Num() >= 2;
+    const TArray<TSharedPtr<FJsonValue>>* SizeArr = nullptr;
+    const bool bSetSize = Params->TryGetArrayField(TEXT("size"), SizeArr) && SizeArr && SizeArr->Num() >= 2;
+    double ZOrderNum = 0.0;
+    const bool bSetZOrder = Params->TryGetNumberField(TEXT("z_order"), ZOrderNum);
+    bool AutoSizeVal = false;
+    const bool bSetAutoSize = Params->TryGetBoolField(TEXT("auto_size"), AutoSizeVal);
+
+    if (!bSetAnchors && !bSetOffsets && !bSetPosition && !bSetSize && !bSetZOrder && !bSetAutoSize)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("No slot properties provided. Supply at least one of: anchors, offsets, position, size, z_order, auto_size"));
+    }
+
     CanvasSlot->Modify();
 
-    bool bSetAnchors = false;
-    bool bSetOffsets = false;
-    bool bSetPosition = false;
-    bool bSetSize = false;
-
     // anchors: [MinX, MinY, MaxX, MaxY]
-    const TArray<TSharedPtr<FJsonValue>>* AnchorsArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("anchors"), AnchorsArr) && AnchorsArr && AnchorsArr->Num() >= 4)
+    if (bSetAnchors)
     {
         FAnchors NewAnchors(
             static_cast<float>((*AnchorsArr)[0]->AsNumber()),
@@ -2020,12 +2049,10 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
             static_cast<float>((*AnchorsArr)[2]->AsNumber()),
             static_cast<float>((*AnchorsArr)[3]->AsNumber()));
         CanvasSlot->SetAnchors(NewAnchors);
-        bSetAnchors = true;
     }
 
     // offsets: [Left, Top, Right, Bottom]  (FMargin)
-    const TArray<TSharedPtr<FJsonValue>>* OffsetsArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("offsets"), OffsetsArr) && OffsetsArr && OffsetsArr->Num() >= 4)
+    if (bSetOffsets)
     {
         FMargin NewOffsets(
             static_cast<float>((*OffsetsArr)[0]->AsNumber()),
@@ -2033,53 +2060,36 @@ TSharedPtr<FJsonObject> HandleSetWidgetSlotProperties(const TSharedPtr<FJsonObje
             static_cast<float>((*OffsetsArr)[2]->AsNumber()),
             static_cast<float>((*OffsetsArr)[3]->AsNumber()));
         CanvasSlot->SetOffsets(NewOffsets);
-        bSetOffsets = true;
     }
 
     // position: [X, Y]
-    const TArray<TSharedPtr<FJsonValue>>* PositionArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("position"), PositionArr) && PositionArr && PositionArr->Num() >= 2)
+    if (bSetPosition)
     {
         FVector2D NewPos(
             (*PositionArr)[0]->AsNumber(),
             (*PositionArr)[1]->AsNumber());
         CanvasSlot->SetPosition(NewPos);
-        bSetPosition = true;
     }
 
     // size: [X, Y]
-    const TArray<TSharedPtr<FJsonValue>>* SizeArr = nullptr;
-    if (Params->TryGetArrayField(TEXT("size"), SizeArr) && SizeArr && SizeArr->Num() >= 2)
+    if (bSetSize)
     {
         FVector2D NewSize(
             (*SizeArr)[0]->AsNumber(),
             (*SizeArr)[1]->AsNumber());
         CanvasSlot->SetSize(NewSize);
-        bSetSize = true;
     }
 
     // z_order: int (optional)
-    bool bSetZOrder = false;
-    double ZOrderNum = 0.0;
-    if (Params->TryGetNumberField(TEXT("z_order"), ZOrderNum))
+    if (bSetZOrder)
     {
         CanvasSlot->SetZOrder(FMath::RoundToInt(ZOrderNum));
-        bSetZOrder = true;
     }
 
     // auto_size: bool (optional)
-    bool bSetAutoSize = false;
-    bool AutoSizeVal = false;
-    if (Params->TryGetBoolField(TEXT("auto_size"), AutoSizeVal))
+    if (bSetAutoSize)
     {
         CanvasSlot->SetAutoSize(AutoSizeVal);
-        bSetAutoSize = true;
-    }
-
-    if (!bSetAnchors && !bSetOffsets && !bSetPosition && !bSetSize && !bSetZOrder && !bSetAutoSize)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("No slot properties provided. Supply at least one of: anchors, offsets, position, size, z_order, auto_size"));
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
@@ -2261,10 +2271,13 @@ TSharedPtr<FJsonObject> HandleAddWidgetExtended(const TSharedPtr<FJsonObject>& P
     }
     if (Added.bAlreadyExisted)
     {
+        // Nothing was added. The widget is on disk only when the package holds no unsaved
+        // change; otherwise the blueprint is compiled and saved like a fresh add.
+        FString SaveErr;
+        const bool bSaved = !WidgetBP->GetPackage()->IsDirty() || SaveWidgetBlueprint(WidgetBP, SaveErr);
         TSharedPtr<FJsonObject> Resp = AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, /*bAdded=*/ true);
         Resp->SetBoolField(TEXT("already_existed"), true);
-        Resp->SetBoolField(TEXT("saved"), true);
-        return mcp_common::MakeOkReply(Resp);
+        return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_widget_extended"), SaveErr);
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
@@ -2562,7 +2575,7 @@ TSharedPtr<FJsonObject> HandlePlayWidgetAnimation(const TSharedPtr<FJsonObject>&
 // stop_widget_animation -- REAL stop (mirrors play_widget_animation) when a live PIE instance of
 // this WidgetBP is found; honest headless gate otherwise.
 // ---------------------------------------------------------------------------
-// MCP:stop_widget_animation - Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
+// MCP:stop_widget_animation - Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets: stopped is true when the animation was playing before the call and is not after it; one that was not playing (stopped or paused) succeeds with stopped:false and a note, and one still playing after the call is an error. Falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param animation_name - object name OR display label of the animation to stop
 //   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD.
@@ -2589,15 +2602,26 @@ TSharedPtr<FJsonObject> HandleStopWidgetAnimation(const TSharedPtr<FJsonObject>&
 
     if (Live.Instance && Live.Animation)
     {
+        // The playback state is read on both sides of the call: an animation that was not playing has
+        // nothing to stop, and one still playing afterwards was not stopped.
+        const bool bWasPlaying = Live.Instance->IsAnimationPlaying(Live.Animation);
         Live.Instance->StopAnimation(Live.Animation);
+        const bool bStillPlaying = Live.Instance->IsAnimationPlaying(Live.Animation);
 
-        Resp->SetBoolField(TEXT("stopped"), true);
+        Resp->SetBoolField(TEXT("stopped"), bWasPlaying && !bStillPlaying);
         Resp->SetBoolField(TEXT("headless"), false);
         Resp->SetBoolField(TEXT("requires_pie"), false);
         Resp->SetStringField(TEXT("live_widget_name"), Live.Instance->GetName());
         Resp->SetStringField(TEXT("live_animation_name"), Live.Animation->GetName());
-        Resp->SetStringField(TEXT("note"), TEXT("Stopped on a live PIE instance via UUserWidget::StopAnimation."));
+        Resp->SetStringField(TEXT("note"), bWasPlaying
+            ? TEXT("Stopped on a live PIE instance via UUserWidget::StopAnimation.")
+            : TEXT("The animation was not playing on the live PIE instance; StopAnimation was still called, which resets a paused one."));
         Resp->SetBoolField(TEXT("saved"), false);
+        if (bStillPlaying)
+        {
+            return mcp_common::MakeOutcomeReply(Resp, false,
+                TEXT("stop_widget_animation: the animation is still playing after UUserWidget::StopAnimation."));
+        }
         return mcp_common::MakeOkReply(Resp);
     }
 

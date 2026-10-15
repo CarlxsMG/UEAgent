@@ -63,7 +63,7 @@ Add one empty UGameplayEffectComponent of a standard type to the GEComponents of
 
 *Additive.*
 
-Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry (the save is refused during PIE). attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
+Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session or a read-only root fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -592,7 +592,7 @@ Author the DataTable&lt;FAttributeMetaData> that gives a UAttributeSet class its
 
 *Destructive, idempotent.*
 
-Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. During PIE the save is refused after the in-memory edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
+Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session or a read-only root fails before any edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -721,12 +721,12 @@ Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/R
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
-| `application_require_tags` | string | no | Optional tags the target must have for the GE to apply |
-| `application_ignore_tags` | string | no | Optional tags that, if present, block application |
-| `ongoing_require_tags` | string | no | Optional tags the target must keep for the GE to stay 'on' |
-| `ongoing_ignore_tags` | string | no | Optional tags that, if present, turn the GE 'off' while applied |
-| `removal_require_tags` | string | no | Optional tags that, if met, remove the GE |
-| `removal_ignore_tags` | string | no | Optional ignore tags for the removal requirement |
+| `application_require_tags` | array | no | Optional array of gameplay tag strings: the target must have for the GE to apply |
+| `application_ignore_tags` | array | no | Optional array of gameplay tag strings: that, if present, block application |
+| `ongoing_require_tags` | array | no | Optional array of gameplay tag strings: the target must keep for the GE to stay 'on' |
+| `ongoing_ignore_tags` | array | no | Optional array of gameplay tag strings: that, if present, turn the GE 'off' while applied |
+| `removal_require_tags` | array | no | Optional array of gameplay tag strings: that, if met, remove the GE |
+| `removal_ignore_tags` | array | no | Optional array of gameplay tag strings: ignore tags for the removal requirement |
 
 **Returns:** `{ ge_blueprint_path: string, component_class: string, already_existed: bool, application_require_tags: [string], application_ignore_tags: [string], ongoing_require_tags: [string], ongoing_ignore_tags: [string], removal_require_tags: [string], removal_ignore_tags: [string], unknown_tags: [string], set: bool }`
 
@@ -747,13 +747,13 @@ Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to
 
 *Destructive, idempotent.*
 
-Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy or a non-GE Blueprint fails before any edit; during PIE the save is refused after the in-memory edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
+Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session or a read-only root fails before any edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
 | `duration_policy` | string | yes | Instant, Infinite, or HasDuration |
-| `duration_seconds` | number | yes | Duration in seconds, written only when duration_policy is HasDuration; ignored for Instant and Infinite, but the schema still requires a number, so pass 0 there |
+| `duration_seconds` | number | no | Duration in seconds; required when duration_policy is HasDuration, ignored for Instant and Infinite |
 
 **Returns:** `{ ge_blueprint_path: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }`
 
@@ -892,7 +892,7 @@ Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime b
 
 *Destructive, idempotent.*
 
-Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint is an error; during PIE the save is refused after the in-memory edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
+Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session or a read-only root fails before any edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

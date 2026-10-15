@@ -1124,7 +1124,7 @@ TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Read-only, never creates the instance; scalar_override_count and vector_override_count are only the parameter counts.
+// MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively
 //   @returns { collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
@@ -1139,6 +1139,8 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
     {
         return mcp_common::MakeErrorReply(LoadError);
     }
+    // UWorld::GetParameterCollectionInstance lazily creates the instance when the world has
+    // none (the instance list is private, so there is no lookup that does not create it).
     UMaterialParameterCollectionInstance* Instance = World->GetParameterCollectionInstance(Collection);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();

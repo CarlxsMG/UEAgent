@@ -1819,10 +1819,10 @@ TSharedPtr<FJsonObject> HandleAddAnimNotify(const TSharedPtr<FJsonObject>& Param
 // is absent removes 0 and reports already_absent=true (no fabricated success,
 // no save). Addressing mirrors add_anim_notify (by animation path + notify name,
 // via the AnimationBlueprintLibrary — NOT remove_montage_notify's by-index path).
-// MCP:remove_anim_notify - Remove all UAnimNotify events matching a name from an AnimSequence
+// MCP:remove_anim_notify - Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and nothing saved; a failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_name - Name of the notify to remove (matches FAnimNotifyEvent.NotifyName).
-//   @returns { animation_path, notify_name, removed, removed_count, already_absent }
+//   @returns { animation_path, notify_name, removed, removed_count, already_absent, saved, save_error }
 TSharedPtr<FJsonObject> HandleRemoveAnimNotify(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -1861,7 +1861,13 @@ TSharedPtr<FJsonObject> HandleRemoveAnimNotify(const TSharedPtr<FJsonObject>& Pa
     Obj->SetBoolField(TEXT("removed"), bRemoved);
     Obj->SetNumberField(TEXT("removed_count"), Removed);
     Obj->SetBoolField(TEXT("already_absent"), !bRemoved);
-    return mcp_common::MakeOkReply(Obj);
+    if (!bRemoved)
+    {
+        // Nothing matched: nothing changed, so nothing was saved.
+        Obj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Obj);
+    }
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_anim_notify"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -2061,13 +2067,13 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_sequence
 // ---------------------------------------------------------------------------
-// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save still answers success, with saved=false. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
+// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
 //   @param anim_name - Asset name (no path).
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @param length_seconds - Sequence length in seconds (default 1.0)
 //   @param frame_rate - Sampling frame rate in fps (default 30)
 //   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { anim_sequence_path, anim_name, skeleton, play_length, frame_rate, num_frames, success, saved, already_existed, message }
+//   @returns { anim_sequence_path, anim_name, skeleton, play_length, frame_rate, num_frames, success, saved, save_error, already_existed, message }
 TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -2101,7 +2107,7 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
         const USkeleton* SeqSkeleton = Seq->GetSkeleton();
         Obj->SetStringField(TEXT("skeleton"), SeqSkeleton ? SeqSkeleton->GetPathName() : FString());
         FillSequenceModelCounts(Seq, Obj);
-        Obj->SetBoolField(TEXT("success"), true);
+        Obj->SetBoolField(TEXT("success"), bSaved);
         Obj->SetBoolField(TEXT("saved"), bSaved);
         return Obj;
     };
@@ -2144,17 +2150,17 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("AnimSequence created and saved to disk")
         : FString::Printf(TEXT("AnimSequence created but save failed: %s"), *SaveError));
-    return mcp_common::MakeOkReply(Obj);
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("create_anim_sequence"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_anim_bone_track
 // ---------------------------------------------------------------------------
-// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). An empty or unknown bone_name silently falls back to the root bone, so read bone_name in the reply; a missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @param bone_name - Name of the skeleton bone
+//   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
 //   @param num_keys - Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence.
-//   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, message }
+//   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2179,6 +2185,16 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
     if (!Skeleton)
     {
         return mcp_common::MakeErrorReply(TEXT("AnimSequence has no skeleton"));
+    }
+
+    // A named bone must exist on the skeleton: PickBoneName falls back to the root bone, and
+    // writing identity keys to the root track for a misspelled name would wipe the root motion.
+    if (!RequestedBone.IsEmpty()
+        && Skeleton->GetReferenceSkeleton().FindBoneIndex(FName(*RequestedBone)) == INDEX_NONE)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Bone '%s' is not in skeleton %s; nothing was written. List its bones with get_skeleton_info (load_full_data=true)."),
+            *RequestedBone, *Skeleton->GetPathName()));
     }
 
     const FName BoneFName = PickBoneName(Skeleton, RequestedBone);
@@ -2220,9 +2236,9 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
     Obj->SetStringField(TEXT("bone_name"), BoneFName.ToString());
     Obj->SetNumberField(TEXT("num_bone_tracks"), NumBoneTracks);
     Obj->SetNumberField(TEXT("num_keys"), NumKeys);
-    Obj->SetBoolField(TEXT("success"), true);
+    Obj->SetBoolField(TEXT("success"), bSaved);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Bone track added"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_bone_track"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_bone_track"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -2231,11 +2247,11 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
 // only writes identity. Same IAnimationDataController::SetBoneTrackKeys path,
 // fed from caller-provided per-key transforms; read back from the data model.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_bone_track_keys - Set per-key bone transforms (translation/rotation/scale) on a UAnimSequence bone track (real pose data, not identity).
+// MCP:set_anim_bone_track_keys - Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @param bone_name - Skeleton bone whose track to author (resolved/validated against the skeleton; first bone if empty).
+//   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
 //   @param keys - Array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1].
-//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, message }
+//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2256,6 +2272,17 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     {
         return mcp_common::MakeErrorReply(TEXT("AnimSequence has no skeleton"));
     }
+
+    // A named bone must exist on the skeleton: PickBoneName falls back to the root bone, and
+    // writing these keys to the root track for a misspelled name would replace the root motion.
+    if (!RequestedBone.IsEmpty()
+        && Skeleton->GetReferenceSkeleton().FindBoneIndex(FName(*RequestedBone)) == INDEX_NONE)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Bone '%s' is not in skeleton %s; nothing was written. List its bones with get_skeleton_info (load_full_data=true)."),
+            *RequestedBone, *Skeleton->GetPathName()));
+    }
+
     const FName BoneFName = PickBoneName(Skeleton, RequestedBone);
     if (BoneFName == NAME_None)
     {
@@ -2342,9 +2369,9 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
         First->SetArrayField(TEXT("rotation_euler"), E);
         Obj->SetObjectField(TEXT("first_key"), First);
     }
-    Obj->SetBoolField(TEXT("success"), true);
+    Obj->SetBoolField(TEXT("success"), bSaved);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Bone track keys set"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_bone_track_keys"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_bone_track_keys"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -2583,11 +2610,11 @@ TSharedPtr<FJsonObject> HandleRemovePoseCurve(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // set_anim_curve_color
 // ---------------------------------------------------------------------------
-// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param color - RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1]).
-//   @returns { anim_sequence_path, curve_name, color, applied, saved, message }
+//   @returns { anim_sequence_path, curve_name, color, applied, saved, save_error, message }
 //   NOTE (impl): wraps IAnimationDataController::SetCurveColor.
 TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2620,8 +2647,15 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& P
     const bool bApplied = Controller.SetCurveColor(CurveId, Color, /*bShouldTransact=*/true);
     Controller.CloseBracket();
 
+    // The float curve exists (checked above), so false is the data controller refusing the write.
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the color for float curve '%s' (see the editor log); nothing was saved"), *CurveName));
+    }
+
     FString SaveError;
-    const bool bSaved = bApplied && AnimAuthoring_SavePackageOf(Seq, SaveError);
+    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
 
     TArray<TSharedPtr<FJsonValue>> ColorJson = mcp_common::ColorToJsonArray(Color);
 
@@ -2630,21 +2664,18 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& P
     Obj->SetStringField(TEXT("curve_name"), CurveName);
     Obj->SetArrayField(TEXT("color"), ColorJson);
     Obj->SetBoolField(TEXT("applied"), bApplied);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
-    Obj->SetStringField(TEXT("message"), bApplied
-        ? AnimAuthoring_SaveMessage(TEXT("Curve color set"), bSaved, SaveError, TEXT(""))
-        : TEXT("SetCurveColor returned false (only float curves support color)"));
-    return mcp_common::MakeOkReply(Obj);
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Curve color set"), bSaved, SaveError, TEXT("")));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_curve_color"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_anim_curve_comment
 // ---------------------------------------------------------------------------
-// MCP:set_anim_curve_comment - Set the author comment of a FLOAT curve on a UAnimSequence (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+// MCP:set_anim_curve_comment - Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param comment - Comment string to set (default empty).
-//   @returns { anim_sequence_path, curve_name, comment, applied, saved, message }
+//   @returns { anim_sequence_path, curve_name, comment, applied, saved, save_error, message }
 //   NOTE (impl): wraps IAnimationDataController::SetCurveComment.
 TSharedPtr<FJsonObject> HandleSetAnimCurveComment(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2674,30 +2705,34 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveComment(const TSharedPtr<FJsonObject>&
     const bool bApplied = Controller.SetCurveComment(CurveId, Comment, /*bShouldTransact=*/true);
     Controller.CloseBracket();
 
+    // The float curve exists (checked above), so false is the data controller refusing the write.
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the comment for float curve '%s' (see the editor log); nothing was saved"), *CurveName));
+    }
+
     FString SaveError;
-    const bool bSaved = bApplied && AnimAuthoring_SavePackageOf(Seq, SaveError);
+    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
     Obj->SetStringField(TEXT("curve_name"), CurveName);
     Obj->SetStringField(TEXT("comment"), Comment);
     Obj->SetBoolField(TEXT("applied"), bApplied);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
-    Obj->SetStringField(TEXT("message"), bApplied
-        ? AnimAuthoring_SaveMessage(TEXT("Curve comment set"), bSaved, SaveError, TEXT(""))
-        : TEXT("SetCurveComment returned false (only float curves support comments)"));
-    return mcp_common::MakeOkReply(Obj);
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Curve comment set"), bSaved, SaveError, TEXT("")));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_curve_comment"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // scale_anim_curve
 // ---------------------------------------------------------------------------
-// MCP:scale_anim_curve - Retime a FLOAT curve on a UAnimSequence: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+// MCP:scale_anim_curve - Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param factor - Scale factor applied to each key TIME (default 1.0).
 //   @param origin - Time origin the key times are scaled about (default 0.0).
-//   @returns { anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, message }
+//   @returns { anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, save_error, message }
 //   NOTE (impl): wraps IAnimationDataController::ScaleCurve -> FIndexedCurve::ScaleCurve (SetKeyTime((t-origin)*factor+origin)).
 TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2729,6 +2764,13 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
     const bool bApplied = Controller.ScaleCurve(CurveId, static_cast<float>(Origin), static_cast<float>(Factor), /*bShouldTransact=*/true);
     Controller.CloseBracket();
 
+    // The float curve exists (checked above), so false is the data controller refusing the write.
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the scale of float curve '%s' (see the editor log); nothing was saved"), *CurveName));
+    }
+
     int32 NumKeys = 0;
     if (const FFloatCurve* C = Controller.GetModel()->FindFloatCurve(CurveId))
     {
@@ -2736,7 +2778,7 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
     }
 
     FString SaveError;
-    const bool bSaved = bApplied && AnimAuthoring_SavePackageOf(Seq, SaveError);
+    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
@@ -2745,11 +2787,8 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
     Obj->SetNumberField(TEXT("factor"), Factor);
     Obj->SetNumberField(TEXT("num_keys"), NumKeys);
     Obj->SetBoolField(TEXT("applied"), bApplied);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
-    Obj->SetStringField(TEXT("message"), bApplied
-        ? AnimAuthoring_SaveMessage(TEXT("Curve scaled"), bSaved, SaveError, TEXT(""))
-        : TEXT("ScaleCurve returned false (only float curves can be scaled)"));
-    return mcp_common::MakeOkReply(Obj);
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Curve scaled"), bSaved, SaveError, TEXT("")));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("scale_anim_curve"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -3294,10 +3333,10 @@ TSharedPtr<FJsonObject> HandleCreatePoseAssetFromAnimSequence(const TSharedPtr<F
 //   get_anim_curve_names         -- IAnimationDataModel::GetBoneTrackNames + GetFloatCurves + GetTransformCurves
 // ===========================================================================
 
-// MCP:remove_anim_bone_track - Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack) and save the package; removed=false when no track has that bone name, and the save result is not reported. List tracks with get_anim_curve_names.
+// MCP:remove_anim_bone_track - Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack, one undo step) and save the package. No track with that bone name is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. List tracks with get_anim_curve_names.
 //   @param sequence_path - Asset path of the UAnimSequence.
-//   @param bone_name - Name of the bone track to remove (must match an existing track).
-//   @returns { sequence_path, bone_name, removed }
+//   @param bone_name - Name of the bone track to remove; a name no track has removes nothing.
+//   @returns { sequence_path, bone_name, removed, saved, save_error }
 TSharedPtr<FJsonObject> HandleRemoveAnimBoneTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath, BoneName;
@@ -3307,19 +3346,26 @@ TSharedPtr<FJsonObject> HandleRemoveAnimBoneTrack(const TSharedPtr<FJsonObject>&
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
     IAnimationDataController& Controller = Sequence->GetController();
     const bool bRemoved = Controller.RemoveBoneTrack(FName(*BoneName));
-    mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence);
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Data->SetStringField(TEXT("bone_name"), BoneName);
     Data->SetBoolField(TEXT("removed"), bRemoved);
-    return mcp_common::MakeOkReply(Data);
+    if (!bRemoved)
+    {
+        // No track had that name: nothing changed, so nothing is saved.
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_anim_bone_track"), SaveError);
 }
 
-// MCP:remove_anim_curve - Remove a float or transform curve by name from a UAnimSequence through its data controller and save the package (the save result is not reported); removed=false when no such curve exists. Any curve_type other than transform targets float curves.
+// MCP:remove_anim_curve - Remove a float or transform curve by name from a UAnimSequence through its data controller (one undo step) and save the package. No such curve is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. Any curve_type other than transform targets float curves.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the curve to remove.
 //   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { sequence_path, curve_name, curve_type, removed }
+//   @returns { sequence_path, curve_name, curve_type, removed, saved, save_error }
 TSharedPtr<FJsonObject> HandleRemoveAnimCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath, CurveName;
@@ -3334,19 +3380,26 @@ TSharedPtr<FJsonObject> HandleRemoveAnimCurve(const TSharedPtr<FJsonObject>& Par
     const FAnimationCurveIdentifier Id(FName(*CurveName), TypeEnum);
     IAnimationDataController& Controller = Sequence->GetController();
     const bool bRemoved = Controller.RemoveCurve(Id);
-    mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence);
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Data->SetStringField(TEXT("curve_name"), CurveName);
     Data->SetStringField(TEXT("curve_type"), CurveType.IsEmpty() ? TEXT("float") : CurveType);
     Data->SetBoolField(TEXT("removed"), bRemoved);
-    return mcp_common::MakeOkReply(Data);
+    if (!bRemoved)
+    {
+        // No curve of that name and type: nothing changed, so nothing is saved.
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_anim_curve"), SaveError);
 }
 
-// MCP:remove_anim_sync_marker - Remove every authored sync marker with the given name from a UAnimSequence and save the package (no undo transaction; the save result is not reported). Returns markers_before, markers_after and removed, which is false when no marker had that name.
+// MCP:remove_anim_sync_marker - Remove every authored sync marker with the given name from a UAnimSequence in an undo transaction and save the package. Returns markers_before, markers_after and removed; no marker with that name is a success with removed=false and nothing saved, and a failed save makes success false, with saved=false and save_error.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param marker_name - Name of the marker to remove.
-//   @returns { sequence_path, marker_name, markers_before, markers_after, removed }
+//   @returns { sequence_path, marker_name, markers_before, markers_after, removed, saved, save_error }
 TSharedPtr<FJsonObject> HandleRemoveAnimSyncMarker(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath, MarkerName;
@@ -3355,25 +3408,38 @@ TSharedPtr<FJsonObject> HandleRemoveAnimSyncMarker(const TSharedPtr<FJsonObject>
     UAnimSequence* Sequence = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
     const FName MarkerFName(*MarkerName);
+    const auto HasMarkerName = [&MarkerFName](const FAnimSyncMarker& M) { return M.MarkerName == MarkerFName; };
     const int32 BeforeCount = Sequence->AuthoredSyncMarkers.Num();
-    Sequence->AuthoredSyncMarkers.RemoveAll([&MarkerFName](const FAnimSyncMarker& M) {
-        return M.MarkerName == MarkerFName;
-    });
+    const bool bFound = Sequence->AuthoredSyncMarkers.ContainsByPredicate(HasMarkerName);
+    if (bFound)
+    {
+        // Modify before the write so the removal is one undo step, as add_anim_sync_marker's add is.
+        const FScopedTransaction Transaction(LOCTEXT("RemoveAnimSyncMarker", "Remove Anim Sync Marker"));
+        Sequence->Modify();
+        Sequence->AuthoredSyncMarkers.RemoveAll(HasMarkerName);
+    }
     const int32 AfterCount = Sequence->AuthoredSyncMarkers.Num();
-    mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence);
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Data->SetStringField(TEXT("marker_name"), MarkerName);
     Data->SetNumberField(TEXT("markers_before"), BeforeCount);
     Data->SetNumberField(TEXT("markers_after"), AfterCount);
     Data->SetBoolField(TEXT("removed"), AfterCount < BeforeCount);
-    return mcp_common::MakeOkReply(Data);
+    if (!bFound)
+    {
+        // No marker had that name: nothing changed, so nothing is saved.
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_anim_sync_marker"), SaveError);
 }
 
-// MCP:set_anim_frame_rate - Set the sampling frame rate of a UAnimSequence (IAnimationDataController::SetFrameRate).
+// MCP:set_anim_frame_rate - Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
 //   @param sequence_path - Asset path of the UAnimSequence.
-//   @param fps - New frame rate in frames per second (integer > 0).
-//   @returns { sequence_path, fps, numerator, denominator }
+//   @param fps - New frame rate in frames per second, rounded to a whole number that must be at least 1.
+//   @returns { sequence_path, fps, numerator, denominator, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -3384,26 +3450,68 @@ TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Pa
         return mcp_common::MakeErrorReply(
             TEXT("Missing or invalid 'fps' parameter (must be > 0)"));
     }
+    // A rate that rounds to 0 fps passes the data controller's interval check and then reaches
+    // FFrameRate::IsMultipleOf, which divides by its numerator: refuse it before the controller sees it.
+    const double RoundedFps = FMath::RoundToDouble(Fps);
+    if (RoundedFps < 1.0 || RoundedFps > static_cast<double>(TNumericLimits<int32>::Max()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("fps %g rounds to %.0f; the frame rate must be a whole number of at least 1 fps"), Fps, RoundedFps));
+    }
     UAnimSequence* Sequence = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
-    const int32 Num = FMath::RoundToInt(Fps);
-    const FFrameRate NewRate(Num, 1);
+    const IAnimationDataModel* Model = Sequence->GetDataModel();
+    if (!Model)
+    {
+        return mcp_common::MakeErrorReply(TEXT("AnimSequence has no data model"));
+    }
+    const FFrameRate NewRate(static_cast<int32>(RoundedFps), 1);
+    const FFrameRate OldRate = Model->GetFrameRate();
+    // Converting from a rate with a zero numerator fails a check() (and the controller's own
+    // compatibility test divides by it), so such a model is refused untouched.
+    if (!OldRate.IsValid() || OldRate.Numerator <= 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data model of this sequence has an invalid frame rate (%d/%d); nothing was changed"),
+            OldRate.Numerator, OldRate.Denominator));
+    }
+
+    // The data controller truncates a frame count that is not whole at the new rate (after an ensure),
+    // which silently shortens the sequence: refuse that rate instead.
+    const int32 NumFrames = Model->GetNumberOfFrames();
+    const FFrameTime ConvertedFrames = FFrameRate::TransformTime(FFrameTime(FFrameNumber(NumFrames)), OldRate, NewRate);
+    if (!FMath::IsNearlyZero(ConvertedFrames.GetSubFrame()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The %d frames of this sequence at %s are not a whole number of frames at %s; nothing was changed"),
+            NumFrames, *OldRate.ToPrettyText().ToString(), *NewRate.ToPrettyText().ToString()));
+    }
+
     IAnimationDataController& Controller = Sequence->GetController();
     Controller.SetFrameRate(NewRate);
-    mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence);
-    const FFrameRate ReadBack = Sequence->GetSamplingFrameRate();
+    // The source rate lives in the data model; GetSamplingFrameRate is the target (resampling) rate,
+    // which SetFrameRate does not change.
+    const FFrameRate ReadBack = Model->GetFrameRate();
+    if (ReadBack != NewRate)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected %s for this sequence (current rate %s; it takes only a multiple or a factor of it, see the editor log); nothing was saved"),
+            *NewRate.ToPrettyText().ToString(), *ReadBack.ToPrettyText().ToString()));
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
-    Data->SetNumberField(TEXT("fps"), ReadBack.Numerator);
+    Data->SetNumberField(TEXT("fps"), ReadBack.AsDecimal());
     Data->SetNumberField(TEXT("numerator"), ReadBack.Numerator);
     Data->SetNumberField(TEXT("denominator"), ReadBack.Denominator);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_frame_rate"), SaveError);
 }
 
-// MCP:set_anim_number_of_frames - Set the number of sampled frames on a UAnimSequence (IAnimationDataController::SetNumberOfFrames).
+// MCP:set_anim_number_of_frames - Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param frame_count - New number of frames (integer > 0).
-//   @returns { sequence_path, frame_count }
+//   @returns { sequence_path, frame_count, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -3418,19 +3526,28 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
     IAnimationDataController& Controller = Sequence->GetController();
     Controller.SetNumberOfFrames(FFrameNumber(FrameCount));
-    mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence);
-    const int32 ReadBack = Sequence->GetNumberOfSampledKeys();
+    // Read the data model: GetNumberOfSampledKeys counts keys (frames + 1) at the target sampling rate.
+    const IAnimationDataModel* Model = Sequence->GetDataModel();
+    const int32 ReadBack = Model ? Model->GetNumberOfFrames() : 0;
+    if (ReadBack != FrameCount)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected %d frames for this sequence (it has %d; see the editor log); nothing was saved"),
+            FrameCount, ReadBack));
+    }
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Data->SetNumberField(TEXT("frame_count"), ReadBack);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_number_of_frames"), SaveError);
 }
 
-// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; the save result is not reported, and a name taken by an asset of another class is refused. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
+// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name taken by an asset of another class is refused. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 //   @param source_path - Asset path of the source UAnimSequence.
 //   @param new_name - Name of the new duplicate.
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
-//   @returns { source_path, duplicate_path, duplicate_class }
+//   @returns { source_path, duplicate_path, duplicate_class, saved, save_error }
 TSharedPtr<FJsonObject> HandleDuplicateAnimSequence(const TSharedPtr<FJsonObject>& Params)
 {
     FString SourcePath, NewName;
@@ -3461,13 +3578,14 @@ TSharedPtr<FJsonObject> HandleDuplicateAnimSequence(const TSharedPtr<FJsonObject
     DupSeq->SetSkeleton(Source->GetSkeleton());
     FAssetRegistryModule::AssetCreated(DupSeq);
     Package->MarkPackageDirty();
-    mcp_common::SaveAssetPackage(DupSeq->GetPackage(), DupSeq);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(DupSeq->GetPackage(), DupSeq, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("source_path"), Source->GetPathName());
     Data->SetStringField(TEXT("duplicate_path"), DupSeq->GetPathName());
     Data->SetStringField(TEXT("duplicate_class"), DupSeq->GetClass()->GetName());
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("duplicate_anim_sequence"), SaveError);
 }
 
 // MCP:get_anim_curve_names - List the bone tracks, float curves, and transform curves on a UAnimSequence
@@ -3534,12 +3652,12 @@ TSharedPtr<FJsonObject> HandleGetAnimCurveNames(const TSharedPtr<FJsonObject>& P
 //   calls IAnimationDataController::SetFrameRate — see above.)
 // ========================================================================== //
 
-// MCP:set_anim_curve_keys - Replace every key of an existing curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first), keys needs at least one valid pair, and a curve_type other than float or transform is an error. Only float curves take keys: on a transform curve nothing changes, yet applied is true. A failed save makes success false.
+// MCP:set_anim_curve_keys - Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A failed save makes success false.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the float curve (e.g. "MyCurve")
 //   @param keys - JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given.
-//   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved }
+//   @param curve_type - Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve.
+//   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -3548,14 +3666,21 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Pa
         return Error;
     }
     const FString CurveTypeRaw = AnimAuthoring_ReadCurveType(Params);
-    ERawCurveTrackTypes CurveType = ERawCurveTrackTypes::RCT_Float;
     const FString CTLower = CurveTypeRaw.ToLower();
-    if (CTLower == TEXT("transform")) { CurveType = ERawCurveTrackTypes::RCT_Transform; }
-    else if (CTLower == TEXT("float")) { CurveType = ERawCurveTrackTypes::RCT_Float; }
-    else
+    if (CTLower == TEXT("transform"))
+    {
+        // A transform curve holds nine channel curves (translation/rotation/scale by X/Y/Z), and the
+        // data controller keys one only through an identifier that names its channel and axis; a
+        // [time, value] pair addresses none of them, so the call is refused instead of writing nothing.
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("set_anim_curve_keys takes [time, value] keys, which only a float curve has; '%s' asks for a transform curve. ")
+            TEXT("Rekey a transform curve with add_anim_transform_curve (its keys are {time, location, rotation, scale})."),
+            *CurveTypeRaw));
+    }
+    if (CTLower != TEXT("float"))
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unsupported curve_type '%s' (use float|transform)"), *CurveTypeRaw));
+            FString::Printf(TEXT("Unsupported curve_type '%s' (set_anim_curve_keys rekeys float curves: use float)"), *CurveTypeRaw));
     }
 
     // keys=[[time,value],...]; at least one pair.
@@ -3569,37 +3694,33 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Pa
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimPath, TEXT("AnimSequence"), Seq)) { return Error; }
 
     const FName CurveFName(*CurveName);
-    const FAnimationCurveIdentifier CurveId(CurveFName, CurveType);
+    const FAnimationCurveIdentifier CurveId(CurveFName, ERawCurveTrackTypes::RCT_Float);
     IAnimationDataController& Controller = Seq->GetController();
 
-    if (!Controller.GetModel()->FindFloatCurve(CurveId) &&
-        !(CurveType == ERawCurveTrackTypes::RCT_Transform && Controller.GetModel()->FindTransformCurve(CurveId)))
+    if (!Controller.GetModel()->FindFloatCurve(CurveId))
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Curve '%s' (%s) does not exist; call add_anim_float_curve / add_anim_transform_curve first"),
-                            *CurveName, *CurveTypeRaw));
+            FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
     }
 
     const FScopedTransaction Transaction(LOCTEXT("SetAnimCurveKeys", "Set Anim Curve Keys"));
     Controller.OpenBracket(NSLOCTEXT("MCP", "SetCurveKeys", "Set Curve Keys"));
-    Controller.SetCurveKeys(CurveId, RichKeys, true);
+    const bool bApplied = Controller.SetCurveKeys(CurveId, RichKeys, true);
     Controller.CloseBracket();
 
+    // SetCurveKeys returns false only when it wrote neither the curve's keys nor its control keys.
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the keys for float curve '%s' (see the editor log); nothing was saved"),
+            *CurveName));
+    }
+
     int32 NumKeys = 0;
-if (CurveType == ERawCurveTrackTypes::RCT_Float)
-        {
-            if (const FFloatCurve* C = Controller.GetModel()->FindFloatCurve(CurveId))
-            {
-                NumKeys = C->FloatCurve.Keys.Num();
-            }
-        }
-        else if (const FTransformCurve* C = Controller.GetModel()->FindTransformCurve(CurveId))
-        {
-            // Sum the key counts across the 3 FVectorCurves (T/R/S).
-            NumKeys = C->TranslationCurve.GetNumKeys()
-                    + C->RotationCurve.GetNumKeys()
-                    + C->ScaleCurve.GetNumKeys();
-        }
+    if (const FFloatCurve* C = Controller.GetModel()->FindFloatCurve(CurveId))
+    {
+        NumKeys = C->FloatCurve.Keys.Num();
+    }
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
@@ -3609,16 +3730,16 @@ if (CurveType == ERawCurveTrackTypes::RCT_Float)
     Result->SetStringField(TEXT("curve_name"), CurveName);
     Result->SetStringField(TEXT("curve_type"), CurveTypeRaw);
     Result->SetNumberField(TEXT("num_keys"), NumKeys);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_keys"));
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_keys"), SaveError);
 }
 
 // MCP:set_anim_curve_interp_mode - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the curve
-//   @param interp_mode - One of "linear|editable|metadata|drive_track|disabled"
+//   @param interp_mode [string!] - One of "linear|editable|metadata|drive_track|disabled"
 //   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved }
+//   @returns { anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -3627,11 +3748,9 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObjec
         return Error;
     }
     const FString CurveTypeRaw = AnimAuthoring_ReadCurveType(Params);
-    if (!Params->HasField(TEXT("interp_mode")))
-    {
-        return mcp_common::MissingParameterReply(TEXT("interp_mode"));
-    }
-    const FString InterpMode = Params->GetStringField(TEXT("interp_mode")).ToLower();
+    FString InterpModeRaw;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("interp_mode"), InterpModeRaw)) { return Missing; }
+    const FString InterpMode = InterpModeRaw.ToLower();
 
 // Map common interp_mode names onto the AACF_ (Animation Asset Curve Flag)
     // bitmask on the FFloatCurve / FTransformCurve flags. The enum has no
@@ -3667,23 +3786,28 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObjec
         return mcp_common::MakeErrorReply(TEXT("AnimSequence has no data model"));
     }
 
-int32 OldFlags = 0;
-    if (CurveType == ERawCurveTrackTypes::RCT_Float)
-    {
-        if (const FFloatCurve* C = Model->FindFloatCurve(CurveId)) { OldFlags = C->GetCurveTypeFlags(); }
-    }
-    else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId)) { OldFlags = C->GetCurveTypeFlags(); }
-    if (OldFlags == 0 && Model->FindFloatCurve(CurveId) == nullptr
-        && !(CurveType == ERawCurveTrackTypes::RCT_Transform && Model->FindTransformCurve(CurveId)))
+    // Look the curve up with the finder of its own type: the data model ensures when
+    // FindFloatCurve gets a transform identifier (or FindTransformCurve a float one).
+    const FAnimCurveBase* Curve = (CurveType == ERawCurveTrackTypes::RCT_Transform)
+        ? static_cast<const FAnimCurveBase*>(Model->FindTransformCurve(CurveId))
+        : static_cast<const FAnimCurveBase*>(Model->FindFloatCurve(CurveId));
+    if (!Curve)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Curve '%s' does not exist on this AnimSequence"), *CurveName));
+            FString::Printf(TEXT("Curve '%s' (%s) does not exist on this AnimSequence"), *CurveName,
+                CurveType == ERawCurveTrackTypes::RCT_Transform ? TEXT("transform") : TEXT("float")));
     }
+    const int32 OldFlags = Curve->GetCurveTypeFlags();
 
     const FScopedTransaction Transaction(LOCTEXT("SetAnimCurveInterpMode", "Set Anim Curve Interp Mode"));
     Seq->GetController().OpenBracket(NSLOCTEXT("MCP", "SetCurveInterpMode", "Set Curve Interp Mode"));
-    Seq->GetController().SetCurveFlags(CurveId, Flags, /*bShouldTransact=*/true);
+    const bool bApplied = Seq->GetController().SetCurveFlags(CurveId, Flags, /*bShouldTransact=*/true);
     Seq->GetController().CloseBracket();
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data controller rejected the flags for curve '%s' (see the editor log); nothing was saved"), *CurveName));
+    }
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
@@ -3694,8 +3818,8 @@ int32 OldFlags = 0;
     Result->SetStringField(TEXT("interp_mode"), InterpMode);
     Result->SetNumberField(TEXT("old_flags"), OldFlags);
     Result->SetNumberField(TEXT("new_flags"), Flags);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_interp_mode"));
+    Result->SetBoolField(TEXT("applied"), bApplied);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_interp_mode"), SaveError);
 }
 
 // MCP:rename_anim_curve - Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
@@ -4135,11 +4259,11 @@ namespace
 // ---------------------------------------------------------------------------
 // add_notify_track
 // ---------------------------------------------------------------------------
-// MCP:add_notify_track - Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
+// MCP:add_notify_track - Add a named notify TRACK to a UAnimSequence (the track itself, not events on it) in an undo transaction and save it. A track of that name already there is a success with already_existed=true and nothing saved; a failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param track_name - Notify track name to add.
 //   @param color - Optional track color as an [r,g,b] or [r,g,b,a] float array (default white).
-//   @returns { animation_path, track_name, track_names, track_count, already_existed, saved, message }
+//   @returns { animation_path, track_name, track_names, track_count, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddNotifyTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -4182,7 +4306,13 @@ TSharedPtr<FJsonObject> HandleAddNotifyTrack(const TSharedPtr<FJsonObject>& Para
     Obj->SetStringField(TEXT("message"), bAlreadyExisted
         ? TEXT("Notify track already existed; no change")
         : AnimAuthoring_SaveMessage(TEXT("Notify track added"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_notify_track"));
+    if (bAlreadyExisted)
+    {
+        // The track the caller asked for is there: nothing changed, so nothing was saved.
+        Obj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Obj);
+    }
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_notify_track"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

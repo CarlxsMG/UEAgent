@@ -282,6 +282,54 @@ namespace
         return Data;
     }
 
+    // Null when the vector param Field is absent or a list starting with three numbers (what the vector reader
+    // reads); otherwise the error reply. The reader turns any other value into 0,0,0, which as a scale collapses
+    // the whole mesh onto one point.
+    TSharedPtr<FJsonObject> GeometryScript_CheckVectorParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field)
+    {
+        if (!Params->HasField(Field))
+        {
+            return nullptr;
+        }
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        if (Params->TryGetArrayField(Field, Items) && Items != nullptr && Items->Num() >= 3
+            && (*Items)[0]->Type == EJson::Number && (*Items)[1]->Type == EJson::Number && (*Items)[2]->Type == EJson::Number)
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' must be a list of three numbers [x, y, z]"), Field));
+    }
+
+    // Null when Target's mesh has vertices; otherwise the error reply, since a whole-mesh transform has nothing to move.
+    TSharedPtr<FJsonObject> GeometryScript_RequireVertices(const FGeometryScriptMeshActor& Target)
+    {
+        if (UGeometryScriptLibrary_MeshQueryFunctions::GetVertexCount(Target.Mesh) > 0)
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("DynamicMeshActor '%s' has an empty mesh: there are no vertices to move"), *Target.Name));
+    }
+
+    // Whether Transform leaves every vertex where it is. The MeshTransformFunctions apply the transform to every
+    // vertex and report nothing, so on a mesh with vertices this is exactly the case in which nothing moves.
+    bool GeometryScript_IsIdentityTransform(const FTransform& Transform)
+    {
+        return Transform.Equals(FTransform::Identity, UE_SMALL_NUMBER);
+    }
+
+    // The reply of a whole-mesh transform: applied says whether it moved the vertices. An identity transform is a
+    // valid request that changes nothing, so it succeeds with applied false and a note.
+    TSharedPtr<FJsonObject> GeometryScript_TransformReply(const TSharedPtr<FJsonObject>& Data, bool bApplied)
+    {
+        Data->SetBoolField(TEXT("applied"), bApplied);
+        if (!bApplied)
+        {
+            Data->SetStringField(TEXT("note"), TEXT("identity transform: the mesh is unchanged"));
+        }
+        return mcp_common::MakeOkReply(Data);
+    }
+
     // Triangle and vertex counts of a dynamic mesh.
     struct FGeometryScriptMeshCounts
     {
@@ -447,6 +495,64 @@ namespace
         return nullptr;
     }
 
+    // The most UV channels a dynamic mesh can carry: UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets
+    // refuses any larger count and leaves the mesh as it was.
+    constexpr int32 GeometryScript_MaxUVChannels = 8;
+
+    // A transient sink for what a GeometryScript library call refuses or fails: those calls return the
+    // target mesh whatever happened and report a failure only by appending an error to this object.
+    UGeometryScriptDebug* GeometryScript_NewDebug()
+    {
+        return NewObject<UGeometryScriptDebug>(GetTransientPackage());
+    }
+
+    // The first error Debug collected, or an empty string when the call reported none (warnings do not count).
+    FString GeometryScript_FirstError(const UGeometryScriptDebug* Debug)
+    {
+        if (Debug != nullptr)
+        {
+            for (const FGeometryScriptDebugMessage& Message : Debug->Messages)
+            {
+                if (Message.MessageType == EGeometryScriptDebugMessageType::ErrorMessage)
+                {
+                    return Message.Message.ToString();
+                }
+            }
+        }
+        return FString();
+    }
+
+    // The reply of a mesh edit whose outcome flag was measured: success carries the flag, and a false one
+    // names the flag and why it is false.
+    TSharedPtr<FJsonObject> GeometryScript_OutcomeReply(const TSharedPtr<FJsonObject>& Data, bool bOutcome,
+        const TCHAR* Command, const TCHAR* OutcomeField, const FString& Reason)
+    {
+        return mcp_common::MakeOutcomeReply(Data, bOutcome, bOutcome ? FString()
+            : FString::Printf(TEXT("%s: %s is false: %s"), Command, OutcomeField, *Reason));
+    }
+
+    // How many triangles of DynMesh carry MaterialID. A mesh without the MaterialID attribute reads as all 0, which
+    // is what EnableMaterialIDs gives it.
+    int32 GeometryScript_CountMaterialID(UDynamicMesh* DynMesh, int32 MaterialID)
+    {
+        FGeometryScriptIndexList AllIDs;
+        bool bHasMaterialIDs = false;
+        UGeometryScriptLibrary_MeshMaterialFunctions::GetAllTriangleMaterialIDs(DynMesh, AllIDs, bHasMaterialIDs);
+        if (!bHasMaterialIDs)
+        {
+            return MaterialID == 0 ? DynMesh->GetTriangleCount() : 0;
+        }
+        int32 Count = 0;
+        if (AllIDs.List.IsValid())
+        {
+            for (const int32 ID : *AllIDs.List)
+            {
+                Count += (ID == MaterialID) ? 1 : 0;
+            }
+        }
+        return Count;
+    }
+
     // Reads back the mesh's max MaterialID and how many distinct MaterialIDs its triangles carry.
     void GeometryScript_ReadMaterialIDs(UDynamicMesh* DynMesh, int32& OutMaxMaterialID, int32& OutDistinctCount)
     {
@@ -602,7 +708,7 @@ TSharedPtr<FJsonObject> HandleAppendMeshPrimitive(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:apply_mesh_boolean - Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. boolean_applied is always true: compare triangle_count with triangle_count_before. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
+// MCP:apply_mesh_boolean - Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. When the engine refuses the result (an empty one, such as subtracting from an empty mesh) the mesh is left unchanged, boolean_applied is false and the call fails. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param operation - Union, Subtract, or Intersect, default Subtract
 //   @param other_primitive - Tool primitive shape, default Sphere
@@ -655,13 +761,17 @@ TSharedPtr<FJsonObject> HandleApplyMeshBoolean(const TSharedPtr<FJsonObject>& Pa
     const FScopedTransaction Transaction(LOCTEXT("ApplyMeshBoolean", "MCP: Apply Mesh Boolean"));
     Target.Actor->Modify();
 
-    FGeometryScriptMeshBooleanOptions BoolOptions; // defaults: fill holes, simplify output
+    FGeometryScriptMeshBooleanOptions BoolOptions; // defaults: fill holes, simplify output, no empty result
     const FTransform ToolTransform(FRotator::ZeroRotator, ToolOffset, FVector::OneVector);
 
+    // The engine replaces the target with the result unless it refuses it (an empty result), and says so only
+    // through Debug; a refused boolean leaves the target as it was.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     UGeometryScriptLibrary_MeshBooleanFunctions::ApplyMeshBoolean(
         Target.Mesh, FTransform::Identity,
         ToolMesh, ToolTransform,
-        Op, BoolOptions);
+        Op, BoolOptions, Debug);
+    const FString BooleanError = GeometryScript_FirstError(Debug);
 
     const FGeometryScriptMeshCounts After = GeometryScript_NotifyAndCount(Target.Component, Target.Mesh);
 
@@ -671,11 +781,12 @@ TSharedPtr<FJsonObject> HandleApplyMeshBoolean(const TSharedPtr<FJsonObject>& Pa
     Result->SetNumberField(TEXT("triangle_count"), After.Triangles);
     Result->SetNumberField(TEXT("triangle_count_before"), TrisBefore);
     Result->SetNumberField(TEXT("vertex_count"), After.Vertices);
-    Result->SetBoolField(TEXT("boolean_applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("boolean_applied"), BooleanError.IsEmpty());
+    return GeometryScript_OutcomeReply(Result, BooleanError.IsEmpty(), TEXT("apply_mesh_boolean"), TEXT("boolean_applied"),
+        FString::Printf(TEXT("the engine refused the boolean and left the mesh unchanged (%s)"), *BooleanError));
 }
 
-// MCP:apply_mesh_boolean_actor_to_actor - Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike apply_mesh_boolean (which builds a transient primitive tool), the tool geometry is the live dynamic mesh of source_actor_name. The target mesh is mutated in place; the source mesh is left untouched. NOT idempotent: re-running keeps cutting/merging the same tool against the already-modified target.
+// MCP:apply_mesh_boolean_actor_to_actor - Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike apply_mesh_boolean (which builds a transient primitive tool), the tool geometry is the live dynamic mesh of source_actor_name. The target mesh is mutated in place; the source mesh is left untouched. NOT idempotent: re-running keeps cutting/merging the same tool against the already-modified target. When the engine refuses the result (an empty one) the target is left unchanged, boolean_applied is false and the call fails.
 //   @param actor_name - Label or name of the target DynamicMeshActor (the receiver, mutated in place)
 //   @param source_actor_name - Label or name of the DynamicMeshActor whose live dynamic mesh is used as the boolean tool
 //   @param operation - Union, Subtract, or Intersect, default Subtract
@@ -729,10 +840,13 @@ TSharedPtr<FJsonObject> HandleApplyMeshBooleanActorToActor(const TSharedPtr<FJso
     DMActor->Modify();
     DMSource->Modify();
 
+    // A refused boolean (an empty result) is reported only through Debug and leaves the target unchanged.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     UGeometryScriptLibrary_MeshBooleanFunctions::ApplyMeshBoolean(
         TargetMesh, FTransform::Identity,
         SourceMesh, ToolTransform,
-        Op, BoolOptions, /*Debug*/ nullptr);
+        Op, BoolOptions, Debug);
+    const FString BooleanError = GeometryScript_FirstError(Debug);
 
     const FGeometryScriptMeshCounts After = GeometryScript_NotifyAndCount(MeshComp, TargetMesh);
 
@@ -742,8 +856,9 @@ TSharedPtr<FJsonObject> HandleApplyMeshBooleanActorToActor(const TSharedPtr<FJso
     Result->SetNumberField(TEXT("triangle_count"), After.Triangles);
     Result->SetNumberField(TEXT("triangle_count_before"), TrisBefore);
     Result->SetNumberField(TEXT("vertex_count"), After.Vertices);
-    Result->SetBoolField(TEXT("boolean_applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("boolean_applied"), BooleanError.IsEmpty());
+    return GeometryScript_OutcomeReply(Result, BooleanError.IsEmpty(), TEXT("apply_mesh_boolean_actor_to_actor"),
+        TEXT("boolean_applied"), FString::Printf(TEXT("the engine refused the boolean and left the mesh unchanged (%s)"), *BooleanError));
 }
 
 // MCP:apply_mesh_solidify - Voxel-wrap a DynamicMeshActor's dynamic mesh (replaces the mesh with a voxelised-and-meshed approximation).
@@ -946,7 +1061,7 @@ TSharedPtr<FJsonObject> HandleGetDynamicMeshInfo(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:recompute_mesh_normals - Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved; recomputed is always true. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
+// MCP:recompute_mesh_normals - Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved. An empty mesh is an error, and recomputed is false (the call fails) when the engine reports an error. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
 //   @param actor_name [!] - Label or name of the target DynamicMeshActor
 //   @param angle_weighted [bool] - Weight contributing face normals by corner angle, default true
 //   @param area_weighted [bool] - Weight contributing face normals by face area, default true
@@ -969,13 +1084,22 @@ TSharedPtr<FJsonObject> HandleRecomputeMeshNormals(const TSharedPtr<FJsonObject>
     NormalsOptions.bAngleWeighted = bAngleWeighted;
     NormalsOptions.bAreaWeighted = bAreaWeighted;
 
+    // A mesh without triangles has no normals to compute; refused before anything is touched.
+    if (Target.Mesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("DynamicMeshActor '%s' has an empty mesh: there are no normals to recompute"), *Target.Name));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("RecomputeMeshNormals", "MCP: Recompute Mesh Normals"));
     Target.Actor->Modify();
 
-    // Headless CPU recompute. With no prior normal overlay this falls back to per-vertex
-    // normals (warns via Debug, never errors); we pass Debug=nullptr so it stays silent.
+    // Headless CPU recompute. With no prior normal overlay this falls back to per-vertex normals (a warning,
+    // not an error); an error in Debug means the engine did not recompute.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(
-        Target.Mesh, NormalsOptions, /*bDeferChangeNotifications*/ false, /*Debug*/ nullptr);
+        Target.Mesh, NormalsOptions, /*bDeferChangeNotifications*/ false, Debug);
+    const FString NormalsError = GeometryScript_FirstError(Debug);
 
     const FGeometryScriptMeshCounts After = GeometryScript_NotifyAndCount(Target.Component, Target.Mesh);
 
@@ -987,14 +1111,15 @@ TSharedPtr<FJsonObject> HandleRecomputeMeshNormals(const TSharedPtr<FJsonObject>
     Result->SetBoolField(TEXT("area_weighted"), bAreaWeighted);
     Result->SetNumberField(TEXT("triangle_count"), After.Triangles);
     Result->SetNumberField(TEXT("vertex_count"), After.Vertices);
-    Result->SetBoolField(TEXT("recomputed"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("recomputed"), NormalsError.IsEmpty());
+    return GeometryScript_OutcomeReply(Result, NormalsError.IsEmpty(), TEXT("recompute_mesh_normals"), TEXT("recomputed"),
+        NormalsError);
 }
 
-// MCP:generate_mesh_uvs - Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. It first sets the mesh's UV channel count to exactly uv_channel + 1, so higher channels are discarded. Idempotent, in an editor transaction, nothing saved; uvs_generated is always true, even for uv_channel 8 or more, which changes nothing. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
+// MCP:generate_mesh_uvs - Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. A missing channel is added first (the channel count only grows, so higher channels such as a lightmap UV1 are kept). uv_channel 8 or more, or an empty mesh, is an error checked before anything changes; uvs_generated is false (the call fails) when the engine reports an error. Idempotent, in an editor transaction, nothing saved. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
 //   @param actor_name [!] - Label or name of the target DynamicMeshActor
-//   @param uv_channel [int] - UV set index to write, default 0
-//   @returns { actor_name: string, uv_channel: int, triangle_count: int, vertex_count: int, uvs_generated: bool }
+//   @param uv_channel [int] - UV set index to write, 0 to 7, default 0
+//   @returns { actor_name: string, uv_channel: int, uv_channel_count: int, triangle_count: int, vertex_count: int, uvs_generated: bool }
 TSharedPtr<FJsonObject> HandleGenerateMeshUVs(const TSharedPtr<FJsonObject>& Params)
 {
     FGeometryScriptMeshActor Target;
@@ -1003,33 +1128,54 @@ TSharedPtr<FJsonObject> HandleGenerateMeshUVs(const TSharedPtr<FJsonObject>& Par
         return Failure;
     }
 
-    int32 UVChannel = 0;
-    Params->TryGetNumberField(TEXT("uv_channel"), UVChannel);
-    if (UVChannel < 0)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'uv_channel' must be >= 0 (got %d)"), UVChannel));
+    // Read as a double so an out-of-range number is refused instead of falling back to channel 0.
+    double UVChannelD = 0.0;
+    Params->TryGetNumberField(TEXT("uv_channel"), UVChannelD);
+    if (UVChannelD < 0.0 || UVChannelD >= GeometryScript_MaxUVChannels)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("'uv_channel' must be between 0 and %d (got %g): a dynamic mesh has at most %d UV channels"),
+            GeometryScript_MaxUVChannels - 1, UVChannelD, GeometryScript_MaxUVChannels));
+    const int32 UVChannel = static_cast<int32>(UVChannelD);
+
+    // A mesh without triangles has nothing to project onto; refused before any channel is added.
+    if (Target.Mesh->GetTriangleCount() == 0)
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("DynamicMeshActor '%s' has an empty mesh: there are no triangles to project UVs onto"), *Target.Name));
+
+    const int32 ChannelsBefore = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(Target.Mesh);
 
     const FScopedTransaction Transaction(LOCTEXT("GenerateMeshUVs", "MCP: Generate Mesh UVs"));
     Target.Actor->Modify();
 
-    // Guarantee the requested UV set exists; SetMeshUVsFromPlanarProjection silently
-    // no-ops (error via Debug) if UVChannel >= NumUVLayers. Max 8 UV sets.
-    UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets(Target.Mesh, UVChannel + 1, /*Debug*/ nullptr);
+    // SetMeshUVsFromPlanarProjection writes nothing to a channel the mesh lacks, so a missing channel is added
+    // first. The count only ever grows: SetNumUVSets sets an exact count, and shrinking it would delete every
+    // channel above uv_channel (a lightmap UV1, say).
+    if (UVChannel >= ChannelsBefore)
+    {
+        UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets(Target.Mesh, UVChannel + 1, /*Debug*/ nullptr);
+    }
 
     // Empty FGeometryScriptMeshSelection => whole mesh. Identity plane transform.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     UGeometryScriptLibrary_MeshUVFunctions::SetMeshUVsFromPlanarProjection(
-        Target.Mesh, UVChannel, FTransform::Identity, FGeometryScriptMeshSelection(), /*Debug*/ nullptr);
+        Target.Mesh, UVChannel, FTransform::Identity, FGeometryScriptMeshSelection(), Debug);
+    const FString ProjectionError = GeometryScript_FirstError(Debug);
 
     const FGeometryScriptMeshCounts After = GeometryScript_NotifyAndCount(Target.Component, Target.Mesh);
+    const int32 ChannelsAfter = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(Target.Mesh);
+    const bool bGenerated = ProjectionError.IsEmpty() && UVChannel < ChannelsAfter;
 
-    UE_LOG(LogTemp, Verbose, TEXT("generate_mesh_uvs: actor='%s' uv_channel=%d -> tris=%d verts=%d"),
-        *Target.Name, UVChannel, After.Triangles, After.Vertices);
+    UE_LOG(LogTemp, Verbose, TEXT("generate_mesh_uvs: actor='%s' uv_channel=%d channels=%d->%d -> tris=%d verts=%d"),
+        *Target.Name, UVChannel, ChannelsBefore, ChannelsAfter, After.Triangles, After.Vertices);
 
     TSharedPtr<FJsonObject> Result = GeometryScript_NewActorData(Target.Actor);
     Result->SetNumberField(TEXT("uv_channel"), UVChannel);
+    Result->SetNumberField(TEXT("uv_channel_count"), ChannelsAfter);
     Result->SetNumberField(TEXT("triangle_count"), After.Triangles);
     Result->SetNumberField(TEXT("vertex_count"), After.Vertices);
-    Result->SetBoolField(TEXT("uvs_generated"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("uvs_generated"), bGenerated);
+    return GeometryScript_OutcomeReply(Result, bGenerated, TEXT("generate_mesh_uvs"), TEXT("uvs_generated"),
+        ProjectionError.IsEmpty() ? FString::Printf(TEXT("the mesh has %d UV channels, so channel %d does not exist"), ChannelsAfter, UVChannel)
+                                  : ProjectionError);
 }
 
 // MCP:simplify_mesh - QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count
@@ -1197,7 +1343,7 @@ TSharedPtr<FJsonObject> HandleCompactMesh(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:apply_uniform_remesh - Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type uniform and mixed work, but uv_preserving matches no engine name: it falls back to Mixed and leaves preserve_sharp_edges and auto_compact at true, so check the echoed settings. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
+// MCP:apply_uniform_remesh - Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type picks uniform, UV-preserving or mixed smoothing; an unknown value is an error. The reply echoes the settings the engine was given. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
 //   @param actor_name [!] - Label or name of the target DynamicMeshActor
 //   @param target_edge_length [float] - Target uniform edge length in mesh units (sets TargetType=TargetEdgeLength). Mutually exclusive with target_tri_count; at least one is required.
 //   @param target_tri_count [int] - Approximate target triangle count (sets TargetType=TriangleCount). Mutually exclusive with target_edge_length.
@@ -1230,33 +1376,40 @@ TSharedPtr<FJsonObject> HandleApplyUniformRemesh(const TSharedPtr<FJsonObject>& 
     if (bHasTriCount && TargetTriCount <= 0.0)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("'target_tri_count' must be > 0 (got %f)"), TargetTriCount));
 
-    // Build RemeshOptions via FJsonObjectConverter so we get the typed enum mapping
-    // for SmoothingType for free (smoothing_type -> EGeometryScriptRemeshSmoothingType
-    // by UENUM name). Unknown strings fall through to Mixed (the UE-canonical default).
-    FGeometryScriptRemeshOptions RemeshOptions; // defaults: Mixed smoothing, 0.25 rate, Free boundary constraints, all ops allowed, 20 iterations, bAutoCompact=true, bReproject=true.
+    // smoothing_type: the published snake_case values map to EGeometryScriptRemeshSmoothingType here, case-insensitively
+    // (the engine name UVPreserving is accepted too). Anything else is refused before the mesh is touched.
+    FString SmoothingTypeStr = TEXT("mixed");
+    Params->TryGetStringField(TEXT("smoothing_type"), SmoothingTypeStr);
+    EGeometryScriptRemeshSmoothingType SmoothingType = EGeometryScriptRemeshSmoothingType::Mixed;
+    if (SmoothingTypeStr.Equals(TEXT("uniform"), ESearchCase::IgnoreCase))
     {
-        TSharedRef<FJsonObject> OptJson = MakeShared<FJsonObject>();
-
-        // preserve_sharp_edges -> bPreventNormalFlips (closest UE equivalent on the shared struct).
-        bool bPreserveSharpEdges = true;
-        Params->TryGetBoolField(TEXT("preserve_sharp_edges"), bPreserveSharpEdges);
-        OptJson->SetBoolField(TEXT("bPreventNormalFlips"), bPreserveSharpEdges);
-
-        // smoothing_type (string) -> SmoothingType (enum). UE-canonical names accepted as-is.
-        FString SmoothingTypeStr = TEXT("Mixed");
-        Params->TryGetStringField(TEXT("smoothing_type"), SmoothingTypeStr);
-        OptJson->SetStringField(TEXT("SmoothingType"), SmoothingTypeStr);
-
-        // auto_compact -> bAutoCompact (default true).
-        bool bAutoCompact = true;
-        Params->TryGetBoolField(TEXT("auto_compact"), bAutoCompact);
-        OptJson->SetBoolField(TEXT("bAutoCompact"), bAutoCompact);
-
-        // JsonObjectToUStruct silently leaves unspecified fields at the struct's default
-        // (the empty JSON above is exactly that), so RemeshOptions keeps its UE defaults
-        // for the untouched fields (RemeshIterations=20, bUseFullRemeshPasses=false, etc.).
-        FJsonObjectConverter::JsonObjectToUStruct(OptJson, FGeometryScriptRemeshOptions::StaticStruct(), &RemeshOptions, /*CheckFlags*/ 0, /*SkipFlags*/ 0);
+        SmoothingType = EGeometryScriptRemeshSmoothingType::Uniform;
     }
+    else if (SmoothingTypeStr.Equals(TEXT("uv_preserving"), ESearchCase::IgnoreCase)
+        || SmoothingTypeStr.Equals(TEXT("uvpreserving"), ESearchCase::IgnoreCase))
+    {
+        SmoothingType = EGeometryScriptRemeshSmoothingType::UVPreserving;
+    }
+    else if (!SmoothingTypeStr.Equals(TEXT("mixed"), ESearchCase::IgnoreCase))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown smoothing_type '%s' (expected uniform|uv_preserving|mixed)"), *SmoothingTypeStr));
+    }
+
+    // preserve_sharp_edges -> bPreventNormalFlips (closest UE equivalent on the shared struct), default true.
+    bool bPreserveSharpEdges = true;
+    Params->TryGetBoolField(TEXT("preserve_sharp_edges"), bPreserveSharpEdges);
+
+    // auto_compact -> bAutoCompact, default true.
+    bool bAutoCompact = true;
+    Params->TryGetBoolField(TEXT("auto_compact"), bAutoCompact);
+
+    // The three requested fields are written directly; every other field keeps the engine default
+    // (0.25 smoothing rate, Free boundary constraints, all ops allowed, 20 iterations, reprojection on).
+    FGeometryScriptRemeshOptions RemeshOptions;
+    RemeshOptions.SmoothingType = SmoothingType;
+    RemeshOptions.bPreventNormalFlips = bPreserveSharpEdges;
+    RemeshOptions.bAutoCompact = bAutoCompact;
 
     // Build UniformOptions with the resolved TargetType + target value.
     FGeometryScriptUniformRemeshOptions UniformOptions; // defaults: TriangleCount=5000, TargetEdgeLength=1.0.
@@ -1752,12 +1905,12 @@ TSharedPtr<FJsonObject> HandleAppendMeshToDynamicMesh(
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:transform_dynamic_mesh - Apply a full FTransform (translation + rotation + scale) to the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh.
+// MCP:transform_dynamic_mesh - Apply a full FTransform (translation + rotation + scale) to the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh, in an editor transaction. A location or scale that is not three numbers, or an empty mesh, is an error. An identity transform succeeds with applied false and a note, leaving the mesh unchanged.
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param location - Optional [x, y, z] translation; default (0,0,0)
 //   @param rotation - Optional [pitch, yaw, roll] rotation; default (0,0,0)
 //   @param scale - Optional [x, y, z] scale; default (1,1,1)
-//   @returns { actor_name, location:{}, rotation:{}, scale:{}, applied: true }
+//   @returns { actor_name: string, location_x: number, location_y: number, location_z: number, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleTransformDynamicMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1765,6 +1918,18 @@ TSharedPtr<FJsonObject> HandleTransformDynamicMesh(
     if (TSharedPtr<FJsonObject> Failure = GeometryScript_ResolveMeshActor(Params, Target))
     {
         return Failure;
+    }
+    if (TSharedPtr<FJsonObject> Malformed = GeometryScript_CheckVectorParam(Params, TEXT("location")))
+    {
+        return Malformed;
+    }
+    if (TSharedPtr<FJsonObject> Malformed = GeometryScript_CheckVectorParam(Params, TEXT("scale")))
+    {
+        return Malformed;
+    }
+    if (TSharedPtr<FJsonObject> Empty = GeometryScript_RequireVertices(Target))
+    {
+        return Empty;
     }
 
     const FVector Location = Params->HasField(TEXT("location"))
@@ -1780,19 +1945,22 @@ TSharedPtr<FJsonObject> HandleTransformDynamicMesh(
     }
 
     const FTransform Transform(Rotation, Location, Scale);
-
-    const FScopedTransaction Transaction(LOCTEXT("TransformDynamicMesh", "MCP: Transform Dynamic Mesh"));
-    Target.Actor->Modify();
-
-    UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh(Target.Mesh, Transform, /*bFixOrientationForNegativeScale*/ false, /*Debug*/ nullptr);
-
-    if (Target.Component)
+    const bool bApplied = !GeometryScript_IsIdentityTransform(Transform);
+    if (bApplied)
     {
-        Target.Component->NotifyMeshUpdated();
+        const FScopedTransaction Transaction(LOCTEXT("TransformDynamicMesh", "MCP: Transform Dynamic Mesh"));
+        Target.Actor->Modify();
+
+        UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh(Target.Mesh, Transform, /*bFixOrientationForNegativeScale*/ false, /*Debug*/ nullptr);
+
+        if (Target.Component)
+        {
+            Target.Component->NotifyMeshUpdated();
+        }
     }
 
-    UE_LOG(LogTemp, Verbose, TEXT("transform_dynamic_mesh: '%s' transform=%s applied"),
-        *Target.Name, *Transform.ToString());
+    UE_LOG(LogTemp, Verbose, TEXT("transform_dynamic_mesh: '%s' transform=%s applied=%d"),
+        *Target.Name, *Transform.ToString(), bApplied ? 1 : 0);
 
     TSharedPtr<FJsonObject> Result = GeometryScript_NewActorData(Target.Actor);
     Result->SetNumberField(TEXT("location_x"), Location.X);
@@ -1804,14 +1972,13 @@ TSharedPtr<FJsonObject> HandleTransformDynamicMesh(
     Result->SetNumberField(TEXT("scale_x"), Scale.X);
     Result->SetNumberField(TEXT("scale_y"), Scale.Y);
     Result->SetNumberField(TEXT("scale_z"), Scale.Z);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    return GeometryScript_TransformReply(Result, bApplied);
 }
 
-// MCP:translate_dynamic_mesh - Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh.
+// MCP:translate_dynamic_mesh - Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh, in an editor transaction. A translation that is not three numbers, or an empty mesh, is an error. A zero translation succeeds with applied false and a note, leaving the mesh unchanged.
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param translation - [x, y, z] translation delta in local space
-//   @returns { actor_name, translation:{}, applied: true }
+//   @returns { actor_name: string, translation_x: number, translation_y: number, translation_z: number, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleTranslateDynamicMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1820,64 +1987,93 @@ TSharedPtr<FJsonObject> HandleTranslateDynamicMesh(
     {
         return Failure;
     }
+    if (TSharedPtr<FJsonObject> Malformed = GeometryScript_CheckVectorParam(Params, TEXT("translation")))
+    {
+        return Malformed;
+    }
+    if (TSharedPtr<FJsonObject> Empty = GeometryScript_RequireVertices(Target))
+    {
+        return Empty;
+    }
 
     const FVector Translation = mcp_common::ReadJsonVector(Params, TEXT("translation"));
-
-    const FScopedTransaction Transaction(LOCTEXT("TranslateDynamicMesh", "MCP: Translate Dynamic Mesh"));
-    Target.Actor->Modify();
-
-    UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh(Target.Mesh, Translation, /*Debug*/ nullptr);
-
-    if (Target.Component)
+    const bool bApplied = !GeometryScript_IsIdentityTransform(FTransform(Translation));
+    if (bApplied)
     {
-        Target.Component->NotifyMeshUpdated();
+        const FScopedTransaction Transaction(LOCTEXT("TranslateDynamicMesh", "MCP: Translate Dynamic Mesh"));
+        Target.Actor->Modify();
+
+        UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh(Target.Mesh, Translation, /*Debug*/ nullptr);
+
+        if (Target.Component)
+        {
+            Target.Component->NotifyMeshUpdated();
+        }
     }
 
     TSharedPtr<FJsonObject> Result = GeometryScript_NewActorData(Target.Actor);
     Result->SetNumberField(TEXT("translation_x"), Translation.X);
     Result->SetNumberField(TEXT("translation_y"), Translation.Y);
     Result->SetNumberField(TEXT("translation_z"), Translation.Z);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    return GeometryScript_TransformReply(Result, bApplied);
 }
 
-// MCP:rotate_dynamic_mesh - Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. rotation is required (omitting it is an error). Runs in an editor transaction, nothing saved; applied is always true. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
+// MCP:rotate_dynamic_mesh - Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. Runs in an editor transaction, nothing saved. An empty mesh is an error; a zero rotation succeeds with applied false and a note, leaving the mesh unchanged. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
 //   @param actor_name - Label or name of the target DynamicMeshActor
-//   @param rotation - Required (the call fails without it): [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh
-//   @returns { actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool }
+//   @param rotation [array!] - [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh
+//   @returns { actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleRotateDynamicMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
     FGeometryScriptMeshActor Target;
-    if (TSharedPtr<FJsonObject> Failure = GeometryScript_ResolveMeshActor(Params, Target, TEXT("rotation")))
+    if (TSharedPtr<FJsonObject> Failure = GeometryScript_ResolveMeshActor(Params, Target))
     {
         return Failure;
     }
 
-    const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
-
-    const FScopedTransaction Transaction(LOCTEXT("RotateDynamicMesh", "MCP: Rotate Dynamic Mesh"));
-    Target.Actor->Modify();
-
-    UGeometryScriptLibrary_MeshTransformFunctions::RotateMesh(Target.Mesh, Rotation, /*RotationOrigin*/ FVector::ZeroVector, /*Debug*/ nullptr);
-
-    if (Target.Component)
+    // rotation is required, as a [pitch, yaw, roll] list of at least three numbers or a {pitch, yaw, roll} object:
+    // the rotator reader turns anything else into no rotation at all.
+    const TArray<TSharedPtr<FJsonValue>>* RotationItems = nullptr;
+    if (!Params->TryGetArrayField(TEXT("rotation"), RotationItems) && !Params->HasTypedField<EJson::Object>(TEXT("rotation")))
     {
-        Target.Component->NotifyMeshUpdated();
+        return mcp_common::MakeErrorReply(TEXT("Missing 'rotation': pass [pitch, yaw, roll] in degrees or a {pitch, yaw, roll} object"));
+    }
+    if (RotationItems != nullptr && RotationItems->Num() < 3)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("'rotation' must hold three numbers [pitch, yaw, roll] (got %d)"), RotationItems->Num()));
+    }
+    if (TSharedPtr<FJsonObject> Empty = GeometryScript_RequireVertices(Target))
+    {
+        return Empty;
+    }
+
+    const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
+    const bool bApplied = !GeometryScript_IsIdentityTransform(FTransform(Rotation));
+    if (bApplied)
+    {
+        const FScopedTransaction Transaction(LOCTEXT("RotateDynamicMesh", "MCP: Rotate Dynamic Mesh"));
+        Target.Actor->Modify();
+
+        UGeometryScriptLibrary_MeshTransformFunctions::RotateMesh(Target.Mesh, Rotation, /*RotationOrigin*/ FVector::ZeroVector, /*Debug*/ nullptr);
+
+        if (Target.Component)
+        {
+            Target.Component->NotifyMeshUpdated();
+        }
     }
 
     TSharedPtr<FJsonObject> Result = GeometryScript_NewActorData(Target.Actor);
     Result->SetNumberField(TEXT("rotation_pitch"), Rotation.Pitch);
     Result->SetNumberField(TEXT("rotation_yaw"), Rotation.Yaw);
     Result->SetNumberField(TEXT("rotation_roll"), Rotation.Roll);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    return GeometryScript_TransformReply(Result, bApplied);
 }
 
-// MCP:scale_dynamic_mesh - Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh.
+// MCP:scale_dynamic_mesh - Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh, in an editor transaction. A scale that is not three numbers, or an empty mesh, is an error. A scale of 1,1,1 succeeds with applied false and a note, leaving the mesh unchanged.
 //   @param actor_name - Label or name of the target DynamicMeshActor
 //   @param scale - [x, y, z] scale factor (1.0 = no change)
-//   @returns { actor_name, scale:{}, applied: true }
+//   @returns { actor_name: string, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleScaleDynamicMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1886,25 +2082,35 @@ TSharedPtr<FJsonObject> HandleScaleDynamicMesh(
     {
         return Failure;
     }
+    if (TSharedPtr<FJsonObject> Malformed = GeometryScript_CheckVectorParam(Params, TEXT("scale")))
+    {
+        return Malformed;
+    }
+    if (TSharedPtr<FJsonObject> Empty = GeometryScript_RequireVertices(Target))
+    {
+        return Empty;
+    }
 
     const FVector Scale = mcp_common::ReadJsonVector(Params, TEXT("scale"));
-
-    const FScopedTransaction Transaction(LOCTEXT("ScaleDynamicMesh", "MCP: Scale Dynamic Mesh"));
-    Target.Actor->Modify();
-
-    UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh(Target.Mesh, Scale, /*ScaleOrigin*/ FVector::ZeroVector, /*bFixOrientationForNegativeScale*/ false, /*Debug*/ nullptr);
-
-    if (Target.Component)
+    const bool bApplied = !GeometryScript_IsIdentityTransform(FTransform(FQuat::Identity, FVector::ZeroVector, Scale));
+    if (bApplied)
     {
-        Target.Component->NotifyMeshUpdated();
+        const FScopedTransaction Transaction(LOCTEXT("ScaleDynamicMesh", "MCP: Scale Dynamic Mesh"));
+        Target.Actor->Modify();
+
+        UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh(Target.Mesh, Scale, /*ScaleOrigin*/ FVector::ZeroVector, /*bFixOrientationForNegativeScale*/ false, /*Debug*/ nullptr);
+
+        if (Target.Component)
+        {
+            Target.Component->NotifyMeshUpdated();
+        }
     }
 
     TSharedPtr<FJsonObject> Result = GeometryScript_NewActorData(Target.Actor);
     Result->SetNumberField(TEXT("scale_x"), Scale.X);
     Result->SetNumberField(TEXT("scale_y"), Scale.Y);
     Result->SetNumberField(TEXT("scale_z"), Scale.Z);
-    Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(Result);
+    return GeometryScript_TransformReply(Result, bApplied);
 }
 
 // ===========================================================================
@@ -2166,10 +2372,10 @@ TSharedPtr<FJsonObject> HandleIsPointInsideMesh(
 // and reject OOR upfront).
 // ============================================================================
 
-// MCP:set_num_uv_channels - Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8; a larger count changes nothing yet still reports changed true. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
+// MCP:set_num_uv_channels - Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8, so a count above 8 is an error; num_uv_channels is the count read back after the call, and the call fails if it differs from the request. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param num_uv_channels [number!] - Desired count (>= 0; <= 8 in practice) (required)
-//   @returns { actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped.
+//   @param num_uv_channels [number!] - Desired count, 0 to 8 (required)
+//   @returns { actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; num_uv_channels is read back; note when channels were removed, whose UV data is dropped.
 TSharedPtr<FJsonObject> HandleSetNumUVChannels(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2182,12 +2388,14 @@ TSharedPtr<FJsonObject> HandleSetNumUVChannels(
 
     double NumChannelsD = 0.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("num_uv_channels"), NumChannelsD)) { return Missing; }
-    const int32 NumChannels = static_cast<int32>(NumChannelsD);
-    if (NumChannels < 0)
+    // SetNumUVSets refuses a count above the maximum and leaves the mesh as it was, so it is refused here first.
+    if (NumChannelsD < 0.0 || NumChannelsD > GeometryScript_MaxUVChannels)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("num_uv_channels must be >= 0 (got %d)"), NumChannels));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("num_uv_channels must be between 0 and %d (got %g): a dynamic mesh has at most %d UV channels"),
+            GeometryScript_MaxUVChannels, NumChannelsD, GeometryScript_MaxUVChannels));
     }
+    const int32 NumChannels = static_cast<int32>(NumChannelsD);
 
     // Read current count BEFORE mutating. GetNumUVSets takes a single
     // UDynamicMesh* arg (no bIsValidUVSet out-param -- unlike GetMeshUVArea).
@@ -2204,16 +2412,20 @@ TSharedPtr<FJsonObject> HandleSetNumUVChannels(
 
     UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets(DynMesh, NumChannels, /*Debug*/ nullptr);
 
+    // The count the mesh has now, read back: the reply reports it, not the request.
+    const int32 Current = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
+
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
-    ResultObj->SetNumberField(TEXT("num_uv_channels"), NumChannels);
+    ResultObj->SetNumberField(TEXT("num_uv_channels"), Current);
     ResultObj->SetNumberField(TEXT("previous_num_uv_channels"), Previous);
-    ResultObj->SetBoolField(TEXT("changed"), true);
-    if (NumChannels < Previous)
+    ResultObj->SetBoolField(TEXT("changed"), Current != Previous);
+    if (Current < Previous)
     {
         ResultObj->SetStringField(TEXT("note"),
             TEXT("Reduced UV channel count; existing UV data on discarded channels is dropped (UE API behavior)."));
     }
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, Current == NumChannels, Current == NumChannels ? FString()
+        : FString::Printf(TEXT("set_num_uv_channels: the mesh has %d UV channels after the call, not the %d requested"), Current, NumChannels));
 }
 
 // MCP:translate_mesh_uvs - Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false). No undo entry; reply actor_name is the component name, not the actor label.
@@ -2327,10 +2539,10 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:copy_mesh_uv_channel - Copy UV data from one UV channel to another on the same mesh.
+// MCP:copy_mesh_uv_channel - Copy UV data from one UV channel to another on the same mesh. A dest_channel the mesh does not have yet is added first (the channel count only grows, and channels added in between have no UVs set); a source_channel the mesh does not have, or a dest_channel of 8 or more, is an error checked before anything changes. copied is false, and the call fails, when the engine reports an error; the same channel for both is a no-op that succeeds with copied false and a note. No undo entry, nothing saved.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param source_channel [number!] - Source UV channel index (required)
-//   @param dest_channel [number!] - Destination UV channel index (required, auto-grown if >= NumUVSets)
+//   @param dest_channel [number!] - Destination UV channel index, 0 to 7 (required, added to the mesh when it does not have it yet)
 //   @returns { actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.
 TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
     const TSharedPtr<FJsonObject>& Params)
@@ -2350,14 +2562,16 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("source_channel must be >= 0 (got %d)"), SourceChannel));
     }
+    // Read as a double so an out-of-range number is refused instead of wrapping into a valid channel.
     double DestD = 0.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("dest_channel"), DestD)) { return Missing; }
-    const int32 DestChannel = static_cast<int32>(DestD);
-    if (DestChannel < 0)
+    if (DestD < 0.0 || DestD >= GeometryScript_MaxUVChannels)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("dest_channel must be >= 0 (got %d)"), DestChannel));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("dest_channel must be between 0 and %d (got %g): a dynamic mesh has at most %d UV channels"),
+            GeometryScript_MaxUVChannels - 1, DestD, GeometryScript_MaxUVChannels));
     }
+    const int32 DestChannel = static_cast<int32>(DestD);
 
     // Validate source exists.
     const int32 NumChannelsBefore = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
@@ -2368,33 +2582,44 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
                 SourceChannel, NumChannelsBefore));
     }
 
-    // Engine CopyUVSet auto-grows dest if dest >= NumUVSets (same pattern as
-    // SetMeshUVsFromPlanarProjection). No explicit pre-grow needed.
-    const bool SameChannel = (SourceChannel == DestChannel);
-
-    UGeometryScriptLibrary_MeshUVFunctions::CopyUVSet(
-        DynMesh, SourceChannel, DestChannel, /*Debug*/ nullptr);
-
-    const int32 NumChannelsAfter = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
-
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
     ResultObj->SetNumberField(TEXT("source_channel"), SourceChannel);
     ResultObj->SetNumberField(TEXT("dest_channel"), DestChannel);
-    ResultObj->SetBoolField(TEXT("copied"), !SameChannel);
-    ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsAfter);
-    if (SameChannel)
+
+    // Copying a channel onto itself changes nothing (CopyUVSet refuses it), so the mesh is left alone.
+    if (SourceChannel == DestChannel)
     {
+        ResultObj->SetBoolField(TEXT("copied"), false);
+        ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsBefore);
         ResultObj->SetStringField(TEXT("note"),
-            TEXT("source_channel == dest_channel; copy is identity and engine no-ops. "
+            TEXT("source_channel == dest_channel; copy is identity and the mesh is unchanged. "
                  "Use distinct channels to actually duplicate UV data."));
+        return mcp_common::MakeOkReply(ResultObj);
     }
-    else if (DestChannel >= NumChannelsBefore)
+
+    // CopyUVSet copies only into a channel the mesh already has: for a missing one it reports an error through
+    // Debug and copies nothing. So a missing destination is added first; the count only ever grows.
+    if (DestChannel >= NumChannelsBefore)
+    {
+        UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets(DynMesh, DestChannel + 1, /*Debug*/ nullptr);
+    }
+
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshUVFunctions::CopyUVSet(DynMesh, SourceChannel, DestChannel, Debug);
+    const FString CopyError = GeometryScript_FirstError(Debug);
+    const bool bCopied = CopyError.IsEmpty();
+
+    const int32 NumChannelsAfter = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
+
+    ResultObj->SetBoolField(TEXT("copied"), bCopied);
+    ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsAfter);
+    if (NumChannelsAfter > NumChannelsBefore)
     {
         ResultObj->SetStringField(TEXT("note"),
-            FString::Printf(TEXT("dest_channel was >= NumUVSets; engine auto-grew UV channels %d -> %d."),
+            FString::Printf(TEXT("dest_channel was >= NumUVSets; the mesh grew UV channels %d -> %d before the copy."),
                 NumChannelsBefore, NumChannelsAfter));
     }
-    return mcp_common::MakeOkReply(ResultObj);
+    return GeometryScript_OutcomeReply(ResultObj, bCopied, TEXT("copy_mesh_uv_channel"), TEXT("copied"), CopyError);
 }
 
 // ===========================================================================
@@ -2442,7 +2667,7 @@ TSharedPtr<FJsonObject> HandleRemoveDynamicMeshActor(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Removal);
 }
 
-// MCP:set_dynamic_mesh_material - Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent.
+// MCP:set_dynamic_mesh_material - Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent, in an editor transaction. applied is the slot read back after the assignment; the call fails when it does not hold the material.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor (required).
 //   @param material_path [string!] - Asset path of the UMaterialInterface (e.g. /Engine/EngineMaterials/DefaultMaterial) (required).
 //   @param slot_index [number] - Material slot to assign. Default 0 (the dynamic mesh only uses slot 0).
@@ -2496,13 +2721,20 @@ TSharedPtr<FJsonObject> HandleSetDynamicMeshMaterial(const TSharedPtr<FJsonObjec
     MeshComp->SetMaterial(SlotIndex, SlotMaterial);
     MeshComp->MarkRenderStateDirty();
 
+    // Read the slot back: applied says the component now holds this material there.
+    const bool bApplied = MeshComp->GetMaterial(SlotIndex) == SlotMaterial;
+
     TSharedPtr<FJsonObject> Assignment = GeometryScript_NewActorData(MeshActor);
     Assignment->SetStringField(TEXT("material_path"), MaterialAssetPath);
     Assignment->SetStringField(TEXT("material_name"), SlotMaterial->GetName());
     Assignment->SetNumberField(TEXT("slot_index"), SlotIndex);
-    Assignment->SetBoolField(TEXT("applied"), true);
-    Assignment->SetStringField(TEXT("note"), TEXT("Material applied to slot; render state marked dirty for next viewport refresh."));
-    return mcp_common::MakeOkReply(Assignment);
+    Assignment->SetBoolField(TEXT("applied"), bApplied);
+    if (bApplied)
+    {
+        Assignment->SetStringField(TEXT("note"), TEXT("Material applied to slot; render state marked dirty for next viewport refresh."));
+    }
+    return GeometryScript_OutcomeReply(Assignment, bApplied, TEXT("set_dynamic_mesh_material"), TEXT("applied"),
+        TEXT("the slot does not hold the material after SetMaterial"));
 }
 
 // MCP:clear_dynamic_mesh - Empty a DynamicMeshActor's live UDynamicMesh in place (keep the actor, drop the geometry).
@@ -2647,10 +2879,10 @@ TSharedPtr<FJsonObject> HandleSetMeshUVElementPosition(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:rebuild_mesh_bvh - Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
+// MCP:rebuild_mesh_bvh - Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMesh and read it back with IsBVHValidForMesh. The BVH is a temporary that is not kept: the spatial-query tools build their own on every call, so this only checks that a BVH can be built for the mesh as it is now. bvh_rebuilt is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param b_only_if_invalid [bool] - Optional: only rebuild if currently invalid (default true)
-//   @returns { actor_name, bvh_rebuilt: true, b_only_if_invalid, bvh_valid }
+//   @param b_only_if_invalid [bool] - Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds
+//   @returns { actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }
 TSharedPtr<FJsonObject> HandleRebuildMeshBVH(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
@@ -2663,18 +2895,23 @@ TSharedPtr<FJsonObject> HandleRebuildMeshBVH(const TSharedPtr<FJsonObject>& Para
         Params->TryGetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     }
 
-    // RebuildBVHForMesh takes an FGeometryScriptDynamicMeshBVH& and re-fills it in-place;
-    // we keep a transient local that we can report `bvh_valid` against after the rebuild.
+    // RebuildBVHForMesh re-fills the BVH it is given. This one is a local that starts empty, so the engine always
+    // rebuilds it (bOnlyIfInvalid only skips a BVH already built for this mesh) and it is dropped on return. A
+    // refusal is reported only through Debug, and the result is read back with IsBVHValidForMesh.
     FGeometryScriptDynamicMeshBVH BVH;
-    UGeometryScriptLibrary_MeshSpatial::RebuildBVHForMesh(DynMesh, BVH, bOnlyIfInvalid, /*Debug*/ nullptr);
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshSpatial::RebuildBVHForMesh(DynMesh, BVH, bOnlyIfInvalid, Debug);
+    const FString RebuildError = GeometryScript_FirstError(Debug);
     bool bIsValidAfter = false;
     UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh(DynMesh, BVH, bIsValidAfter, /*Debug*/ nullptr);
+    const bool bRebuilt = RebuildError.IsEmpty() && bIsValidAfter;
 
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
-    ResultObj->SetBoolField(TEXT("bvh_rebuilt"), true);
+    ResultObj->SetBoolField(TEXT("bvh_rebuilt"), bRebuilt);
     ResultObj->SetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     ResultObj->SetBoolField(TEXT("bvh_valid"), bIsValidAfter);
-    return mcp_common::MakeOkReply(ResultObj);
+    return GeometryScript_OutcomeReply(ResultObj, bRebuilt, TEXT("rebuild_mesh_bvh"), TEXT("bvh_rebuilt"),
+        RebuildError.IsEmpty() ? FString(TEXT("the rebuilt BVH does not read back as valid for the mesh")) : RebuildError);
 }
 
 // MCP:get_num_uv_islands - Get the number of UV islands in a UV channel.
@@ -2763,7 +3000,7 @@ TSharedPtr<FJsonObject> HandleGetMeshHasAttributeSet(const TSharedPtr<FJsonObjec
 //   * GetNumExtendedPolygroupLayers (extended polygroup layer count)
 // ============================================================================
 
-// MCP:recompute_mesh_uvs - Recompute UVs on a UV channel using the configured flatten method.
+// MCP:recompute_mesh_uvs - Recompute UVs on a UV channel using the configured flatten method. A channel the mesh does not have, or an empty mesh, is an error; recomputed is false, and the call fails, when the engine refuses (for example polygroups on a mesh without polygroups).
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param uv_channel [number]  - UV channel index (default 0)
 //   @param island_source [string] - "uv_islands" | "polygroups" | "existing_groups" | "selection" (default "uv_islands")
@@ -2824,25 +3061,39 @@ TSharedPtr<FJsonObject> HandleRecomputeMeshUVs(const TSharedPtr<FJsonObject>& Pa
             FString::Printf(TEXT("Unknown method '%s' (spectral_conformal|conformal|exp_map)"), *MethodStr));
     }
 
-    // Empty selection = entire mesh.
+    // The engine writes nothing to a channel the mesh lacks, and an empty mesh has nothing to unwrap.
+    if (TSharedPtr<FJsonObject> Failure = GeometryScript_CheckUVChannelExists(DynMesh, UVChannel))
+    {
+        return Failure;
+    }
+    if (DynMesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The dynamic mesh is empty: there are no triangles to recompute UVs for"));
+    }
+
+    // Empty selection = entire mesh. A refusal (such as polygroups on a mesh without a polygroup layer) is
+    // reported only through Debug and leaves the UVs unchanged.
     const FGeometryScriptMeshSelection EmptySelection;
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     UGeometryScriptLibrary_MeshUVFunctions::RecomputeMeshUVs(
-        DynMesh, UVChannel, Options, EmptySelection, /*Debug*/ nullptr);
+        DynMesh, UVChannel, Options, EmptySelection, Debug);
+    const FString RecomputeError = GeometryScript_FirstError(Debug);
 
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
     ResultObj->SetNumberField(TEXT("uv_channel"), UVChannel);
     ResultObj->SetStringField(TEXT("island_source"), IslandSourceStr);
     ResultObj->SetStringField(TEXT("method"), MethodStr);
-    ResultObj->SetBoolField(TEXT("recomputed"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("recomputed"), RecomputeError.IsEmpty());
+    return GeometryScript_OutcomeReply(ResultObj, RecomputeError.IsEmpty(), TEXT("recompute_mesh_uvs"), TEXT("recomputed"),
+        RecomputeError);
 }
 
-// MCP:repack_mesh_uvs - Pack existing UV islands on a UV channel into standard UV space.
+// MCP:repack_mesh_uvs - Pack existing UV islands on a UV channel into standard UV space. A channel the mesh does not have, or an empty mesh, is an error checked before anything changes. A channel with no UVs set has no islands to pack: the call succeeds with repacked false and a note, leaving the mesh unchanged. Otherwise repacked is false, and the call fails, when the engine reports an error. No undo entry, nothing saved.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param uv_channel [number]  - UV channel index (default 0)
 //   @param target_image_width [number] - target image width in pixels (default 512)
 //   @param optimize_island_rotation [bool] - whether to optimize island rotation (default true)
-//   @returns { actor_name, uv_channel, target_image_width, optimize_island_rotation, repacked }
+//   @returns { actor_name, uv_channel, target_image_width, optimize_island_rotation, num_uv_islands, repacked, note? }
 TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
@@ -2867,15 +3118,43 @@ TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Param
         Options.bOptimizeIslandRotation = bOptimize;
     }
 
-    UGeometryScriptLibrary_MeshUVFunctions::RepackMeshUVs(
-        DynMesh, UVChannel, Options, /*Debug*/ nullptr);
+    // The engine writes nothing to a channel the mesh lacks, and an empty mesh has nothing to pack.
+    if (TSharedPtr<FJsonObject> Failure = GeometryScript_CheckUVChannelExists(DynMesh, UVChannel))
+    {
+        return Failure;
+    }
+    if (DynMesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The dynamic mesh is empty: there are no UV islands to repack"));
+    }
+
+    // Islands are counted over the triangles that have UVs set; a channel with none (one just added, say) gives
+    // the packer nothing to move, so that valid request succeeds with repacked false and the mesh untouched.
+    bool bIsValidChannel = false;
+    const int32 NumIslands = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVIslands(DynMesh, UVChannel, bIsValidChannel);
 
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
     ResultObj->SetNumberField(TEXT("uv_channel"), UVChannel);
     ResultObj->SetNumberField(TEXT("target_image_width"), Options.TargetImageWidth);
     ResultObj->SetBoolField(TEXT("optimize_island_rotation"), Options.bOptimizeIslandRotation);
-    ResultObj->SetBoolField(TEXT("repacked"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetNumberField(TEXT("num_uv_islands"), FMath::Max(0, NumIslands));
+    if (NumIslands <= 0)
+    {
+        ResultObj->SetBoolField(TEXT("repacked"), false);
+        ResultObj->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("UV channel %d has no UVs set: there are no islands to pack, and the mesh is unchanged"), UVChannel));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+
+    // A refusal is reported only through Debug.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshUVFunctions::RepackMeshUVs(
+        DynMesh, UVChannel, Options, Debug);
+    const FString RepackError = GeometryScript_FirstError(Debug);
+
+    ResultObj->SetBoolField(TEXT("repacked"), RepackError.IsEmpty());
+    return GeometryScript_OutcomeReply(ResultObj, RepackError.IsEmpty(), TEXT("repack_mesh_uvs"), TEXT("repacked"),
+        RepackError);
 }
 
 // MCP:delete_triangle_from_mesh - Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the editor world; a missing ID is not an error, deleted just comes back false. No undo entry; reply actor_name is the component name, not the actor label.
@@ -3204,7 +3483,7 @@ TSharedPtr<FJsonObject> HandleCopyDynamicMeshToStaticMesh(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_num_extended_polygroup_layers - Set the number of extended polygroup layers on the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshPolygroupFunctions::SetNumExtendedPolygroupLayers. Idempotent: the engine dedups (only reshapes attributes when the count actually differs from the current one), so re-setting the same count is a no-op. The layer count is read back AFTER the set via GetNumExtendedPolygroupLayers to confirm it landed.
+// MCP:set_num_extended_polygroup_layers - Set the number of extended polygroup layers on the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshPolygroupFunctions::SetNumExtendedPolygroupLayers. Idempotent: the engine dedups (only reshapes attributes when the count actually differs from the current one), so re-setting the same count is a no-op. The layer count is read back AFTER the set via GetNumExtendedPolygroupLayers: applied is true when it equals the request, and the call fails when it does not.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param num_layers [int!] - Desired number of extended polygroup layers (>= 0).
 //   @returns { actor_name, requested_num_layers, num_polygroup_layers, applied: bool }
@@ -3256,8 +3535,9 @@ TSharedPtr<FJsonObject> HandleSetNumExtendedPolygroupLayers(const TSharedPtr<FJs
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewActorData(Target.Actor);
     ResultObj->SetNumberField(TEXT("requested_num_layers"), NumLayers);
     ResultObj->SetNumberField(TEXT("num_polygroup_layers"), ActualLayers);
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("applied"), ActualLayers == NumLayers);
+    return GeometryScript_OutcomeReply(ResultObj, ActualLayers == NumLayers, TEXT("set_num_extended_polygroup_layers"),
+        TEXT("applied"), FString::Printf(TEXT("the mesh has %d extended polygroup layers after the call, not the %d requested"), ActualLayers, NumLayers));
 }
 
 // ============================================================================
@@ -3564,12 +3844,12 @@ TSharedPtr<FJsonObject> HandleGetMeshMaterialIDs(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_mesh_material_id - Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. scope='all' repaints every triangle (UGeometryScriptLibrary_MeshMaterialFunctions::ClearMaterialIDs); scope='triangles' repaints the listed triangle IDs (SetMaterialIDOnTriangles). Calls EnableMaterialIDs first, because on a mesh without that attribute the engine drops the write and still reports success. Verify with get_mesh_material_ids, not with the success flag.
+// MCP:set_mesh_material_id - Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. scope='all' repaints every triangle (UGeometryScriptLibrary_MeshMaterialFunctions::ClearMaterialIDs); scope='triangles' repaints the listed triangle IDs (SetMaterialIDOnTriangles). Calls EnableMaterialIDs first, because on a mesh without that attribute the engine drops the write. An ID in triangle_ids that is not a triangle, or an empty mesh, is an error checked before anything is painted. The targeted triangles are read back: applied is true when all of them carry material_id, and the call fails otherwise.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param material_id [int!] - MaterialID to write (>= 0). Index into the material list later passed to copy_dynamic_mesh_to_static_mesh.
 //   @param scope [string] - 'all' (default) or 'triangles'.
 //   @param triangle_ids [array] - Required when scope='triangles': array of triangle IDs to repaint (e.g. from select_mesh_triangles).
-//   @returns { actor_name, material_id, scope, triangles_targeted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }
+//   @returns { actor_name, material_id, scope, triangles_targeted: int, triangles_painted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& Params)
 {
     if (!Params->HasField(TEXT("material_id")))
@@ -3605,6 +3885,25 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
             FString::Printf(TEXT("Unknown scope '%s' (all|triangles)"), *Scope));
     }
 
+    // SetMaterialIDOnTriangles stops at the first ID that is not a triangle, after painting the ones before it,
+    // so every ID is checked first; an empty mesh has nothing to paint.
+    if (bScopeTriangles)
+    {
+        for (const int32 TriangleID : *TriangleIDList.List)
+        {
+            if (!UGeometryScriptLibrary_MeshQueryFunctions::IsValidTriangleID(Target.Mesh, TriangleID))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("triangle_ids: %d is not a triangle of the mesh (it has %d triangles); nothing was painted"),
+                    TriangleID, Target.Mesh->GetTriangleCount()));
+            }
+        }
+    }
+    else if (Target.Mesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The dynamic mesh is empty: there are no triangles to paint"));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("SetMeshMaterialID", "MCP: Set Mesh Material ID"));
     Target.Actor->Modify();
 
@@ -3614,7 +3913,7 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
     int32 TrianglesTargeted = 0;
     if (bScopeTriangles)
     {
-        TrianglesTargeted = TriangleIDList.List.IsValid() ? TriangleIDList.List->Num() : 0;
+        TrianglesTargeted = TriangleIDList.List->Num();
         UGeometryScriptLibrary_MeshMaterialFunctions::SetMaterialIDOnTriangles(
             Target.Mesh, TriangleIDList, MaterialID, /*bDeferChangeNotifications*/ false, /*Debug*/ nullptr);
     }
@@ -3626,7 +3925,24 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
 
     Target.Component->NotifyMeshUpdated();
 
-    // Read back so the response carries evidence, not just an echo of the request.
+    // Read back so the response carries evidence, not just an echo of the request: how many of the targeted
+    // triangles now carry MaterialID.
+    int32 TrianglesPainted = 0;
+    if (bScopeTriangles)
+    {
+        for (const int32 TriangleID : *TriangleIDList.List)
+        {
+            bool bIsValidTriangle = false;
+            const int32 ReadID = UGeometryScriptLibrary_MeshMaterialFunctions::GetTriangleMaterialID(Target.Mesh, TriangleID, bIsValidTriangle);
+            TrianglesPainted += (bIsValidTriangle && ReadID == MaterialID) ? 1 : 0;
+        }
+    }
+    else
+    {
+        TrianglesPainted = GeometryScript_CountMaterialID(Target.Mesh, MaterialID);
+    }
+    const bool bApplied = TrianglesTargeted > 0 && TrianglesPainted == TrianglesTargeted;
+
     int32 MaxAfter = 0;
     int32 DistinctAfter = 0;
     GeometryScript_ReadMaterialIDs(Target.Mesh, MaxAfter, DistinctAfter);
@@ -3639,10 +3955,12 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
     ResultObj->SetNumberField(TEXT("material_id"), MaterialID);
     ResultObj->SetStringField(TEXT("scope"), Scope);
     ResultObj->SetNumberField(TEXT("triangles_targeted"), TrianglesTargeted);
+    ResultObj->SetNumberField(TEXT("triangles_painted"), TrianglesPainted);
     ResultObj->SetNumberField(TEXT("max_material_id_after"), MaxAfter);
     ResultObj->SetNumberField(TEXT("distinct_material_ids_after"), DistinctAfter);
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("applied"), bApplied);
+    return GeometryScript_OutcomeReply(ResultObj, bApplied, TEXT("set_mesh_material_id"), TEXT("applied"),
+        FString::Printf(TEXT("%d of the %d targeted triangles carry MaterialID %d after the write"), TrianglesPainted, TrianglesTargeted, MaterialID));
 }
 
 // MCP:set_polygroup_material_id - Stamp a MaterialID onto every triangle of one polygroup via UGeometryScriptLibrary_MeshMaterialFunctions::SetPolygroupMaterialID. This is usually the cheapest way to paint a part: append_mesh_primitive lays primitives down with PerFace polygroups, so each appended piece is already its own group. HONEST GATE: the engine reports whether the polygroup ID actually existed, and that flag is surfaced as polygroup_id_valid — a false there means nothing was painted, even though the call succeeded.
@@ -3852,14 +4170,14 @@ TSharedPtr<FJsonObject> HandleSelectMeshTriangles(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:remap_material_ids - Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass from_material_id + to_material_id to merge one ID into another (UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs), or pass compact=true with the material list to close gaps left by deleted/merged IDs (CompactMaterialIDs) and get back the compacted list to hand to copy_dynamic_mesh_to_static_mesh. Gaps matter: MaterialIDs index into that list positionally, so an unused ID in the middle costs a wasted material slot on the baked asset.
+// MCP:remap_material_ids - Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass from_material_id + to_material_id to merge one ID into another (UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs), or pass compact=true with the material list to close gaps left by deleted/merged IDs (CompactMaterialIDs) and get back the compacted list to hand to copy_dynamic_mesh_to_static_mesh. Gaps matter: MaterialIDs index into that list positionally, so an unused ID in the middle costs a wasted material slot on the baked asset. The materials list may be shorter than the IDs in use (or absent): the missing entries count as no material. When no triangle carries from_material_id, or from and to are the same ID, the mesh is left unchanged and the call succeeds with applied false, triangles_remapped 0 and a note. Otherwise applied is measured (remap: the triangles that carried from_material_id no longer do; compact: the engine reported no error) and the call fails when it is false.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param compact [bool] - Compact mode: renumber IDs to be contiguous from 0 (default false).
 //   @param from_material_id [int] - Remap mode: the MaterialID to replace. Required unless compact is true.
 //   @param to_material_id [int] - Remap mode: the MaterialID to replace it with. Required unless compact is true.
 //   @param materials [array] - Compact mode: ordered UMaterialInterface content paths, one per current MaterialID. The compacted list is returned in compacted_materials, in the new ID order.
 //   @param remove_duplicate_materials [bool] - Compact mode: also merge IDs that point at the SAME material asset (default false).
-//   @returns { actor_name, mode: string, from_material_id: int, to_material_id: int, max_material_id_after: int, distinct_material_ids_after: int, compacted_materials: [string], applied: bool }
+//   @returns { actor_name, mode: string, from_material_id: int, to_material_id: int, triangles_remapped?: int, max_material_id_after: int, distinct_material_ids_after: int, compacted_materials: [string], applied: bool, note?: string }
 TSharedPtr<FJsonObject> HandleRemapMaterialIDs(const TSharedPtr<FJsonObject>& Params)
 {
     bool bCompact = false;
@@ -3910,34 +4228,79 @@ TSharedPtr<FJsonObject> HandleRemapMaterialIDs(const TSharedPtr<FJsonObject>& Pa
             return mcp_common::MakeErrorReply(TEXT("from_material_id and to_material_id must both be >= 0"));
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("RemapMaterialIDs", "MCP: Remap Material IDs"));
-    Target.Actor->Modify();
-
-    UGeometryScriptLibrary_MeshMaterialFunctions::EnableMaterialIDs(Target.Mesh, /*Debug*/ nullptr);
-
-    TArray<TSharedPtr<FJsonValue>> CompactedMaterialsJson;
-    if (bCompact)
+    // Remap mode, before anything is written: a valid request with nothing to do (no triangle carries
+    // from_material_id, or from and to are the same ID) leaves the mesh alone and succeeds with applied false.
+    int32 TrianglesRemapped = 0;
+    FString NothingToDoNote;
+    if (!bCompact)
     {
-        bool bRemoveDuplicateMaterials = false;
-        Params->TryGetBoolField(TEXT("remove_duplicate_materials"), bRemoveDuplicateMaterials);
-
-        TArray<UMaterialInterface*> CompactedMaterialList;
-        UGeometryScriptLibrary_MeshMaterialFunctions::CompactMaterialIDs(
-            Target.Mesh, SourceMaterialList, CompactedMaterialList, bRemoveDuplicateMaterials, /*Debug*/ nullptr);
-
-        for (UMaterialInterface* Material : CompactedMaterialList)
+        TrianglesRemapped = GeometryScript_CountMaterialID(Target.Mesh, FromMaterialID);
+        if (TrianglesRemapped == 0)
         {
-            CompactedMaterialsJson.Add(MakeShared<FJsonValueString>(
-                Material ? Material->GetPathName() : FString()));
+            NothingToDoNote = FString::Printf(TEXT("no triangle carries MaterialID %d: the mesh is unchanged"), FromMaterialID);
+        }
+        else if (FromMaterialID == ToMaterialID)
+        {
+            TrianglesRemapped = 0;
+            NothingToDoNote = FString::Printf(TEXT("from_material_id and to_material_id are both %d: the mesh is unchanged"), FromMaterialID);
         }
     }
-    else
-    {
-        UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs(
-            Target.Mesh, FromMaterialID, ToMaterialID, /*Debug*/ nullptr);
-    }
 
-    Target.Component->NotifyMeshUpdated();
+    TArray<TSharedPtr<FJsonValue>> CompactedMaterialsJson;
+    bool bApplied = false;
+    FString NotAppliedReason;
+    if (NothingToDoNote.IsEmpty())
+    {
+        const FScopedTransaction Transaction(LOCTEXT("RemapMaterialIDs", "MCP: Remap Material IDs"));
+        Target.Actor->Modify();
+
+        UGeometryScriptLibrary_MeshMaterialFunctions::EnableMaterialIDs(Target.Mesh, /*Debug*/ nullptr);
+
+        if (bCompact)
+        {
+            bool bRemoveDuplicateMaterials = false;
+            Params->TryGetBoolField(TEXT("remove_duplicate_materials"), bRemoveDuplicateMaterials);
+
+            // CompactMaterialIDs indexes its per-ID tables by the size of the material list, so a MaterialID in use
+            // at or past the end of the list reads out of bounds and crashes the editor. The list is padded with
+            // null entries up to the highest ID, which is what the engine means for an ID without a material.
+            const bool bMaterialsGiven = SourceMaterialList.Num() > 0;
+            bool bHasMaterialIDs = false;
+            const int32 MaxBefore = UGeometryScriptLibrary_MeshMaterialFunctions::GetMaxMaterialID(Target.Mesh, bHasMaterialIDs);
+            if (SourceMaterialList.Num() <= MaxBefore)
+            {
+                SourceMaterialList.SetNumZeroed(MaxBefore + 1);
+            }
+
+            UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+            TArray<UMaterialInterface*> CompactedMaterialList;
+            UGeometryScriptLibrary_MeshMaterialFunctions::CompactMaterialIDs(
+                Target.Mesh, SourceMaterialList, CompactedMaterialList, bRemoveDuplicateMaterials, Debug);
+            NotAppliedReason = GeometryScript_FirstError(Debug);
+            bApplied = NotAppliedReason.IsEmpty();
+
+            // Without a material list from the caller there is no list to hand back.
+            if (bMaterialsGiven)
+            {
+                for (UMaterialInterface* Material : CompactedMaterialList)
+                {
+                    CompactedMaterialsJson.Add(MakeShared<FJsonValueString>(
+                        Material ? Material->GetPathName() : FString()));
+                }
+            }
+        }
+        else
+        {
+            // Measured: none of the triangles counted above carries from_material_id afterwards.
+            UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs(
+                Target.Mesh, FromMaterialID, ToMaterialID, /*Debug*/ nullptr);
+            const int32 FromLeft = GeometryScript_CountMaterialID(Target.Mesh, FromMaterialID);
+            bApplied = FromLeft == 0;
+            NotAppliedReason = FString::Printf(TEXT("%d triangles still carry MaterialID %d after the remap"), FromLeft, FromMaterialID);
+        }
+
+        Target.Component->NotifyMeshUpdated();
+    }
 
     int32 MaxAfter = 0;
     int32 DistinctAfter = 0;
@@ -3947,11 +4310,20 @@ TSharedPtr<FJsonObject> HandleRemapMaterialIDs(const TSharedPtr<FJsonObject>& Pa
     ResultObj->SetStringField(TEXT("mode"), bCompact ? TEXT("compact") : TEXT("remap"));
     ResultObj->SetNumberField(TEXT("from_material_id"), FromMaterialID);
     ResultObj->SetNumberField(TEXT("to_material_id"), ToMaterialID);
+    if (!bCompact)
+    {
+        ResultObj->SetNumberField(TEXT("triangles_remapped"), TrianglesRemapped);
+    }
     ResultObj->SetNumberField(TEXT("max_material_id_after"), MaxAfter);
     ResultObj->SetNumberField(TEXT("distinct_material_ids_after"), DistinctAfter);
     ResultObj->SetArrayField(TEXT("compacted_materials"), CompactedMaterialsJson);
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("applied"), bApplied);
+    if (!NothingToDoNote.IsEmpty())
+    {
+        ResultObj->SetStringField(TEXT("note"), NothingToDoNote);
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    return GeometryScript_OutcomeReply(ResultObj, bApplied, TEXT("remap_material_ids"), TEXT("applied"), NotAppliedReason);
 }
 
 // ============================================================================
@@ -4250,7 +4622,7 @@ TSharedPtr<FJsonObject> HandleSetMeshUVsFromProjection(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:auto_generate_mesh_uvs - Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs or AutoGenerateXAtlasMeshUVs. This is what sits behind the editor's "Auto UV" button. Use it when a projection is not enough — organic or mixed-orientation geometry; for plank-and-post shapes set_mesh_uvs_from_projection with box is usually cleaner and far cheaper. Both methods PACK the result into standard UV space by default, so island layout is handled too. SLOW on dense meshes: this is a solver, not a projection.
+// MCP:auto_generate_mesh_uvs - Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs or AutoGenerateXAtlasMeshUVs. This is what sits behind the editor's "Auto UV" button. Use it when a projection is not enough (organic or mixed-orientation geometry); for plank-and-post shapes set_mesh_uvs_from_projection with box is usually cleaner and far cheaper. Both methods PACK the result into standard UV space by default, so island layout is handled too. SLOW on dense meshes: this is a solver, not a projection. A UV channel the mesh does not have, or an empty mesh, is an error; applied is false, and the call fails, when the solver reports an error (xatlas needs a compact mesh: run compact_mesh first).
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param method [string] - 'patch_builder' (default, the editor's Auto UV) or 'xatlas'.
 //   @param uv_channel [int] - UV channel to write (default 0).
@@ -4287,12 +4659,24 @@ TSharedPtr<FJsonObject> HandleAutoGenerateMeshUVs(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(Error);
     }
 
+    // The engine writes nothing to a channel the mesh lacks, and an empty mesh has nothing to unwrap.
+    if (TSharedPtr<FJsonObject> Failure = GeometryScript_CheckUVChannelExists(Target.Mesh, UVChannel))
+    {
+        return Failure;
+    }
+    if (Target.Mesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The dynamic mesh is empty: there are no triangles to unwrap"));
+    }
+
     bool bAutoPack = true;
     Params->TryGetBoolField(TEXT("auto_pack"), bAutoPack);
 
     const FScopedTransaction Transaction(LOCTEXT("AutoGenerateMeshUVs", "MCP: Auto Generate Mesh UVs"));
     Target.Actor->Modify();
 
+    // Both solvers report a refusal or a failed unwrap only through Debug.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
     if (bIsPatchBuilder)
     {
         FGeometryScriptPatchBuilderOptions Options; // engine defaults, then only what was asked for
@@ -4324,7 +4708,7 @@ TSharedPtr<FJsonObject> HandleAutoGenerateMeshUVs(const TSharedPtr<FJsonObject>&
         Options.bAutoPack = bAutoPack;
 
         UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs(
-            Target.Mesh, UVChannel, Options, /*Debug*/ nullptr);
+            Target.Mesh, UVChannel, Options, Debug);
     }
     else
     {
@@ -4335,8 +4719,9 @@ TSharedPtr<FJsonObject> HandleAutoGenerateMeshUVs(const TSharedPtr<FJsonObject>&
             Options.MaxIterations = FMath::Max(1, static_cast<int32>(MaxIterationsDouble));
         }
         UGeometryScriptLibrary_MeshUVFunctions::AutoGenerateXAtlasMeshUVs(
-            Target.Mesh, UVChannel, Options, /*Debug*/ nullptr);
+            Target.Mesh, UVChannel, Options, Debug);
     }
+    const FString UnwrapError = GeometryScript_FirstError(Debug);
 
     Target.Component->NotifyMeshUpdated();
 
@@ -4351,8 +4736,8 @@ TSharedPtr<FJsonObject> HandleAutoGenerateMeshUVs(const TSharedPtr<FJsonObject>&
     ResultObj->SetNumberField(TEXT("uv_channel"), UVChannel);
     ResultObj->SetNumberField(TEXT("triangle_count"), Target.Mesh->GetTriangleCount());
     ResultObj->SetNumberField(TEXT("uv_channel_count"), UVChannelCount);
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetBoolField(TEXT("applied"), UnwrapError.IsEmpty());
+    return GeometryScript_OutcomeReply(ResultObj, UnwrapError.IsEmpty(), TEXT("auto_generate_mesh_uvs"), TEXT("applied"), UnwrapError);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

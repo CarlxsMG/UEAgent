@@ -146,7 +146,7 @@ Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "
 
 *Additive, idempotent.*
 
-Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name is returned as is (already_existed true), even if its class differs, without compiling or saving although saved reads true. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes; a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -226,7 +226,7 @@ Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if abse
 
 *Additive.*
 
-Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget only finds editor-world widgets.
+Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget searches the same worlds.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -336,7 +336,7 @@ Retrieve detailed properties and state information for a widget by name.
 
 *Read-only.*
 
-CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy / remove_widget search by widget_name. It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
+CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -454,13 +454,14 @@ Remove a UMVVMViewModelContext (by context name) from a Widget BP's MVVM authori
 
 *Destructive.*
 
-Detach a runtime UserWidget, found by object name in the editor world only (first one hosted by a level UWidgetComponent, then any other UserWidget of that world), from the viewport or panel holding it with RemoveFromParent. The object is not deleted, no asset changes and there is no undo. Widgets of a PIE world, such as those create_widget makes while PIE runs, are not found (an error). was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
+Detach a runtime UserWidget, found by object name, from the viewport or panel holding it with RemoveFromParent. It searches the worlds create_widget uses: the one target_world names, or without it the running PIE world first and then the editor world; in each, the first widget hosted by a level UWidgetComponent, then any other UserWidget of that world. The object is not deleted, no asset changes and there is no undo. was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_name` | string | yes | Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it |
+| `target_world` | string | no | Optional world to search, with the values create_widget takes (editor, pie, server, client, pie:N, game). Omitted: the PIE world while PIE runs, then the editor world. |
 
-**Returns:** `{ widget_name: string, was_in_viewport: bool, had_parent: bool }`
+**Returns:** `{ widget_name: string, target_world: string, was_in_viewport: bool, had_parent: bool, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `remove_widget_animation`
 
@@ -799,7 +800,7 @@ Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisi
 
 *Destructive.*
 
-Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
+Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets: stopped is true when the animation was playing before the call and is not after it; one that was not playing (stopped or paused) succeeds with stopped:false and a note, and one still playing after the call is an error. Falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

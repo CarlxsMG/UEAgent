@@ -626,9 +626,9 @@ TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:stop_behavior_tree - Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. A tree that is not running is not an error: was_running (measured) comes back false, while stopped is always true. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
+// MCP:stop_behavior_tree - Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. was_running is read before the stop (running and not paused); stopped is true when a started tree, running or paused, is no longer started afterwards. A tree that was not started is not an error: success with stopped false and a note. A tree still started after the call (a task still aborting) is an error. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
 //   @param actor_name - Object name or label of the pawn or AIController in the editor world (first match)
-//   @returns { actor_name: string, was_running: bool, stopped: bool }
+//   @returns { actor_name: string, was_running: bool, stopped: bool, note?: string }
 
 TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -652,13 +652,28 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
             FString::Printf(TEXT("No running BehaviorTreeComponent found for actor '%s' (no AIController/brain component)."), *ActorName));
     }
 
+    // A started tree (running or paused) is what StopTree tears down. In Safe mode it returns early, with the
+    // tree still started, while a task finishes aborting or while the component has branch actions suspended,
+    // so the stop is measured on the tree itself.
     const bool bWasRunning = BTComp->IsRunning();
+    const bool bWasStarted = BTComp->TreeHasBeenStarted();
     BTComp->StopTree(EBTStopMode::Safe);
+    const bool bStillStarted = BTComp->TreeHasBeenStarted();
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
     Result->SetBoolField(TEXT("was_running"), bWasRunning);
-    Result->SetBoolField(TEXT("stopped"), true);
+    Result->SetBoolField(TEXT("stopped"), bWasStarted && !bStillStarted);
+    if (bStillStarted)
+    {
+        return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(
+            TEXT("stop_behavior_tree: the tree of '%s' is still started after StopTree (a task is still aborting); call again"),
+            *ActorName));
+    }
+    if (!bWasStarted)
+    {
+        Result->SetStringField(TEXT("note"), TEXT("No behavior tree was started on this actor; nothing was stopped."));
+    }
 
     return mcp_common::MakeOkReply(Result);
 }

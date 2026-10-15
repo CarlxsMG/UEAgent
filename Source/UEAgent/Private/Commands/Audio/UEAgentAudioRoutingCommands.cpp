@@ -222,13 +222,25 @@ namespace
 // ---------------------------------------------------------------------------- //
 // create_audio_bus
 // ---------------------------------------------------------------------------- //
-// MCP:create_audio_bus - Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted nothing is written, so a new bus keeps the engine default (Mono, not Stereo) and an existing one keeps its own. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
+// MCP:create_audio_bus - Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted a new bus gets Stereo and an existing one keeps its own. An invalid channels value is refused before any asset is created or loaded. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
 //   @param name - Name of the new Audio Bus asset
 //   @param package_path - Target content path, defaults to /Game/Audio
-//   @param channels - EAudioBusChannels: 'Mono' | 'Stereo' (default) | 'Quad' | 'FiveDotOne' | 'SevenDotOne'
-//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool, created: bool, already_exists: bool, saved: bool }
+//   @param channels - EAudioBusChannels: 'Mono' | 'Stereo' (default) | 'Quad' | 'FiveDotOne' | 'SevenDotOne'. The default applies to a new bus only.
+//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool (this call wrote the layout: channels given, or the Stereo default on a new bus), created: bool, already_exists: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Params)
 {
+	// Parse optional channels before anything is created, so a bad value leaves no asset behind.
+	EAudioBusChannels Ch = EAudioBusChannels::Stereo;
+	FString ChannelsTok;
+	const bool bChannelsGiven = Params->TryGetStringField(TEXT("channels"), ChannelsTok) && !ChannelsTok.IsEmpty();
+	if (bChannelsGiven && !ParseAudioBusChannels(ChannelsTok, Ch))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(
+				TEXT("Invalid channels '%s' (expected Mono|Stereo|Quad|FiveDotOne|SevenDotOne)"),
+				*ChannelsTok));
+	}
+
 	FString AssetName, PackagePath, FullPath, Error;
 	bool bAlreadyExists = false;
 
@@ -246,22 +258,9 @@ TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Para
 		return mcp_common::MakeErrorReply(TEXT("Created object is not a UAudioBus"));
 	}
 
-	// Parse optional channels (default: Stereo).
-	EAudioBusChannels Ch = EAudioBusChannels::Stereo;
-	bool bAppliedChannels = false;
-	FString ChannelsTok;
-	if (Params->TryGetStringField(TEXT("channels"), ChannelsTok) && !ChannelsTok.IsEmpty())
-	{
-		if (!ParseAudioBusChannels(ChannelsTok, Ch))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(
-					TEXT("Invalid channels '%s' (expected Mono|Stereo|Quad|FiveDotOne|SevenDotOne)"),
-					*ChannelsTok));
-		}
-		bAppliedChannels = true;
-	}
-
+	// A new bus takes the Stereo default (the engine default is Mono); an existing bus keeps its layout
+	// unless channels was given.
+	const bool bAppliedChannels = bChannelsGiven || !bAlreadyExists;
 	if (bAppliedChannels)
 	{
 		Bus->Modify();
@@ -269,7 +268,8 @@ TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Para
 		Bus->PostEditChange();
 	}
 
-	const bool bSaved = mcp_common::SaveAssetPackage(Bus->GetOutermost(), Bus);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Bus->GetOutermost(), Bus, SaveError);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetStringField(TEXT("name"), AssetName);
@@ -284,7 +284,7 @@ TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Para
 		TEXT("create_audio_bus: %s channels=%s saved=%d"),
 		*Bus->GetPathName(), AudioBusChannelsToString(Bus->AudioBusChannels), bSaved ? 1 : 0);
 
-	return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_audio_bus"));
+	return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_audio_bus"), SaveError);
 }
 
 // ---------------------------------------------------------------------------- //
@@ -364,15 +364,53 @@ TSharedPtr<FJsonObject> HandleSetAudioBusChannels(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------- //
 // create_sound_source_bus
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_source_bus - Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration are always written, so on an existing asset omitted ones are overwritten with the defaults (Stereo, 1.0 s). audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
+// MCP:create_sound_source_bus - Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration, when omitted, take the defaults (Stereo, 1.0 s) on a new asset and keep their value on an existing one, whose fields the given values overwrite. Every value is validated before any asset is created or loaded, so an invalid one leaves nothing behind. audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
 //   @param name - Name of the new Sound Source Bus asset
 //   @param package_path - Target content path, defaults to /Game/Audio
-//   @param source_bus_channels - ESourceBusChannels: 'Mono' | 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo.
-//   @param duration - Duration in seconds (ClampMin=0.0; 0.0 means indefinite). Default 1.0.
+//   @param source_bus_channels - ESourceBusChannels: 'Mono' | 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo. The default applies to a new asset only.
+//   @param duration - Duration in seconds, at least 0 (0.0 means indefinite); a negative value is an error. Default 1.0 on a new asset only.
 //   @param audio_bus_path - Optional full content path of a UAudioBus to assign as the AudioBus return.
-//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool, applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool }
+//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool (each true when this call wrote the field: given, or the default on a new asset), applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every optional field is parsed and validated before anything is created, so a bad value leaves no
+	// asset behind.
+
+	// source_bus_channels (default for a new asset: Stereo)
+	ESourceBusChannels Ch = ESourceBusChannels::Stereo;
+	FString ChTok;
+	const bool bChannelsGiven = Params->TryGetStringField(TEXT("source_bus_channels"), ChTok) && !ChTok.IsEmpty();
+	if (bChannelsGiven && !ParseSourceBusChannels(ChTok, Ch))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(
+				TEXT("Invalid source_bus_channels '%s' (USoundSourceBus inherits only Mono|Stereo)"),
+				*ChTok));
+	}
+
+	// duration (default for a new asset: 1.0). The property is ClampMin="0.0" and 0 means "play indefinitely",
+	// so a negative value is refused rather than clamped into that very different meaning.
+	double DurationD = 1.0;
+	const bool bDurationGiven = Params->TryGetNumberField(TEXT("duration"), DurationD);
+	if (bDurationGiven && (!FMath::IsFinite(DurationD) || DurationD < 0.0))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Invalid duration %g: it must be a finite number of seconds >= 0 (0 plays indefinitely)"), DurationD));
+	}
+
+	// audio_bus_path (optional; load UAudioBus and assign SSB->AudioBus)
+	FString AudioBusPath;
+	UAudioBus* AssignedBus = nullptr;
+	bool bAppliedAudioBus = false;
+	if (Params->TryGetStringField(TEXT("audio_bus_path"), AudioBusPath) && !AudioBusPath.IsEmpty())
+	{
+		if (TSharedPtr<FJsonObject> LoadError = AudioRouting_LoadAsset(AudioBusPath, TEXT("UAudioBus"), AssignedBus))
+		{
+			return LoadError;
+		}
+		bAppliedAudioBus = true;
+	}
+
 	FString AssetName, PackagePath, FullPath, Error;
 	bool bAlreadyExists = false;
 
@@ -390,55 +428,28 @@ TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>
 		return mcp_common::MakeErrorReply(TEXT("Created object is not a USoundSourceBus"));
 	}
 
-	bool bAppliedChannels = false;
-	bool bAppliedDuration = false;
-	bool bAppliedAudioBus = false;
-
-	// source_bus_channels (default: Stereo)
-	ESourceBusChannels Ch = ESourceBusChannels::Stereo;
-	FString ChTok;
-	if (Params->TryGetStringField(TEXT("source_bus_channels"), ChTok) && !ChTok.IsEmpty())
-	{
-		if (!ParseSourceBusChannels(ChTok, Ch))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(
-					TEXT("Invalid source_bus_channels '%s' (USoundSourceBus inherits only Mono|Stereo)"),
-					*ChTok));
-		}
-		bAppliedChannels = true;
-	}
-
-	// duration (default: 1.0; clamp to >= 0.0 per UPROPERTY meta ClampMin="0.0")
-	double DurationD = 1.0;
-	bAppliedDuration = Params->TryGetNumberField(TEXT("duration"), DurationD);
-	if (bAppliedDuration)
-	{
-		DurationD = FMath::Max(0.0, DurationD);
-	}
-
-	// audio_bus_path (optional; load UAudioBus and assign SSB->AudioBus)
-	FString AudioBusPath;
-	UAudioBus* AssignedBus = nullptr;
-	if (Params->TryGetStringField(TEXT("audio_bus_path"), AudioBusPath) && !AudioBusPath.IsEmpty())
-	{
-		if (TSharedPtr<FJsonObject> LoadError = AudioRouting_LoadAsset(AudioBusPath, TEXT("UAudioBus"), AssignedBus))
-		{
-			return LoadError;
-		}
-		bAppliedAudioBus = true;
-	}
+	// A new asset takes the defaults (Stereo, 1.0 s) for what was omitted; an existing one keeps its own
+	// value for every field the request leaves out.
+	const bool bAppliedChannels = bChannelsGiven || !bAlreadyExists;
+	const bool bAppliedDuration = bDurationGiven || !bAlreadyExists;
 
 	SSB->Modify();
-	SSB->SourceBusChannels = Ch;
-	SSB->SourceBusDuration = static_cast<float>(DurationD);
+	if (bAppliedChannels)
+	{
+		SSB->SourceBusChannels = Ch;
+	}
+	if (bAppliedDuration)
+	{
+		SSB->SourceBusDuration = static_cast<float>(DurationD);
+	}
 	if (bAppliedAudioBus)
 	{
 		SSB->AudioBus = AssignedBus;
 	}
 	SSB->PostEditChange();
 
-	const bool bSaved = mcp_common::SaveAssetPackage(SSB->GetOutermost(), SSB);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(SSB->GetOutermost(), SSB, SaveError);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetStringField(TEXT("name"), AssetName);
@@ -459,7 +470,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>
 		bAppliedAudioBus ? *AudioBusPath : TEXT("(none)"),
 		bSaved ? 1 : 0);
 
-	return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_sound_source_bus"));
+	return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_sound_source_bus"), SaveError);
 }
 
 // ---------------------------------------------------------------------------- //

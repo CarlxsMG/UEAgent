@@ -497,7 +497,7 @@ TSharedPtr<FJsonObject> HandleGetWidgetHierarchy(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Tree);
 }
 
-// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy / remove_widget search by widget_name. It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
+// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 //   @param actor_name_filter - Optional substring filter on the owning actor's name (Contains match)
 //   @returns { components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }
 
@@ -538,7 +538,7 @@ TSharedPtr<FJsonObject> HandleListLevelWidgetComponents(const TSharedPtr<FJsonOb
 
 // Widget creation and removal
 
-// MCP:create_widget - Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget only finds editor-world widgets.
+// MCP:create_widget - Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget searches the same worlds.
 //   @param widget_class_path - Full path to widget class, e.g. '/Game/UI/MyWidget.MyWidget_C'
 //   @param widget_name - Name to assign to the created widget instance (a name another widget already has gets a unique variant, which widget_name in the response reports)
 //   @param add_to_viewport - If true, AddToViewport the widget (optional, default false). It only ever really adds when the target world has a local PlayerController -- check added_to_viewport in the response, and see target_world for when that is possible at all.
@@ -635,9 +635,10 @@ TSharedPtr<FJsonObject> HandleCreateWidget(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:remove_widget - Detach a runtime UserWidget, found by object name in the editor world only (first one hosted by a level UWidgetComponent, then any other UserWidget of that world), from the viewport or panel holding it with RemoveFromParent. The object is not deleted, no asset changes and there is no undo. Widgets of a PIE world, such as those create_widget makes while PIE runs, are not found (an error). was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
+// MCP:remove_widget - Detach a runtime UserWidget, found by object name, from the viewport or panel holding it with RemoveFromParent. It searches the worlds create_widget uses: the one target_world names, or without it the running PIE world first and then the editor world; in each, the first widget hosted by a level UWidgetComponent, then any other UserWidget of that world. The object is not deleted, no asset changes and there is no undo. was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
 //   @param widget_name - Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it
-//   @returns { widget_name: string, was_in_viewport: bool, had_parent: bool }
+//   @param target_world - Optional world to search, with the values create_widget takes (editor, pie, server, client, pie:N, game). Omitted: the PIE world while PIE runs, then the editor world.
+//   @returns { widget_name: string, target_world: string, was_in_viewport: bool, had_parent: bool, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params)
 {
@@ -646,25 +647,60 @@ TSharedPtr<FJsonObject> HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params
     FString TargetName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_name"), TargetName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    UWorld* EditorWorld = mcp_common::GetEditorWorld();
-    if (!EditorWorld || !EditorWorld->IsValidLowLevel())
+    // The worlds create_widget builds in, resolved the same way: target_world when given;
+    // otherwise its default (the PIE world while PIE runs, else the editor world), followed by
+    // the editor world so a level-hosted widget is still found while PIE runs.
+    FString Selector;
+    const bool bHasSelector = Params->TryGetStringField(TEXT("target_world"), Selector);
+    Selector.TrimStartAndEndInline();
+
+    TArray<Impl::FWidgetTarget, TInlineAllocator<2>> Targets;
     {
-        return mcp_common::MakeErrorReply(TEXT("No valid world found"));
+        Impl::FWidgetTarget First;
+        const FString TargetError = Impl::ResolveWidgetTarget(bHasSelector, Selector, First);
+        if (!TargetError.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TargetError);
+        }
+        Targets.Add(First);
+    }
+    const bool bAsked = bHasSelector && !Selector.IsEmpty();
+    if (!bAsked && Targets[0].Label != TEXT("editor"))
+    {
+        Impl::FWidgetTarget EditorTarget;
+        EditorTarget.Label = TEXT("editor");
+        EditorTarget.World = mcp_common::GetEditorWorld();
+        if (EditorTarget.World && EditorTarget.World->IsValidLowLevel())
+        {
+            Targets.Add(EditorTarget);
+        }
     }
 
     // Broader than the other lookups: level widget components first (all of them on every
-    // actor), then any UUserWidget object living in the editor world under that name, such as
+    // actor), then any UUserWidget object living in that world under that name, such as
     // one made by create_widget.
-    UWidgetComponent* Host = nullptr;
     UUserWidget* Victim = nullptr;
-    Impl::FindWidgetComponentByName(EditorWorld, TargetName, Host, Victim);
-    if (!Victim)
+    const Impl::FWidgetTarget* FoundIn = nullptr;
+    TArray<FString> Searched;
+    for (const Impl::FWidgetTarget& Target : Targets)
     {
-        Victim = Impl::FindLooseUserWidget(EditorWorld, TargetName);
+        Searched.Add(Target.Label);
+        UWidgetComponent* Host = nullptr;
+        Impl::FindWidgetComponentByName(Target.World, TargetName, Host, Victim);
+        if (!Victim)
+        {
+            Victim = Impl::FindLooseUserWidget(Target.World, TargetName);
+        }
+        if (Victim)
+        {
+            FoundIn = &Target;
+            break;
+        }
     }
     if (!Victim)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Widget '%s' not found"), *TargetName));
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Widget '%s' not found in the %s world(s)"),
+            *TargetName, *FString::Join(Searched, TEXT(" and "))));
     }
 
     // Both facts are taken before RemoveFromParent(), which changes them: it detaches the
@@ -676,8 +712,11 @@ TSharedPtr<FJsonObject> HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params
 
     TSharedPtr<FJsonObject> Outcome = MakeShared<FJsonObject>();
     Outcome->SetStringField(TEXT("widget_name"), TargetName);
+    Outcome->SetStringField(TEXT("target_world"), FoundIn->Label);
     Outcome->SetBoolField(TEXT("was_in_viewport"), bWasInViewport);
     Outcome->SetBoolField(TEXT("had_parent"), bHadParent);
+    // WHICH world the widget was found in: a name can exist in both the PIE and the editor world.
+    mcp_common::AddWorldEvidence(Outcome, FoundIn->World);
     return mcp_common::MakeOkReply(Outcome);
 }
 

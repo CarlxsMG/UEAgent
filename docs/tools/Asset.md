@@ -22,7 +22,7 @@ Adds an asset to an existing collection and reads back its object count.        
 
 *Additive.*
 
-Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. Names are not checked, so repeating a socket_name adds a second socket of that name. location and scale take [x, y, z] arrays: any other value given reads as 0,0,0. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
+Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. A socket_name the mesh already has is an error, and so is a location, rotation or scale that is not three numbers; both are checked before the mesh is touched. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -54,7 +54,7 @@ Rename/move multiple assets in one IAssetTools::RenameAssets batch, with per-ite
 
 *Destructive, idempotent.*
 
-Fill an entire render target with a solid color via the canvas
+Fill an entire render target with a solid color via the canvas. drawn is false, and the call fails, when the canvas draws nothing (no white texture or a zero size).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -67,7 +67,7 @@ Fill an entire render target with a solid color via the canvas
 
 *Destructive, idempotent.*
 
-Clear a render target to a solid color via ClearRenderTarget2D
+Clear a render target to a solid color via ClearRenderTarget2D. Render-target contents live on the GPU only, so nothing is saved or undoable. cleared is false, and the call fails, when the engine skips the clear: a render target without a resource, which is every render target in a process that cannot render (-nullrhi, a commandlet).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -241,7 +241,7 @@ Compare two Content folders (project vs external, fork vs source) WITHOUT loadin
 
 *Destructive.*
 
-Draw a line into a render target via the canvas
+Draw a line into a render target via the canvas. drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -257,7 +257,7 @@ Draw a line into a render target via the canvas
 
 *Destructive.*
 
-Render a material full-screen quad into a render target
+Render a material full-screen quad into a render target. drawn is false, and the call fails, when the engine skips the draw: a process that cannot render (-nullrhi, a commandlet) or a render target without a resource.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -270,7 +270,7 @@ Render a material full-screen quad into a render target
 
 *Destructive.*
 
-Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is always true, even when a zero size draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
+Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -285,7 +285,7 @@ Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas
 
 *Destructive.*
 
-Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is always true (an empty text draws nothing) and font_resolved says a font was found. Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
+Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is false, and the call fails, when nothing was drawn (an empty text, or no engine font: font_resolved says whether one was found). Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -301,7 +301,7 @@ Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the edit
 
 *Destructive.*
 
-Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is always true, even when a zero size draws nothing. For a material use draw_material_to_render_target_region.
+Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a material use draw_material_to_render_target_region.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -331,7 +331,7 @@ Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UC
 
 *Destructive.*
 
-Export a render target to an image file on disk
+Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA32f render target, which writes HDR when filename ends in .hdr and EXR otherwise. exported is measured on disk: the file must exist, hold bytes and have been written by this call. It is false, and the call fails saying why, for a render target without a resource (every render target in a process that cannot render: -nullrhi, a commandlet), an invalid path, a file that cannot be opened for writing, or an image that cannot be read back; an empty file left by a failed export is removed when the call created it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -969,7 +969,7 @@ Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subs
 
 *Destructive, idempotent.*
 
-Update the relative transform of an existing static mesh socket (only the provided fields).
+Update the relative transform of an existing static mesh socket (only the provided fields). A location, rotation or scale that is not three numbers is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

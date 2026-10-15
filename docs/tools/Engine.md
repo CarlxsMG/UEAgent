@@ -8,15 +8,15 @@
 
 *Additive.*
 
-Add a new UNiagaraDataInterface user-parameter binding to a Niagara system.
+Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (added false, already_exists true, nothing saved); one with this name and any other type is an error. The inverse is remove_niagara_data_interface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the new user-parameter (no "User." prefix) |
-| `data_interface_class` | string | yes | Data interface class name (e.g. "StaticMesh", "Texture"); resolved from /Script/Niagara.NiagaraDataInterface&lt;Name> if not already loaded |
+| `data_interface_class` | string | yes | Data interface class name (e.g. "StaticMesh", "Texture"): a loaded data interface class with that name, else /Script/Niagara.NiagaraDataInterface&lt;Name> |
 
-**Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool, saved: bool, save_error?: string }`
 
 ## `add_niagara_decal_renderer`
 
@@ -592,14 +592,14 @@ Reorder a Niagara simulation stage on its emitter's stage list by moving it to a
 
 *Destructive.*
 
-Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name.
+Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name, inside an undo transaction, request a recompile and save the system; success requires the save. A name with no user parameter, or a user parameter that is not a data interface, is an error and nothing is changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter to remove (no "User." prefix) |
 
-**Returns:** `{ system_path: string, parameter_name: string, removed: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, removed: bool, saved: bool, save_error?: string }`
 
 ## `remove_niagara_emitter_handle`
 
@@ -877,13 +877,13 @@ Set the numeric values of an array user-parameter data interface (e.g. ArrayFloa
 | `values` | array | yes | Array of numbers to store (replaces all existing array contents) |
 | `array_property` | string | no | Optional array UPROPERTY to set (default "FloatData"; e.g. "IntData" for the int32 array DI) |
 
-**Returns:** `{ system_path: string, parameter_name: string, array_property: string, element_type: string, count: int, values: [number], set: bool, saved: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, array_property: string, element_type: string, count: int, values: [number], set: bool, saved: bool, save_error?: string }`
 
 ## `set_niagara_data_interface_asset`
 
 *Destructive, idempotent.*
 
-Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), then requests a system recompile. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error. The tool does not save the system, mark it dirty or open an undo transaction: persist it with save_asset. For non-asset fields use set_niagara_data_interface_default.
+Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), inside an undo transaction, reads it back, requests a system recompile and saves the system; success requires the read-back and the save. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error and nothing is written. For non-asset fields use set_niagara_data_interface_default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -892,13 +892,13 @@ Points an object property of a user-parameter data interface on a Niagara system
 | `asset_path` | string | no | Asset path of the UObject to assign (must be the right subclass) |
 | `property_name` | string | no | Optional FObjectProperty name on the DI; defaults to the first FObjectProperty |
 
-**Returns:** `{ system_path: string, parameter_name: string, property_name: string, asset_path: string, set: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, property_name: string, asset_path: string, set: bool (the property reads back the asset), saved: bool, save_error?: string }`
 
 ## `set_niagara_data_interface_curve`
 
 *Destructive, idempotent.*
 
-Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.
+Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system, inside an undo transaction that records the DI; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -907,13 +907,13 @@ Replaces all keys of one FRichCurve property on a curve user-parameter data inte
 | `keys` | array | yes | Array of { time: number, value: number } keys to set (replaces all existing keys on the channel) |
 | `curve_property` | string | no | Optional FRichCurve UPROPERTY to author (default "Curve"; e.g. "RedCurve"/"XCurve" on Color/Vector curve DIs) |
 
-**Returns:** `{ system_path: string, parameter_name: string, curve_property: string, key_count: int, keys: [{time,value}], set: bool, saved: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, curve_property: string, key_count: int, keys: [{time,value}], set: bool, saved: bool, save_error?: string }`
 
 ## `set_niagara_data_interface_default`
 
 *Destructive, idempotent.*
 
-Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), then requests a system recompile. A missing DI or property, or text that does not parse, is an error. The tool does not save the system, mark it dirty or open an undo transaction (persist with save_asset); value is echoed, not read back. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
+Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -922,7 +922,7 @@ Writes one property of a user-parameter data interface on a Niagara system from 
 | `property_name` | string | yes | Name of the FProperty on the DI to set |
 | `value` | string | yes | String representation of the value (parsed by FProperty::ImportText_Direct) |
 
-**Returns:** `{ system_path: string, parameter_name: string, property_name: string, value: string, set: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, property_name: string, value: string, value_read_back: string, set: bool, saved: bool, save_error?: string }`
 
 ## `set_niagara_decal_renderer_material`
 

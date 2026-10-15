@@ -6,14 +6,14 @@
 
 ## `add_camera_component`
 
-*Additive.*
+*Destructive.*
 
-Add or configure a UCameraComponent on an existing actor, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor.
+Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. An invalid projection_mode or a rejected post_process_settings is an error and nothing is created or written.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name or label of the target actor. |
-| `component_name` | string | no | Optional name for the new component (defaults to "Camera"). If a UCameraComponent with this name already exists on the actor, only the provided fields are updated. |
+| `component_name` | string | no | Optional name for a new component (defaults to "Camera"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a camera component, which is configured whatever its name. |
 | `parent_component` | string | no | Optional name of a USceneComponent on the same actor to attach to (e.g. "SpringArm"). Default = actor root component. |
 | `field_of_view` | number | no | Optional float. Horizontal FOV in degrees (1..170). |
 | `aspect_ratio` | number | no | Optional float. Aspect ratio (e.g. 16/9). 0 = auto. |
@@ -27,13 +27,13 @@ Add or configure a UCameraComponent on an existing actor, optionally attaching i
 | `post_process_settings` | object | no | Optional object (PostProcess fields, see get_camera_post_process for the schema). |
 | `post_process_blend_weight` | number | no | Optional float. Weight of post-process (0..1). 0 means post-process disabled. |
 
-**Returns:** `{ actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll] }`
+**Returns:** `{ actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll], post_process_blend_weight }`
 
 ## `add_camera_node_child`
 
 *Destructive, idempotent.*
 
-Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
+Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -41,7 +41,7 @@ Populates the Children of a composite rig node (the rig RootNode must be a UArra
 | `child_node_type` | string | yes | A concrete UCameraNode subclass name for the new child, e.g. "OffsetCameraNode", "FieldOfViewCameraNode" (required) |
 | `index` | number | no | Optional child slot. If given and &lt; current child count, REPLACES that slot (deterministic re-runs); otherwise appends. |
 
-**Returns:** `{ camera_rig_path, child_node_type, child_class, child_index, children_count, added, replaced }`
+**Returns:** `{ camera_rig_path, child_node_type, child_class, child_index, children_count, added, replaced, saved, save_error }`
 
 ## `add_gameplay_camera_component`
 
@@ -60,12 +60,12 @@ Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Ide
 
 *Destructive.*
 
-Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
+Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. One undo step; the level is marked dirty, not saved. Negative lengths, sizes and speeds clamp to 0; an unknown probe_channel is an error and nothing is created or written. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name or label of the target actor in the editor world. |
-| `component_name` | string | no | Optional name for a new component (defaults to "SpringArm"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name. |
+| `component_name` | string | no | Optional name for a new component (defaults to "SpringArm"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a spring arm, which is configured whatever its name. |
 | `target_arm_length` | number | no | Optional float. Natural length of the spring arm (uu). Default 300. |
 | `socket_offset` | array | no | Optional [X, Y, Z] relative offset applied at the spring-arm tip. |
 | `target_offset` | array | no | Optional [X, Y, Z] world-space offset applied at the start of the spring. |
@@ -274,14 +274,14 @@ No parameters.
 
 *Destructive, idempotent.*
 
-Wires a USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director). Verified via GetCameraDirector read-back.
+Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director) and replacing any director it had, then saves the asset. One undo step. director_set is the GetCameraDirector read-back; a failed save fails the call, with saved false and save_error, and leaves the change in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_asset_path` | string | yes | /Game/... path to the UCameraAsset (required) |
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset the director runs (required) |
 
-**Returns:** `{ camera_asset_path, camera_rig_path, director_class, director_set }`
+**Returns:** `{ camera_asset_path, camera_rig_path, director_class, director_set, saved, save_error }`
 
 ## `set_camera_fov`
 
@@ -300,14 +300,14 @@ Set the field of view (degrees, above 0 up to 180) of the camera component of an
 
 *Destructive, idempotent.*
 
-Sets parameters on a camera rig's RootNode by reflection. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back.
+Sets parameters on a camera rig's RootNode by reflection, in one undo step, then saves the rig. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose RootNode is edited (required) |
 | `properties` | object | yes | JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90}) |
 
-**Returns:** `{ camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
+**Returns:** `{ camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error }`
 
 ## `set_camera_post_process`
 
@@ -361,14 +361,14 @@ Set the camera position along a CameraRig_Rail (0.0 = start, 1.0 = end).
 
 *Destructive, idempotent.*
 
-Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset (required) |
 | `node_type` | string | yes | A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required) |
 
-**Returns:** `{ camera_rig_path, node_type, node_class, root_set }`
+**Returns:** `{ camera_rig_path, node_type, node_class, root_set, saved, save_error }`
 
 ## `set_camera_transform`
 

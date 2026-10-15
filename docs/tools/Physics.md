@@ -38,7 +38,7 @@ Author a field command node into a UFieldSystem and persist it.  Builds a transi
 
 *Additive.*
 
-Append an additional StaticMesh source to an existing geometry collection
+Append an additional StaticMesh source to an existing geometry collection, then save it. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -46,7 +46,7 @@ Append an additional StaticMesh source to an existing geometry collection
 | `source_mesh_path` | string | yes | Asset path to the UStaticMesh to append |
 | `transform` | object | no | Optional {location, rotation, scale} for the source mesh placement |
 
-**Returns:** `{ geometry_collection_path: string, source_mesh_path: string, num_sources: int, num_materials: int, success: bool }`
+**Returns:** `{ geometry_collection_path: string, source_mesh_path: string, num_sources: int, num_materials: int, success: bool, saved: bool, save_error: string? }`
 
 ## `add_impulse_to_actor`
 
@@ -543,7 +543,7 @@ Write the five clustering and connection-graph properties of a UGeometryCollecti
 
 *Destructive, idempotent.*
 
-Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. The save result is not checked: success is true even when nothing reached disk. The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
+Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -551,7 +551,7 @@ Set the damage model and/or the per-level damage thresholds of a UGeometryCollec
 | `damage_model` | string | no | Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model. |
 | `damage_thresholds` | array | no | Optional array of per-level damage threshold floats |
 
-**Returns:** `{ geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool }`
+**Returns:** `{ geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool, saved: bool, save_error: string? }`
 
 ## `set_geometry_collection_mass`
 
@@ -675,7 +675,7 @@ Writes only the given advanced FBodyInstance fields (damping, mass scale, inerti
 
 *Destructive, idempotent.*
 
-Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither still saves and reports updated=true. An asset with no bodies, no body found or an unknown physics_type is an error. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
+Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither is an error and nothing is written. An asset with no bodies, no body found or an unknown physics_type is an error, checked before any write. mass_override_enabled is read back from the body. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

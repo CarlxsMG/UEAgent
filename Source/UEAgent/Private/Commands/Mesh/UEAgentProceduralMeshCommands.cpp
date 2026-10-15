@@ -77,6 +77,20 @@ namespace
 		return PMC;
 	}
 
+	/**
+	 * Null when SectionIndex is >= 0; otherwise the error reply. UProceduralMeshComponent indexes its section array
+	 * with the raw value after checking only the upper bound, so a negative index reads out of bounds and crashes.
+	 */
+	TSharedPtr<FJsonObject> ProceduralMesh_CheckSectionIndex(int32 SectionIndex)
+	{
+		if (SectionIndex < 0)
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("section_index must be >= 0 (got %d)"), SectionIndex));
+		}
+		return nullptr;
+	}
+
 	/** A reply payload that starts with actor_label and section_index. */
 	TSharedPtr<FJsonObject> ProceduralMesh_NewSectionData(const FString& ActorLabel, int32 SectionIndex)
 	{
@@ -167,10 +181,10 @@ TSharedPtr<FJsonObject> HandleCreateProceduralMeshComponent(
 //   Generates a box mesh with UKismetProceduralMeshLibrary::GenerateBoxMesh
 //   and pushes it into the procedural mesh component as one section.
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_box_mesh - Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section.
+// MCP:create_procedural_box_mesh - Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section. A negative section_index is an error.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Optional target section index; defaults to 0
+//   @param section_index - Optional target section index (>= 0); defaults to 0
 //   @param box_radius - Optional [x, y, z] half-extents; defaults to (50, 50, 50)
 //   @param create_collision - Optional bool; defaults to false
 //   @returns { actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }
@@ -184,6 +198,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
 	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 	bool bCreateCollision = false;
 	Params->TryGetBoolField(TEXT("create_collision"), bCreateCollision);
 
@@ -223,7 +238,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 // create_procedural_grid_mesh {actor_label, component_index?, section_index?,
 //   num_x?=10, num_y?=10, grid_spacing?=16.0, create_collision?=false}
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_grid_mesh - Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component is an error; a negative section_index is unchecked, so never pass one. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
+// MCP:create_procedural_grid_mesh - Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component, or a negative section_index, is an error. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
 //   @param section_index - Optional target section index; defaults to 0
@@ -242,6 +257,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
 	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 	int32 NumX = 10;
 	Params->TryGetNumberField(TEXT("num_x"), NumX);
 	int32 NumY = 10;
@@ -281,10 +297,10 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 //   section_index?, vertices?=[[x,y,z],...]}
 //   Updates an existing section in-place (same topology, new positions).
 // ---------------------------------------------------------------------------
-// MCP:update_procedural_mesh_section - Update an existing procedural mesh section in-place (same topology, new vertex positions).
+// MCP:update_procedural_mesh_section - Update an existing procedural mesh section in-place (same topology, new vertex positions). A negative or missing section is an error.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Optional target section index; defaults to 0
+//   @param section_index - Optional target section index (>= 0); defaults to 0
 //   @param vertices - Required [[x, y, z], ...] array with the same vertex count as the existing section
 //   @returns { actor_label: string, section_index: int, vertex_count: int }
 
@@ -297,6 +313,7 @@ TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
 	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 
 	TArray<FVector> Vertices;
 	if (!ReadVectorArray(Params, TEXT("vertices"), Vertices))
@@ -337,7 +354,7 @@ TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(
 // clear_procedural_mesh {actor_label, component_index?, section_index?=ALL}
 //   If section_index is supplied, clear that section; otherwise clear all.
 // ---------------------------------------------------------------------------
-// MCP:clear_procedural_mesh - Empty the geometry of one section, or drop every section, of a UProceduralMeshComponent on an editor-world actor found by label, then rebuild its bounds and collision. A single cleared section keeps its slot (remaining_sections unchanged); with section_index omitted or -1 all sections go. Transient: nothing is marked dirty, saved or undoable. A missing actor or component_index is an error, a section_index past the end is silently ignored, and any other negative index is unchecked, so never pass one. remove_procedural_mesh_component deletes the component itself.
+// MCP:clear_procedural_mesh - Empty the geometry of one section, or drop every section, of a UProceduralMeshComponent on an editor-world actor found by label, then rebuild its bounds and collision. A single cleared section keeps its slot (remaining_sections unchanged); with section_index omitted or -1 all sections go. Transient: nothing is marked dirty, saved or undoable. A missing actor or component_index is an error, and so is a section_index past the end or below -1. remove_procedural_mesh_component deletes the component itself.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
 //   @param section_index - Optional 0-based section to empty; omit it, or pass -1, to drop all sections
@@ -352,10 +369,23 @@ TSharedPtr<FJsonObject> HandleClearProceduralMesh(
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = INDEX_NONE;
 	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	// -1 (INDEX_NONE) means every section; any other negative index would crash ClearMeshSection.
+	if (SectionIndex != INDEX_NONE)
+	{
+		if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
+	}
 
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
 	if (!PMC) { return Err; }
+
+	// ClearMeshSection ignores an index past the end without a word; it is refused like the other section commands do.
+	if (SectionIndex != INDEX_NONE && SectionIndex >= PMC->GetNumSections())
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Section index %d out of range (num_sections=%d) on actor '%s'"),
+				SectionIndex, PMC->GetNumSections(), *ActorLabel));
+	}
 
 	if (SectionIndex == INDEX_NONE)
 	{
@@ -493,10 +523,10 @@ TSharedPtr<FJsonObject> HandleGetProceduralMeshSectionVisible(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_procedural_mesh_section_data - Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors) of a single procedural mesh section.
+// MCP:get_procedural_mesh_section_data - Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors) of a single procedural mesh section. A negative or missing section is an error.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Required target section index
+//   @param section_index - Required target section index (>= 0)
 //   @returns { actor_label, section_index, vertex_count, triangle_count, vertices, triangles, normals, uv0, tangents, colors, local_box, collision_enabled, visible }
 
 TSharedPtr<FJsonObject> HandleGetProceduralMeshSectionData(
@@ -508,6 +538,7 @@ TSharedPtr<FJsonObject> HandleGetProceduralMeshSectionData(
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("section_index"), SectionIndex)) { return Missing; }
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);

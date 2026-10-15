@@ -644,13 +644,13 @@ TSharedPtr<FJsonObject> HandleSetPrimaryAssetCookRule(const TSharedPtr<FJsonObje
     if (!Params->TryGetStringField(TEXT("cook_rule"), CookRuleStr) || CookRuleStr.IsEmpty())
     {
         return mcp_common::MakeErrorReply(
-            TEXT("Missing required parameter: cook_rule (Unknown|Never|Development|Production|Always)"));
+            TEXT("Missing required parameter: cook_rule (Unknown|Never|Development|DevelopmentAlways|Always)"));
     }
     EPrimaryAssetCookRule NewRule;
     if (!ParseCookRuleName(CookRuleStr, NewRule))
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid cook_rule '%s' (use Unknown|Never|Development|Production|Always)"), *CookRuleStr));
+            FString::Printf(TEXT("Invalid cook_rule '%s' (use Unknown|Never|Development|DevelopmentAlways|Always, or an EPrimaryAssetCookRule name such as AlwaysCook)"), *CookRuleStr));
     }
 
     UAssetManagerSettings* Settings = GetMutableDefault<UAssetManagerSettings>();

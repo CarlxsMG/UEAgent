@@ -802,9 +802,9 @@ TSharedPtr<FJsonObject> HandleInterchangeGetPipelineProperties(const TSharedPtr<
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:interchange_save_pipeline - Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk with UPackage::SavePackage, dirty or not; saved is what SavePackage returned, and false makes success false. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Unlike save_asset it has no PIE refusal and no read-only-root guard. A path that does not load as a pipeline is an error.
+// MCP:interchange_save_pipeline - Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk, dirty or not, through the shared asset save; saved false makes success false and save_error carries the measured cause. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Like save_asset it refuses during PIE and under a read-only root. A path that does not load as a pipeline is an error.
 //   @param pipeline_path [string!] - Object path of the pipeline asset whose package is written to disk (loaded via LoadObject, must be a UInterchangePipelineBase).
-//   @returns { pipeline_path: string, file_path: string, saved: bool }
+//   @returns { pipeline_path: string, file_path: string, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleInterchangeSavePipeline(const TSharedPtr<FJsonObject>& Params)
 {
     FString PipelinePath;
@@ -828,16 +828,14 @@ TSharedPtr<FJsonObject> HandleInterchangeSavePipeline(const TSharedPtr<FJsonObje
     FString FilePath = FPackageName::LongPackageNameToFilename(
         Package->GetName(), FPackageName::GetAssetPackageExtension());
 
-    FSavePackageArgs SaveArgs;
-    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-    SaveArgs.SaveFlags = SAVE_NoError;
-
-    const bool bSaved = UPackage::SavePackage(Package, Pipeline, *FilePath, SaveArgs);
+    // The shared save refuses during PIE and under a read-only root, and measures why a write failed.
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Package, Pipeline, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("pipeline_path"), PipelinePath);
     Data->SetStringField(TEXT("file_path"), FilePath);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("interchange_save_pipeline"));
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("interchange_save_pipeline"), SaveError);
 }
 
 // Headless imports via UInterchangeManager (medium risk: game-thread)

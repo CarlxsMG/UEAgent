@@ -491,7 +491,7 @@ TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_physics_body_properties - Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither still saves and reports updated=true. An asset with no bodies, no body found or an unknown physics_type is an error. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
+// MCP:set_physics_body_properties - Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither is an error and nothing is written. An asset with no bodies, no body found or an unknown physics_type is an error, checked before any write. mass_override_enabled is read back from the body. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
 //   @param physics_asset_path - /Game path to the UPhysicsAsset.
 //   @param body_index - 0-based index of the body in the asset; wins over bone_name when both are given
 //   @param bone_name - Bone whose body to configure, used when body_index is absent
@@ -508,15 +508,13 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
         return Error;
     }
 
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetPhysicsBodyProperties", "Set Physics Body Properties"));
-    PhysAsset->Modify();
-    BodySetup->Modify();
-
+    // Read and validate both fields before anything is written: a bad physics_type, or a call with neither
+    // field, leaves the asset untouched (no transaction, no dirty flag, no save).
     bool bPhysicsTypeApplied = false;
+    EPhysicsType NewType = PhysType_Default;
     FString PhysicsTypeStr;
     if (Params->TryGetStringField(TEXT("physics_type"), PhysicsTypeStr) && !PhysicsTypeStr.IsEmpty())
     {
-        EPhysicsType NewType = PhysType_Default;
         if (PhysicsTypeStr.Equals(TEXT("Kinematic"), ESearchCase::IgnoreCase))
         {
             NewType = PhysType_Kinematic;
@@ -534,17 +532,30 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Invalid physics_type '%s' (Default|Kinematic|Simulated)"), *PhysicsTypeStr));
         }
-        BodySetup->PhysicsType = NewType;
         bPhysicsTypeApplied = true;
     }
 
-    bool bMassApplied = false;
     double Mass = 0.0;
-    if (Params->TryGetNumberField(TEXT("mass"), Mass))
+    const bool bMassApplied = Params->TryGetNumberField(TEXT("mass"), Mass);
+
+    if (!bPhysicsTypeApplied && !bMassApplied)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("No properties provided (physics_type|mass); nothing was changed"));
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetPhysicsBodyProperties", "Set Physics Body Properties"));
+    PhysAsset->Modify();
+    BodySetup->Modify();
+
+    if (bPhysicsTypeApplied)
+    {
+        BodySetup->PhysicsType = NewType;
+    }
+    if (bMassApplied)
     {
         // FBodyInstance::SetMassOverride(MassInKG, bNewOverrideMass=true)  [ENGINE_API]
         BodySetup->DefaultInstance.SetMassOverride((float)Mass, /*bNewOverrideMass=*/true);
-        bMassApplied = true;
     }
 
     BodySetup->MarkPackageDirty();
@@ -568,8 +579,9 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
     ResultObj->SetStringField(TEXT("bone_name"), BodySetup->BoneName.ToString());
     ResultObj->SetStringField(TEXT("physics_type"), AppliedPhysicsType);
     ResultObj->SetBoolField(TEXT("physics_type_applied"), bPhysicsTypeApplied);
-    // bOverrideMass is protected; we report enablement from our own SetMassOverride call.
-    ResultObj->SetBoolField(TEXT("mass_override_enabled"), bMassApplied);
+    // bOverrideMass is a public FBodyInstanceCore bitfield: read it back rather than echo the request, so an
+    // override that was already on (or that the write failed to turn on) shows as it is.
+    ResultObj->SetBoolField(TEXT("mass_override_enabled"), BodySetup->DefaultInstance.bOverrideMass != 0);
     ResultObj->SetNumberField(TEXT("mass"), BodySetup->DefaultInstance.GetMassOverride());
     ResultObj->SetBoolField(TEXT("mass_applied"), bMassApplied);
     ResultObj->SetBoolField(TEXT("updated"), true);

@@ -1295,13 +1295,13 @@ Lock or unlock an actor in the EDITOR world so viewport dragging cannot move it 
 
 *Destructive, idempotent.*
 
-Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. slot_index is not range-checked: past the mesh's slots it has no visible effect, and a negative one does nothing. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
+Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. A slot_index outside the component's material slots is refused. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name or label of the target actor |
 | `material_path` | string | yes | Full asset path of the UMaterialInterface |
-| `slot_index` | number | no | Material slot index, default 0 |
+| `slot_index` | number | no | Material slot index, from 0 to the component's slot count minus 1, default 0 |
 
 **Returns:** `{ actor_name: string, material: string, slot_index: int }`
 

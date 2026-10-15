@@ -114,15 +114,18 @@ namespace
         return Data;
     }
 
-    // Marks Asset's package dirty and saves it. The commands that call this do not report the save.
-    void GC_MarkDirtyAndSave(UObject* Asset)
+    // Marks Asset's package dirty and saves it: false, with OutSaveError saying why, when the
+    // save did not reach disk.
+    bool GC_MarkDirtyAndSave(UObject* Asset, FString& OutSaveError)
     {
         Asset->MarkPackageDirty();
-        FString SaveError;
-        if (UPackage* Package = Asset->GetPackage())
+        UPackage* Package = Asset->GetPackage();
+        if (!Package)
         {
-            mcp_common::SaveAssetPackage(Package, Asset, SaveError);
+            OutSaveError = TEXT("the asset has no package");
+            return false;
         }
+        return mcp_common::SaveAssetPackage(Package, Asset, OutSaveError);
     }
 }
 
@@ -160,10 +163,10 @@ TSharedPtr<FJsonObject> HandleCreateCameraAsset(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_camera_asset"));
 }
 
-// MCP:set_camera_asset_director - Wires a USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director). Verified via GetCameraDirector read-back.
+// MCP:set_camera_asset_director - Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director) and replacing any director it had, then saves the asset. One undo step. director_set is the GetCameraDirector read-back; a failed save fails the call, with saved false and save_error, and leaves the change in memory.
 //   @param camera_asset_path - /Game/... path to the UCameraAsset (required)
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset the director runs (required)
-//   @returns { camera_asset_path, camera_rig_path, director_class, director_set }
+//   @returns { camera_asset_path, camera_rig_path, director_class, director_set, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetCameraAssetDirector(const TSharedPtr<FJsonObject>& Params)
 {
     FString CamPath, RigPath;
@@ -177,20 +180,24 @@ TSharedPtr<FJsonObject> HandleSetCameraAssetDirector(const TSharedPtr<FJsonObjec
     if (!Rig)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("UCameraRigAsset not found: %s"), *RigPath));
 
+    // Same undo rule as set_camera_rig_root_node: Modify() before the mutation, inside an open
+    // transaction.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetCameraAssetDirector", "Set Camera Asset Director (MCP)"));
+    Cam->Modify();
     USingleCameraDirector* Director = NewObject<USingleCameraDirector>(Cam, USingleCameraDirector::StaticClass(), NAME_None, RF_Transactional);
     Director->CameraRig = Rig;
     Cam->SetCameraDirector(Director);
     const bool bSet = (Cam->GetCameraDirector() == Director);
-
-    Cam->Modify();
-    GC_MarkDirtyAndSave(Cam);
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Cam, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_asset_path"), Cam->GetPathName());
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
     Data->SetStringField(TEXT("director_class"), Director->GetClass()->GetName());
     Data->SetBoolField(TEXT("director_set"), bSet);
-    return mcp_common::MakeOkReply(Data);
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+    return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_asset_director")));
 }
 
 // MCP:build_camera_rig - Builds a UCameraRigAsset (UCameraRigAsset::BuildCameraRig) and reports the resulting build status.
@@ -347,10 +354,10 @@ TSharedPtr<FJsonObject> HandleListCameraNodeTypes(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
 //   @param node_type - A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required)
-//   @returns { camera_rig_path, node_type, node_class, root_set }
+//   @returns { camera_rig_path, node_type, node_class, root_set, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath, NodeType;
@@ -372,20 +379,22 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>
     UCameraNode* Node = NewObject<UCameraNode>(Rig, NodeClass, NAME_None, RF_Transactional);
     Rig->RootNode = Node;
     const bool bSet = (Rig->RootNode == Node);
-    GC_MarkDirtyAndSave(Rig);
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
     Data->SetStringField(TEXT("node_type"), NodeType);
     Data->SetStringField(TEXT("node_class"), NodeClass->GetName());
     Data->SetBoolField(TEXT("root_set"), bSet);
-    return mcp_common::MakeOkReply(Data);
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+    return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_rig_root_node")));
 }
 
-// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back.
+// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, in one undo step, then saves the rig. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose RootNode is edited (required)
 //   @param properties - JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90})
-//   @returns { camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }
+//   @returns { camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -408,7 +417,8 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     Rig->Modify();
 
     const ClassReflectionUtils::FPropertyWrites Writes = ClassReflectionUtils::WriteProperties(Node, **PropsObj, &GC_SetNodeProperty);
-    GC_MarkDirtyAndSave(Rig);
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
@@ -416,14 +426,14 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     Data->SetArrayField(TEXT("set"), Writes.Set);
     Data->SetArrayField(TEXT("failed"), Writes.Failed);
     Data->SetObjectField(TEXT("applied"), Writes.Applied);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_camera_node_parameters"), SaveError);
 }
 
-// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
+// MCP:add_camera_node_child - Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it, in one undo step, then saves the rig. Idempotent via optional index: index<Children.Num() REPLACES that slot instead of appending. added is the read-back of the new child in its slot; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose composite RootNode is edited (required)
 //   @param child_node_type - A concrete UCameraNode subclass name for the new child, e.g. "OffsetCameraNode", "FieldOfViewCameraNode" (required)
 //   @param index - Optional child slot. If given and < current child count, REPLACES that slot (deterministic re-runs); otherwise appends.
-//   @returns { camera_rig_path, child_node_type, child_class, child_index, children_count, added, replaced }
+//   @returns { camera_rig_path, child_node_type, child_class, child_index, children_count, added, replaced, saved, save_error }
 TSharedPtr<FJsonObject> HandleAddCameraNodeChild(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath, ChildType;
@@ -452,6 +462,10 @@ TSharedPtr<FJsonObject> HandleAddCameraNodeChild(const TSharedPtr<FJsonObject>& 
     if (!ChildClass)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not resolve '%s' to a concrete UCameraNode subclass"), *ChildType));
 
+    // Same undo rule as set_camera_rig_root_node: Modify() before the mutation, inside an open
+    // transaction.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddCameraNodeChild", "Add Camera Node Child (MCP)"));
+
     // Create the child outered to the rig (mirrors set_camera_rig_root_node); NewObject is required
     // because SetObjectProperty cannot construct an instanced UCameraNode inside the array.
     UCameraNode* NewChild = NewObject<UCameraNode>(Rig, ChildClass, NAME_None, RF_Transactional);
@@ -478,8 +492,10 @@ TSharedPtr<FJsonObject> HandleAddCameraNodeChild(const TSharedPtr<FJsonObject>& 
         ChildIndex = ArrayNode->Children.Num() - 1;
     }
     const int32 ChildrenCount = ArrayNode->Children.Num();
+    const bool bAdded = ArrayNode->Children.IsValidIndex(ChildIndex) && ArrayNode->Children[ChildIndex] == NewChild;
 
-    GC_MarkDirtyAndSave(Rig);
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
 
     UE_LOG(LogTemp, Verbose,
         TEXT("add_camera_node_child: %s child_class='%s' at index=%d, children_count=%d"),
@@ -491,9 +507,10 @@ TSharedPtr<FJsonObject> HandleAddCameraNodeChild(const TSharedPtr<FJsonObject>& 
     Data->SetStringField(TEXT("child_class"), ChildClass->GetName());
     Data->SetNumberField(TEXT("child_index"), ChildIndex);
     Data->SetNumberField(TEXT("children_count"), ChildrenCount);
-    Data->SetBoolField(TEXT("added"), true);
+    Data->SetBoolField(TEXT("added"), bAdded);
     Data->SetBoolField(TEXT("replaced"), bReplaced);
-    return mcp_common::MakeOkReply(Data);
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+    return mcp_common::MakeOutcomeReply(Data, bAdded && bSaved, mcp_common::SavedOutcomeError(TEXT("add_camera_node_child")));
 }
 
 // MCP:get_camera_rig_nodes - Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index + class). Read-only.
@@ -1938,9 +1955,9 @@ static USceneComponent* FindSceneComponentByName(AActor* Actor, const FString& C
     return nullptr;
 }
 
-// MCP:add_spring_arm - Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
+// MCP:add_spring_arm - Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. One undo step; the level is marked dirty, not saved. Negative lengths, sizes and speeds clamp to 0; an unknown probe_channel is an error and nothing is created or written. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
 //   @param actor_name - Name or label of the target actor in the editor world.
-//   @param component_name - Optional name for a new component (defaults to "SpringArm"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name.
+//   @param component_name - Optional name for a new component (defaults to "SpringArm"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a spring arm, which is configured whatever its name.
 //   @param target_arm_length - Optional float. Natural length of the spring arm (uu). Default 300.
 //   @param socket_offset - Optional [X, Y, Z] relative offset applied at the spring-arm tip.
 //   @param target_offset - Optional [X, Y, Z] world-space offset applied at the start of the spring.
@@ -1969,71 +1986,9 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
         ComponentName = RequestedComponentName;
     }
 
-    AActor* Actor = mcp_common::FindActorByName(mcp_common::GetEditorWorld(), ActorName);
-    if (!Actor)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Actor '%s' not found in editor world"), *ActorName));
-    }
-
-    // Find or create component (idempotent by name)
-    USpringArmComponent* Spring = Actor->FindComponentByClass<USpringArmComponent>();
-    bool bAlreadyExisted = (Spring != nullptr);
-    if (!Spring)
-    {
-        Spring = NewObject<USpringArmComponent>(Actor, USpringArmComponent::StaticClass(), FName(*ComponentName));
-        if (!Spring)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Failed to instantiate USpringArmComponent"));
-        }
-        Spring->RegisterComponent();
-        // Attach to root if the actor has one; otherwise the component sits at origin.
-        if (USceneComponent* Root = Actor->GetRootComponent())
-        {
-            Spring->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
-        }
-        Actor->AddInstanceComponent(Spring);
-    }
-    // No rename on a name mismatch: Obj.cpp crashes on a rename into a
-    // name slot owned by a pending-GC USpringArmComponent from a prior
-    // remove+re-add. NewObject<...>(Actor, Class, FName) already handles uniqueness
-    // via MakeUniqueObjectName; the engine-assigned name is returned in
-    // `component_name` of the response.
-
-    // Apply only provided fields — preserves "partial update" idempotency.
-    int32 AppliedCount = 0;
-
-    double LengthVal;
-    if (Params->TryGetNumberField(TEXT("target_arm_length"), LengthVal))
-    {
-        Spring->TargetArmLength = static_cast<float>(FMath::Max(0.0f, LengthVal));
-        AppliedCount++;
-    }
-
-    FVector SocketOffset;
-    if (Params->HasField(TEXT("socket_offset")))
-    {
-        SocketOffset = mcp_common::ReadJsonVector(Params, TEXT("socket_offset"));
-        Spring->SocketOffset = SocketOffset;
-        AppliedCount++;
-    }
-
-    FVector TargetOffset;
-    if (Params->HasField(TEXT("target_offset")))
-    {
-        TargetOffset = mcp_common::ReadJsonVector(Params, TEXT("target_offset"));
-        Spring->TargetOffset = TargetOffset;
-        AppliedCount++;
-    }
-
-    double ProbeSizeVal;
-    if (Params->TryGetNumberField(TEXT("probe_size"), ProbeSizeVal))
-    {
-        Spring->ProbeSize = static_cast<float>(FMath::Max(0.0f, ProbeSizeVal));
-        AppliedCount++;
-    }
-
+    // probe_channel is the only field that can be refused, so it is resolved before anything is
+    // created or written: a bad name leaves the actor exactly as it was.
+    TOptional<ECollisionChannel> ProbeChannel;
     FString ProbeChannelName;
     if (Params->TryGetStringField(TEXT("probe_channel"), ProbeChannelName) && !ProbeChannelName.IsEmpty())
     {
@@ -2074,7 +2029,87 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
                 FString::Printf(TEXT("Unknown collision channel '%s'. Use one of: ECC_Camera, ECC_Visibility, ECC_WorldStatic, ECC_Pawn, etc."),
                     *ProbeChannelName));
         }
-        Spring->ProbeChannel = static_cast<ECollisionChannel>(EnumVal);
+        ProbeChannel = static_cast<ECollisionChannel>(EnumVal);
+    }
+
+    AActor* Actor = mcp_common::FindActorByName(mcp_common::GetEditorWorld(), ActorName);
+    if (!Actor)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Actor '%s' not found in editor world"), *ActorName));
+    }
+
+    // One undo step for the whole call: Modify() records each object before it changes.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSpringArm", "Add Spring Arm (MCP)"));
+    Actor->Modify();
+
+    // The actor's first spring arm is configured in place; only an actor without one gets a new arm.
+    USpringArmComponent* Spring = Actor->FindComponentByClass<USpringArmComponent>();
+    bool bAlreadyExisted = (Spring != nullptr);
+    if (!Spring)
+    {
+        // NewObject with a name another object of the actor already holds is fatal when that
+        // object has another class ("Cannot replace existing object of a different class"), and
+        // replaces it in place when it is a spring arm (a removed one still waiting for GC). Any
+        // holder counts, garbage included, so a taken name gets a unique variant, the way
+        // add_component_to_actor names its component; component_name returns the final name.
+        FName NewName(*ComponentName);
+        if (StaticFindObjectFast(nullptr, Actor, NewName) != nullptr)
+        {
+            NewName = MakeUniqueObjectName(Actor, USpringArmComponent::StaticClass(), NewName);
+        }
+        Spring = NewObject<USpringArmComponent>(Actor, USpringArmComponent::StaticClass(), NewName, RF_Transactional);
+        if (!Spring)
+        {
+            return mcp_common::MakeErrorReply(
+                TEXT("Failed to instantiate USpringArmComponent"));
+        }
+        Spring->RegisterComponent();
+        // Attach to root if the actor has one; otherwise the component sits at origin.
+        if (USceneComponent* Root = Actor->GetRootComponent())
+        {
+            Spring->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+        }
+        Actor->AddInstanceComponent(Spring);
+    }
+    Spring->Modify();
+
+    // Apply only provided fields — preserves "partial update" idempotency.
+    int32 AppliedCount = 0;
+
+    double LengthVal;
+    if (Params->TryGetNumberField(TEXT("target_arm_length"), LengthVal))
+    {
+        Spring->TargetArmLength = static_cast<float>(FMath::Max(0.0f, LengthVal));
+        AppliedCount++;
+    }
+
+    FVector SocketOffset;
+    if (Params->HasField(TEXT("socket_offset")))
+    {
+        SocketOffset = mcp_common::ReadJsonVector(Params, TEXT("socket_offset"));
+        Spring->SocketOffset = SocketOffset;
+        AppliedCount++;
+    }
+
+    FVector TargetOffset;
+    if (Params->HasField(TEXT("target_offset")))
+    {
+        TargetOffset = mcp_common::ReadJsonVector(Params, TEXT("target_offset"));
+        Spring->TargetOffset = TargetOffset;
+        AppliedCount++;
+    }
+
+    double ProbeSizeVal;
+    if (Params->TryGetNumberField(TEXT("probe_size"), ProbeSizeVal))
+    {
+        Spring->ProbeSize = static_cast<float>(FMath::Max(0.0f, ProbeSizeVal));
+        AppliedCount++;
+    }
+
+    if (ProbeChannel.IsSet())
+    {
+        Spring->ProbeChannel = ProbeChannel.GetValue();
         AppliedCount++;
     }
 
@@ -2128,7 +2163,6 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
     }
 
     Spring->MarkRenderStateDirty();
-    Actor->Modify();
     if (UPackage* Pkg = Actor->GetPackage())
     {
         Pkg->MarkPackageDirty();
@@ -2160,9 +2194,9 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:add_camera_component - Add or configure a UCameraComponent on an existing actor, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor.
+// MCP:add_camera_component - Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. An invalid projection_mode or a rejected post_process_settings is an error and nothing is created or written.
 //   @param actor_name - Name or label of the target actor.
-//   @param component_name - Optional name for the new component (defaults to "Camera"). If a UCameraComponent with this name already exists on the actor, only the provided fields are updated.
+//   @param component_name - Optional name for a new component (defaults to "Camera"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a camera component, which is configured whatever its name.
 //   @param parent_component - Optional name of a USceneComponent on the same actor to attach to (e.g. "SpringArm"). Default = actor root component.
 //   @param field_of_view - Optional float. Horizontal FOV in degrees (1..170).
 //   @param aspect_ratio - Optional float. Aspect ratio (e.g. 16/9). 0 = auto.
@@ -2175,7 +2209,7 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
 //   @param b_lock_to_hmd - Optional bool. Lock orientation to the HMD.
 //   @param post_process_settings - Optional object (PostProcess fields, see get_camera_post_process for the schema).
 //   @param post_process_blend_weight - Optional float. Weight of post-process (0..1). 0 means post-process disabled.
-//   @returns { actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll] }
+//   @returns { actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll], post_process_blend_weight }
 TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -2214,11 +2248,64 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
         Parent = Actor->GetRootComponent();
     }
 
+    // The actor's first camera is configured in place; only an actor without one gets a new camera.
     UCameraComponent* CameraComp = Actor->FindComponentByClass<UCameraComponent>();
     bool bAlreadyExisted = (CameraComp != nullptr);
+
+    // projection_mode and post_process_settings are the fields that can be refused, so both are
+    // resolved before anything is created or written: a bad value leaves the actor exactly as it was.
+    TOptional<ECameraProjectionMode::Type> RequestedProjectionMode;
+    FString ProjectionModeStr;
+    if (Params->TryGetStringField(TEXT("projection_mode"), ProjectionModeStr) && !ProjectionModeStr.IsEmpty())
+    {
+        if (ProjectionModeStr.Equals(TEXT("Orthographic"), ESearchCase::IgnoreCase))
+        {
+            RequestedProjectionMode = ECameraProjectionMode::Orthographic;
+        }
+        else if (ProjectionModeStr.Equals(TEXT("Perspective"), ESearchCase::IgnoreCase))
+        {
+            RequestedProjectionMode = ECameraProjectionMode::Perspective;
+        }
+        else
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Invalid projection_mode '%s'. Expected 'Perspective' or 'Orthographic'"), *ProjectionModeStr));
+        }
+    }
+
+    // The post-process blob is merged into a copy of the settings the camera has (a new camera
+    // starts from the class defaults), so a rejected blob writes nothing; the copy is assigned below.
+    TOptional<FPostProcessSettings> RequestedPostProcess;
+    const TSharedPtr<FJsonObject>* PPJson = nullptr;
+    if (Params->TryGetObjectField(TEXT("post_process_settings"), PPJson) && PPJson && PPJson->IsValid())
+    {
+        FPostProcessSettings Merged = CameraComp ? CameraComp->PostProcessSettings : GetDefault<UCameraComponent>()->PostProcessSettings;
+        FString PPError;
+        if (!mcp_common::JsonToStruct(*PPJson, FPostProcessSettings::StaticStruct(), &Merged, PPError))
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("post_process_settings rejected: %s"), *PPError));
+        }
+        RequestedPostProcess = MoveTemp(Merged);
+    }
+
+    // One undo step for the whole call: Modify() records each object before it changes.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddCameraComponent", "Add Camera Component (MCP)"));
+    Actor->Modify();
+
     if (!CameraComp)
     {
-        CameraComp = NewObject<UCameraComponent>(Actor, UCameraComponent::StaticClass(), FName(*ComponentName));
+        // NewObject with a name another object of the actor already holds is fatal when that
+        // object has another class ("Cannot replace existing object of a different class"), and
+        // replaces it in place when it is a camera (a removed one still waiting for GC). Any
+        // holder counts, garbage included, so a taken name gets a unique variant, the way
+        // add_component_to_actor names its component; component_name returns the final name.
+        FName NewName(*ComponentName);
+        if (StaticFindObjectFast(nullptr, Actor, NewName) != nullptr)
+        {
+            NewName = MakeUniqueObjectName(Actor, UCameraComponent::StaticClass(), NewName);
+        }
+        CameraComp = NewObject<UCameraComponent>(Actor, UCameraComponent::StaticClass(), NewName, RF_Transactional);
         if (!CameraComp)
         {
             return mcp_common::MakeErrorReply(
@@ -2227,9 +2314,7 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
         CameraComp->RegisterComponent();
         Actor->AddInstanceComponent(CameraComp);
     }
-    // No rename on a name mismatch (same reason as the spring arm block above):
-    // Obj.cpp crashes on a rename into a name slot owned by a pending-GC
-    // UCameraComponent from a prior remove+re-add.
+    CameraComp->Modify();
 
     // Attach to parent (idempotent — only re-attach if not already there).
     if (Parent && CameraComp->GetAttachParent() != Parent)
@@ -2260,25 +2345,10 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
         AppliedCount++;
     }
 
-    FString ProjectionModeStr;
-    if (Params->TryGetStringField(TEXT("projection_mode"), ProjectionModeStr) && !ProjectionModeStr.IsEmpty())
+    if (RequestedProjectionMode.IsSet())
     {
-        // ECameraProjectionMode::Perspective=0, Orthographic=1.
-        if (ProjectionModeStr.Equals(TEXT("Orthographic"), ESearchCase::IgnoreCase))
-        {
-            CameraComp->SetProjectionMode(ECameraProjectionMode::Orthographic);
-            AppliedCount++;
-        }
-        else if (ProjectionModeStr.Equals(TEXT("Perspective"), ESearchCase::IgnoreCase))
-        {
-            CameraComp->SetProjectionMode(ECameraProjectionMode::Perspective);
-            AppliedCount++;
-        }
-        else
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Invalid projection_mode '%s'. Expected 'Perspective' or 'Orthographic'"), *ProjectionModeStr));
-        }
+        CameraComp->SetProjectionMode(RequestedProjectionMode.GetValue());
+        AppliedCount++;
     }
 
     FVector Loc;
@@ -2320,20 +2390,11 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
         AppliedCount++;
     }
 
-    // Optional: post-process settings blob (forwarded to PostProcessSettings via the
-    // existing FPostProcessSettings field — limited support: the values are JSON-encoded
-    // and applied via FJsonObjectConverter if the schema matches FPostProcessSettings fields).
-    const TSharedPtr<FJsonObject>* PPJson = nullptr;
-    if (Params->TryGetObjectField(TEXT("post_process_settings"), PPJson) && PPJson && PPJson->IsValid())
+    // Optional: post-process settings blob, merged above via FJsonObjectConverter into a copy of
+    // the camera's settings (fields the blob names; the rest keep their values).
+    if (RequestedPostProcess.IsSet())
     {
-        FString PPError;
-        if (!mcp_common::JsonToStruct(*PPJson,
-                FPostProcessSettings::StaticStruct(),
-                &CameraComp->PostProcessSettings, PPError))
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("post_process_settings rejected: %s"), *PPError));
-        }
+        CameraComp->PostProcessSettings = RequestedPostProcess.GetValue();
         AppliedCount++;
     }
 
@@ -2341,7 +2402,6 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
     // (We don't unconditionally set bOverride_* companions — the user only opted
     // in to whatever post_process_settings keys they passed in, and the JsonToStruct
     // merge already turned on the relevant ones via FPostProcessSettings's metadata.)
-    Actor->Modify();
     if (UPackage* Pkg = Actor->GetPackage())
     {
         Pkg->MarkPackageDirty();

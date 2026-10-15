@@ -22,11 +22,11 @@ Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose targ
 
 *Additive.*
 
-Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding (the reliable headless path) and calls UMetaSoundBuilderBase::AddGraphInputNode, adding a real graph input node (and its backing graph input member) of the given data type. Optionally bakes a typed default into the input's literal — provide at most one of ``default_value`` (float), ``int_value``, ``bool_value`` or ``string_value``.          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").         "Bool", "String", "Audio", "Trigger").
+Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example" |
 | `input_name` | string | yes | Name of the graph input node to add. |
 | `data_type` | string | no | Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float") |
 | `default_value` | number | no | Float default baked into the literal (optional) |
@@ -34,13 +34,13 @@ Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a
 | `bool_value` | boolean | no | Bool default baked into the literal (optional, mutually exclusive with other defaults) |
 | `string_value` | string | no | String default baked into the literal (optional, mutually exclusive with other defaults) |
 
-**Returns:** `{ asset_path: string, input_name: string, data_type: string, added: bool, has_default: bool, saved: bool, save_error: string? }`
+**Returns:** `{ asset_path: string, input_name: string, data_type: string, added: bool, already_exists?: bool, has_default: bool, note?: string, saved: bool, save_error: string? }`
 
 ## `add_metasound_graph_output`
 
 *Additive.*
 
-Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is not duplicated or retyped: the engine hands back that output and the reply still says added=true, so check get_metasound_info first. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
+Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is left untouched: with the same data_type the call succeeds with added=false and already_exists=true and saves nothing; with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -48,7 +48,7 @@ Add a graph output of data_type (default Audio; others include Float, Int32, Boo
 | `output_name` | string | yes | Name of the graph output node to add. |
 | `data_type` | string | no | Frontend data type for the output node (optional, default "Audio") |
 
-**Returns:** `{ asset_path: string, output_name: string, data_type: string, added: bool, saved: bool, save_error: string? }`
+**Returns:** `{ asset_path: string, output_name: string, data_type: string, added: bool, already_exists?: bool, saved: bool, save_error: string? }`
 
 ## `add_modulation_input_to_patch`
 
@@ -170,15 +170,15 @@ Wire a child node into a parent node's input slot
 
 *Destructive.*
 
-Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted nothing is written, so a new bus keeps the engine default (Mono, not Stereo) and an existing one keeps its own. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
+Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted a new bus gets Stereo and an existing one keeps its own. An invalid channels value is refused before any asset is created or loaded. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new Audio Bus asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `channels` | string | no | EAudioBusChannels: 'Mono' \| 'Stereo' (default) \| 'Quad' \| 'FiveDotOne' \| 'SevenDotOne' |
+| `channels` | string | no | EAudioBusChannels: 'Mono' \| 'Stereo' (default) \| 'Quad' \| 'FiveDotOne' \| 'SevenDotOne'. The default applies to a new bus only. |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool, created: bool, already_exists: bool, saved: bool }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool (this call wrote the layout: channels given, or the Stereo default on a new bus), created: bool, already_exists: bool, saved: bool, save_error?: string }`
 
 ## `create_control_bus`
 
@@ -394,17 +394,17 @@ Creates a USoundModulationPatch asset at package_path/patch_name with no inputs 
 
 *Destructive.*
 
-Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration are always written, so on an existing asset omitted ones are overwritten with the defaults (Stereo, 1.0 s). audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
+Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration, when omitted, take the defaults (Stereo, 1.0 s) on a new asset and keep their value on an existing one, whose fields the given values overwrite. Every value is validated before any asset is created or loaded, so an invalid one leaves nothing behind. audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new Sound Source Bus asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `source_bus_channels` | string | no | ESourceBusChannels: 'Mono' \| 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo. |
-| `duration` | number | no | Duration in seconds (ClampMin=0.0; 0.0 means indefinite). Default 1.0. |
+| `source_bus_channels` | string | no | ESourceBusChannels: 'Mono' \| 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo. The default applies to a new asset only. |
+| `duration` | number | no | Duration in seconds, at least 0 (0.0 means indefinite); a negative value is an error. Default 1.0 on a new asset only. |
 | `audio_bus_path` | string | no | Optional full content path of a UAudioBus to assign as the AudioBus return. |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool, applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool (each true when this call wrote the field: given, or the default on a new asset), applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }`
 
 ## `create_sound_submix`
 
@@ -686,7 +686,7 @@ Read one level of the hierarchy of a USoundClass asset: its parent and parent_pa
 
 *Read-only.*
 
-Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is "None" for a root class. One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
+Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1092,7 +1092,7 @@ Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Ma
 
 *Destructive, idempotent.*
 
-Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, with no undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
+Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, inside an undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

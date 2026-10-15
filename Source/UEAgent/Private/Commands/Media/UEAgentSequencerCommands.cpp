@@ -105,6 +105,9 @@
 #include "Tracks/MovieSceneMaterialParameterCollectionTrack.h"    // UMovieSceneMaterialParameterCollectionTrack
 #include "Materials/MaterialParameterCollection.h"                // UMaterialParameterCollection
 #include "Curves/RichCurve.h"                                     // ERichCurveInterpMode / ERichCurveTangentMode
+#include "Sections/MovieSceneComponentMaterialParameterSection.h" // ScalarParameterInfosAndCurves (MovieSceneTracks): key read-back
+#include "Sections/MovieSceneParameterSection.h"                  // GetScalarParameterNamesAndCurves (MovieSceneTracks): key read-back
+#include "MovieSceneCommonHelpers.h"                              // MovieSceneHelpers::FindNearestSectionAtTime (MovieScene)
 
 // Section-property setters
 #include "Sections/MovieSceneSkeletalAnimationSection.h"          // UMovieSceneSkeletalAnimationSection + FMovieSceneSkeletalAnimationParams (MovieSceneTracks)
@@ -390,10 +393,12 @@ UClass* ResolveActorClass(const FString& ClassName)
     return nullptr;
 }
 
-bool SaveSequencePackage(ULevelSequence* Sequence)
+// Marks the sequence's package dirty and saves it; false, with OutError saying why, when it did not reach disk.
+bool SaveSequencePackage(ULevelSequence* Sequence, FString& OutError)
 {
     if (!Sequence)
     {
+        OutError = TEXT("No Level Sequence to save");
         return false;
     }
     Sequence->MarkPackageDirty();
@@ -401,9 +406,10 @@ bool SaveSequencePackage(ULevelSequence* Sequence)
     UPackage* Package = Sequence->GetOutermost();
     if (!Package)
     {
+        OutError = FString::Printf(TEXT("Level Sequence '%s' has no package"), *Sequence->GetPathName());
         return false;
     }
-    return mcp_common::SaveAssetPackage(Package, Sequence);
+    return mcp_common::SaveAssetPackage(Package, Sequence, OutError);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +419,7 @@ bool SaveSequencePackage(ULevelSequence* Sequence)
 // MCP:add_spawnable_to_sequence - Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
 //   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
 //   @param class_name - AActor subclass name (e.g. "CineCameraActor" default, "StaticMeshActor", "PointLight", or a "/Script/Module.Class" path).
-//   @returns { sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSpawnableToSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -448,20 +454,21 @@ TSharedPtr<FJsonObject> HandleAddSpawnableToSequence(const TSharedPtr<FJsonObjec
             FString::Printf(TEXT("Failed to create spawnable binding for class '%s'"), *ClassName));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), NewGuid.ToString());
     Response->SetStringField(TEXT("display_name"), MovieScene->GetObjectDisplayName(NewGuid).ToString());
     Response->SetStringField(TEXT("class_name"), SpawnClass->GetName());
     Response->SetBoolField(TEXT("spawnable"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_spawnable_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_spawnable_to_sequence"), SaveError);
 }
 
 // MCP:bind_actor_to_sequence - Adds a possessable binding to a Level Sequence for an existing editor-world actor.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param actor_name - Label (or name) of the actor in the current editor world to possess.
-//   @returns { sequence_name: string, actor_name: string, binding_guid: string, display_name: string, possessable: bool, saved: bool }
+//   @returns { sequence_name: string, actor_name: string, binding_guid: string, display_name: string, possessable: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleBindActorToSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -494,14 +501,15 @@ TSharedPtr<FJsonObject> HandleBindActorToSequence(const TSharedPtr<FJsonObject>&
             FString::Printf(TEXT("Failed to create possessable binding for actor '%s'"), *ActorName));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("actor_name"), TargetActor->GetActorLabel());
     Response->SetStringField(TEXT("binding_guid"), NewGuid.ToString());
     Response->SetStringField(TEXT("display_name"), MovieScene->GetObjectDisplayName(NewGuid).ToString());
     Response->SetBoolField(TEXT("possessable"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_actor_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_actor_to_sequence"), SaveError);
 }
 
 // MCP:get_sequence_bindings - Lists every object binding of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive), with each binding's tracks (class and section count); read-only, needs no open Sequencer. spawnable is true when the binding has a spawn track and possessable otherwise; possessable_count and spawnable_count are the movie scene's own counts and can disagree with those flags. Root tracks are not listed: use get_sequence_tracks. For one binding's tracks with display names use get_binding_tracks.
@@ -562,7 +570,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceBindings(const TSharedPtr<FJsonObject>&
 // MCP:add_transform_track_to_binding - Adds a 3D transform track (with a section spanning the playback range) to a binding.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param binding_guid - GUID of the binding (from add_spawnable_to_sequence / bind_actor_to_sequence / get_sequence_bindings).
-//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, section_created: bool, section_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, section_created: bool, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddTransformTrackToBinding(const TSharedPtr<FJsonObject>& Params)
 {
@@ -600,7 +608,8 @@ TSharedPtr<FJsonObject> HandleAddTransformTrackToBinding(const TSharedPtr<FJsonO
         return mcp_common::MakeErrorReply(TEXT("Failed to create transform section"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -608,7 +617,7 @@ TSharedPtr<FJsonObject> HandleAddTransformTrackToBinding(const TSharedPtr<FJsonO
     Response->SetBoolField(TEXT("track_added"), bCreatedTrack);
     Response->SetBoolField(TEXT("section_created"), bCreatedSection);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_transform_track_to_binding"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_transform_track_to_binding"), SaveError);
 }
 
 // MCP:add_attach_track - Add a Sequencer 3D-Attach track on a binding so it follows another binding (e.g. a prop attached to a character's hand socket) over the section's range.  The attachee binding owns a UMovieScene3DAttachTrack; AddConstraint creates an attach section pointing at the target binding.  Idempotent by (target_binding_guid, start_frame).
@@ -619,7 +628,7 @@ TSharedPtr<FJsonObject> HandleAddTransformTrackToBinding(const TSharedPtr<FJsonO
 //   @param duration - Optional duration in frames (default: the playback range size).
 //   @param socket_name - Optional socket name on the target to attach to (default: none -> target root).
 //   @param component_name - Optional component name on the target to attach to (default: none).
-//   @returns { sequence_name: string, binding_guid: string, target_binding_guid: string, track_added: bool, already_exists: bool, start_frame: int, duration: int, socket_name: string, component_name: string, section_count: int, track_class: string, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, target_binding_guid: string, track_added: bool, already_exists: bool, start_frame: int, duration: int, socket_name: string, component_name: string, section_count: int, track_class: string, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddAttachTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName, GuidStr, TargetGuidStr;
@@ -696,7 +705,8 @@ TSharedPtr<FJsonObject> HandleAddAttachTrack(const TSharedPtr<FJsonObject>& Para
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -709,7 +719,7 @@ TSharedPtr<FJsonObject> HandleAddAttachTrack(const TSharedPtr<FJsonObject>& Para
     Response->SetStringField(TEXT("component_name"), ComponentName);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_attach_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_attach_track"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -777,7 +787,7 @@ TSharedPtr<FJsonObject> ResolveSectionFromParams(const TSharedPtr<FJsonObject>& 
 //   @param detachment_location_rule - Optional EDetachmentRule: KeepRelative | KeepWorld.
 //   @param detachment_rotation_rule - Optional EDetachmentRule: KeepRelative | KeepWorld.
 //   @param detachment_scale_rule - Optional EDetachmentRule: KeepRelative | KeepWorld.
-//   @returns { sequence_path: string, attach_rules: object, applied_count: int, applied: bool }
+//   @returns { sequence_path: string, attach_rules: object, applied_count: int, applied: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetAttachSectionRules(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -833,13 +843,14 @@ TSharedPtr<FJsonObject> HandleSetAttachSectionRules(const TSharedPtr<FJsonObject
         return mcp_common::MakeErrorReply(
             TEXT("No rules provided. Supply at least one of: attachment_location_rule, attachment_rotation_rule, attachment_scale_rule, detachment_location_rule, detachment_rotation_rule, detachment_scale_rule"));
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetObjectField(TEXT("attach_rules"), AttachRulesJson(AttachSec));
     Response->SetNumberField(TEXT("applied_count"), AppliedCount);
     Response->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_attach_section_rules"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_attach_section_rules"), SaveError);
 }
 
 // MCP:add_transform_keyframe - Adds one transform keyframe (9 double channels) at a time on a binding's transform section.  Requires a transform track to already exist (call add_transform_track_to_binding first).
@@ -849,7 +860,7 @@ TSharedPtr<FJsonObject> HandleSetAttachSectionRules(const TSharedPtr<FJsonObject
 //   @param location - Optional [x, y, z] world location.
 //   @param rotation - Optional [pitch, yaw, roll] world rotation.
 //   @param scale - Optional [x, y, z] scale (default 1,1,1).
-//   @returns { sequence_name: string, binding_guid: string, time_seconds: float, key_frame: int, keys_added: int, channel_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, time_seconds: float, key_frame: int, keys_added: int, channel_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddTransformKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
@@ -922,7 +933,8 @@ TSharedPtr<FJsonObject> HandleAddTransformKeyframe(const TSharedPtr<FJsonObject>
             FString::Printf(TEXT("No transform channels found on section (expected 9, got %d)"), DoubleChannels.Num()));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -930,7 +942,7 @@ TSharedPtr<FJsonObject> HandleAddTransformKeyframe(const TSharedPtr<FJsonObject>
     Response->SetNumberField(TEXT("key_frame"), KeyFrame.Value);
     Response->SetNumberField(TEXT("keys_added"), KeysAdded);
     Response->SetNumberField(TEXT("channel_count"), DoubleChannels.Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_transform_keyframe"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_transform_keyframe"), SaveError);
 }
 
 // MCP:set_section_range - Sets the frame range of the FIRST section of one track on a Level Sequence binding (sequence found by asset name under /Game), in an undo transaction, and saves the sequence. track_index picks the track in the binding's track order; no other section can be targeted, and an unknown binding reads as zero tracks. Frames are tick-resolution frames, rounded; keys are not moved or rescaled. range_set is false when the stored range differs from the request. Read a section's range with get_section_info; for the whole sequence use set_sequence_playback_range.
@@ -939,7 +951,7 @@ TSharedPtr<FJsonObject> HandleAddTransformKeyframe(const TSharedPtr<FJsonObject>
 //   @param start_frame - Inclusive start frame (tick resolution).
 //   @param end_frame - Exclusive end frame (must be > start_frame).
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
-//   @returns { sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSectionRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -990,7 +1002,8 @@ TSharedPtr<FJsonObject> HandleSetSectionRange(const TSharedPtr<FJsonObject>& Par
     const int32 AppliedStart = Applied.GetLowerBound().IsClosed() ? Applied.GetLowerBoundValue().Value : StartFrame;
     const int32 AppliedEnd = Applied.GetUpperBound().IsClosed() ? Applied.GetUpperBoundValue().Value : EndFrame;
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -1001,7 +1014,7 @@ TSharedPtr<FJsonObject> HandleSetSectionRange(const TSharedPtr<FJsonObject>& Par
     Response->SetNumberField(TEXT("applied_start_frame"), AppliedStart);
     Response->SetNumberField(TEXT("applied_end_frame"), AppliedEnd);
     Response->SetBoolField(TEXT("range_set"), (AppliedStart == StartFrame && AppliedEnd == EndFrame));
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_range"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_range"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,7 +1023,7 @@ TSharedPtr<FJsonObject> HandleSetSectionRange(const TSharedPtr<FJsonObject>& Par
 
 // MCP:add_camera_cut_track - Adds (or returns the existing) camera cut track on a Level Sequence's movie scene.
 //   @param sequence_name - Name of the target Level Sequence.
-//   @returns { sequence_name: string, track_class: string, track_added: bool, section_count: int, saved: bool }
+//   @returns { sequence_name: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddCameraCutTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1035,13 +1048,14 @@ TSharedPtr<FJsonObject> HandleAddCameraCutTrack(const TSharedPtr<FJsonObject>& P
         return mcp_common::MakeErrorReply(TEXT("Failed to add camera cut track"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetBoolField(TEXT("track_added"), bCreated);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut_track"), SaveError);
 }
 
 // MCP:add_camera_cut - Adds a camera cut section bound to a camera binding over a frame range.  Creates the camera cut track if it does not yet exist.
@@ -1049,7 +1063,7 @@ TSharedPtr<FJsonObject> HandleAddCameraCutTrack(const TSharedPtr<FJsonObject>& P
 //   @param camera_binding_guid - GUID of the camera binding the cut switches to.
 //   @param start_frame - Inclusive start frame (tick resolution).
 //   @param end_frame - Exclusive end frame (must be > start_frame).
-//   @returns { sequence_name: string, camera_binding_guid: string, start_frame: int, end_frame: int, section_class: string, section_count: int, saved: bool }
+//   @returns { sequence_name: string, camera_binding_guid: string, start_frame: int, end_frame: int, section_class: string, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddCameraCut(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1101,7 +1115,8 @@ TSharedPtr<FJsonObject> HandleAddCameraCut(const TSharedPtr<FJsonObject>& Params
     const int32 AppliedStart = Applied.GetLowerBound().IsClosed() ? Applied.GetLowerBoundValue().Value : StartFrame;
     const int32 AppliedEnd = Applied.GetUpperBound().IsClosed() ? Applied.GetUpperBoundValue().Value : EndFrame;
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("camera_binding_guid"), GuidStr);
@@ -1109,14 +1124,14 @@ TSharedPtr<FJsonObject> HandleAddCameraCut(const TSharedPtr<FJsonObject>& Params
     Response->SetNumberField(TEXT("end_frame"), AppliedEnd);
     Response->SetStringField(TEXT("section_class"), Section->GetClass()->GetName());
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut"), SaveError);
 }
 
 // MCP:create_cine_camera_in_sequence - Creates a spawnable CineCameraActor binding, keys its transform, and binds a camera cut to it.  High-value one-shot: spawnable CineCameraActor + transform track keyed at frame 0 + a camera cut spanning the playback range.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param location - Optional [x, y, z] world location for the camera's key at frame 0.
 //   @param rotation - Optional [pitch, yaw, roll] world rotation for the camera's key at frame 0.
-//   @returns { sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, transform_keyed: bool, camera_cut_added: bool, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, transform_keyed: bool, camera_cut_added: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateCineCameraInSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1178,7 +1193,8 @@ TSharedPtr<FJsonObject> HandleCreateCineCameraInSequence(const TSharedPtr<FJsonO
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), CameraGuid.ToString());
@@ -1187,7 +1203,7 @@ TSharedPtr<FJsonObject> HandleCreateCineCameraInSequence(const TSharedPtr<FJsonO
     Response->SetBoolField(TEXT("spawnable"), true);
     Response->SetBoolField(TEXT("transform_keyed"), bTransformKeyed);
     Response->SetBoolField(TEXT("camera_cut_added"), bCameraCutAdded);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("create_cine_camera_in_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("create_cine_camera_in_sequence"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1198,7 +1214,7 @@ TSharedPtr<FJsonObject> HandleCreateCineCameraInSequence(const TSharedPtr<FJsonO
 //   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
 //   @param start_frame - Inclusive lower bound of the playback range, in tick frames.
 //   @param end_frame - Exclusive upper bound of the playback range (must be > start_frame).
-//   @returns { sequence_name: string, requested_start_frame: int, requested_end_frame: int, start_frame: int, end_frame: int, range_set: bool, saved: bool }
+//   @returns { sequence_name: string, requested_start_frame: int, requested_end_frame: int, start_frame: int, end_frame: int, range_set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSequencePlaybackRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1231,7 +1247,8 @@ TSharedPtr<FJsonObject> HandleSetSequencePlaybackRange(const TSharedPtr<FJsonObj
     const int32 AppliedStart = Applied.GetLowerBound().IsClosed() ? Applied.GetLowerBoundValue().Value : StartFrame;
     const int32 AppliedEnd = Applied.GetUpperBound().IsClosed() ? Applied.GetUpperBoundValue().Value : EndFrame;
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("requested_start_frame"), StartFrame);
@@ -1239,7 +1256,7 @@ TSharedPtr<FJsonObject> HandleSetSequencePlaybackRange(const TSharedPtr<FJsonObj
     Response->SetNumberField(TEXT("start_frame"), AppliedStart);
     Response->SetNumberField(TEXT("end_frame"), AppliedEnd);
     Response->SetBoolField(TEXT("range_set"), (AppliedStart == StartFrame && AppliedEnd == EndFrame));
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_playback_range"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_playback_range"), SaveError);
 }
 
 // MCP:add_marked_frame - Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-resolution frame of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; is_determinism_fence turns the same mark into an evaluation fence. Idempotent per frame: an existing mark at that frame is updated instead of duplicated, its label replaced when one is given and both flags overwritten with the values passed (false when omitted); already_existed says which. Read marks with get_marked_frames, delete one with remove_marked_frame.
@@ -1248,7 +1265,7 @@ TSharedPtr<FJsonObject> HandleSetSequencePlaybackRange(const TSharedPtr<FJsonObj
 //   @param label - Optional human-readable label (auto-generated if empty).
 //   @param is_determinism_fence - Optional bool (default false): treat the mark as an evaluation fence (cannot be crossed in one evaluation).
 //   @param is_inclusive - Optional bool (default false): when a determinism fence, how the previous/next ranges are dissected ((X,Y]->(Y,Z] vs (X,Y)->[Y,Z]).
-//   @returns { sequence_name: string, frame: int, mark_index: int, label: string, is_determinism_fence: bool, is_inclusive: bool, already_existed: bool, marked_frame_count: int, saved: bool }
+//   @returns { sequence_name: string, frame: int, mark_index: int, label: string, is_determinism_fence: bool, is_inclusive: bool, already_existed: bool, marked_frame_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddMarkedFrame(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1325,7 +1342,8 @@ TSharedPtr<FJsonObject> HandleAddMarkedFrame(const TSharedPtr<FJsonObject>& Para
         bStoredInclusive = Stored.bIsInclusiveTime;
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("frame"), Frame);
@@ -1335,7 +1353,7 @@ TSharedPtr<FJsonObject> HandleAddMarkedFrame(const TSharedPtr<FJsonObject>& Para
     Response->SetBoolField(TEXT("is_inclusive"), bStoredInclusive);
     Response->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     Response->SetNumberField(TEXT("marked_frame_count"), MarkedFrameCount);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_marked_frame"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_marked_frame"), SaveError);
 }
 
 // MCP:get_marked_frames - Lists every user marked frame in a Level Sequence's movie scene.
@@ -1372,12 +1390,12 @@ TSharedPtr<FJsonObject> HandleGetMarkedFrames(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:remove_marked_frame - Removes one user marked frame from a Level Sequence, by index, frame, or label.
+// MCP:remove_marked_frame - Removes one user marked frame from a Level Sequence, by index, frame, or label, inside an undo transaction, and saves the sequence; success requires the save. A selector that matches no mark succeeds with already_removed true and saved false (nothing is written).
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param index - Optional mark index to delete. Takes precedence over frame/label.
 //   @param frame - Optional tick frame number to resolve the mark to delete (FindMarkedFrameByFrameNumber).
 //   @param label - Optional label to resolve the mark to delete (FindMarkedFrameByLabel).
-//   @returns { sequence_name: string, removed_index: int, already_removed: bool, marked_frame_count: int, saved: bool }
+//   @returns { sequence_name: string, removed_index: int, already_removed: bool, marked_frame_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveMarkedFrame(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1419,24 +1437,31 @@ TSharedPtr<FJsonObject> HandleRemoveMarkedFrame(const TSharedPtr<FJsonObject>& P
     // Idempotent: removing an already-absent mark is a clean no-op, not an error.
     const bool bValid = MovieScene->GetMarkedFrames().IsValidIndex(TargetIndex);
     bool bSaved = false;
+    FString SaveError;
     if (bValid)
     {
         const FScopedTransaction Transaction(LOCTEXT("RemoveMarkedFrame", "MCP: Remove Marked Frame"));
         MovieScene->Modify();
         MovieScene->DeleteMarkedFrame(TargetIndex);
-        bSaved = SaveSequencePackage(Sequence);
+        bSaved = SaveSequencePackage(Sequence, SaveError);
     }
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("removed_index"), bValid ? TargetIndex : -1);
     Response->SetBoolField(TEXT("already_removed"), !bValid);
     Response->SetNumberField(TEXT("marked_frame_count"), MovieScene->GetMarkedFrames().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_marked_frame"));
+    if (!bValid)
+    {
+        // Nothing was removed, so nothing was saved: the state asked for already holds.
+        Response->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Response);
+    }
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_marked_frame"), SaveError);
 }
 
-// MCP:clear_marked_frames - Removes ALL user marked frames from a Level Sequence's movie scene.
+// MCP:clear_marked_frames - Removes ALL user marked frames from a Level Sequence's movie scene, inside an undo transaction, and saves the sequence; success requires the save. A sequence with no marks succeeds with already_empty true and saved false (nothing is written).
 //   @param sequence_name - Name of the target Level Sequence.
-//   @returns { sequence_name: string, removed_count: int, already_empty: bool, marked_frame_count: int, saved: bool }
+//   @returns { sequence_name: string, removed_count: int, already_empty: bool, marked_frame_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleClearMarkedFrames(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1450,25 +1475,32 @@ TSharedPtr<FJsonObject> HandleClearMarkedFrames(const TSharedPtr<FJsonObject>& P
     // Idempotent: clearing an already-empty set is a clean no-op.
     const bool bAlreadyEmpty = RemovedCount == 0;
     bool bSaved = false;
+    FString SaveError;
     if (!bAlreadyEmpty)
     {
         const FScopedTransaction Transaction(LOCTEXT("ClearMarkedFrames", "MCP: Clear Marked Frames"));
         MovieScene->Modify();
         MovieScene->DeleteMarkedFrames();
-        bSaved = SaveSequencePackage(Sequence);
+        bSaved = SaveSequencePackage(Sequence, SaveError);
     }
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("removed_count"), RemovedCount);
     Response->SetBoolField(TEXT("already_empty"), bAlreadyEmpty);
     Response->SetNumberField(TEXT("marked_frame_count"), MovieScene->GetMarkedFrames().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("clear_marked_frames"));
+    if (bAlreadyEmpty)
+    {
+        // Nothing was removed, so nothing was saved: the state asked for already holds.
+        Response->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Response);
+    }
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("clear_marked_frames"), SaveError);
 }
 
 // MCP:set_marked_frames_locked - Sets whether a Level Sequence's user marked frames are locked.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param locked - Bool: whether marked frames should be locked.
-//   @returns { sequence_name: string, marked_frames_locked: bool, saved: bool }
+//   @returns { sequence_name: string, marked_frames_locked: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetMarkedFramesLocked(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1487,17 +1519,18 @@ TSharedPtr<FJsonObject> HandleSetMarkedFramesLocked(const TSharedPtr<FJsonObject
     const FScopedTransaction Transaction(LOCTEXT("SetMarkedFramesLocked", "MCP: Set Marked Frames Locked"));
     MovieScene->Modify();
     MovieScene->SetMarkedFramesLocked(bLocked);
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetBoolField(TEXT("marked_frames_locked"), MovieScene->AreMarkedFramesLocked());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_marked_frames_locked"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_marked_frames_locked"), SaveError);
 }
 
 // MCP:set_playback_range_locked - Sets whether a Level Sequence's playback range is locked (UMovieScene::SetPlaybackRangeLocked).  Overwrite-setter (naturally idempotent); the locked flag is read back via IsPlaybackRangeLocked().
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param locked - Bool: whether the playback range should be locked.
-//   @returns { sequence_name: string, locked: bool, saved: bool }
+//   @returns { sequence_name: string, locked: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetPlaybackRangeLocked(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName;
@@ -1515,11 +1548,12 @@ TSharedPtr<FJsonObject> HandleSetPlaybackRangeLocked(const TSharedPtr<FJsonObjec
     const FScopedTransaction Transaction(LOCTEXT("SetPlaybackRangeLocked", "MCP: Set Playback Range Locked"));
     MovieScene->Modify();
     MovieScene->SetPlaybackRangeLocked(bLocked);
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetBoolField(TEXT("locked"), MovieScene->IsPlaybackRangeLocked());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_playback_range_locked"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_playback_range_locked"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,7 +1562,7 @@ TSharedPtr<FJsonObject> HandleSetPlaybackRangeLocked(const TSharedPtr<FJsonObjec
 
 // MCP:add_event_track_to_sequence - Adds a root event track (UMovieSceneEventTrack) to a Level Sequence.
 //   @param sequence_name - Name of the target Level Sequence.
-//   @returns { sequence_name: string, track_class: string, section_count: int, saved: bool }
+//   @returns { sequence_name: string, track_class: string, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddEventTrackToSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1548,17 +1582,18 @@ TSharedPtr<FJsonObject> HandleAddEventTrackToSequence(const TSharedPtr<FJsonObje
         return mcp_common::MakeErrorReply(TEXT("Failed to add event track"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_event_track_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_event_track_to_sequence"), SaveError);
 }
 
 // MCP:add_fade_track_to_sequence - Adds (or returns the existing) root fade track with a fade section spanning the playback range.
 //   @param sequence_name - Name of the target Level Sequence.
-//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, saved: bool }
+//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddFadeTrackToSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1587,7 +1622,8 @@ TSharedPtr<FJsonObject> HandleAddFadeTrackToSequence(const TSharedPtr<FJsonObjec
     bool bSectionAdded = false;
     UMovieSceneSection* Section = UEAgentSequencerImpl::FirstOrNewPlaybackSection<UMovieSceneSection>(MovieScene, Track, bSectionAdded);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -1598,7 +1634,7 @@ TSharedPtr<FJsonObject> HandleAddFadeTrackToSequence(const TSharedPtr<FJsonObjec
     {
         Response->SetStringField(TEXT("section_class"), Section->GetClass()->GetName());
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_fade_track_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_fade_track_to_sequence"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1668,7 +1704,7 @@ namespace UEAgentSequencerImpl
 //   @param binding_guid - GUID of an existing binding (possessable or spawnable).
 //   @param property_type - One of "Float", "Bool", "Vector", "Color", "Visibility".
 //   @param property_name - Name of the animated property (e.g. "RelativeLocation", "Intensity", "bHidden"). Used as both the property name and path.
-//   @returns { sequence_name: string, binding_guid: string, property_type: string, property_name: string, track_class: string, section_class: string, section_created: bool, section_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, property_type: string, property_name: string, track_class: string, section_class: string, section_created: bool, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddPropertyTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1769,7 +1805,8 @@ TSharedPtr<FJsonObject> HandleAddPropertyTrack(const TSharedPtr<FJsonObject>& Pa
         return mcp_common::MakeErrorReply(TEXT("Failed to create property section"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -1779,7 +1816,7 @@ TSharedPtr<FJsonObject> HandleAddPropertyTrack(const TSharedPtr<FJsonObject>& Pa
     Response->SetStringField(TEXT("section_class"), Section->GetClass()->GetName());
     Response->SetBoolField(TEXT("section_created"), bSectionCreated);
     Response->SetNumberField(TEXT("section_count"), PropTrack->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_property_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_property_track"), SaveError);
 }
 
 // MCP:add_keyframe_to_property_track - Adds a keyframe to a property track's section channel(s) at the given time.  The property track must already exist (call add_property_track first). The value is keyed onto every channel of the section:
@@ -1788,7 +1825,7 @@ TSharedPtr<FJsonObject> HandleAddPropertyTrack(const TSharedPtr<FJsonObject>& Pa
 //   @param property_type - One of "Float", "Bool", "Vector", "Color", "Visibility".
 //   @param time_seconds - Time (seconds, >= 0) at which to place the key.
 //   @param value - Key value. For Float: a scalar. For Bool/Visibility: a bool. For Vector/Color: a list of numbers (Vector/Color). Defaults to 0 / [] if omitted.
-//   @returns { sequence_name: string, binding_guid: string, property_type: string, time_seconds: float, key_frame: int, keys_added: int, channel_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, property_type: string, time_seconds: float, key_frame: int, keys_added: int, channel_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddKeyframeToPropertyTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1904,7 +1941,8 @@ TSharedPtr<FJsonObject> HandleAddKeyframeToPropertyTrack(const TSharedPtr<FJsonO
             TEXT("No keyable channels found on the property section"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -1912,14 +1950,14 @@ TSharedPtr<FJsonObject> HandleAddKeyframeToPropertyTrack(const TSharedPtr<FJsonO
     Response->SetNumberField(TEXT("time_seconds"), TimeSeconds);
     Response->SetNumberField(TEXT("key_frame"), KeyFrame.Value);
     Response->SetNumberField(TEXT("keys_added"), KeysAdded);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_keyframe_to_property_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_keyframe_to_property_track"), SaveError);
 }
 
 // MCP:add_skeletal_animation_track - Adds a skeletal-animation track to a Level Sequence binding.  If anim_path loads a UAnimSequenceBase (a UAnimMontage qualifies), a section is added starting at the playback range start; otherwise just the empty track.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param binding_guid - GUID of an existing binding (typically a SkeletalMeshActor).
 //   @param anim_path - Optional content path of a UAnimSequenceBase or UAnimMontage, e.g. "/Game/Anims/MyAnim".
-//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, anim_loaded: bool, section_added: bool, section_count: int, anim_path: string, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, anim_loaded: bool, section_added: bool, section_count: int, anim_path: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSkeletalAnimationTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1973,7 +2011,8 @@ TSharedPtr<FJsonObject> HandleAddSkeletalAnimationTrack(const TSharedPtr<FJsonOb
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -1986,13 +2025,13 @@ TSharedPtr<FJsonObject> HandleAddSkeletalAnimationTrack(const TSharedPtr<FJsonOb
     {
         Response->SetStringField(TEXT("anim_path"), AnimPath);
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_skeletal_animation_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_skeletal_animation_track"), SaveError);
 }
 
 // MCP:add_audio_section - Adds (or reuses) a root audio track on a Level Sequence and optionally a section.  Finds an existing root UMovieSceneAudioTrack or adds one. If sound_path loads a USoundBase, a sound section is placed at the playback range start.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param sound_path - Optional content path of a USoundBase, e.g. "/Game/Audio/MySound".
-//   @returns { sequence_name: string, track_class: string, audio_track: string, audio_track_index: int (the index set_audio_track_volume / set_audio_track_pitch take), track_added: bool, sound_loaded: bool, section_added: bool, section_count: int, sound_path: string, saved: bool }
+//   @returns { sequence_name: string, track_class: string, audio_track: string, audio_track_index: int (the index set_audio_track_volume / set_audio_track_pitch take), track_added: bool, sound_loaded: bool, section_added: bool, section_count: int, sound_path: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddAudioSection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2034,7 +2073,8 @@ TSharedPtr<FJsonObject> HandleAddAudioSection(const TSharedPtr<FJsonObject>& Par
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -2065,7 +2105,7 @@ TSharedPtr<FJsonObject> HandleAddAudioSection(const TSharedPtr<FJsonObject>& Par
     {
         Response->SetStringField(TEXT("sound_path"), SoundPath);
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_audio_section"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_audio_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -2108,8 +2148,14 @@ ULevelSequence* LoadSequenceByPathOrName(const FString& PathOrName)
 
 // Load an inner ULevelSequence by full /Game path, creating + persisting a fresh
 // one (NewObject + Initialize, like ULevelSequenceFactoryNew) if it does not exist.
-ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* OutError)
+// bOutCreated, when given, is true only when this call created the sequence. Null, with
+// *OutError saying why when it can, when the sequence cannot be loaded, created or saved.
+ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* OutError, bool* bOutCreated = nullptr)
 {
+    if (bOutCreated)
+    {
+        *bOutCreated = false;
+    }
     if (InnerPath.IsEmpty())
     {
         return nullptr;
@@ -2175,7 +2221,23 @@ ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* Out
     }
 
     FAssetRegistryModule::AssetCreated(NewSequence);
-    SaveSequencePackage(NewSequence);
+    // A target saved with a section playing an inner sequence that never reached disk would point at nothing
+    // once the editor closes, so a failed save fails the load-or-create.
+    FString SaveError;
+    if (!SaveSequencePackage(NewSequence, SaveError))
+    {
+        if (OutError)
+        {
+            *OutError = FString::Printf(
+                TEXT("The inner sequence '%s' was created in memory but could not be saved, so nothing was added to the target: %s"),
+                *NewSequence->GetPathName(), *SaveError);
+        }
+        return nullptr;
+    }
+    if (bOutCreated)
+    {
+        *bOutCreated = true;
+    }
     return NewSequence;
 }
 
@@ -2193,15 +2255,51 @@ namespace UEAgentSequencerImpl
         }
         return FString::Printf(TEXT("%s/%s%s"), *Folder, *Sequence->GetName(), Suffix);
     }
+
+    // Whether Outer plays Target through a sub or shot section of one of its root tracks, at any depth. Visited
+    // stops the walk on cycles that already exist between assets.
+    bool NestsSequence(const UMovieSceneSequence* Outer, const UMovieSceneSequence* Target,
+        TSet<const UMovieSceneSequence*>& Visited)
+    {
+        if (Outer == nullptr || Visited.Contains(Outer))
+        {
+            return false;
+        }
+        Visited.Add(Outer);
+
+        const UMovieScene* MovieScene = Outer->GetMovieScene();
+        if (MovieScene == nullptr)
+        {
+            return false;
+        }
+        for (const UMovieSceneTrack* Track : MovieScene->GetTracks())
+        {
+            const UMovieSceneSubTrack* SubTrack = Cast<UMovieSceneSubTrack>(Track);
+            if (SubTrack == nullptr)
+            {
+                continue;
+            }
+            for (const UMovieSceneSection* Section : SubTrack->GetAllSections())
+            {
+                const UMovieSceneSubSection* SubSection = Cast<UMovieSceneSubSection>(Section);
+                const UMovieSceneSequence* Inner = SubSection ? SubSection->GetSequence() : nullptr;
+                if (Inner != nullptr && (Inner == Target || NestsSequence(Inner, Target, Visited)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }
 
-// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset. Each call adds another section. If no inner sequence resolves, the track is still saved and section_added is false. For cinematic shots use add_shot_track.
+// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.
 //   @param sequence_path - Full /Game path (e.g. "/Game/MyGame/SUBSEQ_Example") OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param sub_sequence_path - Optional content path of the sub Level Sequence to nest. If omitted, a sibling inner Level Sequence is created and persisted.
 //   @param start_frame - Inclusive start frame for the sub section (default 0).
 //   @param duration - Section duration in tick frames (default 150).
-//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, inner_sequence_error?: string (why the inner sequence could not be created), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }
+//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2223,6 +2321,37 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Resolve / create the inner sequence to nest before touching the target, so a refusal leaves the target
+    // as it was. If omitted, synthesize a sibling inner sequence under the same folder so the section binds a
+    // real sub-sequence.
+    const FString InnerPath = SubSequencePath.IsEmpty()
+        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Sub")) : SubSequencePath;
+
+    FString InnerError;
+    bool bInnerCreated = false;
+    ULevelSequence* InnerSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError, &bInnerCreated);
+    if (!InnerSeq)
+    {
+        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
+            ? FString::Printf(TEXT("Failed to load or create the inner sequence '%s'"), *InnerPath) : InnerError);
+    }
+
+    // A sequence that plays itself, directly or through the inner one, recurses without end at evaluation.
+    // The path resolved to an existing asset in both cases, so nothing was created before this refusal.
+    if (InnerSeq == Sequence)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to nest '%s' inside itself: sub_sequence_path resolves to the target sequence"),
+            *Sequence->GetPathName()));
+    }
+    TSet<const UMovieSceneSequence*> Visited;
+    if (UEAgentSequencerImpl::NestsSequence(InnerSeq, Sequence, Visited))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to nest '%s' inside '%s': the inner sequence already plays the target, which would be a circular dependency"),
+            *InnerSeq->GetPathName(), *Sequence->GetPathName()));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("AddSubsequenceTrack", "MCP: Add Subsequence Track"));
     MovieScene->Modify();
 
@@ -2235,56 +2364,36 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(TEXT("Failed to add subsequence track"));
     }
 
-    // Resolve / create the inner sequence to nest. If omitted, synthesize a sibling
-    // inner sequence under the same folder so the section binds a real sub-sequence.
-    bool bInnerCreated = false;
-    const FString InnerPath = SubSequencePath.IsEmpty()
-        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Sub")) : SubSequencePath;
+    // AddSequence forwards to the exported AddSequenceOnRow(MOVIESCENE_API).
+    UMovieSceneSubSection* SubSection = Track->AddSequence(InnerSeq, FFrameNumber(StartFrame), Duration);
+    const bool bSectionAdded = (SubSection != nullptr);
 
-    FString InnerError;
-    ULevelSequence* InnerSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError);
-    bInnerCreated = (InnerSeq != nullptr && InnerSeq != Sequence);
-
-    bool bSectionAdded = false;
-    FString InnerName;
-    UMovieSceneSubSection* SubSection = nullptr;
-    if (InnerSeq)
-    {
-        // AddSequence forwards to the exported AddSequenceOnRow(MOVIESCENE_API).
-        SubSection = Track->AddSequence(InnerSeq, FFrameNumber(StartFrame), Duration);
-        if (SubSection)
-        {
-            bSectionAdded = true;
-            InnerName = InnerSeq->GetName();
-        }
-    }
-
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetBoolField(TEXT("track_added"), bTrackCreated);
     Response->SetBoolField(TEXT("section_added"), bSectionAdded);
     Response->SetBoolField(TEXT("inner_sequence_created"), bInnerCreated);
-    if (!InnerError.IsEmpty())
-    {
-        Response->SetStringField(TEXT("inner_sequence_error"), InnerError);
-    }
     Response->SetNumberField(TEXT("start_frame"), StartFrame);
     Response->SetNumberField(TEXT("duration"), Duration);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    if (InnerSeq)
+    Response->SetStringField(TEXT("sub_sequence_path"), InnerSeq->GetPathName());
+    Response->SetStringField(TEXT("sub_sequence_name"), InnerSeq->GetName());
+    if (!bSectionAdded)
     {
-        Response->SetStringField(TEXT("sub_sequence_path"), InnerSeq->GetPathName());
-        Response->SetStringField(TEXT("sub_sequence_name"), InnerName);
+        mcp_common::AddSaveOutcome(Response, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Response, false,
+            TEXT("add_subsequence_track: the subsequence track did not add a section for the inner sequence"));
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subsequence_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subsequence_track"), SaveError);
 }
 
 // MCP:add_shot_track - Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
 //   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
-//   @returns { sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool }
+//   @returns { sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddShotTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2305,22 +2414,23 @@ TSharedPtr<FJsonObject> HandleAddShotTrack(const TSharedPtr<FJsonObject>& Params
         return mcp_common::MakeErrorReply(TEXT("Failed to add cinematic shot track"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetBoolField(TEXT("track_added"), bTrackCreated);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_shot_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_shot_track"), SaveError);
 }
 
-// MCP:add_shot_section - Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet.
+// MCP:add_shot_section - Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track and saves the sequence.  Creates the cinematic shot track if it does not exist yet. The inner shot sequence is shot_sequence_path, or <target name>_Shot in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). An inner shot sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself or that already plays it at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails.
 //   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param shot_sequence_path - Optional content path of the inner shot Level Sequence. If omitted, an inner shot Level Sequence is created and persisted.
 //   @param start_frame - Inclusive start frame for the shot section (default 0).
 //   @param duration - Section duration in tick frames (default 150).
-//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool }
+//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2342,6 +2452,26 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Resolve / create the inner shot sequence before touching the target, so a refusal leaves it as it was.
+    bool bInnerCreated = false;
+    const FString InnerPath = ShotSequencePath.IsEmpty()
+        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Shot")) : ShotSequencePath;
+    FString InnerError;
+    ULevelSequence* ShotSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError, &bInnerCreated);
+    if (!ShotSeq)
+    {
+        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
+            ? FString(TEXT("Failed to load or create the inner shot sequence")) : InnerError);
+    }
+    // A shot that plays its own sequence, directly or through the shot, recurses without end at evaluation.
+    TSet<const UMovieSceneSequence*> Visited;
+    if (ShotSeq == Sequence || UEAgentSequencerImpl::NestsSequence(ShotSeq, Sequence, Visited))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to add '%s' as a shot of '%s': it is the target or already plays it (circular dependency)"),
+            *ShotSeq->GetPathName(), *Sequence->GetPathName()));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("AddShotSection", "MCP: Add Cinematic Shot Section"));
     MovieScene->Modify();
 
@@ -2351,19 +2481,6 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
     if (!Track)
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to obtain cinematic shot track"));
-    }
-
-    // Resolve / create the inner shot sequence.
-    bool bInnerCreated = false;
-    const FString InnerPath = ShotSequencePath.IsEmpty()
-        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Shot")) : ShotSequencePath;
-    FString InnerError;
-    ULevelSequence* ShotSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError);
-    bInnerCreated = (ShotSeq != nullptr && ShotSeq != Sequence);
-    if (!ShotSeq)
-    {
-        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
-            ? FString(TEXT("Failed to load or create the inner shot sequence")) : InnerError);
     }
 
     // AddSequence forwards to the exported AddSequenceOnRow (MOVIESCENETRACKS_API).
@@ -2381,7 +2498,8 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
         ShotName = ShotSeq->GetName();
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -2397,7 +2515,7 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
     {
         Response->SetStringField(TEXT("section_class"), SubSection->GetClass()->GetName());
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_shot_section"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_shot_section"), SaveError);
 }
 
 // MCP:bind_component_to_sequence - Adds a possessable binding for an actor's component to a Level Sequence.  Resolves the actor by label in the current editor world, finds the named component (by component name, class name, or "root"), adds a possessable for the component class, binds the component, and parents the component binding to the actor's binding when the actor is already possessed.
@@ -2405,7 +2523,7 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
 //   @param sequence_name - Alias for sequence_path.
 //   @param actor_name - Label (or name) of the actor in the current editor world.
 //   @param component_name - Component object name, component class name, or "root".
-//   @returns { sequence_path: string, actor_name: string, component_name: string, component_class: string, parent_binding_guid: string, binding_guid: string, display_name: string, possessable: bool, saved: bool }
+//   @returns { sequence_path: string, actor_name: string, component_name: string, component_class: string, parent_binding_guid: string, binding_guid: string, display_name: string, possessable: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleBindComponentToSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2492,7 +2610,8 @@ TSharedPtr<FJsonObject> HandleBindComponentToSequence(const TSharedPtr<FJsonObje
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("actor_name"), TargetActor->GetActorLabel());
@@ -2507,7 +2626,7 @@ TSharedPtr<FJsonObject> HandleBindComponentToSequence(const TSharedPtr<FJsonObje
         Response->SetStringField(TEXT("parent_binding_guid"), ParentGuidStr);
     }
     Response->SetNumberField(TEXT("possessable_count"), MovieScene->GetPossessableCount());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_component_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_component_to_sequence"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -2787,7 +2906,7 @@ static bool StringToBlendType(const FString& Str, EMovieSceneBlendType& OutType)
 //   @param ease_in_frames - Ease-in duration in frames (omit to leave unchanged).
 //   @param ease_out_frames - Ease-out duration in frames (omit to leave unchanged).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2832,7 +2951,8 @@ TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Pa
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), 0);
@@ -2841,7 +2961,7 @@ TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Pa
     Response->SetBoolField(TEXT("manual_ease_in"), Section->Easing.bManualEaseIn);
     Response->SetBoolField(TEXT("manual_ease_out"), Section->Easing.bManualEaseOut);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_easing"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_easing"), SaveError);
 }
 
 // MCP:set_section_completion_mode - Set how a sequencer section handles state when no longer evaluated (keep_state|restore_state|project_default).
@@ -2853,7 +2973,7 @@ TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Pa
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param completion_mode - One of "keep_state", "restore_state", "project_default".
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, completion_mode: string, set: bool, saved: bool }
+//   @returns { sequence_path: string, completion_mode: string, set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSectionCompletionMode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2875,12 +2995,13 @@ TSharedPtr<FJsonObject> HandleSetSectionCompletionMode(const TSharedPtr<FJsonObj
     Section->Modify();
     Section->SetCompletionMode(NewMode);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("completion_mode"), CompletionModeToString(Section->GetCompletionMode()));
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_completion_mode"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_completion_mode"), SaveError);
 }
 
 // MCP:set_section_blend_type - Set the blend type on a sequencer section (absolute|additive|relative|additive_from_base|override).
@@ -2892,7 +3013,7 @@ TSharedPtr<FJsonObject> HandleSetSectionCompletionMode(const TSharedPtr<FJsonObj
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param blend_type - One of "absolute", "additive", "relative", "additive_from_base", "override".
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2914,7 +3035,8 @@ TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>&
     Section->Modify();
     Section->SetBlendType(NewBlend);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     FOptionalMovieSceneBlendType OptBlend = Section->GetBlendType();
 
@@ -2922,7 +3044,7 @@ TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>&
     Response->SetStringField(TEXT("blend_type"), BlendTypeToString(OptBlend.BlendType));
     Response->SetBoolField(TEXT("blend_type_valid"), OptBlend.bIsValid);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_blend_type"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_blend_type"), SaveError);
 }
 
 // MCP:get_section_info - Get detailed info about a sequencer section: range, easing, completion mode, blend type, lock/infinite state.
@@ -2992,7 +3114,7 @@ TSharedPtr<FJsonObject> HandleGetSectionInfo(const TSharedPtr<FJsonObject>& Para
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param active [bool] - Desired active state (true = evaluated, false = muted).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, is_active: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, is_active: bool, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSectionActive(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -3009,13 +3131,14 @@ TSharedPtr<FJsonObject> HandleSetSectionActive(const TSharedPtr<FJsonObject>& Pa
     const FScopedTransaction Transaction(LOCTEXT("SetSectionActive", "MCP: Set Section Active"));
     Section->Modify();
     Section->SetIsActive(bActive);
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetBoolField(TEXT("is_active"), Section->IsActive());
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_active"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_active"), SaveError);
 }
 
 // MCP:set_section_locked - Lock or unlock a sequencer section.  Maps to UMovieSceneSection::SetIsLocked; a locked section cannot be modified by other edit ops, so lock LAST in an edit chain.
@@ -3027,7 +3150,7 @@ TSharedPtr<FJsonObject> HandleSetSectionActive(const TSharedPtr<FJsonObject>& Pa
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param locked [bool] - Desired locked state.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -3044,13 +3167,14 @@ TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Pa
     const FScopedTransaction Transaction(LOCTEXT("SetSectionLocked", "MCP: Set Section Locked"));
     Section->Modify();
     Section->SetIsLocked(bLocked);
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetBoolField(TEXT("is_locked"), Section->IsLocked());
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_locked"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_locked"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -3072,7 +3196,7 @@ TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Pa
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track to remove (default 0).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool }
+//   @returns { sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -3103,7 +3227,8 @@ TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Param
     Track->Modify();
     Track->RemoveSectionAt(SectionIndex);
     const int32 RemainingSections = Track->GetAllSections().Num();
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     UE_LOG(LogTemp, Verbose,
         TEXT("[remove_section] removed section_index=%d -> remaining_sections=%d saved=%d"),
@@ -3115,7 +3240,7 @@ TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Param
     Response->SetNumberField(TEXT("track_index"), TrackIndex);
     Response->SetBoolField(TEXT("removed"), true);
     Response->SetNumberField(TEXT("remaining_sections"), RemainingSections);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_section"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -3132,7 +3257,7 @@ static UClass* ResolveComponentClass(const FString& ClassName)
         return USpotLightComponent::StaticClass();
     if (Lower == TEXT("pointlightcomponent") || Lower == TEXT("pointlight"))
         return UPointLightComponent::StaticClass();
-    if (Lower == TEXT("sceneComponent") || Lower == TEXT("scenecomponent"))
+    if (Lower == TEXT("scenecomponent"))
         return USceneComponent::StaticClass();
 
     if (ClassName.Contains(TEXT(".")) || ClassName.StartsWith(TEXT("/Script/")))
@@ -3147,12 +3272,12 @@ static UClass* ResolveComponentClass(const FString& ClassName)
     return nullptr;
 }
 
-// MCP:add_subcomponent_possessable - Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID or an unresolvable class is an error.
+// MCP:add_subcomponent_possessable - Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID, an unresolvable class, or a class that is not an ActorComponent is an error.
 //   @param sequence_name - Name of the level sequence asset.
 //   @param parent_binding_guid - GUID of the parent binding (spawnable or possessable).
 //   @param component_class - Component class name (e.g. 'StaticMeshComponent', 'SpotLightComponent').
 //   @param possessable_name - Optional override name for the new possessable.
-//   @returns { sequence_name: string, possessable_guid: string, component_class: string, parent_guid: string, saved: bool }
+//   @returns { sequence_name: string, possessable_guid: string, component_class: string, parent_guid: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSubcomponentPossessable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3171,6 +3296,11 @@ TSharedPtr<FJsonObject> HandleAddSubcomponentPossessable(const TSharedPtr<FJsonO
     UClass* CompClass = ResolveComponentClass(ComponentClassName);
     if (!CompClass)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not resolve component class '%s'"), *ComponentClassName));
+    // The short-name lookup accepts any UClass; a component possessable must be bound to a component.
+    if (!CompClass->IsChildOf(UActorComponent::StaticClass()))
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("component_class '%s' resolves to %s, which is not a UActorComponent subclass"),
+            *ComponentClassName, *CompClass->GetPathName()));
 
     ULevelSequence* Sequence = LevelSequenceUtils::FindByName(SequenceName);
     UMovieScene* MovieScene = nullptr;
@@ -3200,13 +3330,14 @@ TSharedPtr<FJsonObject> HandleAddSubcomponentPossessable(const TSharedPtr<FJsonO
     if (Poss)
         Poss->SetParent(ParentGuid, MovieScene);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("possessable_guid"), NewGuid.ToString());
     Response->SetStringField(TEXT("component_class"), CompClass->GetName());
     Response->SetStringField(TEXT("parent_guid"), ParentGuidStr);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subcomponent_possessable"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subcomponent_possessable"), SaveError);
 }
 
 // MCP:set_spawn_ownership - Set the ESpawnOwnership lifetime policy of a spawnable custom binding.
@@ -3214,7 +3345,7 @@ TSharedPtr<FJsonObject> HandleAddSubcomponentPossessable(const TSharedPtr<FJsonO
 //   @param sequence_path - Asset path of the level sequence (alias for sequence_name).
 //   @param binding_guid - GUID of the spawnable binding (from add_spawnable_from_class / get_sequence_spawnables).
 //   @param ownership - One of: InnerSequence | RootSequence | External.
-//   @returns { sequence_name: string, binding_guid: string, ownership: string, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, ownership: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSpawnOwnership(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3277,7 +3408,8 @@ TSharedPtr<FJsonObject> HandleSetSpawnOwnership(const TSharedPtr<FJsonObject>& P
     MovieScene->Modify();
     SB->SpawnOwnership = static_cast<ESpawnOwnership>(Value);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     // Read-back: re-read the field and emit its enumerator name.
     const FString ReadBack = OwnershipEnum
@@ -3287,7 +3419,7 @@ TSharedPtr<FJsonObject> HandleSetSpawnOwnership(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
     Response->SetStringField(TEXT("ownership"), ReadBack);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_spawn_ownership"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_spawn_ownership"), SaveError);
 }
 
 // MCP:get_sequence_spawnables - List all spawnables in a level sequence with GUID, name, template class.
@@ -3388,7 +3520,7 @@ TSharedPtr<FJsonObject> HandleGetSequencePossessables(const TSharedPtr<FJsonObje
 // MCP:remove_sequence_binding - Remove a spawnable or possessable binding, found by GUID, from a Level Sequence named by asset name under /Game, then save the sequence; a failed save returns success false. Fails when the GUID is not a spawnable or possessable of the sequence. Returns removed_as; get GUIDs from get_sequence_bindings.
 //   @param sequence_name - Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case.
 //   @param binding_guid - GUID of the binding to remove, as get_sequence_bindings returns it.
-//   @returns { sequence_name: string, binding_guid: string, removed: bool, removed_as: string, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, removed: bool, removed_as: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveSequenceBinding(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3429,13 +3561,14 @@ TSharedPtr<FJsonObject> HandleRemoveSequenceBinding(const TSharedPtr<FJsonObject
     if (!bRemoved)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to remove binding '%s'"), *GuidStr));
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
     Response->SetStringField(TEXT("removed_as"), RemovedAs);
     Response->SetBoolField(TEXT("removed"), bRemoved);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_binding"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_binding"), SaveError);
 }
 
 // MCP:get_binding_tracks - List all tracks for a given binding GUID with class, display name, section count.
@@ -3546,7 +3679,7 @@ namespace UEAgentSequencerImpl
 //   @param pre_roll_frames - Optional pre-roll frames (omit to leave unchanged).
 //   @param post_roll_frames - Optional post-roll frames (omit to leave unchanged).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, saved: bool }
+//   @returns { sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSectionPrePostRollout(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3575,21 +3708,38 @@ TSharedPtr<FJsonObject> HandleSetSectionPrePostRollout(const TSharedPtr<FJsonObj
             TEXT("Missing at least one of 'pre_roll_frames' or 'post_roll_frames'"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("pre_roll_frames"), Section->GetPreRollFrames());
     Response->SetNumberField(TEXT("post_roll_frames"), Section->GetPostRollFrames());
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_pre_post_rollout"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_pre_post_rollout"), SaveError);
 }
 
-// MCP:set_sequence_view_range - Set the editor view range of a Level Sequence (in seconds).  The view range controls the visible timeline window in the Sequencer editor (does NOT affect playback or asset playback range). Backed by UMovieScene::SetViewRange(double, double) -- MOVIESCENE_API.
+namespace UEAgentSequencerImpl
+{
+    // The reply of the editor-range setters. The view and working ranges live in Transient fields of
+    // FMovieSceneEditorData, so they last for this editor session only: the reply says persisted:false, and
+    // success means the movie scene reads back the requested range.
+    TSharedPtr<FJsonObject> MakeSessionRangeReply(const ULevelSequence* Sequence, const TRange<double>& Stored,
+        double RequestedStart, double RequestedEnd, const TCHAR* Command)
+    {
+        TSharedPtr<FJsonObject> Response = NewSecondsRangePayload(Sequence, Stored, RequestedStart, RequestedEnd);
+        Response->SetBoolField(TEXT("persisted"), false);
+        const bool bVerified = Response->GetBoolField(TEXT("verified"));
+        return mcp_common::MakeOutcomeReply(Response, bVerified, bVerified ? FString()
+            : FString::Printf(TEXT("%s: the movie scene does not read back the requested range"), Command));
+    }
+}
+
+// MCP:set_sequence_view_range - Sets the editor view range of a Level Sequence (path or bare asset name), in seconds: the visible window of the Sequencer timeline. Editor UI state only, it changes neither playback nor the playback range. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false); a Sequencer showing the sequence follows it on its next tick. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the scrollable bounds use set_sequence_working_range; for what plays use set_sequence_playback_range.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_seconds - Start of the view range, in seconds.
 //   @param end_seconds - End of the view range, in seconds. Must be > start_seconds.
-//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }
+//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }
 
 TSharedPtr<FJsonObject> HandleSetSequenceViewRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3602,22 +3752,22 @@ TSharedPtr<FJsonObject> HandleSetSequenceViewRange(const TSharedPtr<FJsonObject>
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Recorded for undo without dirtying the package: the view range is Transient, so a save would write
+    // nothing of it.
     const FScopedTransaction Transaction(LOCTEXT("SetSequenceViewRange", "MCP: Set Sequence View Range"));
-    MovieScene->Modify();
+    MovieScene->Modify(/*bAlwaysMarkDirty=*/false);
     MovieScene->SetViewRange(StartSec, EndSec);
-    const bool bSaved = SaveSequencePackage(Sequence);
 
-    TSharedPtr<FJsonObject> Response = UEAgentSequencerImpl::NewSecondsRangePayload(
-        Sequence, MovieScene->GetEditorData().GetViewRange(), StartSec, EndSec);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_view_range"));
+    return UEAgentSequencerImpl::MakeSessionRangeReply(
+        Sequence, MovieScene->GetEditorData().GetViewRange(), StartSec, EndSec, TEXT("set_sequence_view_range"));
 }
 
-// MCP:set_sequence_working_range - Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so although the package is saved the value is not written: after a reload the working range is recomputed from the playback range. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
+// MCP:set_sequence_working_range - Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false): after a reload the working range is recomputed from the playback range. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_seconds - Start of the working range, in seconds.
 //   @param end_seconds - End of the working range, in seconds. Must be > start_seconds.
-//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }
+//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }
 
 TSharedPtr<FJsonObject> HandleSetSequenceWorkingRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3630,21 +3780,21 @@ TSharedPtr<FJsonObject> HandleSetSequenceWorkingRange(const TSharedPtr<FJsonObje
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Recorded for undo without dirtying the package: the working range is Transient, so a save would write
+    // nothing of it.
     const FScopedTransaction Transaction(LOCTEXT("SetSequenceWorkingRange", "MCP: Set Sequence Working Range"));
-    MovieScene->Modify();
+    MovieScene->Modify(/*bAlwaysMarkDirty=*/false);
     MovieScene->SetWorkingRange(StartSec, EndSec);
-    const bool bSaved = SaveSequencePackage(Sequence);
 
-    TSharedPtr<FJsonObject> Response = UEAgentSequencerImpl::NewSecondsRangePayload(
-        Sequence, MovieScene->GetEditorData().GetWorkingRange(), StartSec, EndSec);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_working_range"));
+    return UEAgentSequencerImpl::MakeSessionRangeReply(
+        Sequence, MovieScene->GetEditorData().GetWorkingRange(), StartSec, EndSec, TEXT("set_sequence_working_range"));
 }
 
 // MCP:set_sequence_display_rate - Set the display frame rate of a Level Sequence.  The display rate is the asset-level "play rate" (frames per second of the timeline). Changing it rescales how existing frame numbers map to time. Backed by UMovieScene::SetDisplayRate(FFrameRate).  Note: The numerator/denominator are integers (FFrameRate), so the fps argument is rounded to the nearest whole-number fps. For non-integer rates (e.g. 23.976) the caller should still pass the closest whole number; the engine does not support fractional FFrameRate numerators without a custom non-integer tick resolution.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param fps - New display rate in frames per second. Must be > 0.
-//   @returns { sequence_path: string, fps: float, numerator: int, denominator: int, verified: bool, saved: bool }
+//   @returns { sequence_path: string, fps: float, numerator: int, denominator: int, verified: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetSequenceDisplayRate(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3669,7 +3819,8 @@ TSharedPtr<FJsonObject> HandleSetSequenceDisplayRate(const TSharedPtr<FJsonObjec
     const FScopedTransaction Transaction(LOCTEXT("SetSequenceDisplayRate", "MCP: Set Sequence Display Rate"));
     MovieScene->Modify();
     MovieScene->SetDisplayRate(NewRate);
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     const FFrameRate ReadBack = MovieScene->GetDisplayRate();
     const double ReadBackFps = Den > 0 ? static_cast<double>(ReadBack.Numerator) / static_cast<double>(ReadBack.Denominator) : 0.0;
@@ -3679,7 +3830,7 @@ TSharedPtr<FJsonObject> HandleSetSequenceDisplayRate(const TSharedPtr<FJsonObjec
     Response->SetNumberField(TEXT("numerator"), ReadBack.Numerator);
     Response->SetNumberField(TEXT("denominator"), ReadBack.Denominator);
     Response->SetBoolField(TEXT("verified"), FMath::IsNearlyEqual(ReadBackFps, Fps, 0.01));
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_display_rate"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_display_rate"), SaveError);
 }
 
 // MCP:get_sequence_master_tracks - List the master tracks and binding tracks of a Level Sequence.  A track is a "master track" if it has no binding GUID (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack). Binding tracks have a non-empty FGuid. This command returns both lists with class, name, section_count, binding_guid fields.
@@ -3796,7 +3947,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceMasterTracks(const TSharedPtr<FJsonObje
 //   @param interp_mode - Blend type string; one of absolute|additive|relative|additive_from_base|override. Also accepted under "blend_type".
 //   @param blend_type - Alias for interp_mode (absolute|additive|relative|additive_from_base|override)
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool }
+//   @returns { sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetTransformTrackInterpMode(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -3843,7 +3994,8 @@ TSharedPtr<FJsonObject> HandleSetTransformTrackInterpMode(const TSharedPtr<FJson
     Section->Modify();
     Section->SetBlendType(NewBlend);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
     const FOptionalMovieSceneBlendType OptBlend = Section->GetBlendType();
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
@@ -3851,7 +4003,7 @@ TSharedPtr<FJsonObject> HandleSetTransformTrackInterpMode(const TSharedPtr<FJson
     Response->SetStringField(TEXT("blend_type"), BlendTypeToString(OptBlend.BlendType));
     Response->SetBoolField(TEXT("blend_type_valid"), OptBlend.bIsValid);
     Response->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_track_interp_mode"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_track_interp_mode"), SaveError);
 }
 
 namespace UEAgentSequencerImpl
@@ -3938,7 +4090,7 @@ TSharedPtr<FJsonObject> HandleAddWeightedValueTrack(const TSharedPtr<FJsonObject
 //   @param property_type - One of "Float", "Bool", "Vector", "Color", "Visibility".
 //   @param key_count - Target number of keys (>= 0). 0 clears all keys; 1 seeds at section start; >=2 evenly distributes.
 //   @param default_value - Value to use for every resampled key (default 0).
-//   @returns { sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetPropertyTrackKeyframeCount(const TSharedPtr<FJsonObject>& Params)
 {
     // Resize a property track's first section to exactly N keys, evenly
@@ -4033,7 +4185,8 @@ TSharedPtr<FJsonObject> HandleSetPropertyTrackKeyframeCount(const TSharedPtr<FJs
             FString::Printf(TEXT("Unsupported property_type '%s' for key_count resize"), *PropertyTypeRaw));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -4042,7 +4195,7 @@ TSharedPtr<FJsonObject> HandleSetPropertyTrackKeyframeCount(const TSharedPtr<FJs
     Response->SetNumberField(TEXT("default_value"), DefaultValue);
     Response->SetNumberField(TEXT("keys_written"), KeysWritten);
     Response->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_property_track_keyframe_count"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_property_track_keyframe_count"), SaveError);
 }
 
 // MCP:duplicate_keyframe - Clone an existing key (Float / Vector / Color / Bool channel) from source_time_seconds to dest_time_seconds, preserving the original value.
@@ -4052,7 +4205,7 @@ TSharedPtr<FJsonObject> HandleSetPropertyTrackKeyframeCount(const TSharedPtr<FJs
 //   @param source_time_seconds - Time (seconds) of the source key to copy.
 //   @param dest_time_seconds - Destination time (seconds) for the cloned key.
 //   @param channel_index - Index of the channel to read/write (default 0).
-//   @returns { sequence_name: string, binding_guid: string, property_type: string, source_time_seconds: float, dest_time_seconds: float, source_frame: int, dest_frame: int, channel_index: int, duplicated_value: string, keys_written: int, applied: bool, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, property_type: string, source_time_seconds: float, dest_time_seconds: float, source_frame: int, dest_frame: int, channel_index: int, duplicated_value: string, keys_written: int, applied: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleDuplicateKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
     // Clone an existing key (Float / Vector / Color / Bool channel) from
@@ -4178,7 +4331,8 @@ TSharedPtr<FJsonObject> HandleDuplicateKeyframe(const TSharedPtr<FJsonObject>& P
         ++KeysWritten;
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -4191,7 +4345,7 @@ TSharedPtr<FJsonObject> HandleDuplicateKeyframe(const TSharedPtr<FJsonObject>& P
     Response->SetStringField(TEXT("duplicated_value"), ValueEcho);
     Response->SetNumberField(TEXT("keys_written"), KeysWritten);
     Response->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("duplicate_keyframe"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("duplicate_keyframe"), SaveError);
 }
 
 // ========================================================================== //
@@ -4226,7 +4380,7 @@ TSharedPtr<FJsonObject> HandleDuplicateKeyframe(const TSharedPtr<FJsonObject>& P
 //   @param sequence_name - Alias for sequence_path.
 //   @param track_name - Display name OR class short name of the track to remove.
 //   @param track_class - Optional exact class filter (e.g. "MovieSceneFadeTrack") to disambiguate.
-//   @returns { sequence_path: string, track_name: string, track_class: string, sections_removed: int, removed: bool, saved: bool }
+//   @returns { sequence_path: string, track_name: string, track_class: string, sections_removed: int, removed: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSequenceTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -4283,14 +4437,15 @@ TSharedPtr<FJsonObject> HandleRemoveSequenceTrack(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("MovieScene::RemoveTrack returned false for '%s'"), *MatchedName));
     }
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_name"), MatchedName);
     Response->SetStringField(TEXT("track_class"), MatchedClass);
     Response->SetNumberField(TEXT("sections_removed"), SectionCountBefore);
     Response->SetBoolField(TEXT("removed"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_track"), SaveError);
 }
 
 // MCP:add_event_track_section - Append a new UMovieSceneEventSection to the existing UMovieSceneEventTrack on the sequence.
@@ -4298,7 +4453,7 @@ TSharedPtr<FJsonObject> HandleRemoveSequenceTrack(const TSharedPtr<FJsonObject>&
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_frame - Inclusive start frame for the new event section (default 0).
 //   @param end_frame - Exclusive end frame for the new event section (default = start_frame + 1).
-//   @returns { sequence_path: string, track_class: string, section_index: int, section_count: int, start_frame: int, end_frame: int, section_class: string, section_added: bool, saved: bool }
+//   @returns { sequence_path: string, track_class: string, section_index: int, section_count: int, start_frame: int, end_frame: int, section_class: string, section_added: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddEventTrackSection(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -4339,7 +4494,8 @@ TSharedPtr<FJsonObject> HandleAddEventTrackSection(const TSharedPtr<FJsonObject>
     NewSection->SetRange(TRange<FFrameNumber>(FFrameNumber(StartFrame), FFrameNumber(EndFrame)));
     Track->AddSection(*NewSection);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetNumberField(TEXT("section_index"), Track->GetAllSections().Num() - 1);
@@ -4348,7 +4504,7 @@ TSharedPtr<FJsonObject> HandleAddEventTrackSection(const TSharedPtr<FJsonObject>
     Response->SetNumberField(TEXT("end_frame"), EndFrame);
     Response->SetStringField(TEXT("section_class"), NewSection->GetClass()->GetName());
     Response->SetBoolField(TEXT("section_added"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_event_track_section"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_event_track_section"), SaveError);
 }
 
 // MCP:add_camera_cut_section - Append a new UMovieSceneCameraCutSection bound to the given camera binding GUID over a frame range.
@@ -4357,7 +4513,7 @@ TSharedPtr<FJsonObject> HandleAddEventTrackSection(const TSharedPtr<FJsonObject>
 //   @param camera_binding_guid - GUID of the camera binding the cut switches to.
 //   @param start_frame - Inclusive start frame (default 0).
 //   @param end_frame - Exclusive end frame (default = start_frame + 1).
-//   @returns { sequence_path: string, track_class: string, camera_binding_guid: string, section_index: int, section_count: int, start_frame: int, end_frame: int, section_added: bool, saved: bool }
+//   @returns { sequence_path: string, track_class: string, camera_binding_guid: string, section_index: int, section_count: int, start_frame: int, end_frame: int, section_added: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddCameraCutSection(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -4409,7 +4565,8 @@ TSharedPtr<FJsonObject> HandleAddCameraCutSection(const TSharedPtr<FJsonObject>&
     NewSection->SetRange(TRange<FFrameNumber>(FFrameNumber(StartFrame), FFrameNumber(EndFrame)));
     Track->AddSection(*NewSection);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
     Response->SetStringField(TEXT("camera_binding_guid"), CameraBindingGuidStr);
@@ -4418,7 +4575,7 @@ TSharedPtr<FJsonObject> HandleAddCameraCutSection(const TSharedPtr<FJsonObject>&
     Response->SetNumberField(TEXT("start_frame"), StartFrame);
     Response->SetNumberField(TEXT("end_frame"), EndFrame);
     Response->SetBoolField(TEXT("section_added"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut_section"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_camera_cut_section"), SaveError);
 }
 
 // MCP:set_audio_section_start_offset - Set the StartFrameOffset on an existing UMovieSceneAudioSection (skip-into-clip).
@@ -4427,7 +4584,7 @@ TSharedPtr<FJsonObject> HandleAddCameraCutSection(const TSharedPtr<FJsonObject>&
 //   @param section_index - Index of the audio section on the audio track (default 0).
 //   @param start_offset_seconds - Optional offset in seconds (converted via display rate).
 //   @param start_offset_frames - Optional raw frame offset (use for non-display-rate precision).
-//   @returns { sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, applied: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, applied: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetAudioSectionStartOffset(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -4491,13 +4648,14 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionStartOffset(const TSharedPtr<FJsonO
     Section->Modify();
     Section->SetStartOffset(NewOffset);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetNumberField(TEXT("old_start_offset_frames"), OldOffset.Value);
     Response->SetNumberField(TEXT("new_start_offset_frames"), NewOffset.Value);
     Response->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_section_start_offset"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_section_start_offset"), SaveError);
 }
 
 // MCP:get_sequence_track_count - Flat readback of the total/master/binding track counts and per-class breakdown.
@@ -4565,7 +4723,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceTrackCount(const TSharedPtr<FJsonObject
 //   @param property_name - Name of the property to animate.
 //   @param property_type - One of "Float", "Bool", "Vector", "Color", "Visibility".
 //   @param track_label - Optional display label for the new track.
-//   @returns { sequence_name: string, actor_name: string, property_name: string, property_type: string, binding_guid: string, track_class: string, section_class: string, binding_created: bool, saved: bool }
+//   @returns { sequence_name: string, actor_name: string, property_name: string, property_type: string, binding_guid: string, track_class: string, section_class: string, binding_created: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleBindActorPropertyToSequence(const TSharedPtr<FJsonObject>& Params)
 {
     // 1. Finds or creates the actor's possessable with the resolve + bind pattern of
@@ -4634,7 +4792,8 @@ TSharedPtr<FJsonObject> HandleBindActorPropertyToSequence(const TSharedPtr<FJson
             : mcp_common::MakeErrorReply(TEXT("HandleAddPropertyTrack returned null"));
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("actor_name"), TargetActor->GetActorLabel());
@@ -4644,7 +4803,7 @@ TSharedPtr<FJsonObject> HandleBindActorPropertyToSequence(const TSharedPtr<FJson
     Response->SetStringField(TEXT("track_class"), TrackRes->GetStringField(TEXT("track_class")));
     Response->SetStringField(TEXT("section_class"), TrackRes->GetStringField(TEXT("section_class")));
     Response->SetBoolField(TEXT("binding_created"), bCreatedBinding);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_actor_property_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_actor_property_to_sequence"), SaveError);
 }
 
 // MCP:bind_component_property_to_sequence - Bind an editor-world actor's component to a Level Sequence (possessable, parented to actor's binding) and add a typed property track to its binding.
@@ -4655,7 +4814,7 @@ TSharedPtr<FJsonObject> HandleBindActorPropertyToSequence(const TSharedPtr<FJson
 //   @param property_name - Name of the property to animate.
 //   @param property_type - One of "Float", "Bool", "Vector", "Color", "Visibility".
 //   @param track_label - Optional display label for the new track.
-//   @returns { sequence_path: string, actor_name: string, component_name: string, property_name: string, property_type: string, binding_guid: string, parented_to_actor: bool, track_class: string, section_class: string, saved: bool }
+//   @returns { sequence_path: string, actor_name: string, component_name: string, property_name: string, property_type: string, binding_guid: string, parented_to_actor: bool, track_class: string, section_class: string, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleBindComponentPropertyToSequence(const TSharedPtr<FJsonObject>& Params)
 {
     // Mirrors HandleBindActorPropertyToSequence but for a component on an actor.
@@ -4717,7 +4876,8 @@ TSharedPtr<FJsonObject> HandleBindComponentPropertyToSequence(const TSharedPtr<F
     }
 
     ULevelSequence* Sequence = LoadSequenceByPathOrName(SequencePath);
-    const bool bSaved = Sequence ? SaveSequencePackage(Sequence) : false;
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
     Response->SetStringField(TEXT("sequence_path"), SequencePath);
@@ -4729,7 +4889,7 @@ TSharedPtr<FJsonObject> HandleBindComponentPropertyToSequence(const TSharedPtr<F
     Response->SetBoolField(TEXT("parented_to_actor"), BindRes->GetBoolField(TEXT("parented_to_actor")));
     Response->SetStringField(TEXT("track_class"), TrackRes->GetStringField(TEXT("track_class")));
     Response->SetStringField(TEXT("section_class"), TrackRes->GetStringField(TEXT("section_class")));
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_component_property_to_sequence"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_component_property_to_sequence"), SaveError);
 }
 
 namespace UEAgentSequencerImpl
@@ -4789,7 +4949,7 @@ namespace UEAgentSequencerImpl
 //   @param section_index - Index of the section within the audio track (default 0).
 //   @param volume - New volume value (0..N; 1 = unity gain).
 //   @param time_seconds - Optional time (seconds) for the key. Omit to set the constant value.
-//   @returns { sequence_name: string, audio_track_index: int, section_index: int, volume: float, channel_name: string, key_count: int, keys_written: int, saved: bool }
+//   @returns { sequence_name: string, audio_track_index: int, section_index: int, volume: float, channel_name: string, key_count: int, keys_written: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetAudioTrackVolume(const TSharedPtr<FJsonObject>& Params)
 {
     // Resolves the audio section by sequence + audio_track_index + section_index,
@@ -4824,7 +4984,8 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackVolume(const TSharedPtr<FJsonObject>&
     FMovieSceneFloatChannel& Channel = const_cast<FMovieSceneFloatChannel&>(Section->GetSoundVolumeChannel());
     const int32 KeysWritten = UEAgentSequencerImpl::KeyAudioChannel(Params, MovieScene, Channel, Volume);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("audio_track_index"), TrackIndex);
@@ -4833,7 +4994,7 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackVolume(const TSharedPtr<FJsonObject>&
     Response->SetStringField(TEXT("channel_name"), TEXT("SoundVolume"));
     Response->SetNumberField(TEXT("key_count"), Channel.GetData().GetTimes().Num());
     Response->SetNumberField(TEXT("keys_written"), KeysWritten);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_track_volume"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_track_volume"), SaveError);
 }
 
 // MCP:set_audio_track_pitch - Set the PitchMultiplier channel on an audio section (default value or at a specific time).
@@ -4842,7 +5003,7 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackVolume(const TSharedPtr<FJsonObject>&
 //   @param section_index - Index of the section within the audio track (default 0).
 //   @param pitch - New pitch multiplier (1.0 = normal speed).
 //   @param time_seconds - Optional time (seconds) for the key. Omit to set the constant value.
-//   @returns { sequence_name: string, audio_track_index: int, section_index: int, pitch: float, channel_name: string, key_count: int, keys_written: int, saved: bool }
+//   @returns { sequence_name: string, audio_track_index: int, section_index: int, pitch: float, channel_name: string, key_count: int, keys_written: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetAudioTrackPitch(const TSharedPtr<FJsonObject>& Params)
 {
     // The pitch channel is UMovieSceneAudioSection::PitchMultiplier
@@ -4875,7 +5036,8 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackPitch(const TSharedPtr<FJsonObject>& 
     FMovieSceneFloatChannel& Channel = const_cast<FMovieSceneFloatChannel&>(Section->GetPitchMultiplierChannel());
     const int32 KeysWritten = UEAgentSequencerImpl::KeyAudioChannel(Params, MovieScene, Channel, Pitch);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetNumberField(TEXT("audio_track_index"), TrackIndex);
@@ -4884,7 +5046,7 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackPitch(const TSharedPtr<FJsonObject>& 
     Response->SetStringField(TEXT("channel_name"), TEXT("PitchMultiplier"));
     Response->SetNumberField(TEXT("key_count"), Channel.GetData().GetTimes().Num());
     Response->SetNumberField(TEXT("keys_written"), KeysWritten);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_track_pitch"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_track_pitch"), SaveError);
 }
 
 // MCP:add_weighted_value_keyframe - Write a single key onto an existing float property track's first section (cubic / linear / constant interp).
@@ -4896,7 +5058,7 @@ TSharedPtr<FJsonObject> HandleSetAudioTrackPitch(const TSharedPtr<FJsonObject>& 
 //   @param arrive_tangent - Optional tangent for cubic interp (default 0).
 //   @param leave_tangent - Optional tangent for cubic interp (default 0).
 //   @param interp_mode - "cubic" (default), "linear", or "constant".
-//   @returns { sequence_name: string, binding_guid: string, property_name: string, time_seconds: float, value: float, interp_mode: string, arrive_tangent: float, leave_tangent: float, key_index: int, key_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, property_name: string, time_seconds: float, value: float, interp_mode: string, arrive_tangent: float, leave_tangent: float, key_index: int, key_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddWeightedValueKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
     // Mirrors HandleAddWeightedValueTrack but writes a single
@@ -4988,7 +5150,8 @@ TSharedPtr<FJsonObject> HandleAddWeightedValueKeyframe(const TSharedPtr<FJsonObj
         KeyIndex = Channel.AddCubicKey(Frame, (float)Value, RCTM_Break, Tangent);
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -5000,7 +5163,7 @@ TSharedPtr<FJsonObject> HandleAddWeightedValueKeyframe(const TSharedPtr<FJsonObj
     Response->SetNumberField(TEXT("leave_tangent"), LeaveTangent);
     Response->SetNumberField(TEXT("key_index"), KeyIndex);
     Response->SetNumberField(TEXT("key_count"), Channel.GetData().GetTimes().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_weighted_value_keyframe"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_weighted_value_keyframe"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5011,7 +5174,7 @@ TSharedPtr<FJsonObject> HandleAddWeightedValueKeyframe(const TSharedPtr<FJsonObj
 //   @param sequence_name - Name of the target Level Sequence
 //   @param dilation - Optional time-dilation multiplier (default 1.0; <1 slower, >1 faster)
 //   @param frame - Optional frame number for the dilation key (default 0)
-//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, dilation: number, saved: bool }
+//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, dilation: number, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddSlomoTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName;
@@ -5047,7 +5210,8 @@ TSharedPtr<FJsonObject> HandleAddSlomoTrack(const TSharedPtr<FJsonObject>& Param
         }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -5056,14 +5220,14 @@ TSharedPtr<FJsonObject> HandleAddSlomoTrack(const TSharedPtr<FJsonObject>& Param
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
     if (Section) { Response->SetStringField(TEXT("section_class"), Section->GetClass()->GetName()); }
     Response->SetNumberField(TEXT("dilation"), Dilation);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_slomo_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_slomo_track"), SaveError);
 }
 
 // MCP:add_level_visibility_track - Add a level-visibility track + section controlling streamed-level visibility over the playback range.
 //   @param sequence_name - Name of the target Level Sequence
 //   @param visible - Optional: true = levels Visible (default), false = Hidden
 //   @param level_names - Optional array of streamed-level short names the section controls
-//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, visibility: string, level_count: int, saved: bool }
+//   @returns { sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, visibility: string, level_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddLevelVisibilityTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName;
@@ -5104,7 +5268,8 @@ TSharedPtr<FJsonObject> HandleAddLevelVisibilityTrack(const TSharedPtr<FJsonObje
         if (LevelNames.Num() > 0) { Section->SetLevelNames(LevelNames); }
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -5118,7 +5283,7 @@ TSharedPtr<FJsonObject> HandleAddLevelVisibilityTrack(const TSharedPtr<FJsonObje
             Section->GetVisibility() == ELevelVisibility::Visible ? TEXT("Visible") : TEXT("Hidden"));
         Response->SetNumberField(TEXT("level_count"), Section->GetLevelNames().Num());
     }
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_level_visibility_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_level_visibility_track"), SaveError);
 }
 
 namespace UEAgentSequencerImpl
@@ -5133,20 +5298,96 @@ namespace UEAgentSequencerImpl
         int32 ScalarChannelCount = 0;
     };
 
+    // The frame the material-track tools key at: the optional frame param, a tick-resolution frame (default 0).
+    FFrameNumber ReadScalarKeyFrame(const TSharedPtr<FJsonObject>& Params)
+    {
+        double F = 0.0;
+        return FFrameNumber(Params->TryGetNumberField(TEXT("frame"), F) ? static_cast<int32>(F) : 0);
+    }
+
+    // Whether Channel holds a key at Frame whose value is Value.
+    bool ChannelHasKey(const FMovieSceneFloatChannel& Channel, FFrameNumber Frame, float Value)
+    {
+        const TArrayView<const FFrameNumber> Times = Channel.GetTimes();
+        const TArrayView<const FMovieSceneFloatValue> Values = Channel.GetValues();
+        for (int32 Index = 0; Index < Times.Num() && Index < Values.Num(); ++Index)
+        {
+            if (Times[Index] == Frame && FMath::IsNearlyEqual(Values[Index].Value, Value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether a section of Track holds a key for the scalar ParameterName at Frame with Value. This is the
+    // read-back of UMovieSceneMaterialTrack::AddScalarParameterKey, which returns nothing and skips the key when
+    // the section it picks is read-only. Component material tracks key UMovieSceneComponentMaterialParameterSection,
+    // the MPC track keys UMovieSceneParameterSection.
+    bool TrackHasScalarKey(const UMovieSceneMaterialTrack* Track, FName ParameterName, FFrameNumber Frame, float Value)
+    {
+        const FMaterialParameterInfo ParameterInfo(ParameterName);
+        for (const UMovieSceneSection* Section : Track->GetAllSections())
+        {
+            if (const UMovieSceneComponentMaterialParameterSection* MaterialSection = Cast<UMovieSceneComponentMaterialParameterSection>(Section))
+            {
+                for (const FScalarMaterialParameterInfoAndCurve& Entry : MaterialSection->ScalarParameterInfosAndCurves)
+                {
+                    if (Entry.ParameterInfo == ParameterInfo && ChannelHasKey(Entry.ParameterCurve, Frame, Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (const UMovieSceneParameterSection* ParameterSection = Cast<UMovieSceneParameterSection>(Section))
+            {
+                for (const FScalarParameterNameAndCurve& Entry : ParameterSection->GetScalarParameterNamesAndCurves())
+                {
+                    if (Entry.ParameterName == ParameterName && ChannelHasKey(Entry.ParameterCurve, Frame, Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    // Whether AddScalarParameterKey on ExistingTrack (null: a track about to be added) would refuse a key at Frame.
+    // It keys the track's section-to-key, else the section nearest Frame, else a new section, and skips the key
+    // when that section is read-only (locked, or in a read-only movie scene).
+    bool ScalarKeyWouldBeRefused(const UMovieScene* MovieScene, const UMovieSceneMaterialTrack* ExistingTrack, FFrameNumber Frame)
+    {
+        const UMovieSceneSection* Target = nullptr;
+        if (ExistingTrack)
+        {
+            Target = ExistingTrack->GetSectionToKey();
+            if (Target == nullptr)
+            {
+                Target = MovieSceneHelpers::FindNearestSectionAtTime(ExistingTrack->GetAllSections(), Frame);
+            }
+        }
+        return Target ? Target->IsReadOnly() : MovieScene->IsReadOnly();
+    }
+
     // Keys the optional scalar parameter_name, ensures a playback-range section and counts its float channels.
+    // bKeyAdded is read back from the track; bSectionAdded is true when the track gained a section, including the
+    // one keying creates.
     FScalarParameterKey KeyScalarParameter(const TSharedPtr<FJsonObject>& Params, UMovieScene* MovieScene, UMovieSceneMaterialTrack* Track)
     {
         FScalarParameterKey Keyed;
         Params->TryGetStringField(TEXT("parameter_name"), Keyed.ParameterName);
         Params->TryGetNumberField(TEXT("value"), Keyed.Value);
-        int32 FrameNum = 0;
-        { double F = 0.0; if (Params->TryGetNumberField(TEXT("frame"), F)) { FrameNum = static_cast<int32>(F); } }
+        const FFrameNumber Frame = ReadScalarKeyFrame(Params);
+        const int32 SectionsBefore = Track->GetAllSections().Num();
 
         if (!Keyed.ParameterName.IsEmpty())
         {
             // AddScalarParameterKey creates a parameter section when the track has none.
-            Track->AddScalarParameterKey(FName(*Keyed.ParameterName), FFrameNumber(FrameNum), static_cast<float>(Keyed.Value));
-            Keyed.bKeyAdded = true;
+            const FName ParameterName(*Keyed.ParameterName);
+            const float KeyValue = static_cast<float>(Keyed.Value);
+            Track->AddScalarParameterKey(ParameterName, Frame, KeyValue);
+            Keyed.bKeyAdded = TrackHasScalarKey(Track, ParameterName, Frame, KeyValue);
         }
         if (Track->GetAllSections().Num() == 0)
         {
@@ -5155,9 +5396,9 @@ namespace UEAgentSequencerImpl
             {
                 NewSection->SetRange(MovieScene->GetPlaybackRange());
                 Track->AddSection(*NewSection);
-                Keyed.bSectionAdded = true;
             }
         }
+        Keyed.bSectionAdded = Track->GetAllSections().Num() > SectionsBefore;
         if (Track->GetAllSections().Num() > 0 && Track->GetAllSections()[0])
         {
             Keyed.ScalarChannelCount = Track->GetAllSections()[0]->GetChannelProxy().GetChannels<FMovieSceneFloatChannel>().Num();
@@ -5177,7 +5418,7 @@ namespace UEAgentSequencerImpl
 //   @param parameter_name - Optional scalar parameter name to key on the MPC track
 //   @param value - Optional scalar value for the keyed parameter (default 0.0)
 //   @param frame - Optional frame number for the key (default 0)
-//   @returns { sequence_name: string, track_class: string, track_added: bool, mpc_path: string, mpc_name: string, parameter_name: string, value: number, key_added: bool, section_added: bool, scalar_channel_count: int, section_count: int, saved: bool }
+//   @returns { sequence_name: string, track_class: string, track_added: bool, mpc_path: string, mpc_name: string, parameter_name: string, value: number, key_added: bool, section_added: bool, scalar_channel_count: int, section_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddMaterialParameterCollectionTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName;
@@ -5219,7 +5460,8 @@ TSharedPtr<FJsonObject> HandleAddMaterialParameterCollectionTrack(const TSharedP
 
     const UEAgentSequencerImpl::FScalarParameterKey Keyed = UEAgentSequencerImpl::KeyScalarParameter(Params, MovieScene, Track);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), Track->GetClass()->GetName());
@@ -5232,17 +5474,17 @@ TSharedPtr<FJsonObject> HandleAddMaterialParameterCollectionTrack(const TSharedP
     Response->SetBoolField(TEXT("section_added"), Keyed.bSectionAdded);
     Response->SetNumberField(TEXT("scalar_channel_count"), Keyed.ScalarChannelCount);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_material_parameter_collection_track"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_material_parameter_collection_track"), SaveError);
 }
 
-// MCP:add_component_material_track - Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame); without it, it only adds a section spanning the playback range when the track has none. An unknown binding_guid is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
+// MCP:add_component_material_track - Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame) and reads the key back: success requires it, and a key the engine would skip (locked section, read-only sequence) is refused before anything is written; without it, it only adds a section spanning the playback range when the track has none. The slot index is not checked against the bound component, which is not resolved. An unknown binding_guid or a material_index that is not a whole number >= 0 is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
 //   @param sequence_name - Name of the target Level Sequence
 //   @param binding_guid - GUID of the actor/component object binding to attach the material track to
-//   @param material_index - Optional indexed material slot the track animates (default 0)
+//   @param material_index - Optional indexed material slot the track animates, a whole number >= 0 (default 0)
 //   @param parameter_name - Optional scalar material parameter name to key
 //   @param value - Optional scalar value for the keyed parameter (default 0.0)
 //   @param frame - Optional frame number for the key (default 0)
-//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool, section_added: bool, scalar_channel_count: int, section_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool (read back from the track), section_added: bool (the track gained a section, keying included), scalar_channel_count: int, section_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName, GuidStr;
@@ -5258,11 +5500,19 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
             FString::Printf(TEXT("Binding '%s' not found in sequence"), *GuidStr));
     }
 
+    // A material slot index is a whole number >= 0; a fraction or a negative number names no slot.
     int32 MaterialIndex = 0;
-    { double F = 0.0; if (Params->TryGetNumberField(TEXT("material_index"), F)) { MaterialIndex = static_cast<int32>(F); } }
-
-    const FScopedTransaction Transaction(LOCTEXT("AddComponentMaterialTrack", "MCP: Add Component Material Track"));
-    MovieScene->Modify();
+    double MaterialIndexD = 0.0;
+    if (Params->TryGetNumberField(TEXT("material_index"), MaterialIndexD))
+    {
+        if (MaterialIndexD < 0.0 || MaterialIndexD > static_cast<double>(MAX_int32)
+            || MaterialIndexD != FMath::FloorToDouble(MaterialIndexD))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("material_index must be a whole number >= 0 (a material slot index), got %g"), MaterialIndexD));
+        }
+        MaterialIndex = static_cast<int32>(MaterialIndexD);
+    }
 
     // Idempotent: reuse an existing component material track on this binding for the same indexed slot.
     bool bTrackCreated = false;
@@ -5277,6 +5527,21 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
             Track = MatTrack; break;
         }
     }
+
+    // A key the engine would skip is refused before anything is written.
+    FString ParameterName;
+    Params->TryGetStringField(TEXT("parameter_name"), ParameterName);
+    const FFrameNumber KeyFrame = UEAgentSequencerImpl::ReadScalarKeyFrame(Params);
+    if (!ParameterName.IsEmpty() && UEAgentSequencerImpl::ScalarKeyWouldBeRefused(MovieScene, Track, KeyFrame))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Cannot key '%s' at frame %d: the section it would land in is locked, or the sequence is read-only"),
+            *ParameterName, KeyFrame.Value));
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("AddComponentMaterialTrack", "MCP: Add Component Material Track"));
+    MovieScene->Modify();
+
     if (!Track)
     {
         Track = MovieScene->AddTrack<UMovieSceneComponentMaterialTrack>(BindingGuid);
@@ -5296,7 +5561,8 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
 
     const UEAgentSequencerImpl::FScalarParameterKey Keyed = UEAgentSequencerImpl::KeyScalarParameter(Params, MovieScene, Track);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("binding_guid"), GuidStr);
@@ -5310,7 +5576,14 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
     Response->SetBoolField(TEXT("section_added"), Keyed.bSectionAdded);
     Response->SetNumberField(TEXT("scalar_channel_count"), Keyed.ScalarChannelCount);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_component_material_track"));
+    if (!Keyed.ParameterName.IsEmpty() && !Keyed.bKeyAdded)
+    {
+        mcp_common::AddSaveOutcome(Response, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Response, false, FString::Printf(
+            TEXT("add_component_material_track: no key for '%s' at frame %d with value %g reads back from the track"),
+            *Keyed.ParameterName, KeyFrame.Value, Keyed.Value));
+    }
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_component_material_track"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5525,7 +5798,7 @@ namespace
 //   @param channel_index - Optional float-channel index on the section (default 0)
 //   @param arrive_tangent - Optional arrive tangent value (Cubic)
 //   @param leave_tangent - Optional leave tangent value (Cubic)
-//   @returns { sequence_name: string, track_class: string, frame: int, key_found: bool, channel_index: int, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, saved: bool }
+//   @returns { sequence_name: string, track_class: string, frame: int, key_found: bool, channel_index: int, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetKeyframeInterpolation(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName, TrackClassFragment;
@@ -5594,7 +5867,8 @@ TSharedPtr<FJsonObject> HandleSetKeyframeInterpolation(const TSharedPtr<FJsonObj
     const float FinalArrive = Key.Tangent.ArriveTangent;
     const float FinalLeave = Key.Tangent.LeaveTangent;
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewNamePayload(SequenceName);
     Response->SetStringField(TEXT("track_class"), TargetTrack->GetClass()->GetName());
@@ -5605,7 +5879,7 @@ TSharedPtr<FJsonObject> HandleSetKeyframeInterpolation(const TSharedPtr<FJsonObj
     Response->SetStringField(TEXT("tangent_mode"), SeqTangentToStr(FinalTangent));
     Response->SetNumberField(TEXT("arrive_tangent"), FinalArrive);
     Response->SetNumberField(TEXT("leave_tangent"), FinalLeave);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_keyframe_interpolation"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_keyframe_interpolation"), SaveError);
 }
 
 // ===========================================================================
@@ -5803,7 +6077,7 @@ static void WriteTimeWarpReadback(const TSharedPtr<FJsonObject>& Response, const
 //   @param hierarchical_bias - HierarchicalBias (int; default engine value 100; omit to leave unchanged).
 //   @param can_loop [bool] - bCanLoop; gates the loop offsets (omit to leave unchanged).
 //   @param time_scale - Constant playback time scale (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged).
-//   @returns { sequence_path: string, section_class: string, section_index: int, start_frame_offset: int, end_frame_offset: int, first_loop_start_frame_offset: int, hierarchical_bias: int, can_loop: bool, time_scale: double|null, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_class: string, section_index: int, start_frame_offset: int, end_frame_offset: int, first_loop_start_frame_offset: int, hierarchical_bias: int, can_loop: bool, time_scale: double|null, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObject>& Params)
 {
     // Resolve the master sub/shot track. Cinematic shot track is-a sub track only at
@@ -5868,7 +6142,8 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
         P.TimeScale.Set(TimeScale);
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("section_class"), SubSection->GetClass()->GetName());
@@ -5880,7 +6155,7 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
     Response->SetBoolField(TEXT("can_loop"), P.bCanLoop);
     WriteTimeWarpReadback(Response, TEXT("time_scale"), P.TimeScale);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sub_section_parameters"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sub_section_parameters"), SaveError);
 }
 
 // MCP:set_audio_section_properties - Set playback properties on an audio section (UMovieSceneAudioSection).  Optionally swaps the sound and toggles loop/play-until-finished/subtitle/attenuation flags. SetAttenuationSettings is a no-op at eval unless override_attenuation is true, so the override flag is applied first.
@@ -5893,7 +6168,7 @@ TSharedPtr<FJsonObject> HandleSetSubSectionParameters(const TSharedPtr<FJsonObje
 //   @param suppress_subtitles [bool] - SetSuppressSubtitles (omit to leave unchanged).
 //   @param override_attenuation [bool] - SetOverrideAttenuation; must be true for attenuation_path to take effect (omit to leave unchanged).
 //   @param attenuation_path - Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true).
-//   @returns { sequence_path: string, section_class: string, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_class: string, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -5956,7 +6231,8 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
     bool bAttenSet = false;
     if (bWantAtten) { Audio->SetAttenuationSettings(NewAtten); bAttenSet = true; }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("section_class"), Audio->GetClass()->GetName());
@@ -5972,7 +6248,7 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionProperties(const TSharedPtr<FJsonOb
     Response->SetStringField(TEXT("attenuation"), Audio->GetAttenuationSettings() ? Audio->GetAttenuationSettings()->GetPathName() : TEXT(""));
     Response->SetBoolField(TEXT("attenuation_set"), bAttenSet);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_section_properties"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_section_properties"), SaveError);
 }
 
 // MCP:get_audio_section_properties - Read the playback properties of an audio section (UMovieSceneAudioSection), resolved like set_audio_section_properties (root audio track + section_index).  Pure reader (no transaction/save).  looping reads IsRepeating() (the engine's loop query); volume/pitch are sampled at frame 0; volume_key_count/pitch_key_count report the animated-channel key counts.
@@ -6024,7 +6300,7 @@ TSharedPtr<FJsonObject> HandleGetAudioSectionProperties(const TSharedPtr<FJsonOb
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param channels - Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, saved: bool, note: string }
+//   @returns { sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, saved: bool, note: string, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6056,7 +6332,8 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObje
     // EMovieSceneTransformChannel via the mask's (EMovieSceneTransformChannel) ctor.
     Xform->SetMask(FMovieSceneTransformMask(Channels));
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     const EMovieSceneTransformChannel Applied = Xform->GetMask().GetChannels();
 
@@ -6066,7 +6343,7 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObje
     Response->SetNumberField(TEXT("channel_mask"), static_cast<int32>(Applied));
     Response->SetBoolField(TEXT("set"), true);
     Response->SetStringField(TEXT("note"), TEXT("SetMask rebuilds the channel proxy and is an eval/visibility filter; existing keys are preserved."));
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_section_mask"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_section_mask"), SaveError);
 }
 
 // MCP:set_transform_section_quaternion_interp - Turns quaternion (slerp) rotation interpolation on or off for one 3D transform section of a Level Sequence binding, in an undo transaction, and saves the sequence; keys are kept. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; a section that is not a 3D transform section is an error. For the section's blend type use set_transform_track_interp_mode; to enable or disable channels use set_transform_section_mask.
@@ -6078,7 +6355,7 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObje
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param use_quaternion [bool] - Desired quaternion-interpolation state.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetTransformSectionQuaternionInterp(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6101,13 +6378,14 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionQuaternionInterp(const TSharedP
     Xform->Modify();
     Xform->SetUseQuaternionInterpolation(bUseQuat);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetBoolField(TEXT("use_quaternion_interpolation"), Xform->GetUseQuaternionInterpolation());
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_section_quaternion_interp"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_section_quaternion_interp"), SaveError);
 }
 
 // MCP:set_skeletal_animation_section_params - Set the playback params on a skeletal-animation section (UMovieSceneSkeletalAnimationSection::Params).  Writes the public FMovieSceneSkeletalAnimationParams fields directly.
@@ -6125,7 +6403,7 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionQuaternionInterp(const TSharedP
 //   @param force_custom_mode [bool] - bForceCustomMode (omit to leave unchanged).
 //   @param play_rate - Constant playback rate (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6174,7 +6452,8 @@ TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr
         P.PlayRate.Set(PlayRate);
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
@@ -6186,7 +6465,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr
     Response->SetBoolField(TEXT("force_custom_mode"), P.bForceCustomMode);
     WriteTimeWarpReadback(Response, TEXT("play_rate"), P.PlayRate);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_skeletal_animation_section_params"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_skeletal_animation_section_params"), SaveError);
 }
 
 // MCP:set_section_row_index - Set the row index of a sequencer section (UMovieSceneSection::SetRowIndex).  Only meaningful when the owning track supports multiple rows (reported as supports_multiple_rows); the owning track is also Modify()'d.
@@ -6198,7 +6477,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param row_index - Desired row index (int, >= 0).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSectionRowIndex(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6227,14 +6506,15 @@ TSharedPtr<FJsonObject> HandleSetSectionRowIndex(const TSharedPtr<FJsonObject>& 
     Section->Modify();
     Section->SetRowIndex(RowIndex);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetNumberField(TEXT("row_index"), Section->GetRowIndex());
     Response->SetBoolField(TEXT("supports_multiple_rows"), bSupportsMultipleRows);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_row_index"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_row_index"), SaveError);
 }
 
 // MCP:set_section_color - Set the editor color tint of a sequencer section (UMovieSceneSection::SetColorTint).  The tint is WITH_EDITORONLY_DATA (a no-op in cooked/no-editor-data builds); in the editor it persists on the asset.
@@ -6249,7 +6529,7 @@ TSharedPtr<FJsonObject> HandleSetSectionRowIndex(const TSharedPtr<FJsonObject>& 
 //   @param b - Blue component 0-255 (int; default 0).
 //   @param a - Alpha component 0-255 (int; default 255).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, saved: bool }
+//   @returns { sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetSectionColor(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6275,7 +6555,8 @@ TSharedPtr<FJsonObject> HandleSetSectionColor(const TSharedPtr<FJsonObject>& Par
     // editor it writes ColorTint.
     Section->SetColorTint(Tint);
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     const FColor Applied = Section->GetColorTint();
 
@@ -6289,7 +6570,7 @@ TSharedPtr<FJsonObject> HandleSetSectionColor(const TSharedPtr<FJsonObject>& Par
     Response->SetNumberField(TEXT("section_index"), SectionIndex);
     Response->SetObjectField(TEXT("color"), Color);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_color"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_color"), SaveError);
 }
 
 // ===========================================================================
@@ -6394,7 +6675,7 @@ TSharedPtr<FJsonObject> HandleGetChannelKeyframes(const TSharedPtr<FJsonObject>&
 //   @param tolerance [int] - Optional FindKey frame tolerance when locating by frame (default 0).
 //   @param new_frame [int!] - Destination frame number for the key.
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, saved: bool }
+//   @returns { sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6427,7 +6708,8 @@ TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params
         return Failure;
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("channel_index"), ChannelIndex);
@@ -6436,7 +6718,7 @@ TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params
     Response->SetNumberField(TEXT("new_frame"), NewFrame.Value);
     Response->SetNumberField(TEXT("key_index"), NewKeyIndex);
     Response->SetBoolField(TEXT("moved"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("move_keyframe"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("move_keyframe"), SaveError);
 }
 
 // MCP:remove_keyframe - Remove one keyframe (located by 'index' or 'frame') from a binding's section channel (resolved like move_keyframe).  The out-of-range guard is applied BEFORE RemoveKey because TMovieSceneChannelData::RemoveKey has a fatal check(IsValidIndex) -- an invalid locator returns a clean error, never a crash.  channel_type selects the proxy view ("double" default | "float" | "bool").
@@ -6452,7 +6734,7 @@ TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params
 //   @param frame [int] - Frame of the key to remove (resolved via FindKey; provide index OR frame).
 //   @param tolerance [int] - Optional FindKey frame tolerance when locating by frame (default 0).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, channel_type: string, channel_index: int, removed_frame: int, key_index: int, removed: bool, key_count_after: int, saved: bool }
+//   @returns { sequence_path: string, channel_type: string, channel_index: int, removed_frame: int, key_index: int, removed: bool, key_count_after: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6485,7 +6767,8 @@ TSharedPtr<FJsonObject> HandleRemoveKeyframe(const TSharedPtr<FJsonObject>& Para
         return Failure;
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("channel_type"), SeqChannelKindName(Kind));
@@ -6494,7 +6777,7 @@ TSharedPtr<FJsonObject> HandleRemoveKeyframe(const TSharedPtr<FJsonObject>& Para
     Response->SetNumberField(TEXT("key_index"), KeyIndexOut);
     Response->SetBoolField(TEXT("removed"), true);
     Response->SetNumberField(TEXT("key_count_after"), KeyCountAfter);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_keyframe"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_keyframe"), SaveError);
 }
 
 // Shared edit body for a Double/Float key value struct (identical fields: Value, Tangent,
@@ -6524,7 +6807,7 @@ static bool SeqApplyKeyEdit(ValueType& Key, const TSharedPtr<FJsonObject>& Param
 //   @param arrive_tangent [number] - Optional arrive tangent value (Cubic).
 //   @param leave_tangent [number] - Optional leave tangent value (Cubic).
 //   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
-//   @returns { sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, saved: bool }
+//   @returns { sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetBindingChannelKeyframeInterp(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelSequence* Sequence = nullptr;
@@ -6571,7 +6854,8 @@ TSharedPtr<FJsonObject> HandleSetBindingChannelKeyframeInterp(const TSharedPtr<F
         return Failure;
     }
 
-    const bool bSaved = SaveSequencePackage(Sequence);
+    FString SaveError;
+    const bool bSaved = SaveSequencePackage(Sequence, SaveError);
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("channel_index"), ChannelIndex);
@@ -6584,7 +6868,7 @@ TSharedPtr<FJsonObject> HandleSetBindingChannelKeyframeInterp(const TSharedPtr<F
     Response->SetNumberField(TEXT("arrive_tangent"), ArriveOut);
     Response->SetNumberField(TEXT("leave_tangent"), LeaveOut);
     Response->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_binding_channel_keyframe_interp"));
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_binding_channel_keyframe_interp"), SaveError);
 }
 
 // ========================================================================== //
@@ -6737,12 +7021,12 @@ static TSharedPtr<FJsonObject> SeqFolderToJson(UMovieSceneFolder* Folder)
 // checks GetChildTracks() first), and GetChildFolders() returns a TArrayView by value, not a TArray
 // reference.
 
-// MCP:add_sequence_folder - Create a Sequencer outliner folder on a Level Sequence's movie scene (root folder, or a child of a named parent). Idempotent by name.
+// MCP:add_sequence_folder - Create a Sequencer outliner folder on a Level Sequence's movie scene (root folder, or a child of a named parent), inside an undo transaction, and save the sequence; success requires the save. Idempotent by name: a folder that already exists succeeds with already_existed true and saved false (nothing is written).
 //   @param sequence_path - Asset path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param folder_name - Name of the folder to create.
 //   @param parent_folder - Optional name of an existing parent folder; if given, the new folder is nested under it instead of at the root.
-//   @returns { sequence_path: string, folder_name: string, parent_folder: string, created: bool, already_existed: bool, root_folder_count: int, saved: bool }
+//   @returns { sequence_path: string, folder_name: string, parent_folder: string, created: bool, already_existed: bool, root_folder_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddSequenceFolder(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6797,7 +7081,8 @@ TSharedPtr<FJsonObject> HandleAddSequenceFolder(const TSharedPtr<FJsonObject>& P
         bCreated = true;
     }
 
-    const bool bSaved = bCreated ? SaveSequencePackage(Sequence) : false;
+    FString SaveError;
+    const bool bSaved = bCreated ? SaveSequencePackage(Sequence, SaveError) : false;
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("folder_name"), FolderName);
@@ -6805,7 +7090,13 @@ TSharedPtr<FJsonObject> HandleAddSequenceFolder(const TSharedPtr<FJsonObject>& P
     Response->SetBoolField(TEXT("created"), bCreated);
     Response->SetBoolField(TEXT("already_existed"), !bCreated);
     Response->SetNumberField(TEXT("root_folder_count"), MovieScene->GetRootFolders().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_sequence_folder"));
+    if (!bCreated)
+    {
+        // The folder already exists, so nothing was written or saved.
+        Response->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Response);
+    }
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_sequence_folder"), SaveError);
 }
 
 // Inverse of add_sequence_folder. Remove a root folder (POINTER
@@ -6815,12 +7106,12 @@ TSharedPtr<FJsonObject> HandleAddSequenceFolder(const TSharedPtr<FJsonObject>& P
 // inverse of add's already_existed) -- never an error. We only Modify/save when a
 // folder was actually removed, so a no-op re-run touches nothing on disk.
 
-// MCP:remove_sequence_folder - Remove a Sequencer outliner folder (root, or a named child of parent_folder) from a Level Sequence's movie scene. Inverse of add_sequence_folder; idempotent by name (already-absent is success, not error).
+// MCP:remove_sequence_folder - Remove a Sequencer outliner folder (root, or a named child of parent_folder) from a Level Sequence's movie scene, inside an undo transaction, and save the sequence; success requires the save. Inverse of add_sequence_folder; idempotent by name: an absent folder succeeds with already_absent true and saved false (nothing is written).
 //   @param sequence_path - Asset path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param folder_name - Name of the folder to remove.
 //   @param parent_folder - Optional name of the parent folder (searched recursively); if given, the child folder named folder_name is removed from it instead of a root folder.
-//   @returns { sequence_path: string, folder_name: string, parent_folder: string, removed: bool, already_absent: bool, root_folder_count: int, saved: bool }
+//   @returns { sequence_path: string, folder_name: string, parent_folder: string, removed: bool, already_absent: bool, root_folder_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveSequenceFolder(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6878,7 +7169,8 @@ TSharedPtr<FJsonObject> HandleRemoveSequenceFolder(const TSharedPtr<FJsonObject>
         bRemoved = true;
     }
 
-    const bool bSaved = bRemoved ? SaveSequencePackage(Sequence) : false;
+    FString SaveError;
+    const bool bSaved = bRemoved ? SaveSequencePackage(Sequence, SaveError) : false;
 
     UE_LOG(LogTemp, Verbose,
         TEXT("[remove_sequence_folder] folder='%s' removed=%d already_absent=%d root_folders_after=%d saved=%d"),
@@ -6891,17 +7183,23 @@ TSharedPtr<FJsonObject> HandleRemoveSequenceFolder(const TSharedPtr<FJsonObject>
     Response->SetBoolField(TEXT("removed"), bRemoved);
     Response->SetBoolField(TEXT("already_absent"), !bRemoved);
     Response->SetNumberField(TEXT("root_folder_count"), MovieScene->GetRootFolders().Num());
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_folder"));
+    if (!bRemoved)
+    {
+        // The folder is already absent, so nothing was written or saved.
+        Response->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Response);
+    }
+    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("remove_sequence_folder"), SaveError);
 }
 
-// MCP:move_track_to_folder - Move a master track (by class) or an object-binding (by GUID) into a named Sequencer folder. Idempotent.
+// MCP:move_track_to_folder - Move a master track (by class) or an object-binding (by GUID) into a named Sequencer folder, inside an undo transaction, and save the sequence; success requires the save. Idempotent: a track or binding already in the folder succeeds with already_present true and saved false (nothing is written).
 //   @param sequence_path - Asset path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param folder_name - Name of the destination folder (searched recursively).
 //   @param track_class - Class name of the master track to move (e.g. "MovieSceneCameraCutTrack"). Mutually exclusive with binding_guid.
 //   @param track_name - Optional track name to disambiguate when several tracks share the class.
 //   @param binding_guid - GUID of an object-binding to move into the folder. Mutually exclusive with track_class.
-//   @returns { sequence_path: string, folder_name: string, track_class: string, track_name: string, binding_guid: string, moved: bool, already_present: bool, saved: bool }
+//   @returns { sequence_path: string, folder_name: string, track_class: string, track_name: string, binding_guid: string, moved: bool, already_present: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleMoveTrackToFolder(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6960,7 +7258,8 @@ TSharedPtr<FJsonObject> HandleMoveTrackToFolder(const TSharedPtr<FJsonObject>& P
             Folder->AddChildObjectBinding(BindingGuid);
             bMoved = true;
         }
-        const bool bSaved = bMoved ? SaveSequencePackage(Sequence) : false;
+        FString SaveError;
+        const bool bSaved = bMoved ? SaveSequencePackage(Sequence, SaveError) : false;
 
         TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
         Response->SetStringField(TEXT("folder_name"), FolderName);
@@ -6970,7 +7269,9 @@ TSharedPtr<FJsonObject> HandleMoveTrackToFolder(const TSharedPtr<FJsonObject>& P
         Response->SetBoolField(TEXT("moved"), bMoved);
         Response->SetBoolField(TEXT("already_present"), bAlready);
         Response->SetBoolField(TEXT("saved"), bSaved);
-        return mcp_common::MakeOkReply(Response);
+        // Already in the folder: nothing was written or saved. A move must reach disk.
+        return bMoved ? mcp_common::MakeSavedReply(Response, bSaved, TEXT("move_track_to_folder"), SaveError)
+                      : mcp_common::MakeOkReply(Response);
     }
 
     // ---- Track-class path ------------------------------------------------- //
@@ -7032,7 +7333,8 @@ TSharedPtr<FJsonObject> HandleMoveTrackToFolder(const TSharedPtr<FJsonObject>& P
         Folder->AddChildTrack(Track);
         bMoved = true;
     }
-    const bool bSaved = bMoved ? SaveSequencePackage(Sequence) : false;
+    FString SaveError;
+    const bool bSaved = bMoved ? SaveSequencePackage(Sequence, SaveError) : false;
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetStringField(TEXT("folder_name"), FolderName);
@@ -7043,7 +7345,9 @@ TSharedPtr<FJsonObject> HandleMoveTrackToFolder(const TSharedPtr<FJsonObject>& P
     Response->SetBoolField(TEXT("moved"), bMoved);
     Response->SetBoolField(TEXT("already_present"), bAlready);
     Response->SetBoolField(TEXT("saved"), bSaved);
-    return mcp_common::MakeOkReply(Response);
+    // Already in the folder: nothing was written or saved. A move must reach disk.
+    return bMoved ? mcp_common::MakeSavedReply(Response, bSaved, TEXT("move_track_to_folder"), SaveError)
+                  : mcp_common::MakeOkReply(Response);
 }
 
 // MCP:get_sequence_folders - Read the Sequencer folder tree of a Level Sequence (root folders, recursively, with child tracks + bindings). Read-only.
