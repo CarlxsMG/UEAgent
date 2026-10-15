@@ -167,6 +167,7 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
                     "type": json_type,
                     "enum": enum_values(description) if json_type.lower() == "string" else [],
                     "rotation": json_type.lower() == "array" and looks_like_rotation(param_name),
+                    "alias_of": raw.get("aliasOf") or "",
                 })
 
             def find(param_name: str, params: list[dict] = params) -> dict | None:
@@ -188,7 +189,13 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
             if name.lower() in pie_unsafe and not find("force"):
                 properties["force"] = {"type": "boolean", "description": FORCE_DESCRIPTION}
 
+            # The handler's own spellings, marked `aliasOf` the one the catalog requires: any of
+            # them satisfies it.
             relaxed: set[str] = set()
+            for param in params:
+                canonical = find(param["alias_of"]) if param["alias_of"] else None
+                if canonical and canonical is not param and canonical["required"]:
+                    relaxed.add(canonical["name"].lower())
             for alias, canonical_name in aliases.get(name.lower(), []):
                 canonical = find(canonical_name)
                 if not canonical or find(alias) or any(key.lower() == alias.lower() for key in properties):
@@ -295,6 +302,16 @@ def check() -> int:
         problems.append("no tool has `force`: the PIE-safety table was not read")
     if not aliases:
         problems.append("no alias parameter: the alias table was not read")
+    # A name another spelling stands for is never in `required`: the server accepts either.
+    by_name = {tool["name"]: tool for tool in tools}
+    spellings = [(command["name"], param["aliasOf"]) for domain in catalog["domains"]
+                 for command in domain["commands"] for param in command.get("params") or [] if param.get("aliasOf")]
+    still_required = sorted({f"{tool}.{name}" for tool, name in spellings
+                             if name in by_name[tool]["inputSchema"].get("required", [])})
+    if not spellings:
+        problems.append("no parameter is `aliasOf` another: the handlers' alias chains are not in the catalog")
+    if still_required:
+        problems.append(f"required although another spelling may replace it: {still_required[:5]}")
 
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
@@ -315,7 +332,8 @@ def check() -> int:
         "an unknown method is -32601": replies.get(4, {}).get("error", {}).get("code") == -32601,
     }
     problems += [name for name, ok in expected.items() if not ok]
-    print(f"{len(tools)} tools, {with_force} with `force`, {aliases} alias parameters, served over stdio")
+    print(f"{len(tools)} tools, {with_force} with `force`, {aliases} alias parameters, "
+          f"{len(spellings)} handler spellings, served over stdio")
     for problem in problems:
         print(f"  FAIL {problem}")
     return 1 if problems else 0

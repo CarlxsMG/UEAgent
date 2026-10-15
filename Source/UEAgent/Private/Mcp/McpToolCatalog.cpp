@@ -338,6 +338,7 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 					(*ParamObj)->TryGetStringField(TEXT("jsonType"), Param.JsonType);
 					(*ParamObj)->TryGetBoolField(TEXT("required"), Param.bRequired);
 					(*ParamObj)->TryGetStringField(TEXT("description"), Param.Description);
+					(*ParamObj)->TryGetStringField(TEXT("aliasOf"), Param.AliasOf);
 					if (Param.Name.IsEmpty() || Tool.FindParam(Param.Name))
 					{
 						continue;
@@ -390,6 +391,18 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 				TSharedPtr<FJsonObject> Schema = MakeTypeSchema(TEXT("boolean"));
 				Schema->SetStringField(TEXT("description"), ForceDescription);
 				Properties->SetObjectField(TEXT("force"), Schema);
+			}
+
+			// The handler's own spellings (`!TryGet(a) && !TryGet(b)`): the catalog publishes one
+			// of them as required and marks the others `aliasOf` it. The handler accepts any of
+			// them, so any of them satisfies the requirement.
+			for (const FParam& Param : Tool.Params)
+			{
+				const FParam* CanonicalParam = Param.AliasOf.IsEmpty() ? nullptr : Tool.FindParam(Param.AliasOf);
+				if (CanonicalParam && CanonicalParam != &Param && CanonicalParam->bRequired)
+				{
+					Tool.RelaxedRequired.FindOrAdd(CanonicalParam->Name).AddUnique(Param.Name);
+				}
 			}
 
 			// Aliases: only when the alias is not already a parameter of the command (and the

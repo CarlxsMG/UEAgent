@@ -790,7 +790,8 @@
               "name": "snapshot_id",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of handle: the name to store the snapshot under, used only when handle is absent or empty; an existing snapshot with that name is overwritten"
+              "description": "Alias of handle: the name to store the snapshot under, used only when handle is absent or empty; an existing snapshot with that name is overwritten",
+              "aliasOf": "handle"
             }
           ],
           "returns": "{ handle, object_path, resolved_path, class, world (the coarse \"pie\"/\"editor\" family label the snapshot itself carries), world_selector (what was asked for), property_count, component_count, component_template_count, persisted, snapshot_path?, persist_error?, snapshot?, world_name, world_package, world_type, net_mode, pie_instance }"
@@ -5476,7 +5477,8 @@
               "name": "name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of montage_path"
+              "description": "Alias of montage_path",
+              "aliasOf": "montage_path"
             },
             {
               "name": "rate_scale",
@@ -13082,7 +13084,8 @@
               "name": "target_class",
               "jsonType": "string",
               "required": false,
-              "description": "Alias accepted instead of target_class_name (same meaning); one of the two is required."
+              "description": "Alias accepted instead of target_class_name (same meaning); one of the two is required.",
+              "aliasOf": "target_class_name"
             },
             {
               "name": "graph_name",
@@ -18263,13 +18266,15 @@
               "name": "table_a",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of a: asset path of the first DataTable, e.g. \"/Game/Data/DT_Items\"; a wins when both are given"
+              "description": "Alias of a: asset path of the first DataTable, e.g. \"/Game/Data/DT_Items\"; a wins when both are given",
+              "aliasOf": "a"
             },
             {
               "name": "table_b",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of b: asset path of the second DataTable, e.g. \"/Game/Data/DT_Items_Old\"; b wins when both are given"
+              "description": "Alias of b: asset path of the second DataTable, e.g. \"/Game/Data/DT_Items_Old\"; b wins when both are given",
+              "aliasOf": "b"
             },
             {
               "name": "before",
@@ -18300,7 +18305,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path: pass one of the two."
+              "description": "Alias of table_path: pass one of the two.",
+              "aliasOf": "table_path"
             },
             {
               "name": "file_path",
@@ -18325,7 +18331,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path: pass one of the two."
+              "description": "Alias of table_path: pass one of the two.",
+              "aliasOf": "table_path"
             },
             {
               "name": "file_path",
@@ -18478,7 +18485,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path: pass one of the two."
+              "description": "Alias of table_path: pass one of the two.",
+              "aliasOf": "table_path"
             }
           ],
           "returns": "{ table_path, column, row_struct, row_count, values:{ rowName: exporttext-string } }"
@@ -18669,7 +18677,8 @@
               "name": "table_path",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of data_table (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); data_table wins when both are given"
+              "description": "Alias of data_table (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); data_table wins when both are given",
+              "aliasOf": "data_table"
             }
           ],
           "returns": "{ table_path, row_name, row_struct, fields:{column: exporttext-serialized value} }"
@@ -18706,7 +18715,8 @@
               "name": "file_path",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of package_file (OS path to the .uasset, e.g. \"D:/Backup/DT_Items.uasset\"); package_file wins when both are given"
+              "description": "Alias of package_file (OS path to the .uasset, e.g. \"D:/Backup/DT_Items.uasset\"); package_file wins when both are given",
+              "aliasOf": "package_file"
             }
           ],
           "returns": "{ package_file, mount_root, package_name, table_name, row_struct, row_count, rows:[{row_name,row_data}] } (or, for a single row_name, { ..., row_name, row_json, row_data })"
@@ -18905,7 +18915,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given"
+              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given",
+              "aliasOf": "table_path"
             }
           ],
           "returns": "{ table_path, old_name, new_name, row_struct, success, overwrote_existing, new_exists, old_removed, saved, row_count }"
@@ -18992,7 +19003,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given"
+              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given",
+              "aliasOf": "table_path"
             }
           ],
           "returns": "{ table_path, row_name, column_name, row_index, cell_property, resolved_property, array_length, before_value, after_value, changed, already_set, import_succeeded, write_verified, success, warning?, saved, save_error? }"
@@ -19054,7 +19066,8 @@
               "name": "table_path",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of data_table (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); data_table wins when both are given"
+              "description": "Alias of data_table (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); data_table wins when both are given",
+              "aliasOf": "data_table"
             }
           ],
           "returns": "{ table_path, row_name, row_struct, success, saved, created, updated_existing, written_fields:[..], changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], problems:[..], row_after_exporttext:{column:exporttext} }"
@@ -19116,7 +19129,8 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given"
+              "description": "Alias of table_path (the DataTable asset path, e.g. \"/Game/Data/DT_Items\"); table_path wins when both are given",
+              "aliasOf": "table_path"
             }
           ],
           "returns": "{ table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, row_count, problems:[..] }"
@@ -27182,7 +27196,8 @@
               "name": "dimensions",
               "jsonType": "number",
               "required": false,
-              "description": "Fallback alias for size when size is omitted (cm)"
+              "description": "Fallback alias for size when size is omitted (cm)",
+              "aliasOf": "size"
             },
             {
               "name": "material_id",
@@ -27293,7 +27308,8 @@
               "name": "dimensions",
               "jsonType": "number",
               "required": false,
-              "description": "Fallback alias for size when size is omitted (cm)"
+              "description": "Fallback alias for size when size is omitted (cm)",
+              "aliasOf": "size"
             }
           ],
           "returns": "{ actor_name: string, operation: string, other_primitive: string, triangle_count: int, triangle_count_before: int, vertex_count: int, boolean_applied: bool }"
@@ -29642,19 +29658,22 @@
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context"
+              "description": "Asset path of the Input Mapping Context",
+              "aliasOf": "context_name"
             },
             {
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Action"
+              "description": "Asset path of the Input Action",
+              "aliasOf": "action_name"
             },
             {
               "name": "key_name",
               "jsonType": "string",
               "required": false,
-              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
+              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)",
+              "aliasOf": "key"
             }
           ],
           "returns": "{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count, saved, save_error? }"
@@ -29691,19 +29710,22 @@
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context, instead of context_name."
+              "description": "Asset path of the Input Mapping Context, instead of context_name.",
+              "aliasOf": "context_name"
             },
             {
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Action"
+              "description": "Asset path of the Input Action",
+              "aliasOf": "action_name"
             },
             {
               "name": "key_name",
               "jsonType": "string",
               "required": false,
-              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
+              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)",
+              "aliasOf": "key"
             }
           ],
           "returns": "Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count, saved, save_error? }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count, saved, save_error? }"
@@ -29734,19 +29756,22 @@
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context"
+              "description": "Asset path of the Input Mapping Context",
+              "aliasOf": "context_name"
             },
             {
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Action"
+              "description": "Asset path of the Input Action",
+              "aliasOf": "action_name"
             },
             {
               "name": "key_name",
               "jsonType": "string",
               "required": false,
-              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
+              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)",
+              "aliasOf": "key"
             }
           ],
           "returns": "{ context_name, context_path, action_name, key, index, mapping_count, added, already_mapped, saved, save_error? }"
@@ -29790,7 +29815,8 @@
               "name": "path",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for package_path when package_path is absent."
+              "description": "Fallback for package_path when package_path is absent.",
+              "aliasOf": "package_path"
             },
             {
               "name": "value_type",
@@ -29821,7 +29847,8 @@
               "name": "path",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for package_path when package_path is absent."
+              "description": "Fallback for package_path when package_path is absent.",
+              "aliasOf": "package_path"
             }
           ],
           "returns": "{ context_name, context_path, saved, save_error? }"
@@ -29896,7 +29923,8 @@
               "name": "action_name",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for action_path when action_path is absent (short asset name)."
+              "description": "Fallback for action_path when action_path is absent (short asset name).",
+              "aliasOf": "action_path"
             }
           ],
           "returns": "{ action_path, action_name, value_type, accumulation_behavior, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, action_description, b_tap, triggers, modifiers }"
@@ -29927,13 +29955,15 @@
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of action, read when action is absent or empty: InputAction object path or short asset name."
+              "description": "Alias of action, read when action is absent or empty: InputAction object path or short asset name.",
+              "aliasOf": "action"
             },
             {
               "name": "action_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name."
+              "description": "Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name.",
+              "aliasOf": "action"
             }
           ],
           "returns": "{ action_path: string, action_name: string, value_type: string, is_enhanced_input: bool, is_tracked: bool, is_mapped_in_applied_context: bool, trigger_event: number, trigger_events: array, value: array, elapsed_seconds: number, triggered_seconds: number, last_triggered_world_time: number, world_time_seconds: number, contexts_mapping_action: array, contexts_mapping_action_count: number, applied_context_count: number, player_index: number, player_controller: string, player_input_class: string, world: string, note: string }"
@@ -30046,13 +30076,15 @@
               "name": "key",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of key_name, read only when key_name is absent (same FKey names)."
+              "description": "Alias of key_name, read only when key_name is absent (same FKey names).",
+              "aliasOf": "key_name"
             },
             {
               "name": "input_action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for action_path when action_path is absent."
+              "description": "Fallback for action_path when action_path is absent.",
+              "aliasOf": "action_path"
             }
           ],
           "returns": "{ context_path, action_path, key_name, index, mapping_count, added, already_mapped, saved, save_error? }"
@@ -30170,19 +30202,22 @@
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context"
+              "description": "Asset path of the Input Mapping Context",
+              "aliasOf": "context_name"
             },
             {
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Action"
+              "description": "Asset path of the Input Action",
+              "aliasOf": "action_name"
             },
             {
               "name": "key_name",
               "jsonType": "string",
               "required": false,
-              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
+              "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)",
+              "aliasOf": "key"
             }
           ],
           "returns": "{ context_name, action_name, key, removed, already_absent, mapping_count, saved, save_error? }"
@@ -30201,7 +30236,8 @@
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Action"
+              "description": "Asset path of the Input Action",
+              "aliasOf": "action_name"
             },
             {
               "name": "consume_input",
@@ -30262,7 +30298,8 @@
               "name": "action_name",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for action_path when action_path is absent."
+              "description": "Fallback for action_path when action_path is absent.",
+              "aliasOf": "action_path"
             },
             {
               "name": "trigger_index",
@@ -30329,7 +30366,8 @@
               "name": "action_name",
               "jsonType": "string",
               "required": false,
-              "description": "Fallback for action_path when action_path is absent."
+              "description": "Fallback for action_path when action_path is absent.",
+              "aliasOf": "action_path"
             }
           ],
           "returns": "{ action_name, action_path, value_type, value_type_set, saved, save_error? }"
@@ -30372,13 +30410,15 @@
               "name": "action_path",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of action, read when action is absent or empty: InputAction object path or short asset name."
+              "description": "Alias of action, read when action is absent or empty: InputAction object path or short asset name.",
+              "aliasOf": "action"
             },
             {
               "name": "action_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name."
+              "description": "Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name.",
+              "aliasOf": "action"
             }
           ],
           "returns": "{ dispatched: bool, note: string, action_path: string, value_type: string, injected_value: [x,y,z], player_index: number, hold_seconds: number, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }"
@@ -46422,7 +46462,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "parent_folder",
@@ -47074,7 +47115,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "section_index",
@@ -47124,7 +47166,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -47160,7 +47203,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, channel_index: int, channel_type: string, key_count: int, keyframes: [{ index: int, frame: int, time_seconds: number, value: number|bool, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number }] }"
@@ -47230,7 +47274,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -47254,7 +47299,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, start_frame: int, end_frame: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, completion_mode: string, blend_type: string, blend_type_valid: bool, is_locked: bool, is_active: bool, is_attach_section: bool, attach_rules: object? }"
@@ -47299,7 +47345,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, root_folder_count: int, folders: [{ name: string, child_folders: [...recursive...], child_tracks: [{class, name}], child_bindings: [guid_string] }] }"
@@ -47331,7 +47378,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, total_track_count: int, master_track_count: int, binding_track_count: int, master_tracks: [{class, name, section_count, binding_guid}], binding_tracks: [{class, name, section_count, binding_guid}] }"
@@ -47433,7 +47481,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -47487,7 +47536,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, saved: bool }"
@@ -47512,7 +47562,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_class",
@@ -47613,7 +47664,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -47667,7 +47719,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, channel_type: string, channel_index: int, removed_frame: int, key_index: int, removed: bool, key_count_after: int, saved: bool }"
@@ -47723,7 +47776,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -47747,7 +47801,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool }"
@@ -47791,7 +47846,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "parent_folder",
@@ -47853,13 +47909,15 @@
               "name": "sequence_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the target Level Sequence (alias for sequence_name)."
+              "description": "Asset path of the target Level Sequence (alias for sequence_name).",
+              "aliasOf": "sequence_name"
             },
             {
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string (alias for binding_guid)."
+              "description": "Sequencer binding: the bound object's name or its GUID string (alias for binding_guid).",
+              "aliasOf": "binding_guid"
             },
             {
               "name": "track_index",
@@ -47932,7 +47990,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "section_index",
@@ -48110,7 +48169,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48194,7 +48254,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, saved: bool }"
@@ -48374,7 +48435,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48398,7 +48460,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, is_active: bool, set: bool, saved: bool }"
@@ -48429,7 +48492,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48453,7 +48517,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool }"
@@ -48478,7 +48543,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48526,7 +48592,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, saved: bool }"
@@ -48557,7 +48624,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48581,7 +48649,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, completion_mode: string, set: bool, saved: bool }"
@@ -48606,7 +48675,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48648,7 +48718,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, saved: bool }"
@@ -48679,7 +48750,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48703,7 +48775,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool }"
@@ -48728,7 +48801,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48764,7 +48838,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, saved: bool }"
@@ -48832,7 +48907,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -48856,7 +48932,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, saved: bool }"
@@ -48881,7 +48958,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, fps: float, numerator: int, denominator: int, verified: bool, saved: bool }"
@@ -48975,7 +49053,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }"
@@ -49006,7 +49085,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }"
@@ -49031,7 +49111,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -49097,7 +49178,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, saved: bool }"
@@ -49147,7 +49229,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -49239,7 +49322,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -49269,7 +49353,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, saved: bool, note: string }"
@@ -49300,7 +49385,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -49324,7 +49410,8 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string."
+              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool }"
@@ -49355,7 +49442,8 @@
               "name": "sequence_name",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for sequence_path."
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_type",
@@ -49379,13 +49467,15 @@
               "name": "blend_type",
               "jsonType": "string",
               "required": false,
-              "description": "Alias for interp_mode (absolute|additive|relative|additive_from_base|override)"
+              "description": "Alias for interp_mode (absolute|additive|relative|additive_from_base|override)",
+              "aliasOf": "interp_mode"
             },
             {
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string"
+              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "aliasOf": "binding_guid"
             }
           ],
           "returns": "{ sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool }"

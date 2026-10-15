@@ -14,7 +14,7 @@ class FJsonObject;
  *   - per-parameter types and descriptions (straight from the catalog)
  *   - closed enums deduced from the description (a STRICT heuristic)
  *   - `force` on the commands that are unsafe with PIE running (from McpPieSafety)
- *   - parameter aliases + relaxed canonical names (from McpParamAliases)
+ *   - parameter aliases + relaxed canonical names (the catalog's `aliasOf` and McpParamAliases)
  *   - rotation: the schema also accepts the {roll,pitch,yaw} OBJECT
  *
  * Whatever is not in the schema cannot be sent by the client, so the three escape hatches
@@ -38,6 +38,9 @@ public:
 		TArray<FString> EnumValues;
 		/** Array-typed rotation parameter: its schema also accepts the object form. */
 		bool bIsRotation = false;
+		/** The parameter this one is another spelling of (`aliasOf` in the catalog): the handler
+		 *  reads either, as in `!TryGet(a) && !TryGet(b)`. Empty for every other parameter. */
+		FString AliasOf;
 	};
 
 	struct FTool
@@ -47,7 +50,8 @@ public:
 		FString Description;
 		TArray<FParam> Params;
 		/** Canonical names that were required and become optional in the schema because they
-		 *  accept aliases: CheckRequired enforces the requirement, counting either spelling. */
+		 *  accept aliases (the handler's own, FParam::AliasOf, and the dispatcher's): CheckRequired
+		 *  enforces the requirement, counting any spelling. */
 		TMap<FString, TArray<FString>> RelaxedRequired;
 		/** The `inputSchema` tools/list carries for it (describe_tool returns it as is). */
 		TSharedPtr<FJsonObject> InputSchema;
