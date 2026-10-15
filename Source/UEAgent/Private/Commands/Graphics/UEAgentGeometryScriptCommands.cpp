@@ -40,6 +40,7 @@
 #include "Selections/MeshConnectedComponents.h"   // UE::Geometry::FMeshConnectedComponents::FindConnectedTriangles (per-island triangle lists; READ-ONLY, unlike SplitMeshByComponents)
 #include "GeometryScript/MeshSelectionQueryFunctions.h" // UGeometryScriptLibrary_MeshSelectionQueryFunctions::GetMeshSelectionBoundingBox
 #include "Engine/StaticMesh.h"                   // UStaticMesh (loaded by path -> CopyMeshFromStaticMesh / CopyMeshToStaticMesh)
+#include "StaticMeshResources.h"                 // MAX_STATIC_MESH_LODS (the LOD range copy_dynamic_mesh_to_static_mesh accepts)
 // Material slot set on UDynamicMeshComponent.
 #include "Materials/MaterialInterface.h"        // UMaterialInterface (loaded by path for set_dynamic_mesh_material)
 
@@ -2178,10 +2179,11 @@ namespace
     }
 }
 
-// MCP:build_mesh_bvh - Build a Bounding Volume Hierarchy for a DynamicMeshActor's dynamic mesh via UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh. The BVH is required for the spatial-query cmds (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh). Idempotent: if b_only_if_invalid=true (default), a fresh BVH is built only when the existing one is invalid.
+// MCP:build_mesh_bvh - Build a BVH (bounding volume hierarchy) for the live dynamic mesh of a DynamicMeshActor in the editor world with BuildBVHForMesh, and read it back with IsBVHValidForMesh. The plugin keeps no BVH between calls: this one is dropped on return, and the spatial-query tools (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh) build their own on every call, so they never need this first. It checks that a BVH can be built for the mesh as it is now: built is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
-//   @param b_only_if_invalid - Optional bool; defaults to true (skip rebuild if BVH is still valid).
-//   @returns { actor_name, built: bool, bvh_valid: bool, vertex_count, triangle_count }
+//   @param b_only_if_invalid - Optional bool, default true; it has no effect, since no earlier BVH is kept and every call builds a new one.
+//   @returns { actor_name, built: bool, b_only_if_invalid: bool, bvh_valid: bool, vertex_count, triangle_count } -- actor_name is the dynamic mesh component's name, not the actor label; b_only_if_invalid echoes the request; the counts are those of the mesh the BVH was built for.
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleBuildMeshBVH(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2190,35 +2192,35 @@ TSharedPtr<FJsonObject> HandleBuildMeshBVH(
     if (!DynMesh)
         return mcp_common::MakeErrorReply(Error);
 
+    // A GeometryScript BVH is a value its caller holds: it points into the mesh it was built for, and nothing tracks
+    // that mesh's lifetime or edits for it. No tool of the plugin reads a kept one, so this BVH is built from the
+    // mesh as it is now and dropped on return; b_only_if_invalid could only skip rebuilding an earlier BVH, and
+    // there is none, so it is only echoed. A refusal is reported only through Debug, and the result is read back
+    // with IsBVHValidForMesh.
     bool bOnlyIfInvalid = true;
-    if (Params->HasField(TEXT("b_only_if_invalid")))
-    {
-        Params->TryGetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
-    }
-
+    Params->TryGetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     FGeometryScriptDynamicMeshBVH BVH;
-    bool bWasValidBefore = false;
-    UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh(DynMesh, BVH, bWasValidBefore, /*Debug*/ nullptr);
-    if (!bWasValidBefore || !bOnlyIfInvalid)
-    {
-        UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh(DynMesh, BVH, /*Debug*/ nullptr);
-    }
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh(DynMesh, BVH, Debug);
+    const FString BuildError = GeometryScript_FirstError(Debug);
     bool bIsValidAfter = false;
     UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh(DynMesh, BVH, bIsValidAfter, /*Debug*/ nullptr);
+    const bool bBuilt = BuildError.IsEmpty() && bIsValidAfter;
 
-    const bool bBuilt = !bWasValidBefore || !bOnlyIfInvalid;
     TSharedPtr<FJsonObject> Data = GeometryScript_NewMeshData(DynMesh);
     Data->SetBoolField(TEXT("built"), bBuilt);
+    Data->SetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     Data->SetBoolField(TEXT("bvh_valid"), bIsValidAfter);
     Data->SetNumberField(TEXT("vertex_count"),
         UGeometryScriptLibrary_MeshQueryFunctions::GetVertexCount(DynMesh));
     Data->SetNumberField(TEXT("triangle_count"), DynMesh->GetTriangleCount());
-    return mcp_common::MakeOkReply(Data);
+    return GeometryScript_OutcomeReply(Data, bBuilt, TEXT("build_mesh_bvh"), TEXT("built"),
+        BuildError.IsEmpty() ? FString(TEXT("the built BVH does not read back as valid for the mesh")) : BuildError);
 }
 
-// MCP:is_bvh_valid_for_mesh - Check whether a BVH for the DynamicMeshActor's dynamic mesh is currently valid via UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. Read-only: no allocation, no rebuild.
+// MCP:is_bvh_valid_for_mesh - Report whether a BVH built for the live dynamic mesh of a DynamicMeshActor in the editor world is valid for it, via BuildBVHForMesh then UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. The plugin keeps no BVH between calls (build_mesh_bvh and rebuild_mesh_bvh drop theirs, and the spatial-query tools build their own on every call), so no kept BVH can go stale after a mesh edit and that staleness is not tracked: this builds a BVH for the mesh as it is now and checks it, as each spatial query does. bvh_valid false means no valid BVH could be built for the mesh. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
-//   @returns { actor_name, bvh_valid: bool }
+//   @returns { actor_name, bvh_valid: bool } -- actor_name is the dynamic mesh component's name, not the actor label.
 TSharedPtr<FJsonObject> HandleIsBVHValidForMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2227,7 +2229,10 @@ TSharedPtr<FJsonObject> HandleIsBVHValidForMesh(
     if (!DynMesh)
         return mcp_common::MakeErrorReply(Error);
 
-    FGeometryScriptDynamicMeshBVH BVH;  // empty BVH — IsBVHValidForMesh checks DynMesh state, not BVH contents
+    // IsBVHValidForMesh is only true for a BVH built for this very mesh and unchanged since, and the plugin keeps none
+    // (see build_mesh_bvh), so an empty BVH would always read back false. The answer is measured on a BVH built now.
+    FGeometryScriptDynamicMeshBVH BVH;
+    UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh(DynMesh, BVH, /*Debug*/ nullptr);
     bool bValid = false;
     UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh(DynMesh, BVH, bValid, /*Debug*/ nullptr);
 
@@ -2236,12 +2241,12 @@ TSharedPtr<FJsonObject> HandleIsBVHValidForMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:find_nearest_point_on_mesh - Find the nearest point on the mesh to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Builds a fresh BVH if needed, then queries.
+// MCP:find_nearest_point_on_mesh - Find the nearest point on the live dynamic mesh of a DynamicMeshActor to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), then queries it, so the answer always reflects the latest mesh edits. found is false when no triangle lies within max_distance, or the mesh is empty. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
 //   @param query_point - [x, y, z] query point in the mesh's local space.
 //   @param max_distance - Optional float; max search distance (0 = unlimited).
-//   @param allow_unsafe_modified [bool] - Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false).
-//   @returns { actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z }
+//   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
+//   @returns { actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label.
 TSharedPtr<FJsonObject> HandleFindNearestPointOnMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2276,13 +2281,13 @@ TSharedPtr<FJsonObject> HandleFindNearestPointOnMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:find_nearest_ray_intersection_with_mesh - Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Builds a fresh BVH if needed.
+// MCP:find_nearest_ray_intersection_with_mesh - Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
 //   @param ray_origin - [x, y, z] origin point of the ray in mesh-local space.
-//   @param ray_direction - [x, y, z] direction of the ray (NOT auto-normalized; pass a unit vector for predictable distances).
+//   @param ray_direction - [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter.
 //   @param max_distance - Optional float; max search distance (0 = unlimited).
-//   @param allow_unsafe_modified [bool] - Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false).
-//   @returns { actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z }
+//   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
+//   @returns { actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label; ray_parameter is a distance along the normalized direction.
 TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2320,13 +2325,13 @@ TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:is_point_inside_mesh - Test whether a 3D point is inside the mesh using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Builds a fresh BVH+FWN if needed.
+// MCP:is_point_inside_mesh - Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Every call builds a fresh BVH and fast winding tree from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
 //   @param query_point - [x, y, z] point in the mesh's local space.
 //   @param winding_threshold - Optional float; default 0.5 (standard parity test). Higher values shrink the "inside" region.
-//   @param max_distance - Optional float; max search distance for the spatial query (0 = unlimited).
-//   @param allow_unsafe_modified [bool] - Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false).
-//   @returns { actor_name, is_inside: bool, containment_outcome: string }
+//   @param max_distance - Optional float; it has no effect on this query, whose winding-number test uses no search distance.
+//   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
+//   @returns { actor_name, is_inside: bool, containment_outcome: string } -- actor_name is the dynamic mesh component's name, not the actor label.
 TSharedPtr<FJsonObject> HandleIsPointInsideMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2882,7 +2887,8 @@ TSharedPtr<FJsonObject> HandleSetMeshUVElementPosition(const TSharedPtr<FJsonObj
 // MCP:rebuild_mesh_bvh - Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMesh and read it back with IsBVHValidForMesh. The BVH is a temporary that is not kept: the spatial-query tools build their own on every call, so this only checks that a BVH can be built for the mesh as it is now. bvh_rebuilt is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param b_only_if_invalid [bool] - Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds
-//   @returns { actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }
+//   @returns { actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid } -- actor_name is the dynamic mesh component's name, not the actor label.
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleRebuildMeshBVH(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
@@ -3356,10 +3362,10 @@ TSharedPtr<FJsonObject> HandleCopyStaticMeshToDynamicMesh(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:copy_dynamic_mesh_to_static_mesh - Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets).
+// MCP:copy_dynamic_mesh_to_static_mesh - Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets). A lod_index outside 0 to 7 (a static mesh has at most 8 LODs) is an error checked before anything changes; one past the asset's last LOD adds the LODs in between, which the engine sets up to be reduced from an earlier LOD.
 //   @param actor_name [string!] - Label or name of the source DynamicMeshActor.
 //   @param target_static_mesh_path [string!] - Content path of an EXISTING /Game UStaticMesh to overwrite.
-//   @param lod_index [int] - Optional target LOD index (default 0). Clamped by the engine to [0, MAX_STATIC_MESH_LODS].
+//   @param lod_index [int] - Optional target LOD index, 0 to 7 (default 0); a negative index or one of 8 or more is refused.
 //   @param materials [array] - Optional ordered list of UMaterialInterface content paths, one per MaterialID (index 0 = MaterialID 0). Supplying it flips bReplaceMaterials on, so the target asset gets exactly these material slots. WITHOUT this the asset keeps its existing slots and a multi-MaterialID mesh collapses into whatever slots already existed — this is the parameter that makes per-triangle MaterialIDs visible on the saved asset.
 //   @param material_slot_names [array] - Optional slot names matching materials 1:1 (default: the engine names them). Ignored when materials is absent.
 //   @returns { actor_name, target_static_mesh_path, lod_index, outcome_success: bool, source_triangle_count, material_count: int, replaced_materials: bool, wrote: bool }. NOTE: this marks the target package dirty (transaction) but does NOT save to disk — persistence requires a separate save (e.g. via save_asset).
@@ -3374,7 +3380,19 @@ TSharedPtr<FJsonObject> HandleCopyDynamicMeshToStaticMesh(const TSharedPtr<FJson
     FString TargetPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("target_static_mesh_path"), TargetPath)) { return Missing; }
 
-    const int32 LODIndex = GeometryScript_ReadClampedLODIndex(Params);
+    // CopyMeshToStaticMesh clamps the LOD index to [0, MAX_STATIC_MESH_LODS], one past the last LOD a static mesh can
+    // have, and grows the source models to reach it: 8 or more gives the asset 9 LODs, after which UStaticMesh::CanBuild
+    // refuses every build of it. A negative index would be clamped to 0 and overwrite LOD 0. Both are refused before
+    // anything changes; the value is read as a double so a number outside int32 is refused too.
+    double LODIndexD = 0.0;
+    Params->TryGetNumberField(TEXT("lod_index"), LODIndexD);
+    if (LODIndexD < 0.0 || LODIndexD >= MAX_STATIC_MESH_LODS)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("lod_index must be between 0 and %d (got %g): a static mesh has at most %d LODs; nothing was changed"),
+            MAX_STATIC_MESH_LODS - 1, LODIndexD, MAX_STATIC_MESH_LODS));
+    }
+    const int32 LODIndex = static_cast<int32>(LODIndexD);
 
     // HONEST GATE: the engine rejects built-in /Engine/ assets (MeshAssetFunctions.cpp).
     // Fail early with a clean, actionable message instead of surfacing the engine's generic outcome.

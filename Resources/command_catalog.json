@@ -1002,7 +1002,7 @@
       "commands": [
         {
           "name": "add_anim_bone_track",
-          "description": "Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.",
+          "description": "Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1033,7 +1033,7 @@
         },
         {
           "name": "add_anim_composite_segment",
-          "description": "Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length",
+          "description": "Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "composite_path",
@@ -1107,7 +1107,7 @@
         },
         {
           "name": "add_anim_curve_name",
-          "description": "Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is kept, reported as already_existed=true, and the skeleton is saved anyway. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false.",
+          "description": "Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "curve_name",
@@ -1122,7 +1122,7 @@
               "description": "Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved."
             }
           ],
-          "returns": "{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }",
+          "returns": "{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1132,7 +1132,7 @@
         },
         {
           "name": "add_anim_float_curve",
-          "description": "Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.",
+          "description": "Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); one that already holds exactly those keys is a success with changed=false and saved=false, and nothing is written or saved. curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false, with saved=false and save_error. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1153,7 +1153,7 @@
               "description": "JSON array of [time, value] pairs (default [[0,0],[1,1]])"
             }
           ],
-          "returns": "{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, success, saved, message }",
+          "returns": "{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -1206,7 +1206,7 @@
         },
         {
           "name": "add_anim_notify",
-          "description": "Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.",
+          "description": "Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "animation_path",
@@ -1233,7 +1233,7 @@
               "description": "Notify track name (default 'Default')"
             }
           ],
-          "returns": "{ animation_path, notify_name, time, success, saved, message }",
+          "returns": "{ animation_path, notify_name, time, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1243,7 +1243,7 @@
         },
         {
           "name": "add_anim_notify_name",
-          "description": "Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.",
+          "description": "Register a notify name in the AnimationNotifies list of a USkeleton inside an undo transaction and save the skeleton package; returns present, notify_count and saved. A name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "notify_name",
@@ -1258,7 +1258,7 @@
               "description": "Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved."
             }
           ],
-          "returns": "{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }",
+          "returns": "{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1268,7 +1268,7 @@
         },
         {
           "name": "add_anim_notify_state",
-          "description": "Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.",
+          "description": "Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "animation_path",
@@ -1301,7 +1301,7 @@
               "description": "Notify track name (default 'Default')"
             }
           ],
-          "returns": "{ animation_path, notify_state_name, start_time, duration, success, saved, message }",
+          "returns": "{ animation_path, notify_state_name, start_time, duration, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1392,7 +1392,7 @@
         },
         {
           "name": "add_anim_sync_marker",
-          "description": "Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.",
+          "description": "Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1413,7 +1413,7 @@
               "description": "Sync marker time in seconds (default 0.5)"
             }
           ],
-          "returns": "{ anim_sequence_path, marker_name, time, num_sync_markers, success, saved, message }",
+          "returns": "{ anim_sequence_path, marker_name, time, num_sync_markers, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -1423,7 +1423,7 @@
         },
         {
           "name": "add_anim_transform_curve",
-          "description": "Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller",
+          "description": "Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1540,7 +1540,7 @@
         },
         {
           "name": "add_blendspace_sample",
-          "description": "Add a blend sample (animation + blend position) to a BlendSpace",
+          "description": "Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blendspace_path",
@@ -1561,7 +1561,7 @@
               "description": "Blend position: single number (1D) or array of up to 3 numbers (default 0)"
             }
           ],
-          "returns": "{ blendspace_path, sample_index, num_samples, success, saved, message }",
+          "returns": "{ blendspace_path, sample_index, num_samples, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1608,7 +1608,7 @@
         },
         {
           "name": "add_ik_goal",
-          "description": "Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, and the asset is saved again. A failed save makes success false, with saved=false and save_error.",
+          "description": "Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, saved=false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -1629,7 +1629,7 @@
               "description": "Optional bone name to attach the goal to"
             }
           ],
-          "returns": "{ asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string }",
+          "returns": "{ asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1639,7 +1639,7 @@
         },
         {
           "name": "add_ik_retarget_chain",
-          "description": "Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.",
+          "description": "Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -1682,7 +1682,7 @@
         },
         {
           "name": "add_ik_solver",
-          "description": "Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of \"FullBodyIK\", \"Limb\", \"Pole\", \"BodyMover\", \"SetTransform\" or \"StretchLimb\" (default \"FullBodyIK\"). Unknown types are rejected with an honest error.",
+          "description": "Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of \"FullBodyIK\", \"Limb\", \"Pole\", \"BodyMover\", \"SetTransform\" or \"StretchLimb\" (default \"FullBodyIK\"). Unknown types are rejected with an honest error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -1707,7 +1707,7 @@
         },
         {
           "name": "add_montage_notify",
-          "description": "Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.",
+          "description": "Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -1728,7 +1728,7 @@
               "description": "Absolute notify trigger time in seconds (default 0)"
             }
           ],
-          "returns": "{ montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, message }",
+          "returns": "{ montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -1738,7 +1738,7 @@
         },
         {
           "name": "add_montage_section",
-          "description": "Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.",
+          "description": "Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections, already_existed and added (true only for a new section). A section of that name already at that start time is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -1759,7 +1759,7 @@
               "description": "Absolute section start time in seconds (default 0)"
             }
           ],
-          "returns": "{ montage_path, section_name, start_time, section_count, sections, already_existed, added, saved, message }",
+          "returns": "{ montage_path, section_name, start_time, section_count, sections, already_existed, added, changed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1769,7 +1769,7 @@
         },
         {
           "name": "add_montage_segment",
-          "description": "Append an animation segment referencing a real UAnimSequence to a montage slot",
+          "description": "Append an animation segment referencing a real UAnimSequence to a montage slot. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -1812,7 +1812,7 @@
         },
         {
           "name": "add_montage_slot",
-          "description": "Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.",
+          "description": "Add an empty slot animation track with the given slot name to a UAnimMontage in an undo transaction and save it; an existing slot of that name is a success with added=false, already_existed=true and saved=false, and the montage is neither modified nor saved. Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -1827,7 +1827,7 @@
               "description": "Name of the slot track to add (e.g. 'UpperBody')."
             }
           ],
-          "returns": "{ montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, message }",
+          "returns": "{ montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -1955,7 +1955,7 @@
         },
         {
           "name": "add_pose_to_pose_asset",
-          "description": "Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.",
+          "description": "Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -1970,7 +1970,7 @@
               "description": "Name of the pose to add (e.g. 'RefPose_A')."
             }
           ],
-          "returns": "{ pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, message }",
+          "returns": "{ pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -2622,7 +2622,7 @@
         },
         {
           "name": "collapse_montage_segments",
-          "description": "Collapse a montage slot track's segments end-to-end (no gaps, order preserved)",
+          "description": "Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -2637,7 +2637,7 @@
               "description": "Name of the slot track to collapse."
             }
           ],
-          "returns": "{ montage_path, slot_name, segment_count, applied, saved, message }",
+          "returns": "{ montage_path, slot_name, segment_count, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -2771,7 +2771,7 @@
         },
         {
           "name": "connect_ik_goal_to_solver",
-          "description": "Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent — re-connecting an already-connected goal is a no-op (already_connected:true), avoiding the duplicate the raw engine call would create.",
+          "description": "Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings, in one undo transaction, then save the asset.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent: re-connecting an already-connected goal is a success with already_connected:true, saved:false and a note, and nothing is saved, avoiding the duplicate the raw engine call would create. An unknown goal or out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -2792,7 +2792,7 @@
               "description": "Index of the solver in the rig's solver stack."
             }
           ],
-          "returns": "{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool }",
+          "returns": "{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -2888,7 +2888,7 @@
         },
         {
           "name": "create_anim_composite",
-          "description": "Create and save a UAnimComposite asset bound to a USkeleton, under /Game",
+          "description": "Create and save a UAnimComposite asset bound to a USkeleton, under /Game. Idempotent: a UAnimComposite already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "name",
@@ -2909,17 +2909,17 @@
               "description": "Asset path of the target Skeleton"
             }
           ],
-          "returns": "{ name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, message }",
+          "returns": "{ name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
         {
           "name": "create_anim_montage",
-          "description": "Create and save an empty-but-valid UAnimMontage asset under /Game",
+          "description": "Create and save an empty-but-valid UAnimMontage asset under /Game. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "name",
@@ -2946,17 +2946,17 @@
               "description": "Asset path of the target Skeleton"
             }
           ],
-          "returns": "{ name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, message }",
+          "returns": "{ name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
         {
           "name": "create_anim_sequence",
-          "description": "Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.",
+          "description": "Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, saved=false, length and rate not applied) and nothing is saved; another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.",
           "params": [
             {
               "name": "anim_name",
@@ -2999,7 +2999,7 @@
         },
         {
           "name": "create_blend_space",
-          "description": "Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game",
+          "description": "Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game. Idempotent: a UBlendSpace already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "name",
@@ -3044,11 +3044,11 @@
               "description": "Asset path of the target Skeleton"
             }
           ],
-          "returns": "{ name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, message }",
+          "returns": "{ name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3141,7 +3141,7 @@
         },
         {
           "name": "create_ik_retargeter",
-          "description": "Create and save a UIKRetargeter asset wiring source + target IK Rigs.",
+          "description": "Create and save a UIKRetargeter asset wiring source + target IK Rigs. An existing retargeter at that path is rewired and saved when either rig differs; when it already uses both rigs nothing changes, nothing is saved (saved=false) and a note says so. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "package_path",
@@ -3168,7 +3168,7 @@
               "description": "Path to the target UIKRigDefinition (copy TO)"
             }
           ],
-          "returns": "{ asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -3178,7 +3178,7 @@
         },
         {
           "name": "create_ik_rig",
-          "description": "Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: if the asset already exists, loads and (re)applies the mesh. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube.",
+          "description": "Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: an existing rig is loaded and only given the mesh, then saved, when it has another one; when it already has that mesh, or the mesh does not load or the engine refuses it (skeletal_mesh_set false), nothing changes, nothing is saved and a note says why. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "package_path",
@@ -3199,7 +3199,7 @@
               "description": "Optional USkeletalMesh asset path; defaults to /Engine/EngineMeshes/SkeletalCube"
             }
           ],
-          "returns": "{ asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -3209,7 +3209,7 @@
         },
         {
           "name": "create_pose_asset",
-          "description": "Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true, even when bound to another skeleton. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.",
+          "description": "Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true and saved=false, even when bound to another skeleton, and nothing is saved. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false, with saved=false and save_error. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.",
           "params": [
             {
               "name": "name",
@@ -3230,7 +3230,7 @@
               "description": "Asset path of the target Skeleton"
             }
           ],
-          "returns": "{ name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, message }",
+          "returns": "{ name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -3240,7 +3240,7 @@
         },
         {
           "name": "create_pose_asset_from_anim_sequence",
-          "description": "Create a UPoseAsset built from a real UAnimSequence's frames",
+          "description": "Create a UPoseAsset built from a real UAnimSequence's frames and save it. Idempotent: a UPoseAsset already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_name",
@@ -3265,7 +3265,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3395,7 +3395,7 @@
         },
         {
           "name": "delete_montage_section",
-          "description": "Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.",
+          "description": "Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -3410,7 +3410,7 @@
               "description": "Name of the FCompositeSection to remove; compared as an FName, so case is ignored."
             }
           ],
-          "returns": "{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }",
+          "returns": "{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -3469,7 +3469,7 @@
         },
         {
           "name": "disconnect_ik_goal_from_solver",
-          "description": "Disconnect a goal from a solver, removing that solver's per-goal effector/settings.  Inverse of connect_ik_goal_to_solver. Idempotent — disconnecting a goal that isn't connected is a no-op (was_connected:false).",
+          "description": "Disconnect a goal from a solver, removing that solver's per-goal effector/settings, through the IK Rig controller (one undo transaction), then save the asset.  Inverse of connect_ik_goal_to_solver. Idempotent: disconnecting a goal that isn't connected is a success with was_connected:false, saved:false and a note, and nothing is saved. An out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -3490,7 +3490,7 @@
               "description": "Index of the solver in the rig's solver stack."
             }
           ],
-          "returns": "{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool }",
+          "returns": "{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -3500,7 +3500,7 @@
         },
         {
           "name": "duplicate_anim_sequence",
-          "description": "Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name taken by an asset of another class is refused. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.",
+          "description": "Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name already taken by any asset, in memory or on disk (the source included), is refused and nothing is touched. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.",
           "params": [
             {
               "name": "source_path",
@@ -3531,7 +3531,7 @@
         },
         {
           "name": "edit_anim_notify",
-          "description": "Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence)",
+          "description": "Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence) in an undo transaction and save it. No editable field is an error before anything changes; edits that leave the event as it is are a success with applied=false, applied_count 0 and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "animation_path",
@@ -3588,7 +3588,7 @@
               "description": "New TrackIndex (zero-based). Optional."
             }
           ],
-          "returns": "{ animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, message }",
+          "returns": "{ animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -3598,7 +3598,7 @@
         },
         {
           "name": "edit_blendspace_sample",
-          "description": "Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it.",
+          "description": "Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blendspace_path",
@@ -3625,7 +3625,7 @@
               "description": "Full asset path to a UAnimSequence to replace the sample's animation (optional)."
             }
           ],
-          "returns": "{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, message }",
+          "returns": "{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -4612,7 +4612,7 @@
         },
         {
           "name": "link_montage_sections",
-          "description": "Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name \"\" or \"None\" to clear the link. Idempotent.",
+          "description": "Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name \"\" or \"None\" to clear the link. Done in an undo transaction, then saved. Idempotent: the link the section already has is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -4633,7 +4633,7 @@
               "description": "Name of the existing section to play next (or \"\" / \"None\" to clear)."
             }
           ],
-          "returns": "{ montage_path, section_name, next_section_name, linked, section_count, sections, saved, message }",
+          "returns": "{ montage_path, section_name, next_section_name, linked, changed, section_count, sections, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -4681,7 +4681,7 @@
         },
         {
           "name": "move_ik_solver_in_stack",
-          "description": "Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false. A failed save makes success false, with saved=false and save_error.",
+          "description": "Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -4702,7 +4702,7 @@
               "description": "Target 0-based solver index, below the solver count"
             }
           ],
-          "returns": "{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -4755,7 +4755,7 @@
         },
         {
           "name": "refresh_anim_montage_cache",
-          "description": "Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent.",
+          "description": "Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -4764,7 +4764,7 @@
               "description": "Full asset path of the montage (e.g. '/Game/MyGame/AM_Example')."
             }
           ],
-          "returns": "{ montage_path, refreshed, sequence_length, slot_count, section_count, saved, message }",
+          "returns": "{ montage_path, refreshed, sequence_length, slot_count, section_count, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -4774,7 +4774,7 @@
         },
         {
           "name": "reimport_anim_sequence",
-          "description": "Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.",
+          "description": "Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved. A missing source is refused before the reimport, which would crash the editor on it, and a reimport the handler reports as failed is a failure too: both make success false with reimported=false, and the missing source a note.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -4862,7 +4862,7 @@
         },
         {
           "name": "remove_anim_composite_segment",
-          "description": "Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length",
+          "description": "Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "composite_path",
@@ -4993,7 +4993,7 @@
         },
         {
           "name": "remove_anim_notify",
-          "description": "Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and nothing saved; a failed save makes success false, with saved=false and save_error.",
+          "description": "Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and saved=false, and the sequence is neither dirtied nor saved; a failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "animation_path",
@@ -5243,7 +5243,7 @@
         },
         {
           "name": "remove_blendspace_sample",
-          "description": "Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call.",
+          "description": "Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blendspace_path",
@@ -5258,7 +5258,7 @@
               "description": "Index of the sample to remove."
             }
           ],
-          "returns": "{ blendspace_path, removed, num_samples, samples, saved, message }",
+          "returns": "{ blendspace_path, removed, num_samples, samples, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5299,7 +5299,7 @@
         },
         {
           "name": "remove_ik_goal",
-          "description": "Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent — removing a goal that isn't present is a no-op (removed:false, already_absent:true).",
+          "description": "Remove an IK goal from an IK Rig by name through the IK Rig controller (one undo transaction), then save the asset.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent: removing a goal that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -5314,7 +5314,7 @@
               "description": "Name of the goal to remove"
             }
           ],
-          "returns": "{ asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5324,7 +5324,7 @@
         },
         {
           "name": "remove_ik_retarget_chain",
-          "description": "Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false. A failed save makes success false, with saved=false and save_error.",
+          "description": "Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -5339,7 +5339,7 @@
               "description": "Name of the retarget chain to remove"
             }
           ],
-          "returns": "{ asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5374,7 +5374,7 @@
         },
         {
           "name": "remove_montage_notify",
-          "description": "Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.",
+          "description": "Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -5389,7 +5389,7 @@
               "description": "Zero-based index into the montage's Notifies array. Use get_montage_info first to list notifies."
             }
           ],
-          "returns": "{ montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, message }",
+          "returns": "{ montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5399,7 +5399,7 @@
         },
         {
           "name": "remove_montage_slot",
-          "description": "Remove a slot animation track from a UAnimMontage by name or index",
+          "description": "Remove a slot animation track from a UAnimMontage by name or index. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -5420,7 +5420,7 @@
               "description": "Zero-based index into SlotAnimTracks (alternative to slot_name). Use get_montage_info first to list slots."
             }
           ],
-          "returns": "{ montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, message }",
+          "returns": "{ montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5449,7 +5449,7 @@
         },
         {
           "name": "remove_notify_track",
-          "description": "Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest)",
+          "description": "Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest). A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "animation_path",
@@ -5464,7 +5464,7 @@
               "description": "Notify track name to remove."
             }
           ],
-          "returns": "{ animation_path, track_name, track_names, track_count, already_absent, saved, message }",
+          "returns": "{ animation_path, track_name, track_names, track_count, already_absent, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5493,7 +5493,7 @@
         },
         {
           "name": "remove_pose_curve",
-          "description": "Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.",
+          "description": "Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. Returns removed_count, removed and num_curves. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -5508,7 +5508,7 @@
               "description": "Name of the curve to remove."
             }
           ],
-          "returns": "{ pose_asset_path, curve_name, removed_count, removed, num_curves, saved, message }",
+          "returns": "{ pose_asset_path, curve_name, removed_count, removed, num_curves, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5518,7 +5518,7 @@
         },
         {
           "name": "remove_pose_from_pose_asset",
-          "description": "Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.",
+          "description": "Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset. An absent name is a success with removed=false and saved=false, and the asset is neither modified nor saved. Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -5533,7 +5533,7 @@
               "description": "Name of the pose to remove."
             }
           ],
-          "returns": "{ pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, message }",
+          "returns": "{ pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5643,7 +5643,7 @@
         },
         {
           "name": "remove_retarget_pose",
-          "description": "Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a no-op (removed:false, already_absent:true), and the asset is still saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.",
+          "description": "Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_retargeter_path",
@@ -5664,7 +5664,7 @@
               "description": "Optional \"Source\" or \"Target\" scope; defaults to \"Target\""
             }
           ],
-          "returns": "{ ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string }",
+          "returns": "{ ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5917,7 +5917,7 @@
         },
         {
           "name": "rename_anim_curve",
-          "description": "Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.",
+          "description": "Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. The same name for both is a success with renamed=false, saved=false and a note, and nothing is written or saved. Any curve_type other than transform means float. Returns renamed and saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -5944,7 +5944,7 @@
               "description": "Curve type to target: float (default) or transform"
             }
           ],
-          "returns": "{ anim_sequence_path, old_curve_name, new_curve_name, renamed, saved }",
+          "returns": "{ anim_sequence_path, old_curve_name, new_curve_name, renamed, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -5985,7 +5985,7 @@
         },
         {
           "name": "rename_ik_retarget_chain",
-          "description": "Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. A failed save makes success false, with saved=false and save_error.",
+          "description": "Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -6006,7 +6006,7 @@
               "description": "Requested new name; the engine may add a suffix to keep it unique."
             }
           ],
-          "returns": "{ asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6016,7 +6016,7 @@
         },
         {
           "name": "rename_montage_section",
-          "description": "Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index",
+          "description": "Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index, in an undo transaction, and save it. The name the section already has (FName match, case ignored) is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -6037,7 +6037,7 @@
               "description": "New FName for the section."
             }
           ],
-          "returns": "{ montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, message }",
+          "returns": "{ montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6047,7 +6047,7 @@
         },
         {
           "name": "rename_pose_in_pose_asset",
-          "description": "Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).",
+          "description": "Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName) in an undo transaction and save it; renamed is measured by reading the pose names back. An unknown old_pose_name, a new_pose_name another pose already has, or a rename the engine does not take is an error with nothing saved; the same name for both is a success with renamed=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -6068,7 +6068,7 @@
               "description": "New name for the pose."
             }
           ],
-          "returns": "{ pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, message }",
+          "returns": "{ pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6372,7 +6372,7 @@
         },
         {
           "name": "scale_anim_curve",
-          "description": "Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.",
+          "description": "Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A retime that moves no key (factor 1, no keys, or every key at the origin) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6409,7 +6409,7 @@
         },
         {
           "name": "set_anim_additive_settings",
-          "description": "Set the additive-animation type and base pose on a UAnimSequence",
+          "description": "Set the additive-animation type and base pose on a UAnimSequence in an undo transaction and save it. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6442,7 +6442,7 @@
               "description": "Object path of the reference UAnimSequence for the base pose (optional)"
             }
           ],
-          "returns": "{ anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, success, saved, save_error }",
+          "returns": "{ anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, changed, success, saved, save_error, message? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6483,7 +6483,7 @@
         },
         {
           "name": "set_anim_curve_color",
-          "description": "Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6514,7 +6514,7 @@
         },
         {
           "name": "set_anim_curve_comment",
-          "description": "Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The comment the curve already has (case-sensitive) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6545,7 +6545,7 @@
         },
         {
           "name": "set_anim_curve_interp_mode",
-          "description": "Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.",
+          "description": "Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; flags the curve already has are a success with applied=false, saved=false and a note, and nothing is written or saved; a failed save makes success false, with saved=false and save_error. get_anim_curve_data reads the flags.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6572,7 +6572,7 @@
               "description": "Curve type to target: float (default) or transform"
             }
           ],
-          "returns": "{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error }",
+          "returns": "{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6582,7 +6582,7 @@
         },
         {
           "name": "set_anim_curve_keys",
-          "description": "Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A failed save makes success false.",
+          "description": "Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A curve that already holds exactly those keys is a success with applied=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6609,7 +6609,7 @@
               "description": "Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve."
             }
           ],
-          "returns": "{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error }",
+          "returns": "{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6619,7 +6619,7 @@
         },
         {
           "name": "set_anim_frame_rate",
-          "description": "Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.",
+          "description": "Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. The rate the data model already has is a success with changed=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.",
           "params": [
             {
               "name": "sequence_path",
@@ -6634,7 +6634,7 @@
               "description": "New frame rate in frames per second, rounded to a whole number that must be at least 1."
             }
           ],
-          "returns": "{ sequence_path, fps, numerator, denominator, saved, save_error }",
+          "returns": "{ sequence_path, fps, numerator, denominator, changed, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6748,7 +6748,7 @@
         },
         {
           "name": "set_anim_montage_preview_mesh",
-          "description": "Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.",
+          "description": "Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied; the preview mesh the montage already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -6763,7 +6763,7 @@
               "description": "Asset path of the preview USkeletalMesh (e.g. '/Engine/EngineMeshes/SkeletalCube')."
             }
           ],
-          "returns": "{ montage_path, mesh_path, prev_mesh_path, applied, saved, message }",
+          "returns": "{ montage_path, mesh_path, prev_mesh_path, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6773,7 +6773,7 @@
         },
         {
           "name": "set_anim_montage_rate_scale",
-          "description": "Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage",
+          "description": "Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage in an undo transaction and save it. Values the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -6801,7 +6801,7 @@
               "description": "Blend-out trigger time in seconds (defaults to current value)"
             }
           ],
-          "returns": "{ montage_path, rate_scale, blend_out_trigger_time, applied, saved, message }",
+          "returns": "{ montage_path, rate_scale, blend_out_trigger_time, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6811,7 +6811,7 @@
         },
         {
           "name": "set_anim_montage_skeleton",
-          "description": "Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches)",
+          "description": "Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches) in an undo transaction and save it. The skeleton the montage already uses is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -6826,7 +6826,7 @@
               "description": "Asset path of the new Skeleton (e.g. '/Engine/EngineMeshes/SkeletalCube_Skeleton')."
             }
           ],
-          "returns": "{ montage_path, skeleton_path, prev_skeleton_path, applied, saved, message }",
+          "returns": "{ montage_path, skeleton_path, prev_skeleton_path, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6836,7 +6836,7 @@
         },
         {
           "name": "set_anim_number_of_frames",
-          "description": "Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.",
+          "description": "Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "sequence_path",
@@ -6851,7 +6851,7 @@
               "description": "New number of frames (integer > 0)."
             }
           ],
-          "returns": "{ sequence_path, frame_count, saved, save_error }",
+          "returns": "{ sequence_path, frame_count, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6861,7 +6861,7 @@
         },
         {
           "name": "set_anim_retarget_source",
-          "description": "Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence)",
+          "description": "Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence) in an undo transaction and save it. A ref_pose_seq_path that does not load is an error before anything changes; values the sequence already has are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6882,7 +6882,7 @@
               "description": "Optional object path of a UAnimSequence used as the additive retarget reference pose (RefPoseSeq). Pass empty/'None' to clear it."
             }
           ],
-          "returns": "{ anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, success, saved, save_error }",
+          "returns": "{ anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, changed, success, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6892,7 +6892,7 @@
         },
         {
           "name": "set_anim_root_motion",
-          "description": "Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.",
+          "description": "Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6919,7 +6919,7 @@
               "description": "Whether to force the root lock (default false)"
             }
           ],
-          "returns": "{ anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, success, saved, message }",
+          "returns": "{ anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, changed, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7150,7 +7150,7 @@
         },
         {
           "name": "set_blendspace_interpolation",
-          "description": "Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change.",
+          "description": "Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blend_space_path",
@@ -7207,7 +7207,7 @@
               "description": "Optional Y-axis smoothing type (2D only): Averaged|Linear|Cubic|EaseInOut|Exponential|SpringDamper."
             }
           ],
-          "returns": "{ blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, saved }",
+          "returns": "{ blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, changed, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7217,7 +7217,7 @@
         },
         {
           "name": "set_blendspace_properties",
-          "description": "Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change.",
+          "description": "Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "blend_space_path",
@@ -7274,7 +7274,7 @@
               "description": "Optional Y axis grid divisions (2D only, >= 1)."
             }
           ],
-          "returns": "{ blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, saved }",
+          "returns": "{ blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, changed, saved, save_error, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7346,7 +7346,7 @@
         },
         {
           "name": "set_ik_bone_settings",
-          "description": "Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z (\"Free\"/\"Limited\"/\"Locked\"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.",
+          "description": "Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent (a bone the rig skeleton lacks is an error, with nothing changed), and existing settings that already have those values give changed false, saved false and a note, with nothing saved. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z (\"Free\"/\"Limited\"/\"Locked\"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7373,7 +7373,7 @@
               "description": "Object with bone-specific fields to set."
             }
           ],
-          "returns": "{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool, saved: bool, save_error?: string }",
+          "returns": "{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7383,7 +7383,7 @@
         },
         {
           "name": "set_ik_goal_settings",
-          "description": "Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7410,7 +7410,7 @@
               "description": "Object with goal-specific fields to set."
             }
           ],
-          "returns": "{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool, saved: bool, save_error?: string }",
+          "returns": "{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7420,7 +7420,7 @@
         },
         {
           "name": "set_ik_retarget_chain_bones",
-          "description": "Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.",
+          "description": "Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A value the chain already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7453,7 +7453,7 @@
               "description": "Optional new associated IK goal, which must be a goal of the rig; None clears the goal of the chain."
             }
           ],
-          "returns": "{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7463,7 +7463,7 @@
         },
         {
           "name": "set_ik_solver_bones",
-          "description": "Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.",
+          "description": "Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton, or a start or end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back, and nothing is stored for it. A bone the solver already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7490,7 +7490,7 @@
               "description": "Optional end bone name"
             }
           ],
-          "returns": "{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7500,7 +7500,7 @@
         },
         {
           "name": "set_ik_solver_enabled",
-          "description": "Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false. A failed save makes success false, with saved=false and save_error.",
+          "description": "Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false, and a solver already in the requested state gives changed false: in both cases saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7521,7 +7521,7 @@
               "description": "Optional bool; defaults to true"
             }
           ],
-          "returns": "{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7531,7 +7531,7 @@
         },
         {
           "name": "set_ik_solver_settings",
-          "description": "Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7552,7 +7552,7 @@
               "description": "Object with solver-type-specific fields to set."
             }
           ],
-          "returns": "{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, saved: bool, save_error?: string }",
+          "returns": "{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7562,7 +7562,7 @@
         },
         {
           "name": "set_montage_blend_times",
-          "description": "Set the blend-in / blend-out times on a UAnimMontage",
+          "description": "Set the blend-in / blend-out times (clamped to >= 0) on a UAnimMontage in an undo transaction and save it. Times the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7583,7 +7583,7 @@
               "description": "Blend-out time in seconds (defaults to current value)"
             }
           ],
-          "returns": "{ montage_path, blend_in, blend_out, applied, saved, message }",
+          "returns": "{ montage_path, blend_in, blend_out, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7593,7 +7593,7 @@
         },
         {
           "name": "set_montage_properties",
-          "description": "Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.",
+          "description": "Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. For blend times use set_montage_blend_times. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7656,7 +7656,7 @@
               "description": "RootMotionRootLock: 'RefPose'|'AnimFirstFrame'|'Zero' (DEPRECATED since 4.5). Optional."
             }
           ],
-          "returns": "{ montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, saved, message }",
+          "returns": "{ montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, changed, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7666,7 +7666,7 @@
         },
         {
           "name": "set_montage_section_start_time",
-          "description": "Set the StartTime on an existing FCompositeSection by zero-based section_index",
+          "description": "Set the StartTime on an existing FCompositeSection by zero-based section_index, in an undo transaction, and save it. The start time the section already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7687,7 +7687,7 @@
               "description": "Absolute section start time in seconds."
             }
           ],
-          "returns": "{ montage_path, section_index, start_time, applied, saved, message }",
+          "returns": "{ montage_path, section_index, start_time, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7697,7 +7697,7 @@
         },
         {
           "name": "set_montage_segment_anim_sequence",
-          "description": "Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range)",
+          "description": "Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range, play rate and loop count to 1 and its start position to 0) in an undo transaction and save the montage. A segment that already references that sequence with those values is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7724,7 +7724,7 @@
               "description": "Object path of the UAnimSequence to reference (must share the montage's skeleton)."
             }
           ],
-          "returns": "{ montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, message }",
+          "returns": "{ montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7734,7 +7734,7 @@
         },
         {
           "name": "set_montage_segment_start_time",
-          "description": "Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index). AnimEndTime is left untouched.",
+          "description": "Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index), clamped to [0, AnimEndTime], in an undo transaction, and save the montage. AnimEndTime is left untouched. The (clamped) start time the segment already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -7761,7 +7761,7 @@
               "description": "New AnimStartTime in seconds (clamped to [0, AnimEndTime])."
             }
           ],
-          "returns": "{ montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, message }",
+          "returns": "{ montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, save_error, message, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -8019,7 +8019,7 @@
         },
         {
           "name": "set_pose_asset_base_pose",
-          "description": "Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes; check applied, false when the engine refused the name, and a failed save makes success false. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.",
+          "description": "Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes, and so is a base pose the engine does not take (read back from the asset), with nothing saved. The base pose the asset already has is a success with applied=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -8034,7 +8034,7 @@
               "description": "Name of the pose to use as the base; empty/None resets to the reference pose."
             }
           ],
-          "returns": "{ pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, message }",
+          "returns": "{ pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -8187,7 +8187,7 @@
         },
         {
           "name": "set_retarget_pose_bone_rotation",
-          "description": "Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. A failed save makes success false, with saved=false and save_error.",
+          "description": "Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. When the pose to edit is already current and already holds exactly that offset for the bone, changed is false, saved is false, a note says so and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_retargeter_path",
@@ -8262,7 +8262,7 @@
               "description": "Optional explicit retarget pose name; created if missing"
             }
           ],
-          "returns": "{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -8272,7 +8272,7 @@
         },
         {
           "name": "set_retargeter_chain_mapping",
-          "description": "Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.",
+          "description": "Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. When no op lists target_chain, or every one already maps it to source_chain, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.",
           "params": [
             {
               "name": "ik_retargeter_path",
@@ -8299,7 +8299,7 @@
               "description": "Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated"
             }
           ],
-          "returns": "{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -8309,7 +8309,7 @@
         },
         {
           "name": "set_retargeter_op_settings",
-          "description": "Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller (its own transaction). The payload echoes the read-back settings.",
+          "description": "Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag, as one undo transaction, then save the asset.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller. The payload echoes the read-back settings. When neither is given, or the op already has those settings and that enabled state, changed is false, saved is false, a note says why and nothing is saved. An out-of-range op_index is an error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "ik_retargeter_path",
@@ -8336,7 +8336,7 @@
               "description": "Optional: enable/disable the op (applied via the controller)."
             }
           ],
-          "returns": "{ asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, saved: bool, save_error?: string }",
+          "returns": "{ asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, changed: bool, saved: bool, save_error?: string, note?: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -9199,7 +9199,7 @@
         },
         {
           "name": "sort_montage_segments",
-          "description": "Sort a montage slot track's segments by start time ascending",
+          "description": "Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -9214,7 +9214,7 @@
               "description": "Name of the slot track to sort."
             }
           ],
-          "returns": "{ montage_path, slot_name, segment_count, applied, saved, message }",
+          "returns": "{ montage_path, slot_name, segment_count, applied, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -20981,7 +20981,7 @@
         },
         {
           "name": "create_chooser_table",
-          "description": "Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails.",
+          "description": "Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails. An unknown result_type, or an output_object_class that does not load as a UClass, is an error checked before the asset is created or loaded.",
           "params": [
             {
               "name": "name",
@@ -21005,7 +21005,7 @@
               "name": "output_object_class",
               "jsonType": "string",
               "required": false,
-              "description": "UClass path used as OutputObjectType (default UObject), loaded via LoadObject<UClass>."
+              "description": "UClass path used as OutputObjectType (default UObject), loaded via LoadObject<UClass>; a path that does not load is an error."
             }
           ],
           "returns": "{ asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null, saved: bool, save_error?: string }",
@@ -27309,7 +27309,7 @@
         },
         {
           "name": "get_niagara_data_interfaces",
-          "description": "List all UNiagaraDataInterface user-parameter bindings on a Niagara system.",
+          "description": "List all UNiagaraDataInterface user-parameter bindings on a Niagara system. parameter_name is the user parameter's short name (no \"User.\" prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store.",
           "params": [
             {
               "name": "system_path",
@@ -27318,7 +27318,7 @@
               "description": "Asset path of the Niagara System."
             }
           ],
-          "returns": "{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, data_interface_class, data_interface_class_path, path_name }] }",
+          "returns": "{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -34053,7 +34053,7 @@
         },
         {
           "name": "build_mesh_bvh",
-          "description": "Build a Bounding Volume Hierarchy for a DynamicMeshActor's dynamic mesh via UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh. The BVH is required for the spatial-query cmds (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh). Idempotent: if b_only_if_invalid=true (default), a fresh BVH is built only when the existing one is invalid.",
+          "description": "Build a BVH (bounding volume hierarchy) for the live dynamic mesh of a DynamicMeshActor in the editor world with BuildBVHForMesh, and read it back with IsBVHValidForMesh. The plugin keeps no BVH between calls: this one is dropped on return, and the spatial-query tools (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh) build their own on every call, so they never need this first. It checks that a BVH can be built for the mesh as it is now: built is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34065,13 +34065,13 @@
               "name": "b_only_if_invalid",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional bool; defaults to true (skip rebuild if BVH is still valid)."
+              "description": "Optional bool, default true; it has no effect, since no earlier BVH is kept and every call builds a new one."
             }
           ],
-          "returns": "{ actor_name, built: bool, bvh_valid: bool, vertex_count, triangle_count }",
+          "returns": "{ actor_name, built: bool, b_only_if_invalid: bool, bvh_valid: bool, vertex_count, triangle_count } -- actor_name is the dynamic mesh component's name, not the actor label; b_only_if_invalid echoes the request; the counts are those of the mesh the BVH was built for.",
           "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": true,
+            "readOnlyHint": true,
+            "destructiveHint": false,
             "idempotentHint": true,
             "openWorldHint": false
           }
@@ -34116,7 +34116,7 @@
         },
         {
           "name": "copy_dynamic_mesh_to_static_mesh",
-          "description": "Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets).",
+          "description": "Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets). A lod_index outside 0 to 7 (a static mesh has at most 8 LODs) is an error checked before anything changes; one past the asset's last LOD adds the LODs in between, which the engine sets up to be reduced from an earlier LOD.",
           "params": [
             {
               "name": "actor_name",
@@ -34134,7 +34134,7 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional target LOD index (default 0). Clamped by the engine to [0, MAX_STATIC_MESH_LODS]."
+              "description": "Optional target LOD index, 0 to 7 (default 0); a negative index or one of 8 or more is refused."
             },
             {
               "name": "materials",
@@ -34271,7 +34271,7 @@
         },
         {
           "name": "find_nearest_point_on_mesh",
-          "description": "Find the nearest point on the mesh to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Builds a fresh BVH if needed, then queries.",
+          "description": "Find the nearest point on the live dynamic mesh of a DynamicMeshActor to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), then queries it, so the answer always reflects the latest mesh edits. found is false when no triangle lies within max_distance, or the mesh is empty. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34295,10 +34295,10 @@
               "name": "allow_unsafe_modified",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false)."
+              "description": "Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh."
             }
           ],
-          "returns": "{ actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z }",
+          "returns": "{ actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -34308,7 +34308,7 @@
         },
         {
           "name": "find_nearest_ray_intersection_with_mesh",
-          "description": "Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Builds a fresh BVH if needed.",
+          "description": "Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34326,7 +34326,7 @@
               "name": "ray_direction",
               "jsonType": "array",
               "required": false,
-              "description": "[x, y, z] direction of the ray (NOT auto-normalized; pass a unit vector for predictable distances)."
+              "description": "[x, y, z] direction of the ray; the engine normalizes it, so its length does not matter."
             },
             {
               "name": "max_distance",
@@ -34338,10 +34338,10 @@
               "name": "allow_unsafe_modified",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false)."
+              "description": "Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh."
             }
           ],
-          "returns": "{ actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z }",
+          "returns": "{ actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label; ray_parameter is a distance along the normalized direction.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -34912,7 +34912,7 @@
         },
         {
           "name": "is_bvh_valid_for_mesh",
-          "description": "Check whether a BVH for the DynamicMeshActor's dynamic mesh is currently valid via UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. Read-only: no allocation, no rebuild.",
+          "description": "Report whether a BVH built for the live dynamic mesh of a DynamicMeshActor in the editor world is valid for it, via BuildBVHForMesh then UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. The plugin keeps no BVH between calls (build_mesh_bvh and rebuild_mesh_bvh drop theirs, and the spatial-query tools build their own on every call), so no kept BVH can go stale after a mesh edit and that staleness is not tracked: this builds a BVH for the mesh as it is now and checks it, as each spatial query does. bvh_valid false means no valid BVH could be built for the mesh. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34921,7 +34921,7 @@
               "description": "Label or name of the target DynamicMeshActor."
             }
           ],
-          "returns": "{ actor_name, bvh_valid: bool }",
+          "returns": "{ actor_name, bvh_valid: bool } -- actor_name is the dynamic mesh component's name, not the actor label.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -34931,7 +34931,7 @@
         },
         {
           "name": "is_point_inside_mesh",
-          "description": "Test whether a 3D point is inside the mesh using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Builds a fresh BVH+FWN if needed.",
+          "description": "Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Every call builds a fresh BVH and fast winding tree from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34955,16 +34955,16 @@
               "name": "max_distance",
               "jsonType": "number",
               "required": false,
-              "description": "Optional float; max search distance for the spatial query (0 = unlimited)."
+              "description": "Optional float; it has no effect on this query, whose winding-number test uses no search distance."
             },
             {
               "name": "allow_unsafe_modified",
               "jsonType": "boolean",
               "required": false,
-              "description": "Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false)."
+              "description": "Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh."
             }
           ],
-          "returns": "{ actor_name, is_inside: bool, containment_outcome: string }",
+          "returns": "{ actor_name, is_inside: bool, containment_outcome: string } -- actor_name is the dynamic mesh component's name, not the actor label.",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -34989,11 +34989,11 @@
               "description": "Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds"
             }
           ],
-          "returns": "{ actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }",
+          "returns": "{ actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid } -- actor_name is the dynamic mesh component's name, not the actor label.",
           "annotations": {
-            "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -47436,7 +47436,7 @@
         },
         {
           "name": "create_procedural_box_mesh",
-          "description": "Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section. A negative section_index is an error.",
+          "description": "Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section: section_index replaces an existing section, or equals the section count to append a new one. A negative section_index, or one past the section count, is an error checked before anything changes.",
           "params": [
             {
               "name": "actor_label",
@@ -47454,7 +47454,7 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional target section index (>= 0); defaults to 0"
+              "description": "Optional target section index, 0 to the current section count (which appends a new section); defaults to 0"
             },
             {
               "name": "box_radius",
@@ -47472,14 +47472,14 @@
           "returns": "{ actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
         },
         {
           "name": "create_procedural_grid_mesh",
-          "description": "Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component, or a negative section_index, is an error. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.",
+          "description": "Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists, or appending a new one when section_index equals the section count. A missing actor or component, or a section_index that is negative or past the section count, is an error checked before anything changes. num_x * num_y is capped at 1,000,000 vertices (1000 x 1000) because each grid vertex costs about 300 bytes across the generated arrays, the section copy and the render buffers, so one call stays near 300 MB with every index far inside int32; a larger grid, or a count outside int32, is an error too. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.",
           "params": [
             {
               "name": "actor_label",
@@ -47497,19 +47497,19 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional target section index; defaults to 0"
+              "description": "Optional target section index, 0 to the current section count (which appends a new section); defaults to 0"
             },
             {
               "name": "num_x",
               "jsonType": "number",
               "required": false,
-              "description": "Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10"
+              "description": "Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000"
             },
             {
               "name": "num_y",
               "jsonType": "number",
               "required": false,
-              "description": "Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10"
+              "description": "Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000"
             },
             {
               "name": "grid_spacing",
@@ -47665,7 +47665,7 @@
         },
         {
           "name": "set_procedural_mesh_material",
-          "description": "Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.",
+          "description": "Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material. element_index may name a slot the component has (one per section, or an existing override) or the next one past them; a negative one, or one further past, is an error checked before anything changes. A slot that already holds the material succeeds with material_set false and a note, touching nothing; otherwise material_set is read back from the slot and the call fails when it is false.",
           "params": [
             {
               "name": "actor_label",
@@ -47683,10 +47683,10 @@
               "name": "element_index",
               "jsonType": "number",
               "required": false,
-              "description": "Material slot index, usually the section index; default 0 (not range-checked)"
+              "description": "Material slot index, usually the section index; default 0; from 0 up to the larger of the section count and the override count"
             }
           ],
-          "returns": "{ actor_label, material_path, element_index, material_set, previous_material_path? }",
+          "returns": "{ actor_label, material_path, element_index, material_set, previous_material_path?, note? }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -47866,7 +47866,7 @@
       "commands": [
         {
           "name": "add_eqs_generator",
-          "description": "Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. A missing option_index is created, appending empty options up to it; a negative one is an error.",
+          "description": "Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes.",
           "params": [
             {
               "name": "query_path",
@@ -47884,7 +47884,7 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional option index to target (default 0; created if missing)"
+              "description": "Optional option index to target (default 0); the current option count appends a new option, a larger index is refused"
             }
           ],
           "returns": "{ query_path, option_index, generator_class, generator_name, replaced, saved }",
@@ -47916,7 +47916,7 @@
         },
         {
           "name": "add_eqs_test",
-          "description": "Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it; a negative one is an error. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.",
+          "description": "Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.",
           "params": [
             {
               "name": "query_path",
@@ -47934,7 +47934,7 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional option index to target (default 0; created if missing)"
+              "description": "Optional option index to target (default 0); the current option count appends a new option, a larger index is refused"
             }
           ],
           "returns": "{ query_path, option_index, test_class, test_name, test_index, test_count, already_existed } — idempotent by test class within the option",
@@ -57247,16 +57247,17 @@
               "description": "Asset path of the Level Sequence."
             },
             {
-              "name": "sequence_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
-            },
-            {
               "name": "camera_binding_guid",
               "jsonType": "string",
               "required": true,
               "description": "GUID of the camera binding the cut switches to."
+            },
+            {
+              "name": "sequence_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "start_frame",
@@ -57391,8 +57392,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "start_frame",
@@ -57701,8 +57703,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "shot_sequence_path",
@@ -57744,8 +57747,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }",
@@ -57882,7 +57886,7 @@
         },
         {
           "name": "add_subsequence_track",
-          "description": "Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.",
+          "description": "Nests one Level Sequence in another: finds the target's first root track of exactly the subsequence class (never a cinematic shot track or another subclass) or adds one, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.",
           "params": [
             {
               "name": "sequence_path",
@@ -57893,8 +57897,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "sub_sequence_path",
@@ -58205,12 +58210,6 @@
               "description": "Asset path of the Level Sequence."
             },
             {
-              "name": "sequence_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
-            },
-            {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
@@ -58233,6 +58232,13 @@
               "jsonType": "string",
               "required": true,
               "description": "One of \"Float\", \"Bool\", \"Vector\", \"Color\", \"Visibility\"."
+            },
+            {
+              "name": "sequence_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_label",
@@ -58260,12 +58266,6 @@
               "description": "Full /Game path OR bare asset name of the target Level Sequence."
             },
             {
-              "name": "sequence_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
-            },
-            {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
@@ -58276,6 +58276,13 @@
               "jsonType": "string",
               "required": true,
               "description": "Component object name, component class name, or \"root\"."
+            },
+            {
+              "name": "sequence_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, actor_name: string, component_name: string, component_class: string, parent_binding_guid: string, binding_guid: string, display_name: string, possessable: bool, saved: bool, save_error?: string }",
@@ -58772,7 +58779,7 @@
         },
         {
           "name": "get_sequence_master_tracks",
-          "description": "List the master tracks and binding tracks of a Level Sequence.  A track is a \"master track\" if it has no binding GUID (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack). Binding tracks have a non-empty FGuid. This command returns both lists with class, name, section_count, binding_guid fields.",
+          "description": "List the master tracks and binding tracks of a Level Sequence.  A master track belongs to no object binding (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack, and the camera cut track, which is listed too); a binding track belongs to an object binding, whose guid it carries. This command returns both lists with class, name, section_count, binding_guid fields (binding_guid empty on a master track); total_track_count is their sum.",
           "params": [
             {
               "name": "sequence_path",
@@ -58836,7 +58843,7 @@
         },
         {
           "name": "get_sequence_track_count",
-          "description": "Flat readback of the total/master/binding track counts and per-class breakdown.",
+          "description": "Flat readback of the total/master/binding track counts and per-class breakdown. master_track_count counts the root tracks, the camera cut track included; binding_track_count counts the tracks of every object binding; total_track_count is their sum, and class_breakdown and total_section_count cover both.",
           "params": [
             {
               "name": "sequence_path",
@@ -58847,8 +58854,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             }
           ],
           "returns": "{ sequence_path: string, total_track_count: int, master_track_count: int, binding_track_count: int, total_section_count: int, distinct_class_count: int, class_breakdown: [{class, count}] }",
@@ -58880,7 +58888,7 @@
         },
         {
           "name": "get_timeline_info",
-          "description": "Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.",
+          "description": "Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts. master_track_count counts the root tracks, the camera cut track included, as get_sequence_tracks lists them.",
           "params": [
             {
               "name": "sequence_name",
@@ -59377,16 +59385,17 @@
               "description": "Asset path of the Level Sequence."
             },
             {
-              "name": "sequence_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
-            },
-            {
               "name": "track_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name OR class short name of the track to remove."
+            },
+            {
+              "name": "sequence_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "track_class",
@@ -59577,8 +59586,9 @@
             {
               "name": "sequence_name",
               "jsonType": "string",
-              "required": true,
-              "description": "Alias for sequence_path."
+              "required": false,
+              "description": "Alias for sequence_path.",
+              "aliasOf": "sequence_path"
             },
             {
               "name": "section_index",

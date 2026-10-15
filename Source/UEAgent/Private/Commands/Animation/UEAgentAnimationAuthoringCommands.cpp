@@ -114,6 +114,17 @@ namespace
             : FString::Printf(TEXT("%s%s; save not persisted (%s)"), Done, UnsavedNote, *SaveError);
     }
 
+    // The reply of a valid call that changed nothing: success with saved=false and Note under NoteField. The
+    // asset was neither modified, dirtied nor saved, so a Play-in-Editor session or a read-only root cannot
+    // turn the no-op into a failure.
+    TSharedPtr<FJsonObject> AnimAuthoring_NoChangeReply(const TSharedPtr<FJsonObject>& Obj, const FString& Note,
+        const TCHAR* NoteField = TEXT("message"))
+    {
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(NoteField, Note);
+        return mcp_common::MakeOkReply(Obj);
+    }
+
     // The optional "package_path" param without trailing slashes; DefaultFolder when absent or empty.
     FString AnimAuthoring_ReadPackagePath(const TSharedPtr<FJsonObject>& Params, const TCHAR* DefaultFolder)
     {
@@ -140,12 +151,12 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_montage
 // ---------------------------------------------------------------------------
-// MCP:create_anim_montage - Create and save an empty-but-valid UAnimMontage asset under /Game
+// MCP:create_anim_montage - Create and save an empty-but-valid UAnimMontage asset under /Game. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param name - Asset name (e.g. 'AM_Example').
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
 //   @param slot_name - Montage slot name (e.g. DefaultSlot)
 //   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, message }
+//   @returns { name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreateAnimMontage(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -194,13 +205,13 @@ TSharedPtr<FJsonObject> HandleCreateAnimMontage(const TSharedPtr<FJsonObject>& P
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: if it already exists, load + return a stable payload. Nothing changed, so nothing is saved.
     if (UAnimMontage* Existing = AnimAssetUtils::FindExisting<UAnimMontage>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("AnimMontage already exists; loaded existing asset"));
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("message"), TEXT("AnimMontage already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -216,10 +227,13 @@ TSharedPtr<FJsonObject> HandleCreateAnimMontage(const TSharedPtr<FJsonObject>& P
     Montage->SetSkeleton(Skeleton);
 
     // Add a slot animation track so the montage is structurally valid even without an
-    // AnimSequence segment (AddSlot appends an FSlotAnimationTrack with the given name).
-    if (!Montage->IsValidSlot(FName(*SlotName)))
+    // AnimSequence segment (AddSlot appends an FSlotAnimationTrack with the given name). The
+    // constructor already adds DefaultSlot, so look the name up: UAnimMontage::IsValidSlot is
+    // false for a track with no segment, and testing it would add a second, empty DefaultSlot.
+    const FName SlotFName(*SlotName);
+    if (!Montage->SlotAnimTracks.ContainsByPredicate([SlotFName](const FSlotAnimationTrack& Track) { return Track.SlotName == SlotFName; }))
     {
-        Montage->AddSlot(FName(*SlotName));
+        Montage->AddSlot(SlotFName);
     }
 
     // Ensure a starting composite section at t=0 (mirrors UAnimMontageFactory::EnsureStartingSection).
@@ -273,7 +287,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_blend_space
 // ---------------------------------------------------------------------------
-// MCP:create_blend_space - Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
+// MCP:create_blend_space - Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game. Idempotent: a UBlendSpace already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param name - Asset name (e.g. 'BS_Example').
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
 //   @param is_1d - If true create a 1D BlendSpace, else 2D (default false)
@@ -281,7 +295,7 @@ namespace
 //   @param axis_min - X-axis minimum value (default 0)
 //   @param axis_max - X-axis maximum value (default 100)
 //   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, message }
+//   @returns { name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -331,13 +345,13 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: if it already exists, load + return a stable payload. Nothing changed, so nothing is saved.
     if (UBlendSpace* Existing = AnimAssetUtils::FindExisting<UBlendSpace>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("BlendSpace already exists; loaded existing asset"));
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("message"), TEXT("BlendSpace already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -390,10 +404,10 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_anim_notify_name
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify_name - Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.
+// MCP:add_anim_notify_name - Register a notify name in the AnimationNotifies list of a USkeleton inside an undo transaction and save the skeleton package; returns present, notify_count and saved. A name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton. A failed save makes success false, with saved=false and save_error.
 //   @param notify_name - The notify name to register (e.g. 'Footstep').
 //   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
-//   @returns { skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }
+//   @returns { skeleton_path, notify_name, present, added, already_existed, notify_count, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& Params)
 {
     FString NotifyName;
@@ -404,39 +418,47 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& P
 
     const FName NotifyFName(*NotifyName);
 
-    const FScopedTransaction Transaction(LOCTEXT("AddAnimNotifyName", "Add Anim Notify Name"));
-    Skeleton->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
+    Obj->SetStringField(TEXT("notify_name"), NotifyName);
 
-    bool bAlreadyExisted = false;
-    bool bPresent = false;
-    bAlreadyExisted = Skeleton->AnimationNotifies.Contains(NotifyFName);
-    // AddNewAnimationNotify uses AddUnique semantics internally.
-    Skeleton->AddNewAnimationNotify(NotifyFName);
-    bPresent = Skeleton->AnimationNotifies.Contains(NotifyFName);
+    // A name already registered changes nothing: answered before Modify() would dirty the skeleton.
+    if (Skeleton->AnimationNotifies.Contains(NotifyFName))
+    {
+        Obj->SetBoolField(TEXT("present"), true);
+        Obj->SetBoolField(TEXT("added"), false);
+        Obj->SetBoolField(TEXT("already_existed"), true);
+        Obj->SetNumberField(TEXT("notify_count"), Skeleton->AnimationNotifies.Num());
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Anim notify name already registered on the skeleton; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("AddAnimNotifyName", "Add Anim Notify Name"));
+        Skeleton->Modify();
+        Skeleton->AddNewAnimationNotify(NotifyFName);
+    }
+    const bool bPresent = Skeleton->AnimationNotifies.Contains(NotifyFName);
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Skeleton, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
-    Obj->SetStringField(TEXT("notify_name"), NotifyName);
     Obj->SetBoolField(TEXT("present"), bPresent);
     Obj->SetBoolField(TEXT("added"), bPresent);
-    Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Obj->SetBoolField(TEXT("already_existed"), false);
     Obj->SetNumberField(TEXT("notify_count"), Skeleton->AnimationNotifies.Num());
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Anim notify registered on skeleton and saved to disk")
         : FString::Printf(TEXT("Anim notify registered in-memory; save not persisted (%s)"), *SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_notify_name"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_notify_name"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_anim_curve_name
 // ---------------------------------------------------------------------------
-// MCP:add_anim_curve_name - Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is kept, reported as already_existed=true, and the skeleton is saved anyway. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false.
+// MCP:add_anim_curve_name - Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false, with saved=false and save_error.
 //   @param curve_name - The curve name to add (e.g. 'Curve_Example').
 //   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
-//   @returns { skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }
+//   @returns { skeleton_path, curve_name, present, added, already_existed, curve_count, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimCurveName(const TSharedPtr<FJsonObject>& Params)
 {
     FString CurveName;
@@ -447,32 +469,46 @@ TSharedPtr<FJsonObject> HandleAddAnimCurveName(const TSharedPtr<FJsonObject>& Pa
 
     const FName CurveFName(*CurveName);
 
-    const FScopedTransaction Transaction(LOCTEXT("AddAnimCurveName", "Add Anim Curve Name"));
-    Skeleton->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
+    Obj->SetStringField(TEXT("curve_name"), CurveName);
 
-    // USkeleton::AddCurveMetaData(Name, bTransact) returns true if a new entry was added,
-    // false if one already existed. Either way the name is present afterwards.
-    const bool bAddedNew = Skeleton->AddCurveMetaData(CurveFName, /*bTransact=*/false);
+    // A name already registered changes nothing: answered before Modify() would dirty the skeleton.
+    TArray<FName> Names;
+    Skeleton->GetCurveMetaDataNames(Names);
+    if (Names.Contains(CurveFName))
+    {
+        Obj->SetBoolField(TEXT("present"), true);
+        Obj->SetBoolField(TEXT("added"), false);
+        Obj->SetBoolField(TEXT("already_existed"), true);
+        Obj->SetNumberField(TEXT("curve_count"), Names.Num());
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Anim curve metadata already registered on the skeleton; nothing changed, nothing saved"));
+    }
+
+    bool bAddedNew = false;
+    {
+        const FScopedTransaction Transaction(LOCTEXT("AddAnimCurveName", "Add Anim Curve Name"));
+        Skeleton->Modify();
+        // USkeleton::AddCurveMetaData(Name, bTransact) returns true if a new entry was added.
+        bAddedNew = Skeleton->AddCurveMetaData(CurveFName, /*bTransact=*/false);
+    }
 
     // Verify present by enumerating curve metadata names.
-    TArray<FName> Names;
+    Names.Reset();
     Skeleton->GetCurveMetaDataNames(Names);
     const bool bPresent = Names.Contains(CurveFName);
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Skeleton, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
-    Obj->SetStringField(TEXT("curve_name"), CurveName);
     Obj->SetBoolField(TEXT("present"), bPresent);
-    Obj->SetBoolField(TEXT("added"), bPresent);
-    Obj->SetBoolField(TEXT("already_existed"), !bAddedNew);
+    Obj->SetBoolField(TEXT("added"), bAddedNew && bPresent);
+    Obj->SetBoolField(TEXT("already_existed"), false);
     Obj->SetNumberField(TEXT("curve_count"), Names.Num());
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Anim curve metadata added to skeleton and saved to disk")
         : FString::Printf(TEXT("Anim curve metadata added in-memory; save not persisted (%s)"), *SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_curve_name"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_curve_name"), SaveError);
 }
 
 // ===========================================================================
@@ -558,11 +594,11 @@ namespace
 // ---------------------------------------------------------------------------
 // add_montage_section
 // ---------------------------------------------------------------------------
-// MCP:add_montage_section - Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.
+// MCP:add_montage_section - Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections, already_existed and added (true only for a new section). A section of that name already at that start time is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_name - Name of the section to add (e.g. 'Loop').
 //   @param start_time - Absolute section start time in seconds (default 0)
-//   @returns { montage_path, section_name, start_time, section_count, sections, already_existed, added, saved, message }
+//   @returns { montage_path, section_name, start_time, section_count, sections, already_existed, added, changed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -579,44 +615,58 @@ TSharedPtr<FJsonObject> HandleAddMontageSection(const TSharedPtr<FJsonObject>& P
 
     const FName SectionFName(*SectionName);
 
-    const FScopedTransaction Transaction(LOCTEXT("AddMontageSection", "Add Montage Section"));
-    Montage->Modify();
-
-    // Idempotent: reuse an existing section of the same name, otherwise append a new one.
+    // Idempotent: reuse an existing section of the same name, otherwise append a new one. An existing section
+    // already at that time changes nothing: answered before Modify() would dirty the montage.
     FCompositeSection* Target = AnimAuthoring_FindSection(Montage, SectionFName);
     const bool bAlreadyExisted = Target != nullptr;
-    if (!Target)
-    {
-        FCompositeSection NewSection;
-        NewSection.SectionName = SectionFName;
-        const int32 NewIndex = Montage->CompositeSections.Add(NewSection);
-        Target = &Montage->CompositeSections[NewIndex];
-    }
-    // SetTime stores the absolute time into LinkValue (Absolute reference frame).
-    Target->SetTime(static_cast<float>(StartTime));
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("section_name"), SectionName);
+    Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Obj->SetBoolField(TEXT("added"), !bAlreadyExisted);
+
+    if (Target && Target->GetTime() == static_cast<float>(StartTime))
+    {
+        Obj->SetNumberField(TEXT("start_time"), Target->GetTime());
+        Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
+        Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
+        Obj->SetBoolField(TEXT("changed"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Montage section already exists at that start time; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("AddMontageSection", "Add Montage Section"));
+        Montage->Modify();
+        if (!Target)
+        {
+            FCompositeSection NewSection;
+            NewSection.SectionName = SectionFName;
+            const int32 NewIndex = Montage->CompositeSections.Add(NewSection);
+            Target = &Montage->CompositeSections[NewIndex];
+        }
+        // SetTime stores the absolute time into LinkValue (Absolute reference frame).
+        Target->SetTime(static_cast<float>(StartTime));
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetNumberField(TEXT("start_time"), Target->GetTime());
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
-    Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Obj->SetBoolField(TEXT("added"), true);
-    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage section added"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_section"));
+    Obj->SetBoolField(TEXT("changed"), true);
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(bAlreadyExisted ? TEXT("Montage section moved") : TEXT("Montage section added"), bSaved, SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_montage_slot
 // ---------------------------------------------------------------------------
-// MCP:add_montage_slot - Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.
+// MCP:add_montage_slot - Add an empty slot animation track with the given slot name to a UAnimMontage in an undo transaction and save it; an existing slot of that name is a success with added=false, already_existed=true and saved=false, and the montage is neither modified nor saved. Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to add (e.g. 'UpperBody').
-//   @returns { montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, message }
+//   @returns { montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddMontageSlot(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -630,41 +680,50 @@ TSharedPtr<FJsonObject> HandleAddMontageSlot(const TSharedPtr<FJsonObject>& Para
 
     const FName SlotFName(*SlotName);
 
-    const FScopedTransaction Transaction(LOCTEXT("AddMontageSlot", "Add Montage Slot"));
-    Montage->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
+    Obj->SetStringField(TEXT("slot_name"), SlotName);
 
-    // UAnimMontage::IsValidSlot returns true if a slot track with this name exists.
-    const bool bAlreadyExisted = Montage->IsValidSlot(SlotFName);
-    if (!bAlreadyExisted)
+    // A slot track with this name already exists: nothing changes, answered before Modify() would dirty the
+    // montage. Not UAnimMontage::IsValidSlot, which is false for a track that has no segment yet.
+    if (AnimAuthoring_FindSlotTrack(Montage, SlotFName))
     {
+        Obj->SetNumberField(TEXT("slot_count"), Montage->SlotAnimTracks.Num());
+        Obj->SetArrayField(TEXT("slots"), CollectSlotNames(Montage));
+        Obj->SetBoolField(TEXT("present"), true);
+        Obj->SetBoolField(TEXT("already_existed"), true);
+        Obj->SetBoolField(TEXT("added"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Montage slot track already exists; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("AddMontageSlot", "Add Montage Slot"));
+        Montage->Modify();
         // AddSlot appends an FSlotAnimationTrack with the given SlotName.
         Montage->AddSlot(SlotFName);
     }
-    const bool bPresent = Montage->IsValidSlot(SlotFName);
+    const bool bPresent = AnimAuthoring_FindSlotTrack(Montage, SlotFName) != nullptr;
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-    Obj->SetStringField(TEXT("slot_name"), SlotName);
     Obj->SetNumberField(TEXT("slot_count"), Montage->SlotAnimTracks.Num());
     Obj->SetArrayField(TEXT("slots"), CollectSlotNames(Montage));
     Obj->SetBoolField(TEXT("present"), bPresent);
-    Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Obj->SetBoolField(TEXT("already_existed"), false);
     Obj->SetBoolField(TEXT("added"), bPresent);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage slot track added"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_slot"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_slot"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_montage_notify
 // ---------------------------------------------------------------------------
-// MCP:add_montage_notify - Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.
+// MCP:add_montage_notify - Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param notify_name - Name of the notify event (e.g. 'Footstep').
 //   @param trigger_time - Absolute notify trigger time in seconds (default 0)
-//   @returns { montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, message }
+//   @returns { montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddMontageNotify(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -706,17 +765,17 @@ TSharedPtr<FJsonObject> HandleAddMontageNotify(const TSharedPtr<FJsonObject>& Pa
     Obj->SetArrayField(TEXT("notifies"), CollectNotifyNames(Montage));
     Obj->SetBoolField(TEXT("added"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage notify added"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_notify"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_montage_notify"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_montage_blend_times
 // ---------------------------------------------------------------------------
-// MCP:set_montage_blend_times - Set the blend-in / blend-out times on a UAnimMontage
+// MCP:set_montage_blend_times - Set the blend-in / blend-out times (clamped to >= 0) on a UAnimMontage in an undo transaction and save it. Times the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param blend_in - Blend-in time in seconds (defaults to current value)
 //   @param blend_out - Blend-out time in seconds (defaults to current value)
-//   @returns { montage_path, blend_in, blend_out, applied, saved, message }
+//   @returns { montage_path, blend_in, blend_out, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetMontageBlendTimes(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -731,16 +790,34 @@ TSharedPtr<FJsonObject> HandleSetMontageBlendTimes(const TSharedPtr<FJsonObject>
     const bool bHasBlendIn = Params->TryGetNumberField(TEXT("blend_in"), BlendIn);
     const bool bHasBlendOut = Params->TryGetNumberField(TEXT("blend_out"), BlendOut);
 
-    const FScopedTransaction Transaction(LOCTEXT("SetMontageBlendTimes", "Set Montage Blend Times"));
-    Montage->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
 
-    if (bHasBlendIn)
+    // FAlphaBlend::SetBlendTime clamps to >= 0: a time the montage already has after that clamp, or no time
+    // at all, changes nothing and is answered before Modify() would dirty the montage.
+    const float NewIn = FMath::Max(static_cast<float>(BlendIn), 0.0f);
+    const float NewOut = FMath::Max(static_cast<float>(BlendOut), 0.0f);
+    const bool bInChanges = bHasBlendIn && NewIn != Montage->BlendIn.GetBlendTime();
+    const bool bOutChanges = bHasBlendOut && NewOut != Montage->BlendOut.GetBlendTime();
+    if (!bInChanges && !bOutChanges)
     {
-        Montage->BlendIn.SetBlendTime(static_cast<float>(BlendIn));
+        Obj->SetNumberField(TEXT("blend_in"), Montage->BlendIn.GetBlendTime());
+        Obj->SetNumberField(TEXT("blend_out"), Montage->BlendOut.GetBlendTime());
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has those blend times; nothing changed, nothing saved"));
     }
-    if (bHasBlendOut)
+
     {
-        Montage->BlendOut.SetBlendTime(static_cast<float>(BlendOut));
+        const FScopedTransaction Transaction(LOCTEXT("SetMontageBlendTimes", "Set Montage Blend Times"));
+        Montage->Modify();
+        if (bInChanges)
+        {
+            Montage->BlendIn.SetBlendTime(NewIn);
+        }
+        if (bOutChanges)
+        {
+            Montage->BlendOut.SetBlendTime(NewOut);
+        }
     }
 
     // Read back the values that actually landed on the FAlphaBlend members.
@@ -750,13 +827,11 @@ TSharedPtr<FJsonObject> HandleSetMontageBlendTimes(const TSharedPtr<FJsonObject>
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetNumberField(TEXT("blend_in"), AppliedIn);
     Obj->SetNumberField(TEXT("blend_out"), AppliedOut);
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage blend times set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_blend_times"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_blend_times"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -806,10 +881,10 @@ TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Para
 // Idempotent: a missing section returns success with already_existed=false and the
 // current sections list (no fake removed=true). The caller can branch on the boolean.
 // ---------------------------------------------------------------------------
-// MCP:delete_montage_section - Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.
+// MCP:delete_montage_section - Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_name - Name of the FCompositeSection to remove; compared as an FName, so case is ignored.
-//   @returns { montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }
+//   @returns { montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, save_error, message }
 TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -853,7 +928,7 @@ TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage section removed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("delete_montage_section"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("delete_montage_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -867,10 +942,10 @@ TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>
 // Idempotent: out-of-range index returns an error with notify_count for diagnostics
 // (caller can recover by re-listing). We do not fabricate a removed=true result.
 // ---------------------------------------------------------------------------
-// MCP:remove_montage_notify - Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.
+// MCP:remove_montage_notify - Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param notify_index - Zero-based index into the montage's Notifies array. Use get_montage_info first to list notifies.
-//   @returns { montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, message }
+//   @returns { montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemoveMontageNotify(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -915,7 +990,7 @@ TSharedPtr<FJsonObject> HandleRemoveMontageNotify(const TSharedPtr<FJsonObject>&
     Obj->SetNumberField(TEXT("notify_count"), Montage->Notifies.Num());
     Obj->SetArrayField(TEXT("notifies"), CollectNotifyNames(Montage));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage notify removed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_notify"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_notify"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -931,11 +1006,11 @@ TSharedPtr<FJsonObject> HandleRemoveMontageNotify(const TSharedPtr<FJsonObject>&
 // Idempotent: a missing slot returns success with already_existed=false and the
 // current slots list (no fake removed=true), mirroring delete_montage_section.
 // ---------------------------------------------------------------------------
-// MCP:remove_montage_slot - Remove a slot animation track from a UAnimMontage by name or index
+// MCP:remove_montage_slot - Remove a slot animation track from a UAnimMontage by name or index. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the FSlotAnimationTrack to remove (FName). Either this or slot_index is required.
 //   @param slot_index - Zero-based index into SlotAnimTracks (alternative to slot_name). Use get_montage_info first to list slots.
-//   @returns { montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, message }
+//   @returns { montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemoveMontageSlot(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -1022,7 +1097,7 @@ TSharedPtr<FJsonObject> HandleRemoveMontageSlot(const TSharedPtr<FJsonObject>& P
     Obj->SetNumberField(TEXT("slot_count"), Montage->SlotAnimTracks.Num());
     Obj->SetArrayField(TEXT("slots"), CollectSlotNames(Montage));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage slot track removed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_slot"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_montage_slot"), SaveError);
 }
 
 // ===========================================================================
@@ -1031,11 +1106,11 @@ TSharedPtr<FJsonObject> HandleRemoveMontageSlot(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // create_anim_composite
 // ---------------------------------------------------------------------------
-// MCP:create_anim_composite - Create and save a UAnimComposite asset bound to a USkeleton, under /Game
+// MCP:create_anim_composite - Create and save a UAnimComposite asset bound to a USkeleton, under /Game. Idempotent: a UAnimComposite already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param name - Asset name (e.g. 'AnimComp_Example').
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
 //   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, message }
+//   @returns { name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreateAnimComposite(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -1062,13 +1137,13 @@ TSharedPtr<FJsonObject> HandleCreateAnimComposite(const TSharedPtr<FJsonObject>&
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: if it already exists, load + return a stable payload. Nothing changed, so nothing is saved.
     if (UAnimComposite* Existing = AnimAssetUtils::FindExisting<UAnimComposite>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("AnimComposite already exists; loaded existing asset"));
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("message"), TEXT("AnimComposite already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -1100,11 +1175,11 @@ TSharedPtr<FJsonObject> HandleCreateAnimComposite(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // create_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:create_pose_asset - Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true, even when bound to another skeleton. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.
+// MCP:create_pose_asset - Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true and saved=false, even when bound to another skeleton, and nothing is saved. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false, with saved=false and save_error. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.
 //   @param name - Asset name (e.g. 'Pose_Example').
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
 //   @param skeleton_path - Asset path of the target Skeleton
-//   @returns { name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, message }
+//   @returns { name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreatePoseAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -1131,13 +1206,13 @@ TSharedPtr<FJsonObject> HandleCreatePoseAsset(const TSharedPtr<FJsonObject>& Par
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: if it already exists, load + return a stable payload. Nothing changed, so nothing is saved.
     if (UPoseAsset* Existing = AnimAssetUtils::FindExisting<UPoseAsset>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("PoseAsset already exists; loaded existing asset"));
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("message"), TEXT("PoseAsset already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -1169,10 +1244,10 @@ TSharedPtr<FJsonObject> HandleCreatePoseAsset(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // add_pose_to_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:add_pose_to_pose_asset - Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.
+// MCP:add_pose_to_pose_asset - Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_path - Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example').
 //   @param pose_name - Name of the pose to add (e.g. 'RefPose_A').
-//   @returns { pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, message }
+//   @returns { pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PoseAssetPath;
@@ -1219,18 +1294,18 @@ TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& 
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Reference pose added to PoseAsset (from skeleton ref pose) and saved to disk")
         : FString::Printf(TEXT("Reference pose added to PoseAsset in-memory; save not persisted (%s)"), *SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_to_pose_asset"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_to_pose_asset"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_anim_montage_rate_scale
 // ---------------------------------------------------------------------------
-// MCP:set_anim_montage_rate_scale - Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage
+// MCP:set_anim_montage_rate_scale - Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage in an undo transaction and save it. Values the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Path to the UAnimMontage (e.g. '/Game/MyGame/AM_Example').
 //   @param name - Alias of montage_path
 //   @param rate_scale - Global play rate scale (defaults to current value)
 //   @param blend_out_trigger_time - Blend-out trigger time in seconds (defaults to current value)
-//   @returns { montage_path, rate_scale, blend_out_trigger_time, applied, saved, message }
+//   @returns { montage_path, rate_scale, blend_out_trigger_time, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimMontageRateScale(const TSharedPtr<FJsonObject>& Params)
 {
     // Accept montage_path, or its alias 'name', for the asset path.
@@ -1254,16 +1329,31 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageRateScale(const TSharedPtr<FJsonObje
     double BlendOutTrigger = Montage->BlendOutTriggerTime;
     const bool bHasTrigger = Params->TryGetNumberField(TEXT("blend_out_trigger_time"), BlendOutTrigger);
 
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimMontageRateScale", "Set Anim Montage Rate Scale"));
-    Montage->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
 
-    if (bHasRate)
+    // Values the montage already has, or none given, change nothing: answered before Modify() would dirty it.
+    const bool bRateChanges = bHasRate && static_cast<float>(RateScale) != Montage->RateScale;
+    const bool bTriggerChanges = bHasTrigger && static_cast<float>(BlendOutTrigger) != Montage->BlendOutTriggerTime;
+    if (!bRateChanges && !bTriggerChanges)
     {
-        Montage->RateScale = static_cast<float>(RateScale);
+        Obj->SetNumberField(TEXT("rate_scale"), Montage->RateScale);
+        Obj->SetNumberField(TEXT("blend_out_trigger_time"), Montage->BlendOutTriggerTime);
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has that rate scale and blend-out trigger time; nothing changed, nothing saved"));
     }
-    if (bHasTrigger)
+
     {
-        Montage->BlendOutTriggerTime = static_cast<float>(BlendOutTrigger);
+        const FScopedTransaction Transaction(LOCTEXT("SetAnimMontageRateScale", "Set Anim Montage Rate Scale"));
+        Montage->Modify();
+        if (bRateChanges)
+        {
+            Montage->RateScale = static_cast<float>(RateScale);
+        }
+        if (bTriggerChanges)
+        {
+            Montage->BlendOutTriggerTime = static_cast<float>(BlendOutTrigger);
+        }
     }
 
     // Read back the values that actually landed on the asset.
@@ -1273,13 +1363,11 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageRateScale(const TSharedPtr<FJsonObje
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetNumberField(TEXT("rate_scale"), AppliedRate);
     Obj->SetNumberField(TEXT("blend_out_trigger_time"), AppliedTrigger);
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage rate scale set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_rate_scale"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_rate_scale"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1493,11 +1581,11 @@ namespace
 // ---------------------------------------------------------------------------
 // add_blendspace_sample
 // ---------------------------------------------------------------------------
-// MCP:add_blendspace_sample - Add a blend sample (animation + blend position) to a BlendSpace
+// MCP:add_blendspace_sample - Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace (e.g.
 //   @param animation_path - Full asset path to the UAnimSequence to use as sample.
 //   @param blend_value - Blend position: single number (1D) or array of up to 3 numbers (default 0)
-//   @returns { blendspace_path, sample_index, num_samples, success, saved, message }
+//   @returns { blendspace_path, sample_index, num_samples, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlendSpacePath;
@@ -1531,7 +1619,7 @@ TSharedPtr<FJsonObject> HandleAddBlendspaceSample(const TSharedPtr<FJsonObject>&
     Obj->SetNumberField(TEXT("sample_index"), SampleIndex);
     Obj->SetNumberField(TEXT("num_samples"), NumSamples);
     Obj->SetBoolField(TEXT("success"), SampleIndex != INDEX_NONE);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
+    mcp_common::AddSaveOutcome(Obj, bSaved, SaveError);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample added to blendspace"), bSaved, SaveError));
     // Success is BOTH things: the operation succeeded AND it persisted.
     return mcp_common::MakeOutcomeReply(Obj, (SampleIndex != INDEX_NONE) && bSaved,
@@ -1571,10 +1659,10 @@ namespace
 // remove_blendspace_sample and edit_blendspace_sample validate the index with IsValidBlendSampleIndex, NEVER
 // with GetBlendSample, which checkf-asserts on an invalid index.
 
-// MCP:remove_blendspace_sample - Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call.
+// MCP:remove_blendspace_sample - Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to remove.
-//   @returns { blendspace_path, removed, num_samples, samples, saved, message }
+//   @returns { blendspace_path, removed, num_samples, samples, saved, save_error, message }
 //   NOTE (impl): the reorder comes from UBlendSpace::DeleteSample using RemoveAtSwap.
 TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1615,18 +1703,18 @@ TSharedPtr<FJsonObject> HandleRemoveBlendspaceSample(const TSharedPtr<FJsonObjec
     Obj->SetStringField(TEXT("message"), bSaved
         ? TEXT("Sample removed (RemoveAtSwap reordered remaining indices); saved to disk")
         : FString::Printf(TEXT("Sample removed in-memory; save not persisted (%s)"), *SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_blendspace_sample"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_blendspace_sample"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // edit_blendspace_sample
 // ---------------------------------------------------------------------------
-// MCP:edit_blendspace_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it.
+// MCP:edit_blendspace_sample - Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @param index - Index of the sample to edit.
 //   @param blend_value - New blend position: single number (1D) or array of up to 3 numbers (optional).
 //   @param animation_path - Full asset path to a UAnimSequence to replace the sample's animation (optional).
-//   @returns { blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, message }
+//   @returns { blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlendSpacePath;
@@ -1666,6 +1754,25 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
         {
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("Animation '%s' is not compatible with the blendspace skeleton"), *AnimationPath));
+        }
+    }
+
+    // A sample that already has the given value (and is valid) and animation changes nothing: answered before
+    // Modify() would dirty the blend space.
+    {
+        const FBlendSample& Current = BlendSpace->GetBlendSample(Index);
+        const bool bValueChanges = bHasBlendValue && (Current.SampleValue != BlendValue || !Current.bIsValid);
+        const bool bAnimationChanges = bHasAnimation && Current.Animation != NewAnim;
+        if (!bValueChanges && !bAnimationChanges)
+        {
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("blendspace_path"), BlendSpace->GetPathName());
+            Obj->SetNumberField(TEXT("index"), Index);
+            Obj->SetBoolField(TEXT("value_edited"), false);
+            Obj->SetBoolField(TEXT("animation_replaced"), false);
+            Obj->SetNumberField(TEXT("num_samples"), BlendSpace->GetNumberOfBlendSamples());
+            Obj->SetArrayField(TEXT("samples"), BuildBlendSampleArray(BlendSpace));
+            return AnimAuthoring_NoChangeReply(Obj, TEXT("The sample already has that blend value and animation; nothing changed, nothing saved"));
         }
     }
 
@@ -1716,7 +1823,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
     Obj->SetNumberField(TEXT("num_samples"), NumSamples);
     Obj->SetArrayField(TEXT("samples"), BuildBlendSampleArray(BlendSpace));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sample edited"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_blendspace_sample"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_blendspace_sample"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1745,12 +1852,12 @@ TSharedPtr<FJsonObject> HandleGetBlendspaceSamples(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // add_anim_notify
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify - Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.
+// MCP:add_anim_notify - Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state. A failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_name - Class name of a loaded UAnimNotify subclass, tried as given and then with the AnimNotify_ prefix (e.g. 'AN_Footstep', or "PlaySound" for AnimNotify_PlaySound); a Blueprint notify goes by its generated name ending in _C.
 //   @param time - Notify trigger time in seconds (default 0)
 //   @param track_name - Notify track name (default 'Default')
-//   @returns { animation_path, notify_name, time, success, saved, message }
+//   @returns { animation_path, notify_name, time, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimNotify(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -1801,7 +1908,7 @@ TSharedPtr<FJsonObject> HandleAddAnimNotify(const TSharedPtr<FJsonObject>& Param
     Obj->SetStringField(TEXT("notify_name"), NotifyName);
     Obj->SetNumberField(TEXT("time"), Time);
     Obj->SetBoolField(TEXT("success"), AddedNotify != nullptr);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
+    mcp_common::AddSaveOutcome(Obj, bSaved, SaveError);
     Obj->SetStringField(TEXT("message"), AddedNotify
         ? AnimAuthoring_SaveMessage(TEXT("Anim notify added"), bSaved, SaveError)
         : TEXT("Failed to add anim notify (invalid track or time)"));
@@ -1819,7 +1926,7 @@ TSharedPtr<FJsonObject> HandleAddAnimNotify(const TSharedPtr<FJsonObject>& Param
 // is absent removes 0 and reports already_absent=true (no fabricated success,
 // no save). Addressing mirrors add_anim_notify (by animation path + notify name,
 // via the AnimationBlueprintLibrary — NOT remove_montage_notify's by-index path).
-// MCP:remove_anim_notify - Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and nothing saved; a failed save makes success false, with saved=false and save_error.
+// MCP:remove_anim_notify - Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and saved=false, and the sequence is neither dirtied nor saved; a failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_name - Name of the notify to remove (matches FAnimNotifyEvent.NotifyName).
 //   @returns { animation_path, notify_name, removed, removed_count, already_absent, saved, save_error }
@@ -1834,22 +1941,27 @@ TSharedPtr<FJsonObject> HandleRemoveAnimNotify(const TSharedPtr<FJsonObject>& Pa
     UAnimSequence* AnimSeq = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(AnimationPath, TEXT("AnimSequence"), AnimSeq)) { return Error; }
 
-    const FScopedTransaction Transaction(LOCTEXT("RemoveAnimNotify", "Remove Anim Notify"));
-    AnimSeq->Modify();
+    // The library removes the events whose NotifyName matches; look for one first, so a name no event has
+    // neither opens a transaction nor calls Modify(), which would leave the package dirty for nothing.
+    const FName NotifyFName(*NotifyName);
+    const bool bAnyMatch = AnimSeq->Notifies.ContainsByPredicate(
+        [&NotifyFName](const FAnimNotifyEvent& Event) { return Event.NotifyName == NotifyFName; });
 
-    // By-name removal: the library call also fires RefreshCacheGuid / notify-sort.
-    const int32 Removed = UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName(
-        AnimSeq, FName(*NotifyName));
-    const bool bRemoved = Removed > 0;
-
-    // Honest headless: only persist when we actually mutated the asset.
+    int32 Removed = 0;
     FString SaveError;
     bool bSaved = false;
-    if (bRemoved)
+    if (bAnyMatch)
     {
+        {
+            const FScopedTransaction Transaction(LOCTEXT("RemoveAnimNotify", "Remove Anim Notify"));
+            AnimSeq->Modify();
+            // By-name removal: the library call also fires RefreshCacheGuid / notify-sort.
+            Removed = UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName(AnimSeq, NotifyFName);
+        }
         AnimSeq->MarkPackageDirty();
         bSaved = AnimAuthoring_SavePackageOf(AnimSeq, SaveError);
     }
+    const bool bRemoved = Removed > 0;
 
     UE_LOG(LogTemp, Verbose,
         TEXT("[remove_anim_notify] %s notify '%s' -> removed_count=%d (already_absent=%d, saved=%d)"),
@@ -1873,13 +1985,13 @@ TSharedPtr<FJsonObject> HandleRemoveAnimNotify(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_anim_notify_state
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify_state - Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.
+// MCP:add_anim_notify_state - Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify. A failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_state_name - Class name of a loaded UAnimNotifyState subclass, tried as given and then with the AnimNotifyState_ prefix (e.g. "Trail" for AnimNotifyState_Trail); a Blueprint notify state goes by its generated name ending in _C.
 //   @param start_time - Notify state start time in seconds (default 0)
 //   @param duration - Notify state duration in seconds (default 1.0)
 //   @param track_name - Notify track name (default 'Default')
-//   @returns { animation_path, notify_state_name, start_time, duration, success, saved, message }
+//   @returns { animation_path, notify_state_name, start_time, duration, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimNotifyState(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -1932,7 +2044,7 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyState(const TSharedPtr<FJsonObject>& 
     Obj->SetNumberField(TEXT("start_time"), StartTime);
     Obj->SetNumberField(TEXT("duration"), Duration);
     Obj->SetBoolField(TEXT("success"), AddedNotifyState != nullptr);
-    Obj->SetBoolField(TEXT("saved"), bSaved);
+    mcp_common::AddSaveOutcome(Obj, bSaved, SaveError);
     Obj->SetStringField(TEXT("message"), AddedNotifyState
         ? AnimAuthoring_SaveMessage(TEXT("Anim notify state added"), bSaved, SaveError)
         : TEXT("Failed to add anim notify state (invalid track or time)"));
@@ -2062,12 +2174,33 @@ namespace
         }
         return Keys;
     }
+
+    // Whether the float curve already holds Keys as SetCurveKeys would store them: the same number of keys,
+    // each with the same time, value, interpolation and tangent modes (its tangents then derive the same way).
+    bool AnimAuthoring_FloatCurveHasKeys(const FFloatCurve* Curve, const TArray<FRichCurveKey>& Keys)
+    {
+        if (!Curve || Curve->FloatCurve.Keys.Num() != Keys.Num())
+        {
+            return false;
+        }
+        for (int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
+        {
+            const FRichCurveKey& Held = Curve->FloatCurve.Keys[KeyIndex];
+            const FRichCurveKey& Wanted = Keys[KeyIndex];
+            if (Held.Time != Wanted.Time || Held.Value != Wanted.Value || Held.InterpMode != Wanted.InterpMode
+                || Held.TangentMode != Wanted.TangentMode || Held.TangentWeightMode != Wanted.TangentWeightMode)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // create_anim_sequence
 // ---------------------------------------------------------------------------
-// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
+// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, saved=false, length and rate not applied) and nothing is saved; another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
 //   @param anim_name - Asset name (no path).
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @param length_seconds - Sequence length in seconds (default 1.0)
@@ -2112,12 +2245,13 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: if it already exists, load + return a stable payload. Nothing changed, so nothing is saved.
     if (UAnimSequence* Existing = AnimAssetUtils::FindExisting<UAnimSequence>(FullPath))
     {
-        TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bSaved=*/true);
+        TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bSaved=*/false);
+        Obj->SetBoolField(TEXT("success"), true);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("AnimSequence already exists; loaded existing asset"));
+        Obj->SetStringField(TEXT("message"), TEXT("AnimSequence already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -2156,7 +2290,7 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_anim_bone_track
 // ---------------------------------------------------------------------------
-// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
 //   @param num_keys - Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence.
@@ -2378,11 +2512,11 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
 // rename_pose_in_pose_asset — rename a named pose in a UPoseAsset, with a read
 // back of the post-rename pose-name list.
 // ---------------------------------------------------------------------------
-// MCP:rename_pose_in_pose_asset - Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).
+// MCP:rename_pose_in_pose_asset - Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName) in an undo transaction and save it; renamed is measured by reading the pose names back. An unknown old_pose_name, a new_pose_name another pose already has, or a rename the engine does not take is an error with nothing saved; the same name for both is a success with renamed=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_path - Path to the UPoseAsset.
 //   @param old_pose_name - Current name of the pose to rename.
 //   @param new_pose_name - New name for the pose.
-//   @returns { pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, message }
+//   @returns { pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRenamePoseInPoseAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PoseAssetPath;
@@ -2403,27 +2537,57 @@ TSharedPtr<FJsonObject> HandleRenamePoseInPoseAsset(const TSharedPtr<FJsonObject
             FString::Printf(TEXT("Pose '%s' not found in PoseAsset"), *OldName));
     }
 
-    const FScopedTransaction Transaction(NSLOCTEXT("MCP", "RenamePoseInPoseAsset", "Rename Pose In Pose Asset"));
-    PoseAsset->Modify();
-
-    const bool bRenamed = PoseAsset->ModifyPoseName(OldFName, NewFName);
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
     Obj->SetStringField(TEXT("old_pose_name"), OldName);
     Obj->SetStringField(TEXT("new_pose_name"), NewName);
-    Obj->SetBoolField(TEXT("renamed"), bRenamed);
-    Obj->SetBoolField(TEXT("contains_new"), PoseAsset->ContainsPose(NewFName));
-    Obj->SetBoolField(TEXT("contains_old"), PoseAsset->ContainsPose(OldFName));
-    Obj->SetNumberField(TEXT("num_poses"), PoseAsset->GetNumPoses());
-    Obj->SetArrayField(TEXT("pose_names"), CollectPoseNames(PoseAsset));
-    Obj->SetStringField(TEXT("message"), bRenamed
-        ? TEXT("Pose renamed and saved to disk")
-        : TEXT("ModifyPoseName returned false (new name may already exist)"));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("rename_pose_in_pose_asset"));
+    const auto AddPoseState = [&]()
+    {
+        Obj->SetBoolField(TEXT("contains_new"), PoseAsset->ContainsPose(NewFName));
+        Obj->SetBoolField(TEXT("contains_old"), PoseAsset->ContainsPose(OldFName));
+        Obj->SetNumberField(TEXT("num_poses"), PoseAsset->GetNumPoses());
+        Obj->SetArrayField(TEXT("pose_names"), CollectPoseNames(PoseAsset));
+    };
+
+    // Renaming a pose to the name it already has changes nothing.
+    if (OldFName == NewFName)
+    {
+        Obj->SetBoolField(TEXT("renamed"), false);
+        AddPoseState();
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The pose already has that name; nothing changed, nothing saved"));
+    }
+    // ModifyPoseName refuses a name another pose already has; refused here before Modify() would dirty the asset.
+    if (PoseAsset->ContainsPose(NewFName))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("PoseAsset already has a pose named '%s'; nothing was renamed"), *NewName));
+    }
+
+    bool bRenamed = false;
+    {
+        FScopedTransaction Transaction(NSLOCTEXT("MCP", "RenamePoseInPoseAsset", "Rename Pose In Pose Asset"));
+        PoseAsset->Modify();
+        // Measured, not trusted: the rename took when the new name is there and the old one is gone.
+        bRenamed = PoseAsset->ModifyPoseName(OldFName, NewFName)
+            && PoseAsset->ContainsPose(NewFName) && !PoseAsset->ContainsPose(OldFName);
+        if (!bRenamed)
+        {
+            Transaction.Cancel();
+        }
+    }
+    if (!bRenamed)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The engine did not rename pose '%s' to '%s' (UPoseAsset::ModifyPoseName); nothing was saved"), *OldName, *NewName));
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
+
+    Obj->SetBoolField(TEXT("renamed"), true);
+    AddPoseState();
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Pose renamed"), bSaved, SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("rename_pose_in_pose_asset"), SaveError);
 }
 
 // ===========================================================================
@@ -2433,10 +2597,10 @@ TSharedPtr<FJsonObject> HandleRenamePoseInPoseAsset(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // remove_pose_from_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_from_pose_asset - Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.
+// MCP:remove_pose_from_pose_asset - Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset. An absent name is a success with removed=false and saved=false, and the asset is neither modified nor saved. Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_path - Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example').
 //   @param pose_name - Name of the pose to remove.
-//   @returns { pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, message }
+//   @returns { pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemovePoseFromPoseAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PoseAssetPath;
@@ -2450,18 +2614,30 @@ TSharedPtr<FJsonObject> HandleRemovePoseFromPoseAsset(const TSharedPtr<FJsonObje
     const FName PoseFName(*PoseName);
 
     // Idempotency guard: only the present case actually deletes; an absent name is a
-    // clean no-op (removed=false, removed_count=0), never a fake success.
+    // clean no-op (removed=false, removed_count=0), answered before Modify() would dirty the asset.
     const bool bWasPresent = PoseAsset->ContainsPose(PoseFName);
 
-    const FScopedTransaction Transaction(NSLOCTEXT("MCP", "RemovePoseFromPoseAsset", "Remove Pose From Pose Asset"));
-    PoseAsset->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
+    Obj->SetStringField(TEXT("pose_name"), PoseName);
+    Obj->SetBoolField(TEXT("was_present"), bWasPresent);
+    if (!bWasPresent)
+    {
+        Obj->SetNumberField(TEXT("removed_count"), 0);
+        Obj->SetBoolField(TEXT("removed"), false);
+        Obj->SetBoolField(TEXT("contains_after"), false);
+        Obj->SetNumberField(TEXT("num_poses"), PoseAsset->GetNumPoses());
+        Obj->SetArrayField(TEXT("pose_names"), CollectPoseNames(PoseAsset));
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Pose not present; nothing changed, nothing saved"));
+    }
 
     // DeletePoses fixes BasePoseIndex, calls PostProcessData and broadcasts OnPoseListChanged.
-    // It does NOT open its own transaction, so the FScopedTransaction above owns undo.
+    // It does NOT open its own transaction, so the FScopedTransaction below owns undo.
     // The returned count is the honest number of poses actually removed.
     int32 RemovedCount = 0;
-    if (bWasPresent)
     {
+        const FScopedTransaction Transaction(NSLOCTEXT("MCP", "RemovePoseFromPoseAsset", "Remove Pose From Pose Asset"));
+        PoseAsset->Modify();
         RemovedCount = PoseAsset->DeletePoses({ PoseFName });
     }
 
@@ -2470,28 +2646,22 @@ TSharedPtr<FJsonObject> HandleRemovePoseFromPoseAsset(const TSharedPtr<FJsonObje
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
-    Obj->SetStringField(TEXT("pose_name"), PoseName);
-    Obj->SetBoolField(TEXT("was_present"), bWasPresent);
     Obj->SetNumberField(TEXT("removed_count"), RemovedCount);
     Obj->SetBoolField(TEXT("removed"), RemovedCount > 0);
     Obj->SetBoolField(TEXT("contains_after"), bContainsAfter);
     Obj->SetNumberField(TEXT("num_poses"), PoseAsset->GetNumPoses());
     Obj->SetArrayField(TEXT("pose_names"), CollectPoseNames(PoseAsset));
-    Obj->SetStringField(TEXT("message"), bWasPresent
-        ? AnimAuthoring_SaveMessage(TEXT("Pose removed from PoseAsset"), bSaved, SaveError)
-        : TEXT("Pose not present; no-op (idempotent remove)"));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_pose_from_pose_asset"));
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Pose removed from PoseAsset"), bSaved, SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_pose_from_pose_asset"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_pose_asset_base_pose
 // ---------------------------------------------------------------------------
-// MCP:set_pose_asset_base_pose - Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes; check applied, false when the engine refused the name, and a failed save makes success false. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.
+// MCP:set_pose_asset_base_pose - Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes, and so is a base pose the engine does not take (read back from the asset), with nothing saved. The base pose the asset already has is a success with applied=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.
 //   @param pose_asset_path - Path to the UPoseAsset.
 //   @param base_pose_name - Name of the pose to use as the base; empty/None resets to the reference pose.
-//   @returns { pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, message }
+//   @returns { pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetPoseAssetBasePose(const TSharedPtr<FJsonObject>& Params)
 {
     FString PoseAssetPath;
@@ -2513,65 +2683,100 @@ TSharedPtr<FJsonObject> HandleSetPoseAssetBasePose(const TSharedPtr<FJsonObject>
             FString::Printf(TEXT("Pose '%s' not found in PoseAsset; cannot set as base pose"), *BasePoseName));
     }
 
-    const FScopedTransaction Transaction(NSLOCTEXT("MCP", "SetPoseAssetBasePose", "Set Pose Asset Base Pose"));
-    PoseAsset->Modify();
-
     // EXPORT-MACRO GOTCHA: UPoseAsset::SetBasePoseName is a bare UFUNCTION(BlueprintCallable)
     // WITHOUT ENGINE_API on the method line, so a direct cross-module C++ call would LNK2019.
-    // Invoke it through the reflection system (ProcessEvent) instead. The param frame mirrors
-    // the UFUNCTION signature: input FName followed by the bool return value.
-    bool bApplied = false;
-    if (UFunction* Func = PoseAsset->FindFunction(TEXT("SetBasePoseName")))
-    {
-        struct FSetBasePoseNameParms { FName NewBasePoseName; bool ReturnValue; };
-        FSetBasePoseNameParms Parms;
-        Parms.NewBasePoseName = BasePoseFName;
-        Parms.ReturnValue = false;
-        PoseAsset->ProcessEvent(Func, &Parms);
-        bApplied = Parms.ReturnValue;
-    }
-    else
+    // Invoke it through the reflection system (ProcessEvent) instead. Looked up before anything is touched.
+    UFunction* Func = PoseAsset->FindFunction(TEXT("SetBasePoseName"));
+    if (!Func)
     {
         return mcp_common::MakeErrorReply(
             TEXT("UPoseAsset::SetBasePoseName reflection function not found"));
     }
 
-    // Read back via the inline-exported GetBasePoseIndex() + GetPoseNameByIndex() (both are
-    // header-bodied / safe cross-module, unlike the un-exported GetBasePoseName()).
-    const int32 BaseIndex = PoseAsset->GetBasePoseIndex();
-    const FName ResolvedName = PoseAsset->GetPoseNameByIndex(BaseIndex);
-    const bool bIsRefPose = (BaseIndex == INDEX_NONE);
-    const bool bAdditive = PoseAsset->IsValidAdditive();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
+    // The index SetBasePoseName gives the name (INDEX_NONE for the reference pose), read through the
+    // inline-exported GetNumPoses() + GetPoseNameByIndex(), as the result below is.
+    int32 WantedIndex = INDEX_NONE;
+    if (BasePoseFName != NAME_None)
+    {
+        for (int32 PoseIndex = 0; PoseIndex < PoseAsset->GetNumPoses(); ++PoseIndex)
+        {
+            if (PoseAsset->GetPoseNameByIndex(PoseIndex) == BasePoseFName)
+            {
+                WantedIndex = PoseIndex;
+                break;
+            }
+        }
+    }
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
     Obj->SetStringField(TEXT("requested_name"), BasePoseName);
-    Obj->SetStringField(TEXT("base_pose_name"), bIsRefPose ? FString() : ResolvedName.ToString());
-    Obj->SetBoolField(TEXT("applied"), bApplied);
-    Obj->SetNumberField(TEXT("base_pose_index"), BaseIndex);
-    Obj->SetBoolField(TEXT("is_reference_pose"), bIsRefPose);
-    Obj->SetBoolField(TEXT("additive"), bAdditive);
-    // The base pose only drives evaluation when the PoseAsset is additive; it is settable
-    // regardless, so we note this honestly rather than rejecting the call.
-    Obj->SetStringField(TEXT("note"), bAdditive
-        ? TEXT("Base pose set on an additive PoseAsset (drives additive evaluation)")
-        : TEXT("Base pose recorded; only meaningful when the PoseAsset is additive (this one is not)"));
-    Obj->SetStringField(TEXT("message"), bApplied
-        ? AnimAuthoring_SaveMessage(TEXT("Base pose set"), bSaved, SaveError)
-        : TEXT("SetBasePoseName returned false"));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_pose_asset_base_pose"));
+    // Read back via the inline-exported GetBasePoseIndex() + GetPoseNameByIndex() (both are
+    // header-bodied / safe cross-module, unlike the un-exported GetBasePoseName()).
+    const auto AddBaseState = [&]()
+    {
+        const int32 BaseIndex = PoseAsset->GetBasePoseIndex();
+        const bool bIsRefPose = (BaseIndex == INDEX_NONE);
+        const bool bAdditive = PoseAsset->IsValidAdditive();
+        Obj->SetStringField(TEXT("base_pose_name"), bIsRefPose ? FString() : PoseAsset->GetPoseNameByIndex(BaseIndex).ToString());
+        Obj->SetNumberField(TEXT("base_pose_index"), BaseIndex);
+        Obj->SetBoolField(TEXT("is_reference_pose"), bIsRefPose);
+        Obj->SetBoolField(TEXT("additive"), bAdditive);
+        // The base pose only drives evaluation when the PoseAsset is additive; it is settable
+        // regardless, so we note this honestly rather than rejecting the call.
+        Obj->SetStringField(TEXT("note"), bAdditive
+            ? TEXT("Base pose set on an additive PoseAsset (drives additive evaluation)")
+            : TEXT("Base pose recorded; only meaningful when the PoseAsset is additive (this one is not)"));
+    };
+
+    // The base pose the asset already has changes nothing: answered before Modify() would dirty it.
+    if (PoseAsset->GetBasePoseIndex() == WantedIndex)
+    {
+        Obj->SetBoolField(TEXT("applied"), false);
+        AddBaseState();
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The PoseAsset already has that base pose; nothing changed, nothing saved"));
+    }
+
+    bool bApplied = false;
+    {
+        FScopedTransaction Transaction(NSLOCTEXT("MCP", "SetPoseAssetBasePose", "Set Pose Asset Base Pose"));
+        PoseAsset->Modify();
+        // The param frame mirrors the UFUNCTION signature: input FName followed by the bool return value.
+        struct FSetBasePoseNameParms { FName NewBasePoseName; bool ReturnValue; };
+        FSetBasePoseNameParms Parms;
+        Parms.NewBasePoseName = BasePoseFName;
+        Parms.ReturnValue = false;
+        PoseAsset->ProcessEvent(Func, &Parms);
+        // Measured, not trusted: the base pose took when the asset now reports the wanted index.
+        bApplied = Parms.ReturnValue && PoseAsset->GetBasePoseIndex() == WantedIndex;
+        if (!bApplied)
+        {
+            Transaction.Cancel();
+        }
+    }
+    if (!bApplied)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The engine did not set '%s' as the base pose (UPoseAsset::SetBasePoseName); nothing was saved"),
+            *BasePoseFName.ToString()));
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
+
+    Obj->SetBoolField(TEXT("applied"), true);
+    AddBaseState();
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Base pose set"), bSaved, SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_pose_asset_base_pose"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // remove_pose_curve
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_curve - Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.
+// MCP:remove_pose_curve - Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. Returns removed_count, removed and num_curves. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_path - Path to the UPoseAsset.
 //   @param curve_name - Name of the curve to remove.
-//   @returns { pose_asset_path, curve_name, removed_count, removed, num_curves, saved, message }
+//   @returns { pose_asset_path, curve_name, removed_count, removed, num_curves, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemovePoseCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString PoseAssetPath;
@@ -2584,33 +2789,43 @@ TSharedPtr<FJsonObject> HandleRemovePoseCurve(const TSharedPtr<FJsonObject>& Par
 
     const FName CurveFName(*CurveName);
 
-    const FScopedTransaction Transaction(NSLOCTEXT("MCP", "RemovePoseCurve", "Remove Pose Curve"));
-    PoseAsset->Modify();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
+    Obj->SetStringField(TEXT("curve_name"), CurveName);
+
+    // DeleteCurves removes the PoseContainer curves of that name, the ones GetCurveFNames lists: an absent
+    // curve changes nothing and is answered before Modify() would dirty the asset.
+    if (!PoseAsset->GetCurveFNames().Contains(CurveFName))
+    {
+        Obj->SetNumberField(TEXT("removed_count"), 0);
+        Obj->SetBoolField(TEXT("removed"), false);
+        Obj->SetNumberField(TEXT("num_curves"), PoseAsset->GetCurveFNames().Num());
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("Curve not present; nothing changed, nothing saved"));
+    }
 
     // DeleteCurves loops PoseContainer.DeleteCurve + broadcasts OnPoseListChanged and returns
-    // the honest count removed. No internal transaction -> FScopedTransaction above owns undo.
-    // An absent curve yields count 0 (clean no-op), never a fake success.
-    const int32 RemovedCount = PoseAsset->DeleteCurves({ CurveFName });
+    // the honest count removed. No internal transaction -> FScopedTransaction below owns undo.
+    int32 RemovedCount = 0;
+    {
+        const FScopedTransaction Transaction(NSLOCTEXT("MCP", "RemovePoseCurve", "Remove Pose Curve"));
+        PoseAsset->Modify();
+        RemovedCount = PoseAsset->DeleteCurves({ CurveFName });
+    }
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
-    Obj->SetStringField(TEXT("curve_name"), CurveName);
     Obj->SetNumberField(TEXT("removed_count"), RemovedCount);
     Obj->SetBoolField(TEXT("removed"), RemovedCount > 0);
     Obj->SetNumberField(TEXT("num_curves"), PoseAsset->GetCurveFNames().Num());
-    Obj->SetStringField(TEXT("message"), RemovedCount > 0
-        ? AnimAuthoring_SaveMessage(TEXT("Pose curve removed"), bSaved, SaveError)
-        : TEXT("Curve not present; no-op (idempotent remove)"));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_pose_curve"));
+    Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Pose curve removed"), bSaved, SaveError));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_pose_curve"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_anim_curve_color
 // ---------------------------------------------------------------------------
-// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+// MCP:set_anim_curve_color - Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param color - RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1]).
@@ -2635,10 +2850,22 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& P
     // FLOAT-CURVE ONLY: build the identifier as a float curve and require it to exist.
     const FAnimationCurveIdentifier CurveId(FName(*CurveName), ERawCurveTrackTypes::RCT_Float);
     IAnimationDataController& Controller = Seq->GetController();
-    if (!Controller.GetModel() || !Controller.GetModel()->FindFloatCurve(CurveId))
+    const FFloatCurve* ExistingCurve = Controller.GetModel() ? Controller.GetModel()->FindFloatCurve(CurveId) : nullptr;
+    if (!ExistingCurve)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
+    }
+
+    // The color the curve already has changes nothing: answered before the data controller transacts.
+    if (ExistingCurve->Color == Color)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+        Obj->SetStringField(TEXT("curve_name"), CurveName);
+        Obj->SetArrayField(TEXT("color"), mcp_common::ColorToJsonArray(Color));
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The curve already has that color; nothing changed, nothing saved"));
     }
 
     // SetCurveColor self-manages undo via bShouldTransact; do NOT add an outer FScopedTransaction.
@@ -2671,7 +2898,7 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveColor(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_anim_curve_comment
 // ---------------------------------------------------------------------------
-// MCP:set_anim_curve_comment - Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+// MCP:set_anim_curve_comment - Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The comment the curve already has (case-sensitive) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param comment - Comment string to set (default empty).
@@ -2693,10 +2920,23 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveComment(const TSharedPtr<FJsonObject>&
 
     const FAnimationCurveIdentifier CurveId(FName(*CurveName), ERawCurveTrackTypes::RCT_Float);
     IAnimationDataController& Controller = Seq->GetController();
-    if (!Controller.GetModel() || !Controller.GetModel()->FindFloatCurve(CurveId))
+    const FFloatCurve* ExistingCurve = Controller.GetModel() ? Controller.GetModel()->FindFloatCurve(CurveId) : nullptr;
+    if (!ExistingCurve)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
+    }
+
+    // The comment the curve already has (compared case-sensitively) changes nothing: answered before the
+    // data controller transacts.
+    if (ExistingCurve->Comment.Equals(Comment, ESearchCase::CaseSensitive))
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+        Obj->SetStringField(TEXT("curve_name"), CurveName);
+        Obj->SetStringField(TEXT("comment"), Comment);
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The curve already has that comment; nothing changed, nothing saved"));
     }
 
     // FLOAT-CURVE ONLY: SetCurveComment Report(Warning)+returns false for non-float curves.
@@ -2727,7 +2967,7 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveComment(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // scale_anim_curve
 // ---------------------------------------------------------------------------
-// MCP:scale_anim_curve - Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+// MCP:scale_anim_curve - Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A retime that moves no key (factor 1, no keys, or every key at the origin) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the float curve.
 //   @param factor - Scale factor applied to each key TIME (default 1.0).
@@ -2752,10 +2992,34 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
 
     const FAnimationCurveIdentifier CurveId(FName(*CurveName), ERawCurveTrackTypes::RCT_Float);
     IAnimationDataController& Controller = Seq->GetController();
-    if (!Controller.GetModel() || !Controller.GetModel()->FindFloatCurve(CurveId))
+    const FFloatCurve* ExistingCurve = Controller.GetModel() ? Controller.GetModel()->FindFloatCurve(CurveId) : nullptr;
+    if (!ExistingCurve)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
+    }
+
+    // A retime that leaves every key where it is (factor 1, no keys, or every key at the origin) changes
+    // nothing: answered before the data controller transacts. Same float arithmetic as
+    // FIndexedCurve::ScaleCurve.
+    {
+        const float OriginF = static_cast<float>(Origin);
+        const float FactorF = static_cast<float>(Factor);
+        const bool bAnyKeyMoves = ExistingCurve->FloatCurve.Keys.ContainsByPredicate([OriginF, FactorF](const FRichCurveKey& Key)
+        {
+            return (Key.Time - OriginF) * FactorF + OriginF != Key.Time;
+        });
+        if (!bAnyKeyMoves)
+        {
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+            Obj->SetStringField(TEXT("curve_name"), CurveName);
+            Obj->SetNumberField(TEXT("origin"), Origin);
+            Obj->SetNumberField(TEXT("factor"), Factor);
+            Obj->SetNumberField(TEXT("num_keys"), ExistingCurve->FloatCurve.Keys.Num());
+            Obj->SetBoolField(TEXT("applied"), false);
+            return AnimAuthoring_NoChangeReply(Obj, TEXT("The retime moves no key of the curve; nothing changed, nothing saved"));
+        }
     }
 
     // FLOAT-CURVE ONLY: ScaleCurve Report(Warning)+returns false for non-float curves.
@@ -2794,11 +3058,11 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_float_curve
 // ---------------------------------------------------------------------------
-// MCP:add_anim_float_curve - Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
+// MCP:add_anim_float_curve - Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); one that already holds exactly those keys is a success with changed=false and saved=false, and nothing is written or saved. curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false, with saved=false and save_error. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Float curve name to add.
 //   @param keys - JSON array of [time, value] pairs (default [[0,0],[1,1]])
-//   @returns { anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, success, saved, message }
+//   @returns { anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -2827,6 +3091,25 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
     const FAnimationCurveIdentifier CurveId(CurveFName, ERawCurveTrackTypes::RCT_Float);
 
     IAnimationDataController& Controller = Seq->GetController();
+
+    // An existing float curve that already holds these keys changes nothing: answered before the data
+    // controller transacts (AddCurve leaves an existing curve and its flags alone).
+    if (const IAnimationDataModel* Model = Seq->GetDataModel())
+    {
+        if (AnimAuthoring_FloatCurveHasKeys(Model->FindFloatCurve(CurveId), RichKeys))
+        {
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+            Obj->SetStringField(TEXT("curve_name"), CurveName);
+            Obj->SetNumberField(TEXT("num_float_curves"), Model->GetNumberOfFloatCurves());
+            Obj->SetNumberField(TEXT("num_keys"), RichKeys.Num());
+            Obj->SetBoolField(TEXT("curve_found"), true);
+            Obj->SetBoolField(TEXT("changed"), false);
+            Obj->SetBoolField(TEXT("success"), true);
+            return AnimAuthoring_NoChangeReply(Obj, TEXT("The float curve already exists with those keys; nothing changed, nothing saved"));
+        }
+    }
+
     Controller.OpenBracket(NSLOCTEXT("MCP", "AddFloatCurve", "Add Float Curve"));
 
     // 0x00000004 == AACF_DefaultCurve.
@@ -2849,19 +3132,20 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
     Obj->SetNumberField(TEXT("num_float_curves"), NumFloatCurves);
     Obj->SetNumberField(TEXT("num_keys"), RichKeys.Num());
     Obj->SetBoolField(TEXT("curve_found"), bCurveFound);
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetBoolField(TEXT("success"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Float curve added"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_float_curve"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_float_curve"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_anim_sync_marker
 // ---------------------------------------------------------------------------
-// MCP:add_anim_sync_marker - Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.
+// MCP:add_anim_sync_marker - Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param marker_name - Name of the sync marker (e.g. "LeftFootDown"); sequences in one sync group line up markers that share a name.
 //   @param time - Sync marker time in seconds (default 0.5)
-//   @returns { anim_sequence_path, marker_name, time, num_sync_markers, success, saved, message }
+//   @returns { anim_sequence_path, marker_name, time, num_sync_markers, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimSyncMarker(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2899,18 +3183,18 @@ TSharedPtr<FJsonObject> HandleAddAnimSyncMarker(const TSharedPtr<FJsonObject>& P
     Obj->SetNumberField(TEXT("num_sync_markers"), NumSyncMarkers);
     Obj->SetBoolField(TEXT("success"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Sync marker added"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_sync_marker"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_sync_marker"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // set_anim_root_motion
 // ---------------------------------------------------------------------------
-// MCP:set_anim_root_motion - Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.
+// MCP:set_anim_root_motion - Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param enable_root_motion - Whether to enable root motion extraction (default true)
 //   @param root_motion_root_lock - Root lock mode: RefPose|AnimFirstFrame|Zero (default RefPose)
 //   @param force_root_lock - Whether to force the root lock (default false)
-//   @returns { anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, success, saved, message }
+//   @returns { anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, changed, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimRootMotion(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2950,23 +3234,33 @@ TSharedPtr<FJsonObject> HandleSetAnimRootMotion(const TSharedPtr<FJsonObject>& P
     bool bSaved = false;
     FString SaveError;
 
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimRootMotion", "Set Anim Root Motion"));
-    Seq->Modify();
-
-    Seq->bEnableRootMotion = bEnableRootMotion;
-    Seq->RootMotionRootLock = Lock;
-    Seq->bForceRootLock = bForceRootLock;
-
-    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
     Obj->SetBoolField(TEXT("enable_root_motion"), bEnableRootMotion);
     Obj->SetStringField(TEXT("root_motion_root_lock"), RootLockStr);
     Obj->SetBoolField(TEXT("force_root_lock"), bForceRootLock);
     Obj->SetBoolField(TEXT("success"), true);
+
+    // The three settings the sequence already has change nothing: answered before Modify() would dirty it.
+    if (Seq->bEnableRootMotion == bEnableRootMotion && Seq->RootMotionRootLock == Lock && Seq->bForceRootLock == bForceRootLock)
+    {
+        Obj->SetBoolField(TEXT("changed"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The sequence already has those root motion settings; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetAnimRootMotion", "Set Anim Root Motion"));
+        Seq->Modify();
+        Seq->bEnableRootMotion = bEnableRootMotion;
+        Seq->RootMotionRootLock = Lock;
+        Seq->bForceRootLock = bForceRootLock;
+    }
+
+    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
+
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Root motion settings applied"), bSaved, SaveError, TEXT("")));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_root_motion"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_root_motion"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -3047,7 +3341,7 @@ namespace
 // add_montage_segment — append an FAnimSegment referencing a real UAnimSequence
 // to a montage slot track, then recompute the montage length.
 // ---------------------------------------------------------------------------
-// MCP:add_montage_segment - Append an animation segment referencing a real UAnimSequence to a montage slot
+// MCP:add_montage_segment - Append an animation segment referencing a real UAnimSequence to a montage slot. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Object path of the UAnimMontage (e.g. "/Game/MyGame/AM_Example").
 //   @param anim_sequence_path - Object path of the UAnimSequence to reference.
 //   @param slot_name - Montage slot name (e.g. DefaultSlot)
@@ -3080,7 +3374,9 @@ TSharedPtr<FJsonObject> HandleAddMontageSegment(const TSharedPtr<FJsonObject>& P
     Montage->Modify();
 
     const FName SlotFName(*SlotName);
-    if (!Montage->IsValidSlot(SlotFName))
+    // By name, not UAnimMontage::IsValidSlot: that is false for an empty track (the one create_anim_montage
+    // adds), and adding another would leave a duplicate empty track behind.
+    if (!AnimAuthoring_FindSlotTrack(Montage, SlotFName))
     {
         Montage->AddSlot(SlotFName);
     }
@@ -3120,7 +3416,7 @@ TSharedPtr<FJsonObject> HandleAddMontageSegment(const TSharedPtr<FJsonObject>& P
 // add_anim_transform_curve — add a transform curve (RCT_Transform) to a
 // UAnimSequence via the data controller.
 // ---------------------------------------------------------------------------
-// MCP:add_anim_transform_curve - Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
+// MCP:add_anim_transform_curve - Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Object path of the UAnimSequence.
 //   @param curve_name - Name of the transform curve to add.
 //   @param keys - JSON array of {time, location:[x,y,z], rotation:[pitch,yaw,roll], scale:[x,y,z]} objects
@@ -3198,13 +3494,13 @@ TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // set_anim_additive_settings — set the additive animation type + base pose on a UAnimSequence.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_additive_settings - Set the additive-animation type and base pose on a UAnimSequence
+// MCP:set_anim_additive_settings - Set the additive-animation type and base pose on a UAnimSequence in an undo transaction and save it. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Object path of the UAnimSequence.
 //   @param additive_anim_type - Additive type: LocalSpaceBase|RotationOffsetMeshSpace|None (default LocalSpaceBase)
 //   @param ref_pose_type - Base pose type: RefPose|AnimScaled|AnimFrame|LocalAnimFrame|None (default RefPose)
 //   @param ref_frame_index - Frame index used for the base pose (default 0)
 //   @param ref_pose_anim_path - Object path of the reference UAnimSequence for the base pose (optional)
-//   @returns { anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, success, saved, save_error }
+//   @returns { anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, changed, success, saved, save_error, message? }
 TSharedPtr<FJsonObject> HandleSetAnimAdditiveSettings(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -3221,32 +3517,53 @@ TSharedPtr<FJsonObject> HandleSetAnimAdditiveSettings(const TSharedPtr<FJsonObje
     const EAdditiveAnimationType AdditiveType = ParseAdditiveAnimType(AdditiveTypeStr);
     const EAdditiveBasePoseType BasePoseType = ParseBasePoseType(BasePoseStr);
 
-    const FScopedTransaction Transaction(LOCTEXT("SetAdditiveSettings", "MCP: Set Additive Settings"));
-    Seq->Modify();
-    Seq->AdditiveAnimType = AdditiveType;
-    Seq->RefPoseType = BasePoseType;
-    Seq->RefFrameIndex = static_cast<int32>(RefFrameD);
-
-    bool bRefPoseSet = false;
+    const int32 RefFrameIndex = static_cast<int32>(RefFrameD);
+    UAnimSequence* RefSeq = nullptr;
     FString RefPosePath;
     if (Params->TryGetStringField(TEXT("ref_pose_anim_path"), RefPosePath) && !RefPosePath.IsEmpty())
     {
-        if (UAnimSequence* RefSeq = AnimAssetUtils::LoadAsset<UAnimSequence>(RefPosePath))
+        RefSeq = AnimAssetUtils::LoadAsset<UAnimSequence>(RefPosePath);
+    }
+
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+    const auto AddSettings = [&]()
+    {
+        Obj->SetStringField(TEXT("additive_anim_type"), AdditiveAnimTypeToString(Seq->AdditiveAnimType.GetValue()));
+        Obj->SetStringField(TEXT("ref_pose_type"), BasePoseTypeToString(Seq->RefPoseType.GetValue()));
+        Obj->SetNumberField(TEXT("ref_frame_index"), Seq->RefFrameIndex);
+    };
+
+    // Settings the sequence already has change nothing: answered before Modify() would dirty it.
+    if (Seq->AdditiveAnimType == AdditiveType && Seq->RefPoseType == BasePoseType && Seq->RefFrameIndex == RefFrameIndex
+        && (!RefSeq || Seq->RefPoseSeq == RefSeq))
+    {
+        AddSettings();
+        Obj->SetBoolField(TEXT("ref_pose_anim_set"), false);
+        Obj->SetBoolField(TEXT("changed"), false);
+        Obj->SetBoolField(TEXT("success"), true);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The sequence already has those additive settings; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetAdditiveSettings", "MCP: Set Additive Settings"));
+        Seq->Modify();
+        Seq->AdditiveAnimType = AdditiveType;
+        Seq->RefPoseType = BasePoseType;
+        Seq->RefFrameIndex = RefFrameIndex;
+        if (RefSeq)
         {
             Seq->RefPoseSeq = RefSeq;
-            bRefPoseSet = true;
         }
     }
+    const bool bRefPoseSet = RefSeq != nullptr;
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
-    Obj->SetStringField(TEXT("additive_anim_type"), AdditiveAnimTypeToString(Seq->AdditiveAnimType.GetValue()));
-    Obj->SetStringField(TEXT("ref_pose_type"), BasePoseTypeToString(Seq->RefPoseType.GetValue()));
-    Obj->SetNumberField(TEXT("ref_frame_index"), Seq->RefFrameIndex);
+    AddSettings();
     Obj->SetBoolField(TEXT("ref_pose_anim_set"), bRefPoseSet);
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetBoolField(TEXT("success"), true);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_additive_settings"), SaveError);
 }
@@ -3254,7 +3571,7 @@ TSharedPtr<FJsonObject> HandleSetAnimAdditiveSettings(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // create_pose_asset_from_anim_sequence — build a UPoseAsset from a real anim.
 // ---------------------------------------------------------------------------
-// MCP:create_pose_asset_from_anim_sequence - Create a UPoseAsset built from a real UAnimSequence's frames
+// MCP:create_pose_asset_from_anim_sequence - Create a UPoseAsset built from a real UAnimSequence's frames and save it. Idempotent: a UPoseAsset already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_name - Name for the new UPoseAsset.
 //   @param anim_sequence_path - Object path of the source UAnimSequence.
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
@@ -3293,12 +3610,12 @@ TSharedPtr<FJsonObject> HandleCreatePoseAssetFromAnimSequence(const TSharedPtr<F
         return Obj;
     };
 
-    // Idempotent: load existing.
+    // Idempotent: load existing. Nothing changed, so nothing is saved.
     if (UPoseAsset* Existing = AnimAssetUtils::FindExisting<UPoseAsset>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -3436,10 +3753,10 @@ TSharedPtr<FJsonObject> HandleRemoveAnimSyncMarker(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_anim_sync_marker"), SaveError);
 }
 
-// MCP:set_anim_frame_rate - Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
+// MCP:set_anim_frame_rate - Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. The rate the data model already has is a success with changed=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param fps - New frame rate in frames per second, rounded to a whole number that must be at least 1.
-//   @returns { sequence_path, fps, numerator, denominator, saved, save_error }
+//   @returns { sequence_path, fps, numerator, denominator, changed, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -3476,6 +3793,18 @@ TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Pa
             OldRate.Numerator, OldRate.Denominator));
     }
 
+    // The rate the data model already has changes nothing: answered before the data controller transacts.
+    if (NewRate == OldRate)
+    {
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
+        Data->SetNumberField(TEXT("fps"), OldRate.AsDecimal());
+        Data->SetNumberField(TEXT("numerator"), OldRate.Numerator);
+        Data->SetNumberField(TEXT("denominator"), OldRate.Denominator);
+        Data->SetBoolField(TEXT("changed"), false);
+        return AnimAuthoring_NoChangeReply(Data, TEXT("The sequence already has that frame rate; nothing changed and nothing was saved."), TEXT("note"));
+    }
+
     // The data controller truncates a frame count that is not whole at the new rate (after an ensure),
     // which silently shortens the sequence: refuse that rate instead.
     const int32 NumFrames = Model->GetNumberOfFrames();
@@ -3505,13 +3834,14 @@ TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Pa
     Data->SetNumberField(TEXT("fps"), ReadBack.AsDecimal());
     Data->SetNumberField(TEXT("numerator"), ReadBack.Numerator);
     Data->SetNumberField(TEXT("denominator"), ReadBack.Denominator);
+    Data->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_frame_rate"), SaveError);
 }
 
-// MCP:set_anim_number_of_frames - Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
+// MCP:set_anim_number_of_frames - Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param frame_count - New number of frames (integer > 0).
-//   @returns { sequence_path, frame_count, saved, save_error }
+//   @returns { sequence_path, frame_count, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequencePath;
@@ -3524,11 +3854,69 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
     }
     UAnimSequence* Sequence = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SequencePath, TEXT("AnimSequence"), Sequence)) { return Error; }
+    const IAnimationDataModel* Model = Sequence->GetDataModel();
+    if (!Model)
+    {
+        return mcp_common::MakeErrorReply(TEXT("AnimSequence has no data model"));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
+    if (Model->GetNumberOfFrames() == FrameCount)
+    {
+        // The data controller leaves an equal length alone: nothing changed, so nothing is saved.
+        Data->SetNumberField(TEXT("frame_count"), FrameCount);
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), TEXT("The sequence already has that number of frames; nothing changed and nothing was saved."));
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    // After a length change the sequence recounts its frames at its sampling (target) rate, which
+    // set_anim_frame_rate leaves alone, and ensures the count is whole there (UAnimSequence::
+    // CalculateNumberOfSampledKeys, then truncates it). A count that is not whole at that rate is refused
+    // before the data controller sees it. Converting from a rate with a zero numerator fails a check(),
+    // and to one with a zero denominator divides by zero, so such rates are refused first.
+    const FFrameRate ModelRate = Model->GetFrameRate();
+    const FFrameRate SamplingRate = Sequence->GetSamplingFrameRate();
+    if (!ModelRate.IsValid() || ModelRate.Numerator <= 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The data model of this sequence has an invalid frame rate (%d/%d); nothing was changed"),
+            ModelRate.Numerator, ModelRate.Denominator));
+    }
+    if (SamplingRate != ModelRate)
+    {
+        if (!SamplingRate.IsValid())
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("This sequence has an invalid sampling frame rate (%d/%d); nothing was changed"),
+                SamplingRate.Numerator, SamplingRate.Denominator));
+        }
+        const FFrameTime Resampled = FFrameRate::TransformTime(FFrameTime(FFrameNumber(FrameCount)), ModelRate, SamplingRate);
+        if (!FMath::IsNearlyZero(Resampled.GetSubFrame()))
+        {
+            // frame_count * (sampling / model) is whole exactly when frame_count is a multiple of the reduced
+            // denominator of that ratio.
+            const int64 RatioNum = static_cast<int64>(SamplingRate.Numerator) * ModelRate.Denominator;
+            const int64 RatioDen = static_cast<int64>(SamplingRate.Denominator) * ModelRate.Numerator;
+            int64 Gcd = RatioNum;
+            for (int64 Rest = RatioDen; Rest != 0;)
+            {
+                const int64 Next = Gcd % Rest;
+                Gcd = Rest;
+                Rest = Next;
+            }
+            const long long Step = Gcd > 0 ? static_cast<long long>(RatioDen / Gcd) : 1LL;
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%d frames at the data model rate %s are not a whole number of frames at the sampling rate %s of this sequence; nothing was changed. Use a frame count that is a multiple of %lld."),
+                FrameCount, *ModelRate.ToPrettyText().ToString(), *SamplingRate.ToPrettyText().ToString(), Step));
+        }
+    }
+
     IAnimationDataController& Controller = Sequence->GetController();
     Controller.SetNumberOfFrames(FFrameNumber(FrameCount));
     // Read the data model: GetNumberOfSampledKeys counts keys (frames + 1) at the target sampling rate.
-    const IAnimationDataModel* Model = Sequence->GetDataModel();
-    const int32 ReadBack = Model ? Model->GetNumberOfFrames() : 0;
+    const int32 ReadBack = Model->GetNumberOfFrames();
     if (ReadBack != FrameCount)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
@@ -3537,13 +3925,11 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
     }
     FString SaveError;
     const bool bSaved = mcp_common::SaveAssetPackage(Sequence->GetPackage(), Sequence, SaveError);
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Data->SetNumberField(TEXT("frame_count"), ReadBack);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_number_of_frames"), SaveError);
 }
 
-// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name taken by an asset of another class is refused. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
+// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name already taken by any asset, in memory or on disk (the source included), is refused and nothing is touched. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 //   @param source_path - Asset path of the source UAnimSequence.
 //   @param new_name - Name of the new duplicate.
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
@@ -3560,6 +3946,21 @@ TSharedPtr<FJsonObject> HandleDuplicateAnimSequence(const TSharedPtr<FJsonObject
     UAnimSequence* Source = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SourcePath, TEXT("Source AnimSequence"), Source)) { return Error; }
     const FString FullPackageName = PackagePath / NewName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPackageName)) { return Invalid; }
+
+    // An existing asset of that name is refused, in memory or on disk, whatever its class (as duplicate_mpc
+    // refuses an existing target). For a UAnimSequence, StaticDuplicateObject would replace it in place:
+    // StaticAllocateObject destroys the live object and constructs the copy in its memory, under the asset
+    // editors, montages and undo history that still reference it.
+    const FString ObjectPath = FPackageName::ObjectPathToPackageName(FullPackageName) + TEXT(".") + NewName;
+    if (FindObject<UObject>(nullptr, *ObjectPath)
+        || IAssetRegistry::GetChecked().GetAssetByObjectPath(FSoftObjectPath(ObjectPath), /*bIncludeOnlyOnDiskAssets*/ true).IsValid())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("'%s' already exists; nothing was changed. Choose another new_name, or delete or rename the existing asset first."),
+            *ObjectPath));
+    }
+
     FString PackageError;
     UPackage* Package = mcp_common::CreateAssetPackage(FullPackageName, NewName, Source->GetClass(), PackageError);
     if (!Package)
@@ -3652,12 +4053,12 @@ TSharedPtr<FJsonObject> HandleGetAnimCurveNames(const TSharedPtr<FJsonObject>& P
 //   calls IAnimationDataController::SetFrameRate — see above.)
 // ========================================================================== //
 
-// MCP:set_anim_curve_keys - Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A failed save makes success false.
+// MCP:set_anim_curve_keys - Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A curve that already holds exactly those keys is a success with applied=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the float curve (e.g. "MyCurve")
 //   @param keys - JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given.
 //   @param curve_type - Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve.
-//   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error }
+//   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -3697,10 +4098,23 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Pa
     const FAnimationCurveIdentifier CurveId(CurveFName, ERawCurveTrackTypes::RCT_Float);
     IAnimationDataController& Controller = Seq->GetController();
 
-    if (!Controller.GetModel()->FindFloatCurve(CurveId))
+    const FFloatCurve* ExistingCurve = Controller.GetModel()->FindFloatCurve(CurveId);
+    if (!ExistingCurve)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Float curve '%s' does not exist; call add_anim_float_curve first"), *CurveName));
+    }
+
+    // A curve that already holds exactly these keys changes nothing: answered before the transaction.
+    if (AnimAuthoring_FloatCurveHasKeys(ExistingCurve, RichKeys))
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+        Result->SetStringField(TEXT("curve_name"), CurveName);
+        Result->SetStringField(TEXT("curve_type"), CurveTypeRaw);
+        Result->SetNumberField(TEXT("num_keys"), ExistingCurve->FloatCurve.Keys.Num());
+        Result->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Result, TEXT("The curve already holds those keys; nothing changed and nothing was saved."), TEXT("note"));
     }
 
     const FScopedTransaction Transaction(LOCTEXT("SetAnimCurveKeys", "Set Anim Curve Keys"));
@@ -3734,12 +4148,12 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_keys"), SaveError);
 }
 
-// MCP:set_anim_curve_interp_mode - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.
+// MCP:set_anim_curve_interp_mode - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; flags the curve already has are a success with applied=false, saved=false and a note, and nothing is written or saved; a failed save makes success false, with saved=false and save_error. get_anim_curve_data reads the flags.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the curve
 //   @param interp_mode [string!] - One of "linear|editable|metadata|drive_track|disabled"
 //   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error }
+//   @returns { anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -3799,6 +4213,19 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObjec
     }
     const int32 OldFlags = Curve->GetCurveTypeFlags();
 
+    // Flags the curve already has change nothing: answered before the transaction.
+    if (OldFlags == Flags)
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+        Result->SetStringField(TEXT("curve_name"), CurveName);
+        Result->SetStringField(TEXT("interp_mode"), InterpMode);
+        Result->SetNumberField(TEXT("old_flags"), OldFlags);
+        Result->SetNumberField(TEXT("new_flags"), OldFlags);
+        Result->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Result, TEXT("The curve already has exactly those flags; nothing changed and nothing was saved."), TEXT("note"));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("SetAnimCurveInterpMode", "Set Anim Curve Interp Mode"));
     Seq->GetController().OpenBracket(NSLOCTEXT("MCP", "SetCurveInterpMode", "Set Curve Interp Mode"));
     const bool bApplied = Seq->GetController().SetCurveFlags(CurveId, Flags, /*bShouldTransact=*/true);
@@ -3822,12 +4249,12 @@ TSharedPtr<FJsonObject> HandleSetAnimCurveInterpMode(const TSharedPtr<FJsonObjec
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_interp_mode"), SaveError);
 }
 
-// MCP:rename_anim_curve - Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
+// MCP:rename_anim_curve - Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. The same name for both is a success with renamed=false, saved=false and a note, and nothing is written or saved. Any curve_type other than transform means float. Returns renamed and saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param old_curve_name - Name of the existing curve to rename, as listed by get_anim_curve_names.
 //   @param new_curve_name - Name the curve gets after the rename.
 //   @param curve_type - Curve type to target: float (default) or transform
-//   @returns { anim_sequence_path, old_curve_name, new_curve_name, renamed, saved }
+//   @returns { anim_sequence_path, old_curve_name, new_curve_name, renamed, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, OldCurveName, NewCurveName;
@@ -3858,6 +4285,17 @@ TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Par
             FString::Printf(TEXT("Source curve '%s' (%s) does not exist"), *OldCurveName, *CurveTypeRaw));
     }
 
+    // Renaming a curve to the name it already has changes nothing (the data controller would refuse it).
+    if (FName(*OldCurveName) == FName(*NewCurveName))
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+        Result->SetStringField(TEXT("old_curve_name"), OldCurveName);
+        Result->SetStringField(TEXT("new_curve_name"), NewCurveName);
+        Result->SetBoolField(TEXT("renamed"), false);
+        return AnimAuthoring_NoChangeReply(Result, TEXT("The curve already has that name; nothing changed and nothing was saved."), TEXT("note"));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("RenameAnimCurve", "Rename Anim Curve"));
     Seq->GetController().OpenBracket(NSLOCTEXT("MCP", "RenameAnimCurve", "Rename Anim Curve"));
     const bool bRenamed = Seq->GetController().RenameCurve(OldId, NewId, true);
@@ -3876,7 +4314,7 @@ TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Par
     Result->SetStringField(TEXT("old_curve_name"), OldCurveName);
     Result->SetStringField(TEXT("new_curve_name"), NewCurveName);
     Result->SetBoolField(TEXT("renamed"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("rename_anim_curve"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("rename_anim_curve"), SaveError);
 }
 
 // MCP:get_anim_curve_data - Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
@@ -3942,7 +4380,7 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.
+// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved. A missing source is refused before the reimport, which would crash the editor on it, and a reimport the handler reports as failed is a failure too: both make success false with reimported=false, and the missing source a note.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param source_file_path - Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data.
 //   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note? }
@@ -3999,6 +4437,8 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
     // because the factory is registered, but the file path is stale). This
     // pre-validation is the difference between "no reimport possible" (an
     // honest error) and "editor crash".
+    // A reimport that cannot run, or that the handler reports as failed, is a failure: the payload says which
+    // step stopped it.
     if (EffectiveSource.IsEmpty())
     {
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -4006,11 +4446,12 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         Result->SetStringField(TEXT("source_file_path"), FString());
         Result->SetBoolField(TEXT("reimported"), false);
         Result->SetBoolField(TEXT("source_validated"), false);
-        Result->SetStringField(TEXT("note"),
+        const FString Note =
             TEXT("Asset has a registered reimport factory but no source filename is recorded -- "
                  "the sequence was likely created at runtime or its FBX was relocated. "
-                 "Provide 'source_file_path' explicitly or assign one in the asset's AssetImportData."));
-        return mcp_common::MakeOkReply(Result);
+                 "Provide 'source_file_path' explicitly or assign one in the asset's AssetImportData.");
+        Result->SetStringField(TEXT("note"), Note);
+        return mcp_common::MakeOutcomeReply(Result, false, TEXT("reimport_anim_sequence: not reimported. ") + Note);
     }
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -4021,12 +4462,12 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         Result->SetStringField(TEXT("source_file_path"), EffectiveSource);
         Result->SetBoolField(TEXT("reimported"), false);
         Result->SetBoolField(TEXT("source_validated"), false);
-        Result->SetStringField(TEXT("note"),
-            FString::Printf(TEXT("Source file does not exist on disk: %s -- "
+        const FString Note = FString::Printf(TEXT("Source file does not exist on disk: %s -- "
                                  "FReimportManager::Reimport would crash the editor on a missing source. "
                                  "Provide a valid 'source_file_path' or fix the asset's import path."),
-                             *EffectiveSource));
-        return mcp_common::MakeOkReply(Result);
+                             *EffectiveSource);
+        Result->SetStringField(TEXT("note"), Note);
+        return mcp_common::MakeOutcomeReply(Result, false, TEXT("reimport_anim_sequence: not reimported. ") + Note);
     }
 
     const bool bReimported = ReimportManager->Reimport(
@@ -4044,7 +4485,9 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
     Result->SetStringField(TEXT("source_file_path"), EffectiveSource);
     Result->SetBoolField(TEXT("reimported"), bReimported);
     Result->SetBoolField(TEXT("source_validated"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bReimported, bReimported ? FString() : FString::Printf(
+        TEXT("reimport_anim_sequence: FReimportManager::Reimport failed for %s from %s (see the editor log for the reimport handler's reason)."),
+        *Asset->GetPathName(), *EffectiveSource));
 }
 
 // ---------------------------------------------------------------------------
@@ -4053,11 +4496,11 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
 // add_montage_section does not write). Pass
 // next_section_name = "" or "None" to clear the link.
 // ---------------------------------------------------------------------------
-// MCP:link_montage_sections - Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name "" or "None" to clear the link. Idempotent.
+// MCP:link_montage_sections - Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name "" or "None" to clear the link. Done in an undo transaction, then saved. Idempotent: the link the section already has is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_name - Name of the existing section whose link to set.
 //   @param next_section_name - Name of the existing section to play next (or "" / "None" to clear).
-//   @returns { montage_path, section_name, next_section_name, linked, section_count, sections, saved, message }
+//   @returns { montage_path, section_name, next_section_name, linked, changed, section_count, sections, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -4092,22 +4535,37 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
         NextFName = CandidateNext;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("LinkMontageSections", "Link Montage Sections"));
-    Montage->Modify();
-    Target->NextSectionName = NextFName;
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
+    Obj->SetStringField(TEXT("section_name"), SectionName);
+
+    // The link the section already has changes nothing: answered before Modify() would dirty the montage.
+    if (Target->NextSectionName == NextFName)
+    {
+        Obj->SetStringField(TEXT("next_section_name"), Target->NextSectionName.ToString());
+        Obj->SetBoolField(TEXT("linked"), Target->NextSectionName != NAME_None);
+        Obj->SetBoolField(TEXT("changed"), false);
+        Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
+        Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The section already has that link; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("LinkMontageSections", "Link Montage Sections"));
+        Montage->Modify();
+        Target->NextSectionName = NextFName;
+    }
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-    Obj->SetStringField(TEXT("section_name"), SectionName);
     Obj->SetStringField(TEXT("next_section_name"), Target->NextSectionName.ToString());
     Obj->SetBoolField(TEXT("linked"), Target->NextSectionName != NAME_None);
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Section link set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("link_montage_sections"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("link_montage_sections"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -4119,7 +4577,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 // array, ArrayDim==3 — same path create_blend_space uses), reads back via
 // GetBlendParameter().
 // ---------------------------------------------------------------------------
-// MCP:set_blendspace_properties - Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change.
+// MCP:set_blendspace_properties - Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_axis_name - Optional X axis display name.
 //   @param x_axis_min [number] - Optional X axis minimum value.
@@ -4129,7 +4587,7 @@ TSharedPtr<FJsonObject> HandleLinkMontageSections(const TSharedPtr<FJsonObject>&
 //   @param y_axis_min [number] - Optional Y axis minimum value (2D only).
 //   @param y_axis_max [number] - Optional Y axis maximum value (2D only).
 //   @param y_axis_grid [integer] - Optional Y axis grid divisions (2D only, >= 1).
-//   @returns { blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, saved }
+//   @returns { blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, changed, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlendSpacePath;
@@ -4146,9 +4604,11 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObje
 
     const bool bIs1D = BlendSpace->IsA<UBlendSpace1D>();
     int32 AppliedCount = 0;
+    bool bAnyDiffers = false;
     TArray<FString> Notes;
 
-    auto ApplyAxis = [&](int32 Index, const TCHAR* Prefix)
+    // Counts the supplied fields of one axis and whether any differs from the axis, and writes them when bWrite.
+    auto VisitAxis = [&](int32 Index, const TCHAR* Prefix, bool bWrite)
     {
         FBlendParameter* Axis = BlendParamsProp->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, Index);
         if (!Axis)
@@ -4156,31 +4616,49 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObje
             return;
         }
         FString S;
-        if (Params->TryGetStringField(FString(Prefix) + TEXT("_name"), S)) { Axis->DisplayName = S; ++AppliedCount; }
+        if (Params->TryGetStringField(FString(Prefix) + TEXT("_name"), S))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= !Axis->DisplayName.Equals(S, ESearchCase::CaseSensitive);
+            if (bWrite) { Axis->DisplayName = S; }
+        }
         double D = 0.0;
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_min"), D)) { Axis->Min = static_cast<float>(D); ++AppliedCount; }
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_max"), D)) { Axis->Max = static_cast<float>(D); ++AppliedCount; }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_min"), D))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Axis->Min != static_cast<float>(D);
+            if (bWrite) { Axis->Min = static_cast<float>(D); }
+        }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_max"), D))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Axis->Max != static_cast<float>(D);
+            if (bWrite) { Axis->Max = static_cast<float>(D); }
+        }
         int32 G = 0;
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_grid"), G)) { Axis->GridNum = FMath::Max(1, G); ++AppliedCount; }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_grid"), G))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Axis->GridNum != FMath::Max(1, G);
+            if (bWrite) { Axis->GridNum = FMath::Max(1, G); }
+        }
     };
-
-    ApplyAxis(0, TEXT("x_axis"));
 
     // Build the field names so the codegen extractor does not see them as literal
     // string inputs (their JSON types are declared on the @param hints instead).
     const FString YPrefix = TEXT("y_axis");
     const bool bYProvided = Params->HasField(YPrefix + TEXT("_name")) || Params->HasField(YPrefix + TEXT("_min"))
         || Params->HasField(YPrefix + TEXT("_max")) || Params->HasField(YPrefix + TEXT("_grid"));
-    if (bIs1D)
+    if (bIs1D && bYProvided)
     {
-        if (bYProvided)
-        {
-            Notes.Add(TEXT("y_axis_* ignored: this is a 1D blend space (only the X axis applies)"));
-        }
+        Notes.Add(TEXT("y_axis_* ignored: this is a 1D blend space (only the X axis applies)"));
     }
-    else
+
+    // First pass: count and compare only, so values the axes already have leave the asset untouched.
+    VisitAxis(0, TEXT("x_axis"), /*bWrite=*/false);
+    if (!bIs1D)
     {
-        ApplyAxis(1, TEXT("y_axis"));
+        VisitAxis(1, TEXT("y_axis"), /*bWrite=*/false);
     }
 
     if (AppliedCount == 0)
@@ -4189,10 +4667,25 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObje
             TEXT("No axis properties provided. Supply at least one of: x_axis_name/min/max/grid (and y_axis_* for 2D)"));
     }
 
-    // Without this the RUNTIME does not see the blend space.
-    RebuildBlendSpaceRuntimeData(BlendSpace);
+    bool bSaved = false;
     FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(BlendSpace, SaveError);
+    if (bAnyDiffers)
+    {
+        {
+            // Written straight into the protected BlendParameters: Modify() inside a transaction makes it undoable.
+            const FScopedTransaction Transaction(LOCTEXT("SetBlendSpaceProperties", "Set Blend Space Properties"));
+            BlendSpace->Modify();
+            AppliedCount = 0;
+            VisitAxis(0, TEXT("x_axis"), /*bWrite=*/true);
+            if (!bIs1D)
+            {
+                VisitAxis(1, TEXT("y_axis"), /*bWrite=*/true);
+            }
+            // Without this the RUNTIME does not see the blend space.
+            RebuildBlendSpaceRuntimeData(BlendSpace);
+        }
+        bSaved = AnimAuthoring_SavePackageOf(BlendSpace, SaveError);
+    }
 
     auto AxisJson = [](const FBlendParameter& P)
     {
@@ -4212,8 +4705,13 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceProperties(const TSharedPtr<FJsonObje
     {
         Obj->SetObjectField(TEXT("y_axis"), AxisJson(BlendSpace->GetBlendParameter(1)));
     }
-    Obj->SetNumberField(TEXT("applied_count"), AppliedCount);
+    Obj->SetNumberField(TEXT("applied_count"), bAnyDiffers ? AppliedCount : 0);
     Obj->SetArrayField(TEXT("notes"), mcp_common::StringsToJson(Notes));
+    Obj->SetBoolField(TEXT("changed"), bAnyDiffers);
+    if (!bAnyDiffers)
+    {
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The blend space axes already have those values; nothing changed and nothing was saved."), TEXT("note"));
+    }
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blendspace_properties"), SaveError);
 }
 
@@ -4318,10 +4816,10 @@ TSharedPtr<FJsonObject> HandleAddNotifyTrack(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // remove_notify_track
 // ---------------------------------------------------------------------------
-// MCP:remove_notify_track - Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest)
+// MCP:remove_notify_track - Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest). A failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param track_name - Notify track name to remove.
-//   @returns { animation_path, track_name, track_names, track_count, already_absent, saved, message }
+//   @returns { animation_path, track_name, track_names, track_count, already_absent, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRemoveNotifyTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -4370,7 +4868,7 @@ TSharedPtr<FJsonObject> HandleRemoveNotifyTrack(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Obj = AnimAuthoring_NotifyTrackPayload(AnimSeq, TrackNameStr);
     Obj->SetBoolField(TEXT("already_absent"), false);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Notify track removed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_notify_track"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("remove_notify_track"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -4423,7 +4921,7 @@ namespace
     }
 }
 
-// MCP:add_anim_composite_segment - Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length
+// MCP:add_anim_composite_segment - Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
 //   @param composite_path - Object path of the UAnimComposite (e.g. "/Game/Animation/AC_Example").
 //   @param animation_path - Object path of the UAnimSequence to reference.
 //   @param start_pos - Segment start position; ignored after auto-stacking (default 0)
@@ -4481,7 +4979,7 @@ TSharedPtr<FJsonObject> HandleAddAnimCompositeSegment(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_composite_segment"), SaveError);
 }
 
-// MCP:remove_anim_composite_segment - Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length
+// MCP:remove_anim_composite_segment - Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
 //   @param composite_path - Object path of the UAnimComposite (e.g. "/Game/Animation/AC_Example").
 //   @param index - Zero-based index of the segment to remove, in [0, num_segments).
 //   @returns { composite_path, index, num_segments, composite_length, segments, success, saved, save_error }
@@ -4583,7 +5081,7 @@ namespace
     }
 }
 
-// MCP:edit_anim_notify - Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence)
+// MCP:edit_anim_notify - Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence) in an undo transaction and save it. No editable field is an error before anything changes; edits that leave the event as it is are a success with applied=false, applied_count 0 and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @param notify_name - NotifyName of the event to edit (FName). Names are not unique; see occurrence_index.
 //   @param occurrence_index - Zero-based index AMONG events sharing notify_name (default 0)
@@ -4593,7 +5091,7 @@ namespace
 //   @param trigger_weight_threshold - New TriggerWeightThreshold. Optional.
 //   @param montage_tick_type - New MontageTickType: 'Queued' or 'BranchingPoint'. Optional.
 //   @param track_index - New TrackIndex (zero-based). Optional.
-//   @returns { animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, message }
+//   @returns { animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimationPath;
@@ -4650,59 +5148,20 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
         }
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("EditAnimNotify", "Edit Anim Notify"));
-    AnimSeq->Modify();
-
-    FAnimNotifyEvent& Event = AnimSeq->Notifies[TargetArrayIndex];
-    int32 AppliedCount = 0;
-    bool bTimingChanged = false;
-
-    // Duration first, then time: SetTime recomputes EndLink from the CURRENT duration,
-    // so applying duration before time keeps the end anchored to the final values.
     double DurationD = 0.0;
-    if (Params->TryGetNumberField(TEXT("duration"), DurationD))
-    {
-        Event.SetDuration(static_cast<float>(DurationD));
-        ++AppliedCount;
-        bTimingChanged = true;
-    }
-
+    const bool bHasDuration = Params->TryGetNumberField(TEXT("duration"), DurationD);
     double TimeD = 0.0;
-    if (Params->TryGetNumberField(TEXT("time"), TimeD))
-    {
-        Event.SetTime(static_cast<float>(TimeD), EAnimLinkMethod::Absolute);
-        ++AppliedCount;
-        bTimingChanged = true;
-    }
-
+    const bool bHasTime = Params->TryGetNumberField(TEXT("time"), TimeD);
     double ChanceD = 0.0;
-    if (Params->TryGetNumberField(TEXT("trigger_chance"), ChanceD))
-    {
-        // ClampMin/Max meta only fires through the editor/property path; clamp here.
-        Event.NotifyTriggerChance = FMath::Clamp(static_cast<float>(ChanceD), 0.0f, 1.0f);
-        ++AppliedCount;
-    }
-
+    const bool bHasChance = Params->TryGetNumberField(TEXT("trigger_chance"), ChanceD);
     double WeightD = 0.0;
-    if (Params->TryGetNumberField(TEXT("trigger_weight_threshold"), WeightD))
-    {
-        Event.TriggerWeightThreshold = static_cast<float>(WeightD);
-        ++AppliedCount;
-    }
-
-    if (bHasTickType)
-    {
-        Event.MontageTickType = static_cast<EMontageNotifyTickType::Type>(TickTypeValue);
-        ++AppliedCount;
-    }
-
+    const bool bHasWeight = Params->TryGetNumberField(TEXT("trigger_weight_threshold"), WeightD);
     double TrackIndexD = 0.0;
-    if (Params->TryGetNumberField(TEXT("track_index"), TrackIndexD))
-    {
-        Event.TrackIndex = FMath::Max(0, static_cast<int32>(TrackIndexD));
-        ++AppliedCount;
-    }
+    const bool bHasTrackIndex = Params->TryGetNumberField(TEXT("track_index"), TrackIndexD);
 
+    const int32 AppliedCount = (bHasDuration ? 1 : 0) + (bHasTime ? 1 : 0) + (bHasChance ? 1 : 0)
+        + (bHasWeight ? 1 : 0) + (bHasTickType ? 1 : 0) + (bHasTrackIndex ? 1 : 0);
+    const bool bTimingChanged = bHasDuration || bHasTime;
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
@@ -4710,10 +5169,48 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
                  "trigger_weight_threshold, montage_tick_type, track_index"));
     }
 
-    // Keep Notifies time-sorted after a timing edit (the array contract).
-    if (bTimingChanged)
+    // Writes the supplied fields onto an event.
+    const auto ApplyEdits = [&](FAnimNotifyEvent& Event)
     {
-        AnimSeq->SortNotifies();
+        // Duration first, then time: SetTime recomputes EndLink from the CURRENT duration,
+        // so applying duration before time keeps the end anchored to the final values.
+        if (bHasDuration) { Event.SetDuration(static_cast<float>(DurationD)); }
+        if (bHasTime) { Event.SetTime(static_cast<float>(TimeD), EAnimLinkMethod::Absolute); }
+        // ClampMin/Max meta only fires through the editor/property path; clamp here.
+        if (bHasChance) { Event.NotifyTriggerChance = FMath::Clamp(static_cast<float>(ChanceD), 0.0f, 1.0f); }
+        if (bHasWeight) { Event.TriggerWeightThreshold = static_cast<float>(WeightD); }
+        if (bHasTickType) { Event.MontageTickType = static_cast<EMontageNotifyTickType::Type>(TickTypeValue); }
+        if (bHasTrackIndex) { Event.TrackIndex = FMath::Max(0, static_cast<int32>(TrackIndexD)); }
+    };
+
+    // Edits that leave every property of the event as it is change nothing: measured on a copy, before
+    // Modify() would dirty the sequence.
+    {
+        FAnimNotifyEvent Edited = AnimSeq->Notifies[TargetArrayIndex];
+        ApplyEdits(Edited);
+        if (FAnimNotifyEvent::StaticStruct()->CompareScriptStruct(&Edited, &AnimSeq->Notifies[TargetArrayIndex], PPF_None))
+        {
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("animation_path"), AnimSeq->GetPathName());
+            Obj->SetStringField(TEXT("notify_name"), NotifyName);
+            Obj->SetNumberField(TEXT("occurrence_index"), OccurrenceIndex);
+            Obj->SetNumberField(TEXT("matched_count"), MatchedCount);
+            Obj->SetNumberField(TEXT("applied_count"), 0);
+            Obj->SetObjectField(TEXT("notify"), AnimNotifyEventJson(AnimSeq->Notifies[TargetArrayIndex]));
+            Obj->SetBoolField(TEXT("applied"), false);
+            return AnimAuthoring_NoChangeReply(Obj, TEXT("The notify already has those values; nothing changed, nothing saved"));
+        }
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("EditAnimNotify", "Edit Anim Notify"));
+        AnimSeq->Modify();
+        ApplyEdits(AnimSeq->Notifies[TargetArrayIndex]);
+        // Keep Notifies time-sorted after a timing edit (the array contract).
+        if (bTimingChanged)
+        {
+            AnimSeq->SortNotifies();
+        }
     }
 
     UE_LOG(LogTemp, Verbose, TEXT("[edit_anim_notify] %s notify '%s'[occ %d] -> %d field(s) applied (timing_changed=%d)"),
@@ -4748,10 +5245,10 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
     }
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Anim notify edited"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"), SaveError);
 }
 
-// MCP:set_montage_properties - Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.
+// MCP:set_montage_properties - Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. For blend times use set_montage_blend_times. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param blend_mode_in - BlendModeIn: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
 //   @param blend_mode_out - BlendModeOut: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
@@ -4762,7 +5259,7 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
 //   @param enable_root_motion_translation - bEnableRootMotionTranslation (bool, DEPRECATED since 4.5). Optional.
 //   @param enable_root_motion_rotation - bEnableRootMotionRotation (bool, DEPRECATED since 4.5). Optional.
 //   @param root_motion_root_lock - RootMotionRootLock: 'RefPose'|'AnimFirstFrame'|'Zero' (DEPRECATED since 4.5). Optional.
-//   @returns { montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, saved, message }
+//   @returns { montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, changed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -4836,77 +5333,103 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
         }
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetMontageProperties", "Set Montage Properties"));
-    Montage->Modify();
+    // RootMotionRootLock is a TEnumAsByte written through reflection: looked up before anything is touched.
+    FByteProperty* LockProp = FindFProperty<FByteProperty>(UAnimMontage::StaticClass(), TEXT("RootMotionRootLock"));
+    if (bHasRootLock && !LockProp)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Could not access RootMotionRootLock via reflection"));
+    }
 
+    // Reads every supplied field once: counts it, records whether it differs from the montage, and writes it
+    // when bWrite. The first pass only compares, so supplied values the montage already has leave it untouched.
     int32 AppliedCount = 0;
+    bool bAnyDiffers = false;
     TArray<FString> Notes;
+    const auto VisitFields = [&](bool bWrite)
+    {
+        AppliedCount = 0;
+        bAnyDiffers = false;
+        Notes.Reset();
 
-    // BlendModeIn/Out are public 'enum class EMontageBlendMode : uint8' members -> assign
-    // directly (type-checked; BlueprintReadOnly restricts BP write only, not C++).
-    if (bHasBlendIn)  { Montage->BlendModeIn  = static_cast<EMontageBlendMode>(BlendInValue);  ++AppliedCount; }
-    if (bHasBlendOut) { Montage->BlendModeOut = static_cast<EMontageBlendMode>(BlendOutValue); ++AppliedCount; }
+        // BlendModeIn/Out are public 'enum class EMontageBlendMode : uint8' members -> assign
+        // directly (type-checked; BlueprintReadOnly restricts BP write only, not C++).
+        if (bHasBlendIn)
+        {
+            const EMontageBlendMode Mode = static_cast<EMontageBlendMode>(BlendInValue);
+            ++AppliedCount;
+            bAnyDiffers |= Montage->BlendModeIn != Mode;
+            if (bWrite) { Montage->BlendModeIn = Mode; }
+        }
+        if (bHasBlendOut)
+        {
+            const EMontageBlendMode Mode = static_cast<EMontageBlendMode>(BlendOutValue);
+            ++AppliedCount;
+            bAnyDiffers |= Montage->BlendModeOut != Mode;
+            if (bWrite) { Montage->BlendModeOut = Mode; }
+        }
 
-    bool bAutoBlendOut = false;
-    if (Params->TryGetBoolField(TEXT("enable_auto_blend_out"), bAutoBlendOut))
-    {
-        Montage->bEnableAutoBlendOut = bAutoBlendOut;
-        ++AppliedCount;
-    }
+        bool bAutoBlendOut = false;
+        if (Params->TryGetBoolField(TEXT("enable_auto_blend_out"), bAutoBlendOut))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->bEnableAutoBlendOut != bAutoBlendOut;
+            if (bWrite) { Montage->bEnableAutoBlendOut = bAutoBlendOut; }
+        }
 
-    double TriggerTimeD = 0.0;
-    if (Params->TryGetNumberField(TEXT("blend_out_trigger_time"), TriggerTimeD))
-    {
-        Montage->BlendOutTriggerTime = static_cast<float>(TriggerTimeD);
-        ++AppliedCount;
-    }
+        double TriggerTimeD = 0.0;
+        if (Params->TryGetNumberField(TEXT("blend_out_trigger_time"), TriggerTimeD))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->BlendOutTriggerTime != static_cast<float>(TriggerTimeD);
+            if (bWrite) { Montage->BlendOutTriggerTime = static_cast<float>(TriggerTimeD); }
+        }
 
-    FString SyncGroupStr;
-    if (Params->TryGetStringField(TEXT("sync_group"), SyncGroupStr))
-    {
-        Montage->SyncGroup = FName(*SyncGroupStr);
-        ++AppliedCount;
-    }
+        FString SyncGroupStr;
+        if (Params->TryGetStringField(TEXT("sync_group"), SyncGroupStr))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->SyncGroup != FName(*SyncGroupStr);
+            if (bWrite) { Montage->SyncGroup = FName(*SyncGroupStr); }
+        }
 
-    double SyncSlotD = 0.0;
-    if (Params->TryGetNumberField(TEXT("sync_slot_index"), SyncSlotD))
-    {
-        Montage->SyncSlotIndex = static_cast<int32>(SyncSlotD);
-        ++AppliedCount;
-    }
+        double SyncSlotD = 0.0;
+        if (Params->TryGetNumberField(TEXT("sync_slot_index"), SyncSlotD))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->SyncSlotIndex != static_cast<int32>(SyncSlotD);
+            if (bWrite) { Montage->SyncSlotIndex = static_cast<int32>(SyncSlotD); }
+        }
 
-    // -------- Deprecated-since-4.5 root-motion members (honest NOTE on use). -------- //
-    // Comment-only deprecation (no UE_DEPRECATED macro) so direct assignment is warning-
-    // free; still public. RootMotionRootLock is a TEnumAsByte -> set via reflection.
-    bool bRootTrans = false;
-    if (Params->TryGetBoolField(TEXT("enable_root_motion_translation"), bRootTrans))
-    {
-        Montage->bEnableRootMotionTranslation = bRootTrans;
-        ++AppliedCount;
-        Notes.Add(TEXT("enable_root_motion_translation is DEPRECATED since 4.5 (root motion is controlled by anim sequences)"));
-    }
-    bool bRootRot = false;
-    if (Params->TryGetBoolField(TEXT("enable_root_motion_rotation"), bRootRot))
-    {
-        Montage->bEnableRootMotionRotation = bRootRot;
-        ++AppliedCount;
-        Notes.Add(TEXT("enable_root_motion_rotation is DEPRECATED since 4.5 (root motion is controlled by anim sequences)"));
-    }
-    if (bHasRootLock)
-    {
-        if (FByteProperty* LockProp = FindFProperty<FByteProperty>(UAnimMontage::StaticClass(), TEXT("RootMotionRootLock")))
+        // -------- Deprecated-since-4.5 root-motion members (honest NOTE on use). -------- //
+        // Comment-only deprecation (no UE_DEPRECATED macro) so direct assignment is warning-
+        // free; still public. RootMotionRootLock is a TEnumAsByte -> set via reflection.
+        bool bRootTrans = false;
+        if (Params->TryGetBoolField(TEXT("enable_root_motion_translation"), bRootTrans))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->bEnableRootMotionTranslation != bRootTrans;
+            if (bWrite) { Montage->bEnableRootMotionTranslation = bRootTrans; }
+            Notes.Add(TEXT("enable_root_motion_translation is DEPRECATED since 4.5 (root motion is controlled by anim sequences)"));
+        }
+        bool bRootRot = false;
+        if (Params->TryGetBoolField(TEXT("enable_root_motion_rotation"), bRootRot))
+        {
+            ++AppliedCount;
+            bAnyDiffers |= Montage->bEnableRootMotionRotation != bRootRot;
+            if (bWrite) { Montage->bEnableRootMotionRotation = bRootRot; }
+            Notes.Add(TEXT("enable_root_motion_rotation is DEPRECATED since 4.5 (root motion is controlled by anim sequences)"));
+        }
+        if (bHasRootLock)
         {
             void* Addr = LockProp->ContainerPtrToValuePtr<void>(Montage);
-            LockProp->SetIntPropertyValue(Addr, static_cast<int64>(RootLockValue));
             ++AppliedCount;
+            bAnyDiffers |= LockProp->GetUnsignedIntPropertyValue(Addr) != static_cast<uint64>(RootLockValue);
+            if (bWrite) { LockProp->SetIntPropertyValue(Addr, static_cast<int64>(RootLockValue)); }
             Notes.Add(TEXT("root_motion_root_lock is DEPRECATED since 4.5 (root motion is controlled by anim sequences)"));
         }
-        else
-        {
-            return mcp_common::MakeErrorReply(TEXT("Could not access RootMotionRootLock via reflection"));
-        }
-    }
+    };
 
+    VisitFields(/*bWrite=*/false);
     if (AppliedCount == 0)
     {
         return mcp_common::MakeErrorReply(
@@ -4915,16 +5438,27 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
                  "enable_root_motion_rotation, root_motion_root_lock"));
     }
 
-    UE_LOG(LogTemp, Verbose, TEXT("[set_montage_properties] %s -> %d field(s) applied (mode_in=%s mode_out=%s)"),
-        *Montage->GetPathName(), AppliedCount,
-        AnimAuthoring_BlendModeName(Montage->BlendModeIn), AnimAuthoring_BlendModeName(Montage->BlendModeOut));
-
+    const bool bChanged = bAnyDiffers;
+    bool bSaved = false;
     FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+    if (bChanged)
+    {
+        {
+            const FScopedTransaction Transaction(LOCTEXT("SetMontageProperties", "Set Montage Properties"));
+            Montage->Modify();
+            VisitFields(/*bWrite=*/true);
+        }
+
+        UE_LOG(LogTemp, Verbose, TEXT("[set_montage_properties] %s -> %d field(s) applied (mode_in=%s mode_out=%s)"),
+            *Montage->GetPathName(), AppliedCount,
+            AnimAuthoring_BlendModeName(Montage->BlendModeIn), AnimAuthoring_BlendModeName(Montage->BlendModeOut));
+
+        bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+    }
 
     // Read the deprecated lock back through reflection so the round-trip is honest.
     int32 ReadbackRootLock = 0;
-    if (FByteProperty* LockProp = FindFProperty<FByteProperty>(UAnimMontage::StaticClass(), TEXT("RootMotionRootLock")))
+    if (LockProp)
     {
         const void* Addr = LockProp->ContainerPtrToValuePtr<void>(Montage);
         ReadbackRootLock = static_cast<int32>(LockProp->GetUnsignedIntPropertyValue(Addr));
@@ -4946,10 +5480,15 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
     RootMotion->SetBoolField(TEXT("deprecated"), true);
     Obj->SetObjectField(TEXT("root_motion"), RootMotion);
 
-    Obj->SetNumberField(TEXT("applied_count"), AppliedCount);
+    Obj->SetNumberField(TEXT("applied_count"), bChanged ? AppliedCount : 0);
     Obj->SetArrayField(TEXT("notes"), mcp_common::StringsToJson(Notes));
+    Obj->SetBoolField(TEXT("changed"), bChanged);
+    if (!bChanged)
+    {
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has those properties; nothing changed, nothing saved"));
+    }
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage properties set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_properties"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_properties"), SaveError);
 }
 
 // ===========================================================================
@@ -4972,7 +5511,7 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
 // on InterpolationTime/DampingRatio/MaxSpeed fire only through the editor property
 // path, so we clamp to >=0 here.
 // ---------------------------------------------------------------------------
-// MCP:set_blendspace_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change.
+// MCP:set_blendspace_interpolation - Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param blend_space_path - Full asset path of the UBlendSpace / UBlendSpace1D.
 //   @param x_interpolation_time [number] - Optional X-axis smoothing time in seconds (>= 0; 0 disables smoothing).
 //   @param x_damping_ratio [number] - Optional X-axis damping ratio (>= 0; only used when type is SpringDamper).
@@ -4982,7 +5521,7 @@ TSharedPtr<FJsonObject> HandleSetMontageProperties(const TSharedPtr<FJsonObject>
 //   @param y_damping_ratio [number] - Optional Y-axis damping ratio (2D only, >= 0).
 //   @param y_max_speed [number] - Optional Y-axis maximum speed (2D only, >= 0).
 //   @param y_interpolation_type - Optional Y-axis smoothing type (2D only): Averaged|Linear|Cubic|EaseInOut|Exponential|SpringDamper.
-//   @returns { blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, saved }
+//   @returns { blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, changed, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlendSpacePath;
@@ -5001,11 +5540,13 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
 
     const bool bIs1D = BlendSpace->IsA<UBlendSpace1D>();
     int32 AppliedCount = 0;
+    bool bAnyDiffers = false;
     TArray<FString> Notes;
     bool bTypeError = false;
     FString TypeErrorMsg;
 
-    auto ApplyAxis = [&](int32 Index, const TCHAR* Prefix)
+    // Counts the supplied fields of one axis and whether any differs from the axis, and writes them when bWrite.
+    auto VisitAxis = [&](int32 Index, const TCHAR* Prefix, bool bWrite)
     {
         FInterpolationParameter* Axis = InterpProp->ContainerPtrToValuePtr<FInterpolationParameter>(BlendSpace, Index);
         if (!Axis)
@@ -5014,9 +5555,27 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
         }
         double D = 0.0;
         // ClampMin="0" metas only fire through the editor property path -> clamp here.
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_interpolation_time"), D)) { Axis->InterpolationTime = FMath::Max(0.0f, static_cast<float>(D)); ++AppliedCount; }
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_damping_ratio"), D))      { Axis->DampingRatio     = FMath::Max(0.0f, static_cast<float>(D)); ++AppliedCount; }
-        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_max_speed"), D))          { Axis->MaxSpeed         = FMath::Max(0.0f, static_cast<float>(D)); ++AppliedCount; }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_interpolation_time"), D))
+        {
+            const float V = FMath::Max(0.0f, static_cast<float>(D));
+            ++AppliedCount;
+            bAnyDiffers |= Axis->InterpolationTime != V;
+            if (bWrite) { Axis->InterpolationTime = V; }
+        }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_damping_ratio"), D))
+        {
+            const float V = FMath::Max(0.0f, static_cast<float>(D));
+            ++AppliedCount;
+            bAnyDiffers |= Axis->DampingRatio != V;
+            if (bWrite) { Axis->DampingRatio = V; }
+        }
+        if (Params->TryGetNumberField(FString(Prefix) + TEXT("_max_speed"), D))
+        {
+            const float V = FMath::Max(0.0f, static_cast<float>(D));
+            ++AppliedCount;
+            bAnyDiffers |= Axis->MaxSpeed != V;
+            if (bWrite) { Axis->MaxSpeed = V; }
+        }
         FString TypeStr;
         if (Params->TryGetStringField(FString(Prefix) + TEXT("_interpolation_type"), TypeStr) && !TypeStr.IsEmpty())
         {
@@ -5030,34 +5589,30 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
                     Prefix, *TypeStr);
                 return;
             }
-            Axis->InterpolationType = Parsed;
             ++AppliedCount;
+            bAnyDiffers |= !(Axis->InterpolationType == Parsed);
+            if (bWrite) { Axis->InterpolationType = Parsed; }
         }
     };
-
-    ApplyAxis(0, TEXT("x"));
-    if (bTypeError)
-    {
-        return mcp_common::MakeErrorReply(TypeErrorMsg);
-    }
 
     const FString YPrefix = TEXT("y");
     const bool bYProvided = Params->HasField(YPrefix + TEXT("_interpolation_time")) || Params->HasField(YPrefix + TEXT("_damping_ratio"))
         || Params->HasField(YPrefix + TEXT("_max_speed")) || Params->HasField(YPrefix + TEXT("_interpolation_type"));
-    if (bIs1D)
+    if (bIs1D && bYProvided)
     {
-        if (bYProvided)
-        {
-            Notes.Add(TEXT("y_* ignored: this is a 1D blend space (only the X axis is smoothed)"));
-        }
+        Notes.Add(TEXT("y_* ignored: this is a 1D blend space (only the X axis is smoothed)"));
     }
-    else
+
+    // First pass: validate, count and compare only, so a bad type or values the axes already have leave the
+    // asset untouched.
+    VisitAxis(0, TEXT("x"), /*bWrite=*/false);
+    if (!bTypeError && !bIs1D)
     {
-        ApplyAxis(1, TEXT("y"));
-        if (bTypeError)
-        {
-            return mcp_common::MakeErrorReply(TypeErrorMsg);
-        }
+        VisitAxis(1, TEXT("y"), /*bWrite=*/false);
+    }
+    if (bTypeError)
+    {
+        return mcp_common::MakeErrorReply(TypeErrorMsg);
     }
 
     if (AppliedCount == 0)
@@ -5067,10 +5622,25 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
                  "x_max_speed/x_interpolation_type (and y_* for 2D)"));
     }
 
-    // Without this the RUNTIME does not see the blend space.
-    RebuildBlendSpaceRuntimeData(BlendSpace);
+    bool bSaved = false;
     FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(BlendSpace, SaveError);
+    if (bAnyDiffers)
+    {
+        {
+            // Written straight into InterpolationParam: Modify() inside a transaction makes it undoable.
+            const FScopedTransaction Transaction(LOCTEXT("SetBlendSpaceInterpolation", "Set Blend Space Interpolation"));
+            BlendSpace->Modify();
+            AppliedCount = 0;
+            VisitAxis(0, TEXT("x"), /*bWrite=*/true);
+            if (!bIs1D)
+            {
+                VisitAxis(1, TEXT("y"), /*bWrite=*/true);
+            }
+            // Without this the RUNTIME does not see the blend space.
+            RebuildBlendSpaceRuntimeData(BlendSpace);
+        }
+        bSaved = AnimAuthoring_SavePackageOf(BlendSpace, SaveError);
+    }
 
     // Read the values back through the SAME reflection path so the round-trip is honest.
     auto AxisReadback = [&](int32 Index) -> TSharedPtr<FJsonObject>
@@ -5090,8 +5660,13 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
     {
         Obj->SetObjectField(TEXT("y_axis"), AxisReadback(1));
     }
-    Obj->SetNumberField(TEXT("applied_count"), AppliedCount);
+    Obj->SetNumberField(TEXT("applied_count"), bAnyDiffers ? AppliedCount : 0);
     Obj->SetArrayField(TEXT("notes"), mcp_common::StringsToJson(Notes));
+    Obj->SetBoolField(TEXT("changed"), bAnyDiffers);
+    if (!bAnyDiffers)
+    {
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The blend space smoothing already has those values; nothing changed and nothing was saved."), TEXT("note"));
+    }
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_blendspace_interpolation"), SaveError);
 }
 
@@ -5108,11 +5683,11 @@ TSharedPtr<FJsonObject> HandleSetBlendSpaceInterpolation(const TSharedPtr<FJsonO
 // path and assign. Direct member assignment under Modify() (both are public).
 // Distinct from set_anim_additive_settings (additive TYPE vs retarget SOURCE).
 // ---------------------------------------------------------------------------
-// MCP:set_anim_retarget_source - Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence)
+// MCP:set_anim_retarget_source - Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence) in an undo transaction and save it. A ref_pose_seq_path that does not load is an error before anything changes; values the sequence already has are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Object path of the UAnimSequence to mutate.
 //   @param retarget_source - Retarget-source name (FName). Must name an entry in the owning skeleton's retarget-source map to RESOLVE at runtime, but the property write persists regardless. Use 'None' (or empty) to clear.
 //   @param ref_pose_seq_path - Optional object path of a UAnimSequence used as the additive retarget reference pose (RefPoseSeq). Pass empty/'None' to clear it.
-//   @returns { anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, success, saved, save_error }
+//   @returns { anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, changed, success, saved, save_error, note? }
 TSharedPtr<FJsonObject> HandleSetAnimRetargetSource(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -5134,19 +5709,55 @@ TSharedPtr<FJsonObject> HandleSetAnimRetargetSource(const TSharedPtr<FJsonObject
     bool bRefPoseSet = false;
     bool bRefPoseCleared = false;
 
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimRetargetSource", "MCP: Set Anim Retarget Source"));
-    Seq->Modify();
-
+    // Resolve every supplied value before anything is touched: an unknown ref-pose sequence is refused, and
+    // values the sequence already has change nothing.
+    FName SourceName = NAME_None;
     if (bHasSource)
     {
         FString SourceStr;
         Params->TryGetStringField(TEXT("retarget_source"), SourceStr);
         SourceStr = SourceStr.TrimStartAndEnd();
         // Treat empty / "None" as a clear (NAME_None).
-        const FName SourceName = (SourceStr.IsEmpty() || SourceStr.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+        SourceName = (SourceStr.IsEmpty() || SourceStr.Equals(TEXT("None"), ESearchCase::IgnoreCase))
             ? NAME_None : FName(*SourceStr);
-        Seq->RetargetSource = SourceName;
-        ++AppliedCount;
+    }
+    UAnimSequence* NewRefSeq = nullptr;
+    bool bClearRefPose = false;
+    if (bHasRefPose)
+    {
+        FString RefPosePath;
+        Params->TryGetStringField(TEXT("ref_pose_seq_path"), RefPosePath);
+        RefPosePath = RefPosePath.TrimStartAndEnd();
+        bClearRefPose = RefPosePath.IsEmpty() || RefPosePath.Equals(TEXT("None"), ESearchCase::IgnoreCase);
+        if (!bClearRefPose)
+        {
+            NewRefSeq = AnimAssetUtils::LoadAsset<UAnimSequence>(RefPosePath);
+            if (!NewRefSeq)
+            {
+                // Honest failure: a referenced ref-pose asset path that does not load is an error,
+                // not a silent skip.
+                return mcp_common::MakeErrorReply(
+                    FString::Printf(TEXT("ref_pose_seq_path AnimSequence not found: %s"), *RefPosePath));
+            }
+        }
+    }
+    const bool bSourceChanges = bHasSource && Seq->RetargetSource != SourceName;
+    const bool bRefPoseChanges = bHasRefPose && Seq->RefPoseSeq != NewRefSeq;
+
+    TOptional<FScopedTransaction> Transaction;
+    if (bSourceChanges || bRefPoseChanges)
+    {
+        Transaction.Emplace(LOCTEXT("SetAnimRetargetSource", "MCP: Set Anim Retarget Source"));
+        Seq->Modify();
+    }
+
+    if (bHasSource)
+    {
+        if (bSourceChanges)
+        {
+            Seq->RetargetSource = SourceName;
+            ++AppliedCount;
+        }
         // Honest note: the write persists, but resolution depends on the skeleton's map.
         if (SourceName != NAME_None)
         {
@@ -5171,36 +5782,19 @@ TSharedPtr<FJsonObject> HandleSetAnimRetargetSource(const TSharedPtr<FJsonObject
 
     if (bHasRefPose)
     {
-        FString RefPosePath;
-        Params->TryGetStringField(TEXT("ref_pose_seq_path"), RefPosePath);
-        RefPosePath = RefPosePath.TrimStartAndEnd();
-        if (RefPosePath.IsEmpty() || RefPosePath.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+        if (bRefPoseChanges)
         {
-            Seq->RefPoseSeq = nullptr;
-            bRefPoseCleared = true;
+            Seq->RefPoseSeq = NewRefSeq;
+            bRefPoseCleared = bClearRefPose;
+            bRefPoseSet = !bClearRefPose;
             ++AppliedCount;
         }
-        else if (UAnimSequence* RefSeq = AnimAssetUtils::LoadAsset<UAnimSequence>(RefPosePath))
+        if (!bClearRefPose)
         {
-            Seq->RefPoseSeq = RefSeq;
-            bRefPoseSet = true;
-            ++AppliedCount;
             Notes.Add(TEXT("ref_pose_seq (RefPoseSeq) is meaningful only when the additive base pose type is AnimScaled or AnimFrame"));
         }
-        else
-        {
-            // Honest failure: a referenced ref-pose asset path that does not load is an error,
-            // not a silent skip.
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("ref_pose_seq_path AnimSequence not found: %s"), *RefPosePath));
-        }
     }
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
-    UE_LOG(LogTemp, Verbose, TEXT("[set_anim_retarget_source] %s -> retarget_source='%s' ref_pose_set=%d cleared=%d (%d field(s))"),
-        *Seq->GetPathName(), *Seq->RetargetSource.ToString(), bRefPoseSet ? 1 : 0, bRefPoseCleared ? 1 : 0, AppliedCount);
+    Transaction.Reset();
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
@@ -5210,7 +5804,19 @@ TSharedPtr<FJsonObject> HandleSetAnimRetargetSource(const TSharedPtr<FJsonObject
     Obj->SetBoolField(TEXT("ref_pose_seq_cleared"), bRefPoseCleared);
     Obj->SetNumberField(TEXT("applied_count"), AppliedCount);
     Obj->SetArrayField(TEXT("notes"), mcp_common::StringsToJson(Notes));
+    Obj->SetBoolField(TEXT("changed"), AppliedCount > 0);
     Obj->SetBoolField(TEXT("success"), true);
+    if (AppliedCount == 0)
+    {
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The sequence already has that retarget source and reference-pose sequence; nothing changed and nothing was saved."), TEXT("note"));
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
+
+    UE_LOG(LogTemp, Verbose, TEXT("[set_anim_retarget_source] %s -> retarget_source='%s' ref_pose_set=%d cleared=%d (%d field(s))"),
+        *Seq->GetPathName(), *Seq->RetargetSource.ToString(), bRefPoseSet ? 1 : 0, bRefPoseCleared ? 1 : 0, AppliedCount);
+
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_retarget_source"), SaveError);
 }
 
@@ -5247,10 +5853,10 @@ TSharedPtr<FJsonObject> HandleSetAnimRetargetSource(const TSharedPtr<FJsonObject
 // VirtualBone Guid / RequiredBones cache; it does NOT auto-save. We follow with
 // Modify + RefreshCacheData + SaveAssetPackage so the change persists.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_montage_skeleton - Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches)
+// MCP:set_anim_montage_skeleton - Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches) in an undo transaction and save it. The skeleton the montage already uses is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param skeleton_path - Asset path of the new Skeleton (e.g. '/Engine/EngineMeshes/SkeletalCube_Skeleton').
-//   @returns { montage_path, skeleton_path, prev_skeleton_path, applied, saved, message }
+//   @returns { montage_path, skeleton_path, prev_skeleton_path, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimMontageSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5265,21 +5871,31 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageSkeleton(const TSharedPtr<FJsonObjec
 
     const FString PrevSkeletonPath = Montage->GetSkeleton() ? Montage->GetSkeleton()->GetPathName() : FString();
 
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimMontageSkeleton", "Set Anim Montage Skeleton"));
-    Montage->Modify();
-    Montage->SetSkeleton(NewSkeleton);
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("skeleton_path"), NewSkeleton->GetPathName());
     Obj->SetStringField(TEXT("prev_skeleton_path"), PrevSkeletonPath);
+
+    // The skeleton the montage already has changes nothing: answered before Modify() would dirty it.
+    if (Montage->GetSkeleton() == NewSkeleton)
+    {
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already uses that skeleton; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetAnimMontageSkeleton", "Set Anim Montage Skeleton"));
+        Montage->Modify();
+        Montage->SetSkeleton(NewSkeleton);
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage skeleton set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_skeleton"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_skeleton"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5289,10 +5905,10 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageSkeleton(const TSharedPtr<FJsonObjec
 // to dirty-marking, but we still MarkPackageDirty explicitly so editor save flows
 // pick the change up the same way as the rest of this file.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_montage_preview_mesh - Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.
+// MCP:set_anim_montage_preview_mesh - Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied; the preview mesh the montage already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param mesh_path - Asset path of the preview USkeletalMesh (e.g. '/Engine/EngineMeshes/SkeletalCube').
-//   @returns { montage_path, mesh_path, prev_mesh_path, applied, saved, message }
+//   @returns { montage_path, mesh_path, prev_mesh_path, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimMontagePreviewMesh(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5305,22 +5921,33 @@ TSharedPtr<FJsonObject> HandleSetAnimMontagePreviewMesh(const TSharedPtr<FJsonOb
     USkeletalMesh* NewMesh = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MeshPath, TEXT("SkeletalMesh"), NewMesh)) { return Error; }
 
-    const FString PrevMeshPath = Montage->GetPreviewMesh() ? Montage->GetPreviewMesh()->GetPathName() : FString();
-
-    const FScopedTransaction Transaction(LOCTEXT("SetAnimMontagePreviewMesh", "Set Anim Montage Preview Mesh"));
-    Montage->Modify();
-    Montage->SetPreviewMesh(NewMesh, /*bMarkAsDirty=*/true);
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+    USkeletalMesh* PrevMesh = Montage->GetPreviewMesh();
+    const FString PrevMeshPath = PrevMesh ? PrevMesh->GetPathName() : FString();
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("mesh_path"), NewMesh->GetPathName());
     Obj->SetStringField(TEXT("prev_mesh_path"), PrevMeshPath);
+
+    // The preview mesh the montage already has changes nothing: answered before Modify() would dirty it.
+    if (PrevMesh == NewMesh)
+    {
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage already has that preview mesh; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetAnimMontagePreviewMesh", "Set Anim Montage Preview Mesh"));
+        Montage->Modify();
+        Montage->SetPreviewMesh(NewMesh, /*bMarkAsDirty=*/true);
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage preview mesh set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_preview_mesh"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_preview_mesh"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5328,9 +5955,9 @@ TSharedPtr<FJsonObject> HandleSetAnimMontagePreviewMesh(const TSharedPtr<FJsonOb
 // ENGINE_API virtual AnimSequenceBase.h; safe + idempotent (recomputes
 // NotifyTracks, SequenceLength and bone-cache without mutating authored data).
 // ---------------------------------------------------------------------------
-// MCP:refresh_anim_montage_cache - Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent.
+// MCP:refresh_anim_montage_cache - Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
-//   @returns { montage_path, refreshed, sequence_length, slot_count, section_count, saved, message }
+//   @returns { montage_path, refreshed, sequence_length, slot_count, section_count, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRefreshAnimMontageCache(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5352,7 +5979,7 @@ TSharedPtr<FJsonObject> HandleRefreshAnimMontageCache(const TSharedPtr<FJsonObje
     Obj->SetNumberField(TEXT("slot_count"), Montage->SlotAnimTracks.Num());
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage cache refreshed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("refresh_anim_montage_cache"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("refresh_anim_montage_cache"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5360,11 +5987,11 @@ TSharedPtr<FJsonObject> HandleRefreshAnimMontageCache(const TSharedPtr<FJsonObje
 // FCompositeSection::SectionName (AnimMontage.h) is a public UPROPERTY FName;
 // surgical write under Modify + RefreshCacheData keeps NotifyTracks in sync.
 // ---------------------------------------------------------------------------
-// MCP:rename_montage_section - Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index
+// MCP:rename_montage_section - Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index, in an undo transaction, and save it. The name the section already has (FName match, case ignored) is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_index - Zero-based index into CompositeSections (use get_montage_info first to list).
 //   @param new_name - New FName for the section.
-//   @returns { montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, message }
+//   @returns { montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRenameMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5388,24 +6015,36 @@ TSharedPtr<FJsonObject> HandleRenameMontageSection(const TSharedPtr<FJsonObject>
     const FName OldName = Montage->CompositeSections[Index].SectionName;
     const FName NewFName(*NewName);
 
-    const FScopedTransaction Transaction(LOCTEXT("RenameMontageSection", "Rename Montage Section"));
-    Montage->Modify();
-    Montage->CompositeSections[Index].SectionName = NewFName;
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetNumberField(TEXT("section_index"), Index);
     Obj->SetStringField(TEXT("old_name"), OldName.ToString());
     Obj->SetStringField(TEXT("new_name"), NewName);
+
+    // The name the section already has (FName match) changes nothing: answered before Modify() would dirty it.
+    if (OldName == NewFName)
+    {
+        Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
+        Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The section already has that name; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("RenameMontageSection", "Rename Montage Section"));
+        Montage->Modify();
+        Montage->CompositeSections[Index].SectionName = NewFName;
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
     Obj->SetArrayField(TEXT("sections"), CollectSectionNames(Montage));
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage section renamed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("rename_montage_section"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("rename_montage_section"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5413,11 +6052,11 @@ TSharedPtr<FJsonObject> HandleRenameMontageSection(const TSharedPtr<FJsonObject>
 // FCompositeSection::StartTime is a public UPROPERTY float (AnimMontage.h);
 // write + RefreshCacheData keeps the section's LinkValue / derived bookkeeping in sync.
 // ---------------------------------------------------------------------------
-// MCP:set_montage_section_start_time - Set the StartTime on an existing FCompositeSection by zero-based section_index
+// MCP:set_montage_section_start_time - Set the StartTime on an existing FCompositeSection by zero-based section_index, in an undo transaction, and save it. The start time the section already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_index - Zero-based index into CompositeSections.
 //   @param start_time - Absolute section start time in seconds.
-//   @returns { montage_path, section_index, start_time, applied, saved, message }
+//   @returns { montage_path, section_index, start_time, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetMontageSectionStartTime(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5438,23 +6077,34 @@ TSharedPtr<FJsonObject> HandleSetMontageSectionStartTime(const TSharedPtr<FJsonO
             TEXT("section_index %d out of range (section_count=%d)"), Index, Montage->CompositeSections.Num()));
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetMontageSectionStartTime", "Set Montage Section Start Time"));
-    Montage->Modify();
-    // FCompositeSection::StartTime is deprecated in favor of FAnimLinkableElement::SetTime/GetTime.
-    // Use the inherited setter with EAnimLinkMethod::Absolute (the default; the alternative Relative/Proportional require a valid SegmentBeginTime).
-    Montage->CompositeSections[Index].SetTime(static_cast<float>(StartTime), EAnimLinkMethod::Absolute);
-    Montage->RefreshCacheData();
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
+    Obj->SetNumberField(TEXT("section_index"), Index);
+
+    // The start time the section already has changes nothing: answered before Modify() would dirty the montage.
+    if (Montage->CompositeSections[Index].GetTime(EAnimLinkMethod::Absolute) == static_cast<float>(StartTime))
+    {
+        Obj->SetNumberField(TEXT("start_time"), static_cast<double>(Montage->CompositeSections[Index].GetTime(EAnimLinkMethod::Absolute)));
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The section already starts at that time; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetMontageSectionStartTime", "Set Montage Section Start Time"));
+        Montage->Modify();
+        // FCompositeSection::StartTime is deprecated in favor of FAnimLinkableElement::SetTime/GetTime.
+        // Use the inherited setter with EAnimLinkMethod::Absolute (the default; the alternative Relative/Proportional require a valid SegmentBeginTime).
+        Montage->CompositeSections[Index].SetTime(static_cast<float>(StartTime), EAnimLinkMethod::Absolute);
+        Montage->RefreshCacheData();
+    }
 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-    Obj->SetNumberField(TEXT("section_index"), Index);
     Obj->SetNumberField(TEXT("start_time"), static_cast<double>(Montage->CompositeSections[Index].GetTime(EAnimLinkMethod::Absolute)));
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage section start time set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_section_start_time"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_section_start_time"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5509,12 +6159,12 @@ namespace
 // The raw AnimReference field is BlueprintReadOnly (AnimCompositeBase.h) — we go
 // through the public setter, which is the supported C++ write path.
 // ---------------------------------------------------------------------------
-// MCP:set_montage_segment_anim_sequence - Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range)
+// MCP:set_montage_segment_anim_sequence - Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range, play rate and loop count to 1 and its start position to 0) in an undo transaction and save the montage. A segment that already references that sequence with those values is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track containing the segment (e.g. 'DefaultSlot').
 //   @param segment_index - Zero-based index into the slot track's AnimSegments.
 //   @param anim_sequence_path - Object path of the UAnimSequence to reference (must share the montage's skeleton).
-//   @returns { montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, message }
+//   @returns { montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetMontageSegmentAnimSequence(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5546,26 +6196,42 @@ TSharedPtr<FJsonObject> HandleSetMontageSegmentAnimSequence(const TSharedPtr<FJs
         return mcp_common::MakeErrorReply(ResolveError);
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetMontageSegmentAnimSequence", "Set Montage Segment Anim Sequence"));
-    Montage->Modify();
-    // bInitialize=true resets AnimStartTime=0 / AnimEndTime=AnimSequenceLength — the
-    // supported way to switch a segment's underlying animation.
-    Segment->SetAnimReference(NewAnim, /*bInitialize=*/true);
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("slot_name"), SlotName);
     Obj->SetNumberField(TEXT("segment_index"), Index);
     Obj->SetStringField(TEXT("anim_sequence_path"), NewAnim->GetPathName());
+
+    // SetAnimReference(bInitialize=true) writes the reference, its cached play length, AnimStartTime 0,
+    // AnimEndTime the play length, AnimPlayRate 1, LoopingCount 1 and StartPos 0: a segment that already
+    // holds all of them changes nothing and is answered before Modify() would dirty the montage.
+    if (Segment->GetAnimReference() == NewAnim && !Segment->IsPlayLengthOutOfDate() && Segment->AnimStartTime == 0.f
+        && Segment->AnimEndTime == static_cast<float>(NewAnim->GetPlayLength()) && Segment->AnimPlayRate == 1.f
+        && Segment->LoopingCount == 1 && Segment->StartPos == 0.f)
+    {
+        Obj->SetNumberField(TEXT("anim_start_time"), static_cast<double>(Segment->AnimStartTime));
+        Obj->SetNumberField(TEXT("anim_end_time"), static_cast<double>(Segment->AnimEndTime));
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The segment already references that sequence over its full range; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetMontageSegmentAnimSequence", "Set Montage Segment Anim Sequence"));
+        Montage->Modify();
+        // bInitialize=true resets AnimStartTime=0 / AnimEndTime=AnimSequenceLength -- the
+        // supported way to switch a segment's underlying animation.
+        Segment->SetAnimReference(NewAnim, /*bInitialize=*/true);
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetNumberField(TEXT("anim_start_time"), static_cast<double>(Segment->AnimStartTime));
     Obj->SetNumberField(TEXT("anim_end_time"), static_cast<double>(Segment->AnimEndTime));
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segment anim reference set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_segment_anim_sequence"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_segment_anim_sequence"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5576,12 +6242,12 @@ TSharedPtr<FJsonObject> HandleSetMontageSegmentAnimSequence(const TSharedPtr<FJs
 // AnimEndTime). Here we only move the START of an already-bound segment — the user keeps
 // AnimEndTime as-is to preserve the segment's play-length intent.
 // ---------------------------------------------------------------------------
-// MCP:set_montage_segment_start_time - Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index). AnimEndTime is left untouched.
+// MCP:set_montage_segment_start_time - Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index), clamped to [0, AnimEndTime], in an undo transaction, and save the montage. AnimEndTime is left untouched. The (clamped) start time the segment already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track containing the segment.
 //   @param segment_index - Zero-based index into the slot track's AnimSegments.
 //   @param start_time - New AnimStartTime in seconds (clamped to [0, AnimEndTime]).
-//   @returns { montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, message }
+//   @returns { montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, save_error, message, note? }
 TSharedPtr<FJsonObject> HandleSetMontageSegmentStartTime(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5613,28 +6279,41 @@ TSharedPtr<FJsonObject> HandleSetMontageSegmentStartTime(const TSharedPtr<FJsonO
     const float NewStart = static_cast<float>(StartTime);
     const float ClampedStart = FMath::Clamp(NewStart, 0.0f, Segment->AnimEndTime);
 
-    const FScopedTransaction Transaction(LOCTEXT("SetMontageSegmentStartTime", "Set Montage Segment Start Time"));
-    Montage->Modify();
-    Segment->AnimStartTime = ClampedStart;
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("slot_name"), SlotName);
     Obj->SetNumberField(TEXT("segment_index"), Index);
-    Obj->SetNumberField(TEXT("start_time"), static_cast<double>(Segment->AnimStartTime));
-    Obj->SetNumberField(TEXT("anim_end_time"), static_cast<double>(Segment->AnimEndTime));
     if (!FMath::IsNearlyEqual(NewStart, ClampedStart))
     {
         Obj->SetStringField(TEXT("note"), FString::Printf(
             TEXT("Requested start_time=%f was clamped to AnimEndTime=%f"), NewStart, Segment->AnimEndTime));
     }
+
+    // The (clamped) start time the segment already has changes nothing: answered before Modify() would dirty
+    // the montage.
+    if (Segment->AnimStartTime == ClampedStart)
+    {
+        Obj->SetNumberField(TEXT("start_time"), static_cast<double>(Segment->AnimStartTime));
+        Obj->SetNumberField(TEXT("anim_end_time"), static_cast<double>(Segment->AnimEndTime));
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The segment already starts at that time; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SetMontageSegmentStartTime", "Set Montage Segment Start Time"));
+        Montage->Modify();
+        Segment->AnimStartTime = ClampedStart;
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
+    Obj->SetNumberField(TEXT("start_time"), static_cast<double>(Segment->AnimStartTime));
+    Obj->SetNumberField(TEXT("anim_end_time"), static_cast<double>(Segment->AnimEndTime));
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segment start time set"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_segment_start_time"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_montage_segment_start_time"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5642,10 +6321,10 @@ TSharedPtr<FJsonObject> HandleSetMontageSegmentStartTime(const TSharedPtr<FJsonO
 // AnimCompositeBase.h — moves AnimSegments so there are no gaps between one
 // finishing and the next starting (preserves order). WITH_EDITOR-only.
 // ---------------------------------------------------------------------------
-// MCP:collapse_montage_segments - Collapse a montage slot track's segments end-to-end (no gaps, order preserved)
+// MCP:collapse_montage_segments - Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to collapse.
-//   @returns { montage_path, slot_name, segment_count, applied, saved, message }
+//   @returns { montage_path, slot_name, segment_count, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5676,7 +6355,7 @@ TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObje
     Obj->SetNumberField(TEXT("segment_count"), SlotTrack->AnimTrack.AnimSegments.Num());
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segments collapsed"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("collapse_montage_segments"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("collapse_montage_segments"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -5684,10 +6363,10 @@ TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObje
 // AnimCompositeBase.h — sorts AnimSegments by StartTime ascending.
 // WITH_EDITOR-only.
 // ---------------------------------------------------------------------------
-// MCP:sort_montage_segments - Sort a montage slot track's segments by start time ascending
+// MCP:sort_montage_segments - Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to sort.
-//   @returns { montage_path, slot_name, segment_count, applied, saved, message }
+//   @returns { montage_path, slot_name, segment_count, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSortMontageSegments(const TSharedPtr<FJsonObject>& Params)
 {
     FString MontagePath;
@@ -5718,7 +6397,7 @@ TSharedPtr<FJsonObject> HandleSortMontageSegments(const TSharedPtr<FJsonObject>&
     Obj->SetNumberField(TEXT("segment_count"), SlotTrack->AnimTrack.AnimSegments.Num());
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segments sorted"), bSaved, SaveError));
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("sort_montage_segments"));
+    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("sort_montage_segments"), SaveError);
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -34,14 +34,14 @@ Add one implicit row to a UChooserTable. Grows every column's RowValues by one (
 
 *Additive.*
 
-Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails.
+Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails. An unknown result_type, or an output_object_class that does not load as a UClass, is an error checked before the asset is created or loaded.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset short name (e.g. "MyChooser"); becomes the package short name. |
 | `package_path` | string | no | Long package root (default "/Game/MCP"); full asset path = &lt;package_path>/&lt;name>. |
 | `result_type` | string | no | EObjectChooserResultType: "Object" (default), "Class", or "NoPrimaryResult". |
-| `output_object_class` | string | no | UClass path used as OutputObjectType (default UObject), loaded via LoadObject&lt;UClass>. |
+| `output_object_class` | string | no | UClass path used as OutputObjectType (default UObject), loaded via LoadObject&lt;UClass>; a path that does not load is an error. |
 
 **Returns:** `{ asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null, saved: bool, save_error?: string }`
 

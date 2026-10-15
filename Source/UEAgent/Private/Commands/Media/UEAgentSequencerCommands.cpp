@@ -187,12 +187,21 @@ namespace UEAgentSequencerImpl
         return nullptr;
     }
 
-    // ReadSequencePath with both names tested in one condition, the form the tool catalog publishes as two
-    // required params.
+    // ReadSequencePath in the `!a && !b` form the tool catalog reads as one parameter with an alias, so the
+    // published schema accepts a call that passes either name; an empty sequence_path falls back to
+    // sequence_name, as in ReadSequencePath.
     TSharedPtr<FJsonObject> ReadSequencePathOrName(const TSharedPtr<FJsonObject>& Params, FString& OutSequencePath)
     {
-        if ((!Params->TryGetStringField(TEXT("sequence_path"), OutSequencePath) || OutSequencePath.IsEmpty()) &&
-            (!Params->TryGetStringField(TEXT("sequence_name"), OutSequencePath) || OutSequencePath.IsEmpty()))
+        if (!Params->TryGetStringField(TEXT("sequence_path"), OutSequencePath) &&
+            !Params->TryGetStringField(TEXT("sequence_name"), OutSequencePath))
+        {
+            return mcp_common::MissingParameterReply(TEXT("sequence_path"));
+        }
+        if (OutSequencePath.IsEmpty())
+        {
+            Params->TryGetStringField(TEXT("sequence_name"), OutSequencePath);
+        }
+        if (OutSequencePath.IsEmpty())
         {
             return mcp_common::MissingParameterReply(TEXT("sequence_path"));
         }
@@ -289,6 +298,25 @@ namespace UEAgentSequencerImpl
             bOutCreated = (Track != nullptr);
         }
         return Track;
+    }
+
+    // The first root track whose class is exactly TrackType, added when missing; bOutCreated reports the
+    // addition. FindTrack<>() also matches subclasses, so a UMovieSceneSubTrack lookup through it would take a
+    // cinematic shot track.
+    template <typename TrackType>
+    TrackType* FindOrAddExactRootTrack(UMovieScene* MovieScene, bool& bOutCreated)
+    {
+        bOutCreated = false;
+        for (UMovieSceneTrack* Track : MovieScene->GetTracks())
+        {
+            if (IsValid(Track) && Track->GetClass() == TrackType::StaticClass())
+            {
+                return CastChecked<TrackType>(Track);
+            }
+        }
+        TrackType* Added = MovieScene->AddTrack<TrackType>();
+        bOutCreated = (Added != nullptr);
+        return Added;
     }
 
     // The track's first section as SectionType, else a new one spanning the playback range (bOutCreated).
@@ -2293,7 +2321,7 @@ namespace UEAgentSequencerImpl
     }
 }
 
-// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.
+// MCP:add_subsequence_track - Nests one Level Sequence in another: finds the target's first root track of exactly the subsequence class (never a cinematic shot track or another subclass) or adds one, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.
 //   @param sequence_path - Full /Game path (e.g. "/Game/MyGame/SUBSEQ_Example") OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param sub_sequence_path - Optional content path of the sub Level Sequence to nest. If omitted, a sibling inner Level Sequence is created and persisted.
@@ -2355,10 +2383,10 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
     const FScopedTransaction Transaction(LOCTEXT("AddSubsequenceTrack", "MCP: Add Subsequence Track"));
     MovieScene->Modify();
 
-    // Root sub track (no object binding). FindTrack<>() / AddTrack<>() are the
-    // no-guid overloads on UMovieScene (verified MOVIESCENE_API).
+    // Root sub track (no object binding), matched by exact class: a cinematic shot track is a UMovieSceneSubTrack
+    // too, and set_sub_section_parameters reads the subsequence track by exact class as well.
     bool bTrackCreated = false;
-    UMovieSceneSubTrack* Track = UEAgentSequencerImpl::FindOrAddTrack<UMovieSceneSubTrack>(MovieScene, bTrackCreated);
+    UMovieSceneSubTrack* Track = UEAgentSequencerImpl::FindOrAddExactRootTrack<UMovieSceneSubTrack>(MovieScene, bTrackCreated);
     if (!Track)
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to add subsequence track"));
@@ -3624,9 +3652,9 @@ TSharedPtr<FJsonObject> HandleGetBindingTracks(const TSharedPtr<FJsonObject>& Pa
 //   2. set_sequence_view_range      -- UMovieScene::SetViewRange(double, double)
 //   3. set_sequence_working_range   -- UMovieScene::SetWorkingRange(double, double)
 //   4. set_sequence_display_rate    -- UMovieScene::SetDisplayRate(FFrameRate)
-//   5. get_sequence_master_tracks   -- enumerate MovieScene->GetTracks(), split by
-//                                      Track->FindObjectBindingGuid() (invalid =
-//                                      master track, valid = binding track).
+//   5. get_sequence_master_tracks   -- master tracks are MovieScene->GetTracks() plus
+//                                      GetCameraCutTrack(); binding tracks are the
+//                                      tracks of each FMovieSceneBinding.
 //
 // Runtime playback lives in the *_level_sequence_runtime commands
 // (play_level_sequence_runtime and its siblings), which need a PIE or game world.
@@ -3833,7 +3861,7 @@ TSharedPtr<FJsonObject> HandleSetSequenceDisplayRate(const TSharedPtr<FJsonObjec
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_display_rate"), SaveError);
 }
 
-// MCP:get_sequence_master_tracks - List the master tracks and binding tracks of a Level Sequence.  A track is a "master track" if it has no binding GUID (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack). Binding tracks have a non-empty FGuid. This command returns both lists with class, name, section_count, binding_guid fields.
+// MCP:get_sequence_master_tracks - List the master tracks and binding tracks of a Level Sequence.  A master track belongs to no object binding (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack, and the camera cut track, which is listed too); a binding track belongs to an object binding, whose guid it carries. This command returns both lists with class, name, section_count, binding_guid fields (binding_guid empty on a master track); total_track_count is their sum.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @returns { sequence_path: string, total_track_count: int, master_track_count: int, binding_track_count: int, master_tracks: [{class, name, section_count, binding_guid}], binding_tracks: [{class, name, section_count, binding_guid}] }
@@ -3847,40 +3875,47 @@ TSharedPtr<FJsonObject> HandleGetSequenceMasterTracks(const TSharedPtr<FJsonObje
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
-    // A track is a "master track" if FindBindingFromTrack returns nullptr (no
-    // binding GUID). Binding tracks have a non-null FMovieSceneBinding.
-    TArray<TSharedPtr<FJsonValue>> MasterTracks;
-    TArray<TSharedPtr<FJsonValue>> BindingTracks;
-    int32 NumMaster = 0, NumBinding = 0;
-    for (UMovieSceneTrack* Track : MovieScene->GetTracks())
+    // GetTracks() holds the root tracks only; the camera cut track is a root track kept apart from it, and the
+    // tracks of each object binding live on the binding.
+    auto MakeTrackEntry = [](const UMovieSceneTrack& Track, const FString& BindingGuid)
     {
-        if (!Track)
-        {
-            continue;
-        }
         TSharedPtr<FJsonObject> TObj = MakeShared<FJsonObject>();
-        const FString ClassName = Track->GetClass()->GetName();
-        const FString TrackName = Track->GetTrackName().IsNone() ? FString() : Track->GetTrackName().ToString();
-        TObj->SetStringField(TEXT("class"), ClassName);
-        TObj->SetStringField(TEXT("name"), TrackName);
-        TObj->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-        // UMovieSceneTrack::FindObjectBindingGuid() (MOVIESCENE_API, MovieSceneTrack.h)
-        // returns the binding FGuid -- an invalid FGuid
-        // means the track is a master track (no binding). Cast-checked.
-        const FGuid BindingGuid = Track->FindObjectBindingGuid();
-        if (BindingGuid.IsValid())
+        TObj->SetStringField(TEXT("class"), Track.GetClass()->GetName());
+        TObj->SetStringField(TEXT("name"), Track.GetTrackName().IsNone() ? FString() : Track.GetTrackName().ToString());
+        TObj->SetNumberField(TEXT("section_count"), Track.GetAllSections().Num());
+        TObj->SetStringField(TEXT("binding_guid"), BindingGuid);
+        return MakeShared<FJsonValueObject>(TObj);
+    };
+
+    TArray<TSharedPtr<FJsonValue>> MasterTracks;
+    for (const UMovieSceneTrack* Track : MovieScene->GetTracks())
+    {
+        if (Track != nullptr)
         {
-            TObj->SetStringField(TEXT("binding_guid"), BindingGuid.ToString());
-            BindingTracks.Add(MakeShared<FJsonValueObject>(TObj));
-            ++NumBinding;
-        }
-        else
-        {
-            TObj->SetStringField(TEXT("binding_guid"), FString());
-            MasterTracks.Add(MakeShared<FJsonValueObject>(TObj));
-            ++NumMaster;
+            MasterTracks.Add(MakeTrackEntry(*Track, FString()));
         }
     }
+    if (const UMovieSceneTrack* CameraCutTrack = MovieScene->GetCameraCutTrack())
+    {
+        MasterTracks.Add(MakeTrackEntry(*CameraCutTrack, FString()));
+    }
+
+    // A const movie scene, for the non-deprecated GetBindings() const overload.
+    const UMovieScene* ConstScene = MovieScene;
+    TArray<TSharedPtr<FJsonValue>> BindingTracks;
+    for (const FMovieSceneBinding& Binding : ConstScene->GetBindings())
+    {
+        const FString BindingGuid = Binding.GetObjectGuid().ToString();
+        for (const UMovieSceneTrack* Track : Binding.GetTracks())
+        {
+            if (Track != nullptr)
+            {
+                BindingTracks.Add(MakeTrackEntry(*Track, BindingGuid));
+            }
+        }
+    }
+    const int32 NumMaster = MasterTracks.Num();
+    const int32 NumBinding = BindingTracks.Num();
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
     Response->SetNumberField(TEXT("total_track_count"), NumMaster + NumBinding);
@@ -4366,9 +4401,9 @@ TSharedPtr<FJsonObject> HandleDuplicateKeyframe(const TSharedPtr<FJsonObject>& P
 //                                    actor the cut is on).
 //   set_audio_section_start_offset    set the StartFrameOffset on an existing
 //                                    UMovieSceneAudioSection (skip-into-clip).
-//   get_sequence_track_count          flat readback: total track count +
-//                                    breakdown by track class (no nested
-//                                    track walk, just class names + counts).
+//   get_sequence_track_count          flat readback: root, binding and total
+//                                    track counts + breakdown by track class
+//                                    (class names + counts).
 //
 // The mutators work directly on the ULevelSequence / UMovieScene asset model with the
 // pattern of the other section commands: section/track guard + FScopedTransaction +
@@ -4658,7 +4693,7 @@ TSharedPtr<FJsonObject> HandleSetAudioSectionStartOffset(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_audio_section_start_offset"), SaveError);
 }
 
-// MCP:get_sequence_track_count - Flat readback of the total/master/binding track counts and per-class breakdown.
+// MCP:get_sequence_track_count - Flat readback of the total/master/binding track counts and per-class breakdown. master_track_count counts the root tracks, the camera cut track included; binding_track_count counts the tracks of every object binding; total_track_count is their sum, and class_breakdown and total_section_count cover both.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @returns { sequence_path: string, total_track_count: int, master_track_count: int, binding_track_count: int, total_section_count: int, distinct_class_count: int, class_breakdown: [{class, count}] }
@@ -4671,20 +4706,42 @@ TSharedPtr<FJsonObject> HandleGetSequenceTrackCount(const TSharedPtr<FJsonObject
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
-    // Flat readback. Build a TMap<class_name, count> from MovieScene->GetTracks().
+    // Flat readback, by class. GetTracks() holds the root tracks only; the camera cut track is a root track kept
+    // apart from it, and the tracks of each object binding live on the binding.
     TMap<FString, int32> ClassCounts;
     int32 MasterCount = 0;
     int32 BindingCount = 0;
     int32 TotalSections = 0;
-    const TArray<UMovieSceneTrack*>& AllTracks = MovieScene->GetTracks();
-    for (const UMovieSceneTrack* Track : AllTracks)
+    auto CountTrack = [&ClassCounts, &TotalSections](const UMovieSceneTrack& Track)
     {
-        if (!Track) { continue; }
-        const FString ClassName = Track->GetClass()->GetName();
-        ClassCounts.FindOrAdd(ClassName)++;
-        const FGuid BindingGuid = Track->FindObjectBindingGuid();
-        if (BindingGuid.IsValid()) { ++BindingCount; } else { ++MasterCount; }
-        TotalSections += Track->GetAllSections().Num();
+        ClassCounts.FindOrAdd(Track.GetClass()->GetName())++;
+        TotalSections += Track.GetAllSections().Num();
+    };
+    for (const UMovieSceneTrack* Track : MovieScene->GetTracks())
+    {
+        if (Track != nullptr)
+        {
+            CountTrack(*Track);
+            ++MasterCount;
+        }
+    }
+    if (const UMovieSceneTrack* CameraCutTrack = MovieScene->GetCameraCutTrack())
+    {
+        CountTrack(*CameraCutTrack);
+        ++MasterCount;
+    }
+    // A const movie scene, for the non-deprecated GetBindings() const overload.
+    const UMovieScene* ConstScene = MovieScene;
+    for (const FMovieSceneBinding& Binding : ConstScene->GetBindings())
+    {
+        for (const UMovieSceneTrack* Track : Binding.GetTracks())
+        {
+            if (Track != nullptr)
+            {
+                CountTrack(*Track);
+                ++BindingCount;
+            }
+        }
     }
 
     // Build the class_breakdown array sorted by count desc.
@@ -4704,7 +4761,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceTrackCount(const TSharedPtr<FJsonObject
     }
 
     TSharedPtr<FJsonObject> Response = LevelSequenceUtils::NewPathPayload(Sequence);
-    Response->SetNumberField(TEXT("total_track_count"), AllTracks.Num());
+    Response->SetNumberField(TEXT("total_track_count"), MasterCount + BindingCount);
     Response->SetNumberField(TEXT("master_track_count"), MasterCount);
     Response->SetNumberField(TEXT("binding_track_count"), BindingCount);
     Response->SetNumberField(TEXT("total_section_count"), TotalSections);

@@ -4,6 +4,37 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.2 - 2026-10-15
+
+- More calls that killed or hung the editor are refused before they touch anything:
+  `copy_dynamic_mesh_to_static_mesh` with `lod_index` 8 or more (a negative one silently overwrote LOD 0),
+  a huge `section_index` on the procedural mesh tools or `element_index` on
+  `set_procedural_mesh_material`, `create_procedural_grid_mesh` with `num_x * num_y` past 1,000,000
+  vertices, a huge `option_index` on the EQS tools, and `duplicate_anim_sequence` onto an existing asset
+  (the engine destroyed the live object and built the copy in its memory; it now refuses, as
+  `duplicate_mpc` does). A section or option index can be at most the current count, which appends one,
+  and a number outside int32 is an error instead of silently becoming the default.
+- The Sequencer tools that take `sequence_path` or its alias `sequence_name` accept either: ten of them
+  published both as required, so a call with one was refused before it reached the tool
+  (`add_shot_track`, `add_subsequence_track`, `add_camera_cut_section`, `get_sequence_track_count` and six
+  more).
+- A valid no-op succeeds without saving: the IK Rig and retargeter tools and the setters and add or remove
+  tools of animation assets saved on a no-op, so during Play-in-Editor or under a read-only root a no-op
+  failed; they now answer the flag false and `saved: false`, and leave the asset untouched. The create tools
+  said `saved: true` for an asset that already existed.
+- `create_anim_montage` and `add_montage_segment` added a second, empty `DefaultSlot` track (the engine's
+  `IsValidSlot` is false for an empty track), and `add_montage_slot` added one on every call.
+- Answers that were wrong: `is_bvh_valid_for_mesh` always answered false; `reimport_anim_sequence`,
+  `rename_pose_in_pose_asset` and `set_pose_asset_base_pose` answered success when the engine refused;
+  `set_ik_solver_bones` for a solver type with no start bone; `set_anim_number_of_frames` tripped an engine
+  ensure on a count that is not whole at the sampling rate; `create_chooser_table` mapped an unknown
+  `result_type` to Object; `add_subsequence_track` put its section on a cinematic shot track;
+  `get_timeline_info`, `get_sequence_master_tracks` and `get_sequence_track_count` left out the camera cut
+  track (the last two every binding track too); `get_niagara_data_interfaces` reported the object name
+  where the other tools take the user parameter name.
+- Undoable now: `connect_ik_goal_to_solver`, `set_retargeter_op_settings`, `set_blendspace_properties` and
+  `set_blendspace_interpolation`. Every saving tool of animation assets reports `save_error`.
+
 ## 1.2.1 - 2026-10-15
 
 - Calls that killed the editor are refused before they touch anything: a negative `section_index` on

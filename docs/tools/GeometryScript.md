@@ -156,16 +156,16 @@ Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFun
 
 ## `build_mesh_bvh`
 
-*Destructive, idempotent.*
+*Read-only.*
 
-Build a Bounding Volume Hierarchy for a DynamicMeshActor's dynamic mesh via UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh. The BVH is required for the spatial-query cmds (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh). Idempotent: if b_only_if_invalid=true (default), a fresh BVH is built only when the existing one is invalid.
+Build a BVH (bounding volume hierarchy) for the live dynamic mesh of a DynamicMeshActor in the editor world with BuildBVHForMesh, and read it back with IsBVHValidForMesh. The plugin keeps no BVH between calls: this one is dropped on return, and the spatial-query tools (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh) build their own on every call, so they never need this first. It checks that a BVH can be built for the mesh as it is now: built is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `b_only_if_invalid` | boolean | no | Optional bool; defaults to true (skip rebuild if BVH is still valid). |
+| `b_only_if_invalid` | boolean | no | Optional bool, default true; it has no effect, since no earlier BVH is kept and every call builds a new one. |
 
-**Returns:** `{ actor_name, built: bool, bvh_valid: bool, vertex_count, triangle_count }`
+**Returns:** `{ actor_name, built: bool, b_only_if_invalid: bool, bvh_valid: bool, vertex_count, triangle_count } -- actor_name is the dynamic mesh component's name, not the actor label; b_only_if_invalid echoes the request; the counts are those of the mesh the BVH was built for.`
 
 ## `clear_dynamic_mesh`
 
@@ -195,13 +195,13 @@ Compact vertex and triangle ID lists on a DynamicMeshActor's dynamic mesh
 
 *Destructive, idempotent.*
 
-Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets).
+Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets). A lod_index outside 0 to 7 (a static mesh has at most 8 LODs) is an error checked before anything changes; one past the asset's last LOD adds the LODs in between, which the engine sets up to be reduced from an earlier LOD.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the source DynamicMeshActor. |
 | `target_static_mesh_path` | string | yes | Content path of an EXISTING /Game UStaticMesh to overwrite. |
-| `lod_index` | number | no | Optional target LOD index (default 0). Clamped by the engine to [0, MAX_STATIC_MESH_LODS]. |
+| `lod_index` | number | no | Optional target LOD index, 0 to 7 (default 0); a negative index or one of 8 or more is refused. |
 | `materials` | array | no | Optional ordered list of UMaterialInterface content paths, one per MaterialID (index 0 = MaterialID 0). Supplying it flips bReplaceMaterials on, so the target asset gets exactly these material slots. WITHOUT this the asset keeps its existing slots and a multi-MaterialID mesh collapses into whatever slots already existed — this is the parameter that makes per-triangle MaterialIDs visible on the saved asset. |
 | `material_slot_names` | array | no | Optional slot names matching materials 1:1 (default: the engine names them). Ignored when materials is absent. |
 
@@ -265,32 +265,32 @@ Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the edi
 
 *Read-only.*
 
-Find the nearest point on the mesh to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Builds a fresh BVH if needed, then queries.
+Find the nearest point on the live dynamic mesh of a DynamicMeshActor to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), then queries it, so the answer always reflects the latest mesh edits. found is false when no triangle lies within max_distance, or the mesh is empty. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `query_point` | array | no | [x, y, z] query point in the mesh's local space. |
 | `max_distance` | number | no | Optional float; max search distance (0 = unlimited). |
-| `allow_unsafe_modified` | boolean | no | Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false). |
+| `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
-**Returns:** `{ actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z }`
+**Returns:** `{ actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label.`
 
 ## `find_nearest_ray_intersection_with_mesh`
 
 *Read-only.*
 
-Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Builds a fresh BVH if needed.
+Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `ray_origin` | array | no | [x, y, z] origin point of the ray in mesh-local space. |
-| `ray_direction` | array | no | [x, y, z] direction of the ray (NOT auto-normalized; pass a unit vector for predictable distances). |
+| `ray_direction` | array | no | [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter. |
 | `max_distance` | number | no | Optional float; max search distance (0 = unlimited). |
-| `allow_unsafe_modified` | boolean | no | Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false). |
+| `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
-**Returns:** `{ actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z }`
+**Returns:** `{ actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label; ray_parameter is a distance along the normalized direction.`
 
 ## `generate_mesh_uvs`
 
@@ -575,33 +575,33 @@ Get the number of UV islands in a UV channel.
 
 *Read-only.*
 
-Check whether a BVH for the DynamicMeshActor's dynamic mesh is currently valid via UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. Read-only: no allocation, no rebuild.
+Report whether a BVH built for the live dynamic mesh of a DynamicMeshActor in the editor world is valid for it, via BuildBVHForMesh then UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. The plugin keeps no BVH between calls (build_mesh_bvh and rebuild_mesh_bvh drop theirs, and the spatial-query tools build their own on every call), so no kept BVH can go stale after a mesh edit and that staleness is not tracked: this builds a BVH for the mesh as it is now and checks it, as each spatial query does. bvh_valid false means no valid BVH could be built for the mesh. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 
-**Returns:** `{ actor_name, bvh_valid: bool }`
+**Returns:** `{ actor_name, bvh_valid: bool } -- actor_name is the dynamic mesh component's name, not the actor label.`
 
 ## `is_point_inside_mesh`
 
 *Read-only.*
 
-Test whether a 3D point is inside the mesh using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Builds a fresh BVH+FWN if needed.
+Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Every call builds a fresh BVH and fast winding tree from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `query_point` | array | no | [x, y, z] point in the mesh's local space. |
 | `winding_threshold` | number | no | Optional float; default 0.5 (standard parity test). Higher values shrink the "inside" region. |
-| `max_distance` | number | no | Optional float; max search distance for the spatial query (0 = unlimited). |
-| `allow_unsafe_modified` | boolean | no | Optional; allow querying against a mesh modified since the BVH was built without re-syncing (maps to bAllowUnsafeModifiedQueries, default false). |
+| `max_distance` | number | no | Optional float; it has no effect on this query, whose winding-number test uses no search distance. |
+| `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
-**Returns:** `{ actor_name, is_inside: bool, containment_outcome: string }`
+**Returns:** `{ actor_name, is_inside: bool, containment_outcome: string } -- actor_name is the dynamic mesh component's name, not the actor label.`
 
 ## `rebuild_mesh_bvh`
 
-*Destructive.*
+*Read-only.*
 
 Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMesh and read it back with IsBVHValidForMesh. The BVH is a temporary that is not kept: the spatial-query tools build their own on every call, so this only checks that a BVH can be built for the mesh as it is now. bvh_rebuilt is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 
@@ -610,7 +610,7 @@ Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMe
 | `actor_name` | string | yes | DynamicMeshActor name (required) |
 | `b_only_if_invalid` | boolean | no | Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds |
 
-**Returns:** `{ actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }`
+**Returns:** `{ actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid } -- actor_name is the dynamic mesh component's name, not the actor label.`
 
 ## `recompute_mesh_normals`
 

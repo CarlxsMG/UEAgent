@@ -129,11 +129,13 @@ namespace
 		}
 	}
 
-	EObjectChooserResultType ResultTypeFromString(const FString& S)
+	/** The EObjectChooserResultType named S (Object, Class or NoPrimaryResult, any case) into Out; false for any other name. */
+	bool ResultTypeFromString(const FString& S, EObjectChooserResultType& Out)
 	{
-		if (S.Equals(TEXT("Class"), ESearchCase::IgnoreCase))         { return EObjectChooserResultType::ClassResult; }
-		if (S.Equals(TEXT("NoPrimaryResult"), ESearchCase::IgnoreCase)) { return EObjectChooserResultType::NoPrimaryResult; }
-		return EObjectChooserResultType::ObjectResult;
+		if (S.Equals(TEXT("Object"), ESearchCase::IgnoreCase))          { Out = EObjectChooserResultType::ObjectResult; return true; }
+		if (S.Equals(TEXT("Class"), ESearchCase::IgnoreCase))           { Out = EObjectChooserResultType::ClassResult; return true; }
+		if (S.Equals(TEXT("NoPrimaryResult"), ESearchCase::IgnoreCase)) { Out = EObjectChooserResultType::NoPrimaryResult; return true; }
+		return false;
 	}
 
 	/**
@@ -532,11 +534,11 @@ namespace
 	}
 }
 
-// MCP:create_chooser_table - Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails.
+// MCP:create_chooser_table - Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails. An unknown result_type, or an output_object_class that does not load as a UClass, is an error checked before the asset is created or loaded.
 //   @param name - Asset short name (e.g. "MyChooser"); becomes the package short name.
 //   @param package_path - Long package root (default "/Game/MCP"); full asset path = <package_path>/<name>.
 //   @param result_type - EObjectChooserResultType: "Object" (default), "Class", or "NoPrimaryResult".
-//   @param output_object_class - UClass path used as OutputObjectType (default UObject), loaded via LoadObject<UClass>.
+//   @param output_object_class - UClass path used as OutputObjectType (default UObject), loaded via LoadObject<UClass>; a path that does not load is an error.
 //   @returns { asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -555,12 +557,30 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 
 	const FString FullPath = PackagePath / Name;
 
-	FString ResultTypeStr = TEXT("Object");
+	// Both settings are validated before the asset is created or loaded, so a refused call touches nothing.
+	FString ResultTypeStr;
 	const bool bHasResultType = Params->TryGetStringField(TEXT("result_type"), ResultTypeStr) && !ResultTypeStr.IsEmpty();
-	const EObjectChooserResultType ResultType = ResultTypeFromString(ResultTypeStr);
+	EObjectChooserResultType ResultType = EObjectChooserResultType::ObjectResult;
+	if (bHasResultType && !ResultTypeFromString(ResultTypeStr, ResultType))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("create_chooser_table: unknown result_type '%s' (expected Object|Class|NoPrimaryResult); nothing was created or changed"),
+			*ResultTypeStr));
+	}
 
 	FString OutputObjectClassPath;
 	Params->TryGetStringField(TEXT("output_object_class"), OutputObjectClassPath);
+	UClass* RequestedClass = nullptr;
+	if (!OutputObjectClassPath.IsEmpty())
+	{
+		RequestedClass = LoadObject<UClass>(nullptr, *OutputObjectClassPath);
+		if (!RequestedClass)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("create_chooser_table: could not load UClass at output_object_class '%s'; nothing was created or changed"),
+				*OutputObjectClassPath));
+		}
+	}
 
 	FString CreateError;
 	bool bCreated = false;
@@ -582,16 +602,6 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 			Chooser->OutputObjectType ? Chooser->OutputObjectType->GetPathName() : FString());
 		return Data;
 	};
-
-	UClass* RequestedClass = nullptr;
-	if (!OutputObjectClassPath.IsEmpty())
-	{
-		RequestedClass = LoadObject<UClass>(nullptr, *OutputObjectClassPath);
-		if (!RequestedClass)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[Chooser] Could not load OutputObjectType UClass: %s"), *OutputObjectClassPath);
-		}
-	}
 
 	if (!bCreated)
 	{

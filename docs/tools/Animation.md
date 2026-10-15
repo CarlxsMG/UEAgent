@@ -8,7 +8,7 @@
 
 *Destructive, idempotent.*
 
-Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -22,7 +22,7 @@ Add the animation track of one skeleton bone to a UAnimSequence through its data
 
 *Additive.*
 
-Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length
+Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -52,20 +52,20 @@ Add a conduit node named conduit_name to an existing state machine of an Animati
 
 *Additive, idempotent.*
 
-Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is kept, reported as already_existed=true, and the skeleton is saved anyway. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false.
+Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `curve_name` | string | yes | The curve name to add (e.g. 'Curve_Example'). |
 | `skeleton_path` | string | no | Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved. |
 
-**Returns:** `{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }`
+**Returns:** `{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, save_error, message }`
 
 ## `add_anim_float_curve`
 
 *Destructive, idempotent.*
 
-Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
+Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); one that already holds exactly those keys is a success with changed=false and saved=false, and nothing is written or saved. curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false, with saved=false and save_error. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -73,7 +73,7 @@ Add a float curve (Editable flag) to a UAnimSequence through its data controller
 | `curve_name` | string | yes | Float curve name to add. |
 | `keys` | array | no | JSON array of [time, value] pairs (default [[0,0],[1,1]]) |
 
-**Returns:** `{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, success, saved, message }`
+**Returns:** `{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, changed, success, saved, save_error, message }`
 
 ## `add_anim_graph_node`
 
@@ -95,7 +95,7 @@ Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner gr
 
 *Additive.*
 
-Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.
+Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -104,26 +104,26 @@ Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track
 | `time` | number | no | Notify trigger time in seconds (default 0) |
 | `track_name` | string | no | Notify track name (default 'Default') |
 
-**Returns:** `{ animation_path, notify_name, time, success, saved, message }`
+**Returns:** `{ animation_path, notify_name, time, success, saved, save_error, message }`
 
 ## `add_anim_notify_name`
 
 *Additive.*
 
-Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.
+Register a notify name in the AnimationNotifies list of a USkeleton inside an undo transaction and save the skeleton package; returns present, notify_count and saved. A name already registered is a success with added=false, already_existed=true and saved=false, and the skeleton is neither modified nor saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `notify_name` | string | yes | The notify name to register (e.g. 'Footstep'). |
 | `skeleton_path` | string | no | Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved. |
 
-**Returns:** `{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }`
+**Returns:** `{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, save_error, message }`
 
 ## `add_anim_notify_state`
 
 *Additive.*
 
-Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.
+Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -133,7 +133,7 @@ Add an instance of a UAnimNotifyState class with a start time and duration to a 
 | `duration` | number | no | Notify state duration in seconds (default 1.0) |
 | `track_name` | string | no | Notify track name (default 'Default') |
 
-**Returns:** `{ animation_path, notify_state_name, start_time, duration, success, saved, message }`
+**Returns:** `{ animation_path, notify_state_name, start_time, duration, success, saved, save_error, message }`
 
 ## `add_anim_slot_group`
 
@@ -179,7 +179,7 @@ Add a state machine node named machine_name to the top-level AnimGraph of an Ani
 
 *Destructive.*
 
-Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.
+Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -187,13 +187,13 @@ Append an authored sync marker (name and time, on marker track 0) to a UAnimSequ
 | `marker_name` | string | yes | Name of the sync marker (e.g. "LeftFootDown"); sequences in one sync group line up markers that share a name. |
 | `time` | number | no | Sync marker time in seconds (default 0.5) |
 
-**Returns:** `{ anim_sequence_path, marker_name, time, num_sync_markers, success, saved, message }`
+**Returns:** `{ anim_sequence_path, marker_name, time, num_sync_markers, success, saved, save_error, message }`
 
 ## `add_anim_transform_curve`
 
 *Additive.*
 
-Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
+Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -239,7 +239,7 @@ Append an animation asset to a UPoseSearchDatabase as an enabled entry over its 
 
 *Additive.*
 
-Add a blend sample (animation + blend position) to a BlendSpace
+Add a blend sample (animation + blend position) to a BlendSpace. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -247,7 +247,7 @@ Add a blend sample (animation + blend position) to a BlendSpace
 | `animation_path` | string | yes | Full asset path to the UAnimSequence to use as sample. |
 | `blend_value` | any | no | Blend position: single number (1D) or array of up to 3 numbers (default 0) |
 
-**Returns:** `{ blendspace_path, sample_index, num_samples, success, saved, message }`
+**Returns:** `{ blendspace_path, sample_index, num_samples, success, saved, save_error, message }`
 
 ## `add_bone`
 
@@ -268,7 +268,7 @@ Add a bone named bone_name to the reference skeleton of a USkeleton asset under 
 
 *Additive, idempotent.*
 
-Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, and the asset is saved again. A failed save makes success false, with saved=false and save_error.
+Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, saved=false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -276,13 +276,13 @@ Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controll
 | `goal_name` | string | yes | Unique name for the new goal |
 | `bone_name` | string | no | Optional bone name to attach the goal to |
 
-**Returns:** `{ asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string, note?: string }`
 
 ## `add_ik_retarget_chain`
 
 *Additive.*
 
-Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.
+Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -298,7 +298,7 @@ Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK 
 
 *Additive.*
 
-Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error.
+Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -311,7 +311,7 @@ Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one 
 
 *Destructive.*
 
-Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.
+Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -319,13 +319,13 @@ Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an a
 | `notify_name` | string | yes | Name of the notify event (e.g. 'Footstep'). |
 | `trigger_time` | number | no | Absolute notify trigger time in seconds (default 0) |
 
-**Returns:** `{ montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, message }`
+**Returns:** `{ montage_path, notify_name, trigger_time, notify_count, notifies, added, saved, save_error, message }`
 
 ## `add_montage_section`
 
 *Additive.*
 
-Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.
+Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections, already_existed and added (true only for a new section). A section of that name already at that start time is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -333,13 +333,13 @@ Add a composite section to a UAnimMontage at an absolute start time, or move the
 | `section_name` | string | yes | Name of the section to add (e.g. 'Loop'). |
 | `start_time` | number | no | Absolute section start time in seconds (default 0) |
 
-**Returns:** `{ montage_path, section_name, start_time, section_count, sections, already_existed, added, saved, message }`
+**Returns:** `{ montage_path, section_name, start_time, section_count, sections, already_existed, added, changed, saved, save_error, message }`
 
 ## `add_montage_segment`
 
 *Additive.*
 
-Append an animation segment referencing a real UAnimSequence to a montage slot
+Append an animation segment referencing a real UAnimSequence to a montage slot. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -355,14 +355,14 @@ Append an animation segment referencing a real UAnimSequence to a montage slot
 
 *Additive.*
 
-Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.
+Add an empty slot animation track with the given slot name to a UAnimMontage in an undo transaction and save it; an existing slot of that name is a success with added=false, already_existed=true and saved=false, and the montage is neither modified nor saved. Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `slot_name` | string | yes | Name of the slot track to add (e.g. 'UpperBody'). |
 
-**Returns:** `{ montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, message }`
+**Returns:** `{ montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, save_error, message }`
 
 ## `add_motion_warping_component`
 
@@ -423,14 +423,14 @@ Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable und
 
 *Destructive.*
 
-Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.
+Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pose_asset_path` | string | yes | Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example'). |
 | `pose_name` | string | yes | Name of the pose to add (e.g. 'RefPose_A'). |
 
-**Returns:** `{ pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, message }`
+**Returns:** `{ pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, save_error, message }`
 
 ## `add_retargeter_op`
 
@@ -702,14 +702,14 @@ Remove EVERY FMotionWarpingTarget from a UMotionWarpingComponent in one call (th
 
 *Destructive.*
 
-Collapse a montage slot track's segments end-to-end (no gaps, order preserved)
+Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `slot_name` | string | yes | Name of the slot track to collapse. |
 
-**Returns:** `{ montage_path, slot_name, segment_count, applied, saved, message }`
+**Returns:** `{ montage_path, slot_name, segment_count, applied, saved, save_error, message }`
 
 ## `commit_bone_changes`
 
@@ -771,7 +771,7 @@ Wire two AnimGraph pins (pose links AND data pins) using the graph's OWN schema.
 
 *Destructive, idempotent.*
 
-Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent — re-connecting an already-connected goal is a no-op (already_connected:true), avoiding the duplicate the raw engine call would create.
+Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings, in one undo transaction, then save the asset.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent: re-connecting an already-connected goal is a success with already_connected:true, saved:false and a note, and nothing is saved, avoiding the duplicate the raw engine call would create. An unknown goal or out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -779,7 +779,7 @@ Connect an existing IK Rig goal to a solver, creating that solver's per-goal eff
 | `goal_name` | string | yes | Name of an existing goal (created via add_ik_goal). |
 | `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
 
-**Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool }`
+**Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `copy_anim_graph_nodes`
 
@@ -815,9 +815,9 @@ Create an Animation Blueprint (parent UAnimInstance) for a skeleton at package_p
 
 ## `create_anim_composite`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a UAnimComposite asset bound to a USkeleton, under /Game
+Create and save a UAnimComposite asset bound to a USkeleton, under /Game. Idempotent: a UAnimComposite already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -825,13 +825,13 @@ Create and save a UAnimComposite asset bound to a USkeleton, under /Game
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Animation) |
 | `skeleton_path` | string | no | Asset path of the target Skeleton |
 
-**Returns:** `{ name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, message }`
+**Returns:** `{ name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, save_error, message }`
 
 ## `create_anim_montage`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save an empty-but-valid UAnimMontage asset under /Game
+Create and save an empty-but-valid UAnimMontage asset under /Game. Idempotent: a UAnimMontage already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -840,13 +840,13 @@ Create and save an empty-but-valid UAnimMontage asset under /Game
 | `slot_name` | string | no | Montage slot name (e.g. DefaultSlot) |
 | `skeleton_path` | string | no | Asset path of the target Skeleton |
 
-**Returns:** `{ name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, message }`
+**Returns:** `{ name, package_path, asset_path, montage_path, skeleton_path, slot_names, slot_name, slot_count, section_count, created, already_existed, saved, save_error, message }`
 
 ## `create_anim_sequence`
 
 *Additive, idempotent.*
 
-Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
+Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, saved=false, length and rate not applied) and nothing is saved; another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -860,9 +860,9 @@ Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skele
 
 ## `create_blend_space`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
+Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game. Idempotent: a UBlendSpace already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -874,7 +874,7 @@ Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
 | `axis_max` | number | no | X-axis maximum value (default 100) |
 | `skeleton_path` | string | no | Asset path of the target Skeleton |
 
-**Returns:** `{ name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, message }`
+**Returns:** `{ name, package_path, asset_path, blend_space_path, is_1d, skeleton_path, axis_name, axis_min, axis_max, axis_grid_num, sample_count, created, already_existed, saved, save_error, message }`
 
 ## `create_control_rig_blueprint`
 
@@ -921,7 +921,7 @@ Create an editable /Game skeleton by duplicating an engine skeleton
 
 *Additive.*
 
-Create and save a UIKRetargeter asset wiring source + target IK Rigs.
+Create and save a UIKRetargeter asset wiring source + target IK Rigs. An existing retargeter at that path is rewired and saved when either rig differs; when it already uses both rigs nothing changes, nothing is saved (saved=false) and a note says so. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -930,13 +930,13 @@ Create and save a UIKRetargeter asset wiring source + target IK Rigs.
 | `source_ik_rig_path` | string | yes | Path to the source UIKRigDefinition (copy FROM) |
 | `target_ik_rig_path` | string | yes | Path to the target UIKRigDefinition (copy TO) |
 
-**Returns:** `{ asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `create_ik_rig`
 
 *Additive, idempotent.*
 
-Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: if the asset already exists, loads and (re)applies the mesh. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube.
+Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: an existing rig is loaded and only given the mesh, then saved, when it has another one; when it already has that mesh, or the mesh does not load or the engine refuses it (skeletal_mesh_set false), nothing changes, nothing is saved and a note says why. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -944,13 +944,13 @@ Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idem
 | `name` | string | yes | Asset name for the new IK Rig |
 | `skeletal_mesh_path` | string | no | Optional USkeletalMesh asset path; defaults to /Engine/EngineMeshes/SkeletalCube |
 
-**Returns:** `{ asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `create_pose_asset`
 
 *Additive, idempotent.*
 
-Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true, even when bound to another skeleton. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.
+Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true and saved=false, even when bound to another skeleton, and nothing is saved. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false, with saved=false and save_error. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -958,13 +958,13 @@ Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkelet
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Animation) |
 | `skeleton_path` | string | no | Asset path of the target Skeleton |
 
-**Returns:** `{ name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, message }`
+**Returns:** `{ name, package_path, asset_path, pose_asset_path, skeleton, num_poses, created, already_existed, saved, save_error, message }`
 
 ## `create_pose_asset_from_anim_sequence`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create a UPoseAsset built from a real UAnimSequence's frames
+Create a UPoseAsset built from a real UAnimSequence's frames and save it. Idempotent: a UPoseAsset already at that path is returned unchanged with already_existed=true and saved=false, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1034,14 +1034,14 @@ Register a new morph target on a skeletal mesh asset in memory only, for the res
 
 *Destructive.*
 
-Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.
+Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `section_name` | string | yes | Name of the FCompositeSection to remove; compared as an FName, so case is ignored. |
 
-**Returns:** `{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }`
+**Returns:** `{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, save_error, message }`
 
 ## `disconnect_anim_graph_pins`
 
@@ -1064,7 +1064,7 @@ Break AnimGraph pin links: a specific source->target link, or ALL links on the s
 
 *Destructive, idempotent.*
 
-Disconnect a goal from a solver, removing that solver's per-goal effector/settings.  Inverse of connect_ik_goal_to_solver. Idempotent — disconnecting a goal that isn't connected is a no-op (was_connected:false).
+Disconnect a goal from a solver, removing that solver's per-goal effector/settings, through the IK Rig controller (one undo transaction), then save the asset.  Inverse of connect_ik_goal_to_solver. Idempotent: disconnecting a goal that isn't connected is a success with was_connected:false, saved:false and a note, and nothing is saved. An out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1072,13 +1072,13 @@ Disconnect a goal from a solver, removing that solver's per-goal effector/settin
 | `goal_name` | string | yes | Name of the goal. |
 | `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
 
-**Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool }`
+**Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `duplicate_anim_sequence`
 
 *Additive.*
 
-Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name taken by an asset of another class is refused. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
+Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name already taken by any asset, in memory or on disk (the source included), is refused and nothing is touched. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1092,7 +1092,7 @@ Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton
 
 *Destructive.*
 
-Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence)
+Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence) in an undo transaction and save it. No editable field is an error before anything changes; edits that leave the event as it is are a success with applied=false, applied_count 0 and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1106,13 +1106,13 @@ Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occur
 | `montage_tick_type` | string | no | New MontageTickType: 'Queued' or 'BranchingPoint'. Optional. |
 | `track_index` | number | no | New TrackIndex (zero-based). Optional. |
 
-**Returns:** `{ animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, message }`
+**Returns:** `{ animation_path, notify_name, occurrence_index, matched_count, notify, applied_count, applied, saved, save_error, message }`
 
 ## `edit_blendspace_sample`
 
 *Destructive.*
 
-Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it.
+Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it. A sample that already has those values is a success with value_edited=false, animation_replaced=false and saved=false, and the blend space is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1121,7 +1121,7 @@ Edit a blend sample (by index): blend value and/or animation. At least one of bl
 | `blend_value` | any | no | New blend position: single number (1D) or array of up to 3 numbers (optional). |
 | `animation_path` | string | no | Full asset path to a UAnimSequence to replace the sample's animation (optional). |
 
-**Returns:** `{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, message }`
+**Returns:** `{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, save_error, message }`
 
 ## `evaluate_pose_search_query`
 
@@ -1652,7 +1652,7 @@ Find the skeletal mesh assets bound to a USkeleton asset through an Asset Regist
 
 *Destructive, idempotent.*
 
-Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name "" or "None" to clear the link. Idempotent.
+Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name "" or "None" to clear the link. Done in an undo transaction, then saved. Idempotent: the link the section already has is a success with changed=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1660,7 +1660,7 @@ Chain one montage section to the next by setting its NextSectionName.  add_monta
 | `section_name` | string | yes | Name of the existing section whose link to set. |
 | `next_section_name` | string | yes | Name of the existing section to play next (or "" / "None" to clear). |
 
-**Returns:** `{ montage_path, section_name, next_section_name, linked, section_count, sections, saved, message }`
+**Returns:** `{ montage_path, section_name, next_section_name, linked, changed, section_count, sections, saved, save_error, message }`
 
 ## `list_anim_state_machines`
 
@@ -1690,7 +1690,7 @@ List every FMotionWarpingTarget on an actor's UMotionWarpingComponent. Read-only
 
 *Destructive.*
 
-Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false. A failed save makes success false, with saved=false and save_error.
+Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1698,7 +1698,7 @@ Move the solver at from_index so that it ends up at to_index (both 0-based posit
 | `from_index` | number | yes | Source 0-based solver index |
 | `to_index` | number | yes | Target 0-based solver index, below the solver count |
 
-**Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string, note?: string }`
 
 ## `play_animation`
 
@@ -1720,19 +1720,19 @@ Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Pla
 
 *Destructive, idempotent.*
 
-Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent.
+Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 
-**Returns:** `{ montage_path, refreshed, sequence_length, slot_count, section_count, saved, message }`
+**Returns:** `{ montage_path, refreshed, sequence_length, slot_count, section_count, saved, save_error, message }`
 
 ## `reimport_anim_sequence`
 
 *Destructive.*
 
-Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.
+Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved. A missing source is refused before the reimport, which would crash the editor on it, and a reimport the handler reports as failed is a failure too: both make success false with reimported=false, and the missing source a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1782,7 +1782,7 @@ Delete a UAnimComposite asset after verifying the asset is a UAnimComposite.
 
 *Destructive.*
 
-Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length
+Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1848,7 +1848,7 @@ Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
 
 *Destructive.*
 
-Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and nothing saved; a failed save makes success false, with saved=false and save_error.
+Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and saved=false, and the sequence is neither dirtied nor saved; a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1978,14 +1978,14 @@ Delete a UBlendSpace1D asset after verifying the asset is a UBlendSpace1D.
 
 *Destructive.*
 
-Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call.
+Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blendspace_path` | string | yes | Full asset path to the UBlendSpace. |
 | `index` | number | yes | Index of the sample to remove. |
 
-**Returns:** `{ blendspace_path, removed, num_samples, samples, saved, message }`
+**Returns:** `{ blendspace_path, removed, num_samples, samples, saved, save_error, message }`
 
 ## `remove_bone`
 
@@ -2005,27 +2005,27 @@ Remove a bone from a skeleton's reference skeleton (idempotent).
 
 *Destructive, idempotent.*
 
-Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent — removing a goal that isn't present is a no-op (removed:false, already_absent:true).
+Remove an IK goal from an IK Rig by name through the IK Rig controller (one undo transaction), then save the asset.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent: removing a goal that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 | `goal_name` | string | yes | Name of the goal to remove |
 
-**Returns:** `{ asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string, note?: string }`
 
 ## `remove_ik_retarget_chain`
 
 *Destructive.*
 
-Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false. A failed save makes success false, with saved=false and save_error.
+Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 | `chain_name` | string | yes | Name of the retarget chain to remove |
 
-**Returns:** `{ asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string, note?: string }`
 
 ## `remove_ik_solver`
 
@@ -2044,20 +2044,20 @@ Remove the solver at a 0-based index from the solver stack of an IK Rig asset th
 
 *Destructive.*
 
-Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.
+Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `notify_index` | number | yes | Zero-based index into the montage's Notifies array. Use get_montage_info first to list notifies. |
 
-**Returns:** `{ montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, message }`
+**Returns:** `{ montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, save_error, message }`
 
 ## `remove_montage_slot`
 
 *Destructive.*
 
-Remove a slot animation track from a UAnimMontage by name or index
+Remove a slot animation track from a UAnimMontage by name or index. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2065,7 +2065,7 @@ Remove a slot animation track from a UAnimMontage by name or index
 | `slot_name` | string | no | Name of the FSlotAnimationTrack to remove (FName). Either this or slot_index is required. |
 | `slot_index` | number | no | Zero-based index into SlotAnimTracks (alternative to slot_name). Use get_montage_info first to list slots. |
 
-**Returns:** `{ montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, message }`
+**Returns:** `{ montage_path, slot_name?, slot_index?, removed_index?, removed_slot_name?, slot_count, slots[], already_existed, removed, saved, save_error, message }`
 
 ## `remove_motion_warping_component`
 
@@ -2083,14 +2083,14 @@ Detach the UMotionWarpingComponent from an actor (mirror of add_motion_warping_c
 
 *Destructive.*
 
-Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest)
+Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest). A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `animation_path` | string | yes | Full asset path to the UAnimSequence. |
 | `track_name` | string | yes | Notify track name to remove. |
 
-**Returns:** `{ animation_path, track_name, track_names, track_count, already_absent, saved, message }`
+**Returns:** `{ animation_path, track_name, track_names, track_count, already_absent, saved, save_error, message }`
 
 ## `remove_pose_asset`
 
@@ -2108,27 +2108,27 @@ Permanently delete one UPoseAsset after checking that the path loads as one: a f
 
 *Destructive.*
 
-Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.
+Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve is a success with removed=false, removed_count 0 and saved=false, and the asset is neither modified nor saved. Returns removed_count, removed and num_curves. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pose_asset_path` | string | yes | Path to the UPoseAsset. |
 | `curve_name` | string | yes | Name of the curve to remove. |
 
-**Returns:** `{ pose_asset_path, curve_name, removed_count, removed, num_curves, saved, message }`
+**Returns:** `{ pose_asset_path, curve_name, removed_count, removed, num_curves, saved, save_error, message }`
 
 ## `remove_pose_from_pose_asset`
 
 *Destructive.*
 
-Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.
+Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset. An absent name is a success with removed=false and saved=false, and the asset is neither modified nor saved. Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pose_asset_path` | string | yes | Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example'). |
 | `pose_name` | string | yes | Name of the pose to remove. |
 
-**Returns:** `{ pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, message }`
+**Returns:** `{ pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, save_error, message }`
 
 ## `remove_pose_search_channel_from_schema`
 
@@ -2186,7 +2186,7 @@ Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-d
 
 *Destructive, idempotent.*
 
-Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a no-op (removed:false, already_absent:true), and the asset is still saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.
+Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2194,7 +2194,7 @@ Remove a retarget pose from an IK Retargeter by name through its controller, the
 | `pose_name` | string | yes | Name of the retarget pose to remove |
 | `source_or_target` | string | no | Optional "Source" or "Target" scope; defaults to "Target" |
 
-**Returns:** `{ ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `remove_retargeter_op`
 
@@ -2320,7 +2320,7 @@ Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName. Wraps UMo
 
 *Destructive.*
 
-Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
+Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. The same name for both is a success with renamed=false, saved=false and a note, and nothing is written or saved. Any curve_type other than transform means float. Returns renamed and saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2329,7 +2329,7 @@ Rename a float or transform curve on a UAnimSequence through its data controller
 | `new_curve_name` | string | yes | Name the curve gets after the rename. |
 | `curve_type` | string | no | Curve type to target: float (default) or transform |
 
-**Returns:** `{ anim_sequence_path, old_curve_name, new_curve_name, renamed, saved }`
+**Returns:** `{ anim_sequence_path, old_curve_name, new_curve_name, renamed, saved, save_error, note? }`
 
 ## `rename_bone`
 
@@ -2349,7 +2349,7 @@ Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails 
 
 *Destructive.*
 
-Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. A failed save makes success false, with saved=false and save_error.
+Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2357,13 +2357,13 @@ Rename a retarget chain of an IK Rig asset through the IK Rig controller (one un
 | `chain_name` | string | yes | Current name of the retarget chain, as get_ik_rig_info lists it. |
 | `new_name` | string | yes | Requested new name; the engine may add a suffix to keep it unique. |
 
-**Returns:** `{ asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `rename_montage_section`
 
 *Destructive.*
 
-Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index
+Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index, in an undo transaction, and save it. The name the section already has (FName match, case ignored) is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2371,13 +2371,13 @@ Rename an existing FCompositeSection on a UAnimMontage by zero-based section_ind
 | `section_index` | number | yes | Zero-based index into CompositeSections (use get_montage_info first to list). |
 | `new_name` | string | yes | New FName for the section. |
 
-**Returns:** `{ montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, message }`
+**Returns:** `{ montage_path, section_index, old_name, new_name, section_count, sections, applied, saved, save_error, message }`
 
 ## `rename_pose_in_pose_asset`
 
 *Destructive.*
 
-Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).
+Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName) in an undo transaction and save it; renamed is measured by reading the pose names back. An unknown old_pose_name, a new_pose_name another pose already has, or a rename the engine does not take is an error with nothing saved; the same name for both is a success with renamed=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2385,7 +2385,7 @@ Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).
 | `old_pose_name` | string | yes | Current name of the pose to rename. |
 | `new_pose_name` | string | yes | New name for the pose. |
 
-**Returns:** `{ pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, message }`
+**Returns:** `{ pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, save_error, message }`
 
 ## `rename_rig_element`
 
@@ -2493,7 +2493,7 @@ Create or update a character Animation Blueprint with a "Locomotion" state machi
 
 *Destructive.*
 
-Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A retime that moves no key (factor 1, no keys, or every key at the origin) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2508,7 +2508,7 @@ Retime a FLOAT curve on a UAnimSequence through its data controller (one undo st
 
 *Destructive, idempotent.*
 
-Set the additive-animation type and base pose on a UAnimSequence
+Set the additive-animation type and base pose on a UAnimSequence in an undo transaction and save it. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2518,7 +2518,7 @@ Set the additive-animation type and base pose on a UAnimSequence
 | `ref_frame_index` | number | no | Frame index used for the base pose (default 0) |
 | `ref_pose_anim_path` | string | no | Object path of the reference UAnimSequence for the base pose (optional) |
 
-**Returns:** `{ anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, success, saved, save_error }`
+**Returns:** `{ anim_sequence_path, additive_anim_type, ref_pose_type, ref_frame_index, ref_pose_anim_set, changed, success, saved, save_error, message? }`
 
 ## `set_anim_bone_track_keys`
 
@@ -2538,7 +2538,7 @@ Replace the keys of one bone track of a UAnimSequence with the given per-key tra
 
 *Destructive, idempotent.*
 
-Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The color the curve already has is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2552,7 +2552,7 @@ Set the editor display color of a FLOAT curve on a UAnimSequence through its dat
 
 *Destructive, idempotent.*
 
-Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
+Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. The comment the curve already has (case-sensitive) is a success with applied=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2566,7 +2566,7 @@ Set the author comment of a FLOAT curve on a UAnimSequence through its data cont
 
 *Destructive, idempotent.*
 
-Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.
+Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; flags the curve already has are a success with applied=false, saved=false and a note, and nothing is written or saved; a failed save makes success false, with saved=false and save_error. get_anim_curve_data reads the flags.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2575,13 +2575,13 @@ Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float 
 | `interp_mode` | string | yes | One of "linear\|editable\|metadata\|drive_track\|disabled" |
 | `curve_type` | string | no | Curve type to target: float (default) or transform |
 
-**Returns:** `{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error }`
+**Returns:** `{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error, note? }`
 
 ## `set_anim_curve_keys`
 
 *Destructive, idempotent.*
 
-Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A failed save makes success false.
+Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A curve that already holds exactly those keys is a success with applied=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2590,20 +2590,20 @@ Replace every key of an existing float curve on a UAnimSequence with the given [
 | `keys` | array | no | JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given. |
 | `curve_type` | string | no | Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve. |
 
-**Returns:** `{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error }`
+**Returns:** `{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error, note? }`
 
 ## `set_anim_frame_rate`
 
 *Destructive, idempotent.*
 
-Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
+Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. The rate the data model already has is a success with changed=false, saved=false and a note, and nothing is written or saved. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `fps` | number | yes | New frame rate in frames per second, rounded to a whole number that must be at least 1. |
 
-**Returns:** `{ sequence_path, fps, numerator, denominator, saved, save_error }`
+**Returns:** `{ sequence_path, fps, numerator, denominator, changed, saved, save_error, note? }`
 
 ## `set_anim_graph_node_pin_binding`
 
@@ -2644,20 +2644,20 @@ Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) nam
 
 *Destructive, idempotent.*
 
-Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.
+Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied; the preview mesh the montage already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `mesh_path` | string | yes | Asset path of the preview USkeletalMesh (e.g. '/Engine/EngineMeshes/SkeletalCube'). |
 
-**Returns:** `{ montage_path, mesh_path, prev_mesh_path, applied, saved, message }`
+**Returns:** `{ montage_path, mesh_path, prev_mesh_path, applied, saved, save_error, message }`
 
 ## `set_anim_montage_rate_scale`
 
 *Destructive, idempotent.*
 
-Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage
+Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage in an undo transaction and save it. Values the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2666,39 +2666,39 @@ Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage
 | `rate_scale` | number | no | Global play rate scale (defaults to current value) |
 | `blend_out_trigger_time` | number | no | Blend-out trigger time in seconds (defaults to current value) |
 
-**Returns:** `{ montage_path, rate_scale, blend_out_trigger_time, applied, saved, message }`
+**Returns:** `{ montage_path, rate_scale, blend_out_trigger_time, applied, saved, save_error, message }`
 
 ## `set_anim_montage_skeleton`
 
 *Destructive, idempotent.*
 
-Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches)
+Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches) in an undo transaction and save it. The skeleton the montage already uses is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `skeleton_path` | string | yes | Asset path of the new Skeleton (e.g. '/Engine/EngineMeshes/SkeletalCube_Skeleton'). |
 
-**Returns:** `{ montage_path, skeleton_path, prev_skeleton_path, applied, saved, message }`
+**Returns:** `{ montage_path, skeleton_path, prev_skeleton_path, applied, saved, save_error, message }`
 
 ## `set_anim_number_of_frames`
 
 *Destructive, idempotent.*
 
-Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
+Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `frame_count` | number | yes | New number of frames (integer > 0). |
 
-**Returns:** `{ sequence_path, frame_count, saved, save_error }`
+**Returns:** `{ sequence_path, frame_count, saved, save_error, note? }`
 
 ## `set_anim_retarget_source`
 
 *Destructive, idempotent.*
 
-Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence)
+Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence) in an undo transaction and save it. A ref_pose_seq_path that does not load is an error before anything changes; values the sequence already has are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2706,13 +2706,13 @@ Set a UAnimSequence's retarget source (and optionally its retarget reference-pos
 | `retarget_source` | string | no | Retarget-source name (FName). Must name an entry in the owning skeleton's retarget-source map to RESOLVE at runtime, but the property write persists regardless. Use 'None' (or empty) to clear. |
 | `ref_pose_seq_path` | string | no | Optional object path of a UAnimSequence used as the additive retarget reference pose (RefPoseSeq). Pass empty/'None' to clear it. |
 
-**Returns:** `{ anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, success, saved, save_error }`
+**Returns:** `{ anim_sequence_path, retarget_source, ref_pose_seq, ref_pose_seq_set, ref_pose_seq_cleared, applied_count, notes, changed, success, saved, save_error, note? }`
 
 ## `set_anim_root_motion`
 
 *Destructive, idempotent.*
 
-Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.
+Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text. Settings the sequence already has are a success with changed=false and saved=false, and the sequence is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2721,7 +2721,7 @@ Write the three root motion settings of a UAnimSequence (bEnableRootMotion, Root
 | `root_motion_root_lock` | string | no | Root lock mode: RefPose\|AnimFirstFrame\|Zero (default RefPose) |
 | `force_root_lock` | boolean | no | Whether to force the root lock (default false) |
 
-**Returns:** `{ anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, success, saved, message }`
+**Returns:** `{ anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, changed, success, saved, save_error, message }`
 
 ## `set_anim_transition_rule_automatic`
 
@@ -2808,7 +2808,7 @@ Set a bone's blend scale on a UBlendProfile (creates profile if missing).
 
 *Destructive, idempotent.*
 
-Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change.
+Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change, in one undo transaction, then the blend space is saved; an unknown smoothing type is an error before anything changes, and values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, with nothing modified or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2822,13 +2822,13 @@ Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, da
 | `y_max_speed` | number | no | Optional Y-axis maximum speed (2D only, >= 0). |
 | `y_interpolation_type` | string | no | Optional Y-axis smoothing type (2D only): Averaged\|Linear\|Cubic\|EaseInOut\|Exponential\|SpringDamper. |
 
-**Returns:** `{ blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, saved }`
+**Returns:** `{ blend_space_path, is_1d, x_axis: {interpolation_time, damping_ratio, max_speed, interpolation_type}, y_axis: {...}, applied_count, notes, changed, saved, save_error, note? }`
 
 ## `set_blendspace_properties`
 
 *Destructive, idempotent.*
 
-Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change.
+Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change, in one undo transaction, then the blend space is saved; values the axes already have are a success with changed=false, applied_count 0, saved=false and a note, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2842,7 +2842,7 @@ Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid 
 | `y_axis_max` | number | no | Optional Y axis maximum value (2D only). |
 | `y_axis_grid` | integer | no | Optional Y axis grid divisions (2D only, >= 1). |
 
-**Returns:** `{ blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, saved }`
+**Returns:** `{ blend_space_path, is_1d, x_axis: {name, min, max, grid}, y_axis: {name, min, max, grid}, applied_count, notes, changed, saved, save_error, note? }`
 
 ## `set_bone_parent`
 
@@ -2876,7 +2876,7 @@ Update the local reference-pose transform of an existing bone
 
 *Destructive, idempotent.*
 
-Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
+Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent (a bone the rig skeleton lacks is an error, with nothing changed), and existing settings that already have those values give changed false, saved false and a note, with nothing saved. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2885,13 +2885,13 @@ Set bone-specific settings for a bone within a solver, as one undo transaction, 
 | `bone_name` | string | yes | Name of the bone to modify. |
 | `settings` | object | yes | Object with bone-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_ik_goal_settings`
 
 *Destructive, idempotent.*
 
-Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. A failed save makes success false, with saved=false and save_error.
+Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2900,13 +2900,13 @@ Set goal-specific settings for a goal connected to a solver, as one undo transac
 | `goal_name` | string | yes | Name of the goal to modify. |
 | `settings` | object | yes | Object with goal-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_ik_retarget_chain_bones`
 
 *Destructive, idempotent.*
 
-Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
+Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A value the chain already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2916,13 +2916,13 @@ Change the start bone, end bone and/or IK goal of an existing retarget chain in 
 | `end_bone` | string | no | Optional new end bone |
 | `goal_name` | string | no | Optional new associated IK goal, which must be a goal of the rig; None clears the goal of the chain. |
 
-**Returns:** `{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_ik_solver_bones`
 
 *Destructive, idempotent.*
 
-Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
+Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton, or a start or end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back, and nothing is stored for it. A bone the solver already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2931,13 +2931,13 @@ Set the start bone and/or end bone of one solver in an IK Rig asset (0-based sta
 | `start_bone` | string | no | Optional start bone name |
 | `end_bone` | string | no | Optional end bone name |
 
-**Returns:** `{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_ik_solver_enabled`
 
 *Destructive, idempotent.*
 
-Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false. A failed save makes success false, with saved=false and save_error.
+Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false, and a solver already in the requested state gives changed false: in both cases saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2945,13 +2945,13 @@ Enable or disable the solver at a 0-based index of an IK Rig asset through the I
 | `solver_index` | number | yes | 0-based solver index |
 | `enabled` | boolean | no | Optional bool; defaults to true |
 
-**Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_ik_solver_settings`
 
 *Destructive, idempotent.*
 
-Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. A failed save makes success false, with saved=false and save_error.
+Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2959,13 +2959,13 @@ Set detailed solver-specific settings on a solver in an IK Rig, as one undo tran
 | `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
 | `settings` | object | yes | Object with solver-type-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_montage_blend_times`
 
 *Destructive, idempotent.*
 
-Set the blend-in / blend-out times on a UAnimMontage
+Set the blend-in / blend-out times (clamped to >= 0) on a UAnimMontage in an undo transaction and save it. Times the montage already has, or none given, are a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2973,13 +2973,13 @@ Set the blend-in / blend-out times on a UAnimMontage
 | `blend_in` | number | no | Blend-in time in seconds (defaults to current value) |
 | `blend_out` | number | no | Blend-out time in seconds (defaults to current value) |
 
-**Returns:** `{ montage_path, blend_in, blend_out, applied, saved, message }`
+**Returns:** `{ montage_path, blend_in, blend_out, applied, saved, save_error, message }`
 
 ## `set_montage_properties`
 
 *Destructive, idempotent.*
 
-Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.
+Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change, and supplied values the montage already has are a success with changed=false, applied_count 0 and saved=false, with nothing modified or saved. For blend times use set_montage_blend_times. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2994,13 +2994,13 @@ Set only the supplied blend modes, auto blend out, trigger time, sync group/slot
 | `enable_root_motion_rotation` | boolean | no | bEnableRootMotionRotation (bool, DEPRECATED since 4.5). Optional. |
 | `root_motion_root_lock` | string | no | RootMotionRootLock: 'RefPose'\|'AnimFirstFrame'\|'Zero' (DEPRECATED since 4.5). Optional. |
 
-**Returns:** `{ montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, saved, message }`
+**Returns:** `{ montage_path, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index, root_motion: {...}, applied_count, notes, changed, saved, save_error, message }`
 
 ## `set_montage_section_start_time`
 
 *Destructive, idempotent.*
 
-Set the StartTime on an existing FCompositeSection by zero-based section_index
+Set the StartTime on an existing FCompositeSection by zero-based section_index, in an undo transaction, and save it. The start time the section already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3008,13 +3008,13 @@ Set the StartTime on an existing FCompositeSection by zero-based section_index
 | `section_index` | number | yes | Zero-based index into CompositeSections. |
 | `start_time` | number | yes | Absolute section start time in seconds. |
 
-**Returns:** `{ montage_path, section_index, start_time, applied, saved, message }`
+**Returns:** `{ montage_path, section_index, start_time, applied, saved, save_error, message }`
 
 ## `set_montage_segment_anim_sequence`
 
 *Destructive, idempotent.*
 
-Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range)
+Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range, play rate and loop count to 1 and its start position to 0) in an undo transaction and save the montage. A segment that already references that sequence with those values is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3023,13 +3023,13 @@ Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (re
 | `segment_index` | number | yes | Zero-based index into the slot track's AnimSegments. |
 | `anim_sequence_path` | string | yes | Object path of the UAnimSequence to reference (must share the montage's skeleton). |
 
-**Returns:** `{ montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, message }`
+**Returns:** `{ montage_path, slot_name, segment_index, anim_sequence_path, anim_start_time, anim_end_time, applied, saved, save_error, message }`
 
 ## `set_montage_segment_start_time`
 
 *Destructive, idempotent.*
 
-Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index). AnimEndTime is left untouched.
+Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index), clamped to [0, AnimEndTime], in an undo transaction, and save the montage. AnimEndTime is left untouched. The (clamped) start time the segment already has is a success with applied=false and saved=false, and the montage is neither modified nor saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3038,7 +3038,7 @@ Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index).
 | `segment_index` | number | yes | Zero-based index into the slot track's AnimSegments. |
 | `start_time` | number | yes | New AnimStartTime in seconds (clamped to [0, AnimEndTime]). |
 
-**Returns:** `{ montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, message }`
+**Returns:** `{ montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, save_error, message, note? }`
 
 ## `set_morph_target_deltas`
 
@@ -3156,14 +3156,14 @@ Set the rotation of an existing warp target of an editor-world actor (found by i
 
 *Destructive, idempotent.*
 
-Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes; check applied, false when the engine refused the name, and a failed save makes success false. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.
+Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes, and so is a base pose the engine does not take (read back from the asset), with nothing saved. The base pose the asset already has is a success with applied=false and saved=false, and nothing is modified or saved. A failed save makes success false, with saved=false and save_error. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `pose_asset_path` | string | yes | Path to the UPoseAsset. |
 | `base_pose_name` | string | no | Name of the pose to use as the base; empty/None resets to the reference pose. |
 
-**Returns:** `{ pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, message }`
+**Returns:** `{ pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, save_error, message }`
 
 ## `set_pose_search_database_schema`
 
@@ -3237,7 +3237,7 @@ Bind (or rebind) the USkeleton of the schema's FPoseSearchRoledSkeleton entry un
 
 *Destructive, idempotent.*
 
-Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. A failed save makes success false, with saved=false and save_error.
+Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. When the pose to edit is already current and already holds exactly that offset for the bone, changed is false, saved is false, a note says so and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3254,13 +3254,13 @@ Set a bone's rotation offset in the current retarget pose (euler degrees) of an 
 | `rotation` | object | no | Optional nested {x, y, z, w} quaternion object |
 | `pose_name` | string | no | Optional explicit retarget pose name; created if missing |
 
-**Returns:** `{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_retargeter_chain_mapping`
 
 *Destructive, idempotent.*
 
-Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.
+Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. When no op lists target_chain, or every one already maps it to source_chain, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3269,13 +3269,13 @@ Make source_chain drive target_chain in an IK Retargeter asset, overwriting the 
 | `target_chain` | string | yes | Name of the target retarget chain to map to |
 | `op_name` | string | no | Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated |
 
-**Returns:** `{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_retargeter_op_settings`
 
 *Destructive, idempotent.*
 
-Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller (its own transaction). The payload echoes the read-back settings.
+Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag, as one undo transaction, then save the asset.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller. The payload echoes the read-back settings. When neither is given, or the op already has those settings and that enabled state, changed is false, saved is false, a note says why and nothing is saved. An out-of-range op_index is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3284,7 +3284,7 @@ Partial-merge a retarget op's live settings struct (only the JSON fields present
 | `settings` | object | no | Partial settings object; only present fields are written (e.g. { lODThreshold: 5 }). |
 | `enabled` | boolean | no | Optional: enable/disable the op (applied via the controller). |
 
-**Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, saved: bool, save_error?: string }`
+**Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_rig_control_limits`
 
@@ -3600,14 +3600,14 @@ Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animat
 
 *Destructive.*
 
-Sort a montage slot track's segments by start time ascending
+Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `slot_name` | string | yes | Name of the slot track to sort. |
 
-**Returns:** `{ montage_path, slot_name, segment_count, applied, saved, message }`
+**Returns:** `{ montage_path, slot_name, segment_count, applied, saved, save_error, message }`
 
 ## `stop_animation`
 
