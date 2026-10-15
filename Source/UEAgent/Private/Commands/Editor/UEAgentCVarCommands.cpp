@@ -326,7 +326,7 @@ TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>
 // MCP:search_cvars - Search console variables and commands whose name contains term (case-insensitive); each hit has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a prefix listing use list_cvars_with_prefix; for one cvar in full, get_cvar.
 //   @param term - Substring to search (case-insensitive)
 //   @param max - Maximum number of entries to return (default 50, minimum 1).
-//   @returns { count, cvars: [{name, value, help}] }
+//   @returns { count, cvars: [{name, value?}] }
 TSharedPtr<FJsonObject> HandleSearchCVars(const TSharedPtr<FJsonObject>& Params)
 {
     FString Term;
@@ -437,10 +437,10 @@ TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_engine_ini_sections - List the section names GConfig holds for one INI (count, sections, file_path). Read-only. Caveat: it asks GConfig for config_file plus .ini, a form GConfig does not match to its known config files (get_engine_ini_value avoids it), so count can be 0 for a file that has sections.
-//   @param config_file - INI base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; not validated.
+// MCP:list_engine_ini_sections - List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.
+//   @param config_file - INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped.
 //   @param include_base - Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed.
-//   @returns { count, sections: [...] }
+//   @returns { count, sections: [string], found: bool, config_file, file_path }
 TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject>& Params)
 {
     FString ConfigFile = TEXT("Engine");
@@ -452,13 +452,17 @@ TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject
     {
         return mcp_common::MakeErrorReply(TEXT("GConfig unavailable"));
     }
+    // GConfig resolves a known config (Engine, Game, ...) only by its BARE name: a name ending in
+    // ".ini" is looked up among the other files instead and finds nothing (see get_engine_ini_value).
+    ConfigFile.RemoveFromEnd(TEXT(".ini"), ESearchCase::IgnoreCase);
     const FString FilePath = FPaths::GeneratedConfigDir() / ConfigFile + TEXT(".ini");
 
     TArray<FString> SectionNames;
-    GConfig->GetSectionNames(ConfigFile + TEXT(".ini"), SectionNames);
+    const bool bFound = GConfig->GetSectionNames(ConfigFile, SectionNames);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("count"), SectionNames.Num());
+    Data->SetBoolField(TEXT("found"), bFound);
     Data->SetStringField(TEXT("config_file"), ConfigFile);
     Data->SetStringField(TEXT("file_path"), FilePath);
     Data->SetArrayField(TEXT("sections"), mcp_common::StringsToJson(SectionNames));

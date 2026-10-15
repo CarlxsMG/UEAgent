@@ -61,9 +61,9 @@ Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the
 | `input_name` | string | yes | Name of the new input pin, stored as given: a name another input already uses is not made unique. |
 | `input_type` | string | no | One of the 13 EFunctionInputType values: Scalar\|Vector2\|Vector3\|Vector4\|Texture2D\|TextureCube\|Texture2DArray\|VolumeTexture\|StaticBool\|MaterialAttributes\|TextureExternal\|Bool\|Substrate (optional, default "Scalar") |
 | `description` | string | no | Optional tooltip/description string for the input pin |
-| `preview_value` | string | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default. |
-| `use_preview_value_as_default` | string | no | Optional bool; if true, the preview value becomes the input's default |
-| `sort_priority` | string | no | Optional int controlling the input's display order relative to other inputs |
+| `preview_value` | object | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default. |
+| `use_preview_value_as_default` | boolean | no | Optional bool; if true, the preview value becomes the input's default |
+| `sort_priority` | number | no | Optional int controlling the input's display order relative to other inputs |
 
 **Returns:** `{ function_path: string, input_name: string, input_type: string, node_id: string, num_inputs: number, added: bool }`
 
@@ -836,7 +836,7 @@ Set the default of an existing scalar or vector parameter of a Material Paramete
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Name of the existing parameter to update |
 | `scalar_value` | number | no | Optional new float value for a scalar parameter |
-| `vector` | string | no | New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given |
+| `vector` | array | no | New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }`
 
@@ -862,9 +862,9 @@ Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_
 | `input_name` | string | no | New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material). |
 | `input_type` | string | no | Optional EFunctionInputType (the 13 values; same parser as add_material_function_input) |
 | `description` | string | no | New tooltip text of the input pin. |
-| `preview_value` | string | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. |
-| `use_preview_value_as_default` | string | no | Bool: true makes the preview value the default of the input when its pin is left unconnected. |
-| `sort_priority` | string | no | Integer that orders this input pin relative to the other inputs of the function. |
+| `preview_value` | object | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. |
+| `use_preview_value_as_default` | boolean | no | Bool: true makes the preview value the default of the input when its pin is left unconnected. |
+| `sort_priority` | number | no | Integer that orders this input pin relative to the other inputs of the function. |
 
 **Returns:** `{ function_path: string, node_id: string, input_name: string, input_type: string, applied: bool }`
 

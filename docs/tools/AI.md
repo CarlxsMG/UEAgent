@@ -17,13 +17,15 @@ Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a sou
 
 ## `configure_ai_sight_radius`
 
-Set SightRadius, and LoseSightRadius to sight_radius times 1.5, on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
+Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Object name or editor label of the pawn or AIController in the editor world; the first match is used. |
 | `sight_radius` | number | yes | New SightRadius in cm, greater than 0. |
-| `lose_sight_radius` | string | no | Ignored: the code never reads it and always sets LoseSightRadius to sight_radius times 1.5. |
+| `lose_sight_radius` | number | no | New LoseSightRadius in cm, the distance at which an already seen target is lost, 0 or more; default sight_radius times 1.5. |
+
+**Returns:** `{ actor_name, sight_radius, lose_sight_radius, sight_sense_count }`
 
 ## `create_ai_controller_blueprint`
 
@@ -54,7 +56,7 @@ List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an
 |---|---|---|---|
 | `actor_name` | string | yes | Object name or editor label of the pawn or AIController in the editor world; the first match is used. |
 
-**Returns:** `{ actor_name, perceived: [{actor_name, last_sensed_seconds}], count }`
+**Returns:** `{ actor_name, perceived: [{actor_name}], count }`
 
 ## `set_actor_team`
 

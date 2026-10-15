@@ -1566,11 +1566,9 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodScreenSize(const TSharedPtr<FJso
     int32 LodIndex = 0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("lod_index"), LodIndex)) { return Missing; }
 
-    if (!Params->HasField(TEXT("screen_size")))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing 'screen_size'"));
-    }
-    const float ScreenSize = static_cast<float>(Params->GetNumberField(TEXT("screen_size")));
+    double ScreenSizeValue = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("screen_size"), ScreenSizeValue)) { return Missing; }
+    const float ScreenSize = static_cast<float>(ScreenSizeValue);
 
     USkeletalMesh* Mesh = nullptr;
     if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }

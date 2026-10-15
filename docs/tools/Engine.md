@@ -10,9 +10,9 @@ Add a new UNiagaraDataInterface user-parameter binding to a Niagara system.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the new user-parameter (no "User." prefix) |
 | `data_interface_class` | string | yes | Data interface class name (e.g. "StaticMesh", "Texture"); resolved from /Script/Niagara.NiagaraDataInterface&lt;Name> if not already loaded |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool }`
 
@@ -22,8 +22,8 @@ Add a NiagaraDecalRendererProperties (UNiagaraDecalRendererProperties) to a Niag
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Name of the emitter handle (the human-readable name in the system's emitter list). |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `material_path` | string | no | Optional asset path; sets the renderer's Material UPROPERTY. |
 | `source_mode` | string | no | Optional ENiagaraRendererSourceDataMode name (Particles/Emitter). Default Particles. |
 | `renderer_visibility` | number | no | Optional int32 visibility tag (default 0). |
@@ -37,8 +37,8 @@ Add a copy of a template emitter to a Niagara system (canonical path).  Loads th
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example") |
 | `emitter_asset_path` | string | yes | Asset path of the source UNiagaraEmitter template (e.g. "/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain") |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example") |
 
 **Returns:** `{ system_path: string, source_emitter_asset: string, emitter_handle_id: string, emitter_handle_name: string, is_valid: bool, is_enabled: bool, emitters_before: int, total_emitters: int, success: bool, saved: bool, save_error?: string }`
 
@@ -48,7 +48,7 @@ Add an emitter to a Niagara system from an existing UNiagaraEmitter asset.  Load
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the target Niagara System (e.g. "/Game/Niagara/NS_Example"). |
+| `system_path` | string | yes | Asset path of the target Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_path` | string | no | Asset path of the source UNiagaraEmitter to add. |
 | `emitter_name` | string | no | Optional desired name for the new handle; defaults to the source emitter's name |
 
@@ -60,9 +60,9 @@ Add an event handler to a Niagara emitter (the writer for event_handler_count). 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Display name of the emitter handle within the system. |
 | `source_event_name` | string | yes | Name of the source event this handler consumes (its identity key for idempotency). |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `execution_mode` | string | no | Optional EveryParticle \| SpawnedParticles \| SingleParticle (default EveryParticle). |
 | `spawn_number` | number | no | Optional int particles to spawn per event (SpawnedParticles mode). |
 | `max_events_per_frame` | number | no | Optional int cap on events consumed per frame. |
@@ -78,8 +78,8 @@ Add a NiagaraLightRendererProperties (UNiagaraLightRendererProperties) to a Niag
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `use_inverse_squared_falloff` | boolean | no | Optional bool (default true). True => UE physical light; false => use DefaultExponent below. |
 | `affects_translucency` | boolean | no | Optional bool (default true). Set false for cheaper lights that shouldn't bleed through translucent surfaces. |
 | `allow_mega_lights` | boolean | no | Optional bool (default false). True => MegaLights path (Lumen); see bMegaLightsCastShadows below. |
@@ -99,9 +99,9 @@ Insert a UNiagaraScript module at a specific index in a Niagara emitter's partic
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_script_path` | string | yes | Asset path of the module UNiagaraScript |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 | `target_index` | number | no | Optional stack index for insertion; INDEX_NONE (-1) appends to the end |
 
@@ -113,9 +113,9 @@ Insert an engine module script into a Niagara emitter's particle stack.  Loads t
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle to modify. |
 | `module_script_path` | string | yes | Asset path of the module UNiagaraScript (e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce") |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" (ParticleSpawnScript) or "update" (ParticleUpdateScript); defaults to "update" |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }`
@@ -126,9 +126,9 @@ Add a new renderer (Sprite / Ribbon / Mesh / Light) to a Niagara emitter.  Creat
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Name of the emitter handle (the human-readable name in the system's emitter list). |
 | `renderer_type` | string | yes | One of "Sprite" / "Ribbon" / "Mesh" / "Light" (case-insensitive). |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `material_path` | string | no | Optional asset path; sets the renderer's Material property. If omitted, the renderer is added with a null material (still a valid empty renderer). |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, renderer_count: int, save_error?: string }`
@@ -139,9 +139,9 @@ Add a simulation stage to a Niagara emitter.  Creates a UNiagaraSimulationStageG
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `stage_name` | string | yes | Name for the new simulation stage. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `iteration_count` | number | no | Optional iteration count for the stage; defaults to 1 |
 
 **Returns:** `{ system_path: string, emitter_name: string, stage_name: string, requested_iteration_count: int, total_simulation_stages: int, success: bool }`
@@ -163,8 +163,8 @@ Duplicate an emitter handle of a Niagara System asset under a new name, keeping 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `source_emitter_name` | string | yes | Display name of the emitter handle to copy (case-insensitive), as get_niagara_emitter_handles lists it. |
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `new_emitter_name` | string | no | Name for the copy (default "&lt;source_emitter_name>_Copy"). |
 
 **Returns:** `{ system_path: string, source_emitter_name: string, new_emitter_name: string, new_emitter_id: string, is_valid: bool, total_emitters: int }`
@@ -175,9 +175,9 @@ Duplicate a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or upda
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_name` | string | yes | Display name of the module to duplicate |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 | `target_index_override` | number | no | Optional absolute target index for the duplicate; defaults to one-past-source |
 
@@ -232,8 +232,8 @@ Get detail and a UPROPERTY dump for one UNiagaraDataInterface user-parameter bin
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter DI |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path: string, path_name: string, properties: [{ name, type }], property_count: int }`
 
@@ -243,7 +243,7 @@ List all UNiagaraDataInterface user-parameter bindings on a Niagara system.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, data_interface_class, data_interface_class_path, path_name }] }`
 
@@ -253,7 +253,7 @@ Get the EffectType configuration of a Niagara system.  Reads the UNiagaraEffectT
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool }`
 
@@ -263,8 +263,8 @@ List the data interface bindings on a Niagara emitter (read-only).  Reads the FV
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }`
 
@@ -274,7 +274,7 @@ Read one emitter handle of a Niagara System asset, chosen by display name or 0-b
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `emitter_name` | string | no | Display name of the handle (case-insensitive); when non-empty it wins over emitter_index. |
 | `emitter_index` | number | no | 0-based position in the emitter list of the system, used only when emitter_name is absent or empty. |
 
@@ -286,7 +286,7 @@ List every emitter handle of a Niagara System asset with its display name, id GU
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, emitter_count: int, emitter_handles: [{ name, id, is_enabled, is_valid }] }`
 
@@ -296,8 +296,8 @@ List all renderers on a Niagara emitter (read-only).  Each entry also dumps the 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_count: int, renderers: [{ index, class, display_name, material_path, properties:{...}, meshes?:[{ slot, mesh_path }] }] }`
 
@@ -307,8 +307,8 @@ Flat readback of a Niagara emitter's runtime knobs and counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }`
 
@@ -318,8 +318,8 @@ Get the simulation target configuration of a Niagara emitter.  Reads SimTarget, 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 
 **Returns:** `{ system_path: string, emitter_name: string, sim_target: string, is_local_space: bool, is_deterministic: bool }`
 
@@ -329,8 +329,8 @@ List a Niagara emitter's event handlers and their properties.  Reads FVersionedN
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle within the system. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, event_handler_count: int, event_handlers: [{usage_id, source_event_name, execution_mode, spawn_number, max_events_per_frame, min_spawn_number, random_spawn_number, source_emitter_id, has_script}] }`
 
@@ -340,9 +340,9 @@ Read detail for a single UNiagaraNodeFunctionCall module in a Niagara emitter's 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_name` | string | yes | Display name of the module function-call node |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, node_guid: string, stack_index: int, total_modules_in_stack: int, function_script?: string, function_script_class?: string, is_enabled?: bool, input_pin_count: int, output_pin_count: int, is_deprecated: bool }`
@@ -353,10 +353,10 @@ Read a Niagara module input override from the rapid-iteration store.  Locates th
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `module_node_name` | string | yes | The module function-call node name. |
 | `input_name` | string | yes | Leaf name of the module input (e.g. "Drag"). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, ri_param_name: string, value_type: string, found: bool, value?: number | [number, number, number] | [number, number, number, number], success: bool }`
 
@@ -366,8 +366,8 @@ Read BOTH the spawn AND update module stacks of a Niagara emitter in one call (r
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, spawn: [{...}], update: [{...}], spawn_module_count: int, update_module_count: int, total_modules_in_stack: int, spawn_note?: string, update_note?: string }`
 
@@ -377,9 +377,9 @@ Dump the full property set of a specific renderer instance owned by a system emi
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Content path to the UNiagaraSystem asset. |
 | `emitter_name` | string | yes | Name of the emitter handle (preferred) or its FName. |
 | `renderer_index` | number | yes | 0-based index into FVersionedNiagaraEmitterData::RendererProperties. |
-| `system_path` | string | no | Content path to the UNiagaraSystem asset. |
 | `handle_index` | number | no | Optional fallback when multiple emitters share a name (0-based). |
 
 **Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, renderer_class_path, properties: {...} }`
@@ -390,7 +390,7 @@ Get the scalability configuration of a Niagara system.  Reads scalability settin
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, effect_type_path: string, has_scalability_settings: bool, max_distance: number, max_instances: int, scale_spawn_count: number, distance_culling_enabled: bool }`
 
@@ -400,8 +400,8 @@ Read the simulation stages of a Niagara emitter (read-only). Same enumeration as
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `stage_index` | number | no | Optional 0-based index of a single stage to return. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 
@@ -413,7 +413,7 @@ Reads metadata for a UNiagaraSystem: emitter count, warmup time and exposed user
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example) |
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example) |
 
 **Returns:** `{ system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, user_parameters: [{ name, type }] }`
 
@@ -423,7 +423,7 @@ Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflec
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path, cast_shadow, override_cast_shadow, receives_decals, override_receives_decals, render_custom_depth, override_render_custom_depth, custom_depth_stencil_value, override_custom_depth_stencil_value, translucency_sort_priority, override_translucency_sort_priority, translucency_sort_distance_offset, override_translucency_sort_distance_offset, support_large_world_coordinates, require_current_frame_data, b_fixed_bounds, fixed_bounds:{min,max}, fixed_bounds_valid }`
 
@@ -433,7 +433,7 @@ Read the warmup and determinism settings of a Niagara System asset: warmup_time 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool }`
 
@@ -443,8 +443,8 @@ Read a user-exposed parameter's current value from a Niagara System's exposed st
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `type` | string | no | Type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive); defaults to Float |
 
 **Returns:** `{ system_path: string, parameter_name: string, parameter_type: string, found: bool, value_read_back?: number|bool|[number...] }`
@@ -463,8 +463,8 @@ List the module function-call nodes on ONE stack of a Niagara emitter (read-only
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update". |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_count: int, total_modules_in_stack: int, modules: [{ index, script_group, module_name, node_guid, function_script?, function_script_class?, is_enabled, is_deprecated, input_pin_count, output_pin_count, total_modules_in_stack }], note?: string }`
@@ -483,8 +483,8 @@ List all simulation stages on a Niagara emitter (read-only). Resolves the system
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, simulation_stage_count: int, simulation_stages: [{ index, stage_name, class, enabled, iteration_source? }] }`
 
@@ -494,9 +494,9 @@ Reorder a Niagara simulation stage on its emitter's stage list by moving it to a
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle owning the stage. |
 | `target_index` | number | yes | Required 0-based target index the stage should occupy after the move (must be in [0, total_simulation_stages)). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages; takes precedence over stage_name when both are supplied. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied. |
 
@@ -508,8 +508,8 @@ Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by n
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter to remove (no "User." prefix) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, parameter_name: string, removed: bool }`
 
@@ -519,7 +519,7 @@ Remove an emitter handle from a Niagara system by name or index.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | no | Optional display name of the emitter handle to remove |
 | `emitter_index` | number | no | Optional zero-based index; used if emitter_name not provided |
 
@@ -531,9 +531,9 @@ Remove an event handler from a Niagara emitter by its usage_id.  Calls UNiagaraE
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle within the system. |
 | `usage_id` | string | yes | The handler's usage_id (as returned by add_niagara_event_handler / get_niagara_event_handlers). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, usage_id: string, already_removed: bool, removed: bool, event_handler_count: int, saved: bool, save_error?: string }`
 
@@ -543,9 +543,9 @@ Remove a UNiagaraNodeFunctionCall module from a Niagara emitter's spawn or updat
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_name` | string | yes | Display name of the module function-call node to remove |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, removed: bool, saved: bool, save_error?: string }`
@@ -556,9 +556,9 @@ Remove a renderer from a Niagara emitter by index.  Validates that renderer_inde
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `renderer_index` | number | yes | 0-based index into the emitter's renderers list (use get_niagara_emitter_renderers to find the index) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, removed_renderer_index: int, removed_renderer_class: string, renderer_count_after: int, save_error?: string }`
 
@@ -568,8 +568,8 @@ Remove a Niagara simulation stage from an emitter's stage list by stage_index or
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle owning the stage. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages; takes precedence over stage_name when both are supplied. |
 | `stage_name` | string | no | Optional SimulationStageName to match if stage_index is not supplied (matches add_niagara_simulation_stage's name). |
 
@@ -581,9 +581,9 @@ Rename an emitter handle of a Niagara System asset and save the system. The engi
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `current_name` | string | yes | Current display name of the emitter handle (case-insensitive), as get_niagara_emitter_handles lists it. |
 | `new_name` | string | yes | Requested display name; it may come back sanitized or with a numeric suffix. |
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, old_name: string, new_name: string, verified: bool }`
 
@@ -593,10 +593,10 @@ Move a UNiagaraNodeFunctionCall module to a new index in its Niagara emitter sta
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_name` | string | yes | Display name of the module to move |
 | `target_index` | number | yes | Non-negative target index in the ordered stack |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 
 **Returns:** `{ system_path: string, emitter_name: string, script_group: string, module_name: string, old_index: int, new_index: int, target_index: int, reordered: bool, saved: bool, save_error?: string }`
@@ -746,9 +746,9 @@ Set the numeric values of an array user-parameter data interface (e.g. ArrayFloa
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter array DI (no "User." prefix) |
 | `values` | array | yes | Array of numbers to store (replaces all existing array contents) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `array_property` | string | no | Optional array UPROPERTY to set (default "FloatData"; e.g. "IntData" for the int32 array DI) |
 
 **Returns:** `{ system_path: string, parameter_name: string, array_property: string, element_type: string, count: int, values: [number], set: bool, saved: bool }`
@@ -759,8 +759,8 @@ Set the underlying asset on a UNiagaraDataInterface user-parameter binding.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter DI to mutate |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `asset_path` | string | no | Asset path of the UObject to assign (must be the right subclass) |
 | `property_name` | string | no | Optional FObjectProperty name on the DI; defaults to the first FObjectProperty |
 
@@ -772,9 +772,9 @@ Author the FRichCurve keys of a curve user-parameter data interface (Curve / Col
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter curve DI (no "User." prefix) |
 | `keys` | array | yes | Array of { time: number, value: number } keys to set (replaces all existing keys on the channel) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `curve_property` | string | no | Optional FRichCurve UPROPERTY to author (default "Curve"; e.g. "RedCurve"/"XCurve" on Color/Vector curve DIs) |
 
 **Returns:** `{ system_path: string, parameter_name: string, curve_property: string, key_count: int, keys: [{time,value}], set: bool, saved: bool }`
@@ -785,10 +785,10 @@ Set a default property (scalar/vector/color) on a UNiagaraDataInterface user-par
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter DI to mutate |
 | `property_name` | string | yes | Name of the FProperty on the DI to set |
 | `value` | string | yes | String representation of the value (parsed by FProperty::ImportText_Direct) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, parameter_name: string, property_name: string, value: string, set: bool }`
 
@@ -798,10 +798,12 @@ Assign a material to the Decal renderer at renderer_index of one emitter in a Ni
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it. |
+| `emitter_name` | string | yes | Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it. |
+| `renderer_index` | number | yes | 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it. |
 | `material_path` | string | yes | Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood". |
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it. |
-| `emitter_name` | string | no | Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it. |
-| `renderer_index` | number | no | 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it. |
+
+**Returns:** `{ system_path, emitter_name, renderer_index, previous_material_path, new_material_path, changed, saved }`
 
 ## `set_niagara_effect_type`
 
@@ -809,8 +811,8 @@ Assign an EffectType asset to a Niagara system.  Loads the UNiagaraEffectType fr
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `effect_type_path` | string | yes | Asset path of the UNiagaraEffectType to assign. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, effect_type_path: string, success: bool }`
 
@@ -820,9 +822,9 @@ Set the EParticleAllocationMode (and optional PreAllocationCount) on a Niagara e
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `allocation_mode` | string | yes | One of "AutomaticEstimate", "ManualEstimate", or "FixedCount" (case-insensitive; "Automatic" and "Manual" and "Fixed" also accepted) |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `pre_allocation_count` | number | no | Optional int; only meaningful when not AutomaticEstimate |
 
 **Returns:** `{ system_path: string, emitter_name: string, allocation_mode: string, pre_allocation_count: int, applied: bool, saved: bool, save_error?: string }`
@@ -833,8 +835,8 @@ Set the CalculateBoundsMode and FixedBounds on a Niagara emitter's FVersionedNia
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `bounds_mode` | string | no | One of "Dynamic", "Fixed", or "Programmable"; defaults to "Fixed" |
 | `bounds_min` | string | no | Optional [x, y, z] string (FVector) for the FixedBounds minimum |
 | `bounds_max` | string | no | Optional [x, y, z] string (FVector) for the FixedBounds maximum |
@@ -847,8 +849,8 @@ Enable or disable an emitter handle on a Niagara system.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `enabled` | boolean | no | Optional bool; defaults to true |
 
 **Returns:** `{ system_path: string, emitter_name: string, enabled: bool, state_changed: bool, verified: bool, is_enabled_read_back: bool }`
@@ -859,9 +861,9 @@ Set whether one emitter of a Niagara System asset simulates in local space (bLoc
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 | `emitter_name` | string | yes | Display name of the emitter handle (case-insensitive). |
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
-| `local_space` | boolean | no | true to simulate the particles of the emitter in its local space, false for world space; the call fails without it. |
+| `local_space` | boolean | yes | true to simulate the particles of the emitter in its local space, false for world space; the call fails without it. |
 
 **Returns:** `{ system_path: string, emitter_name: string, local_space: bool, applied: bool, saved: bool, save_error?: string }`
 
@@ -871,8 +873,8 @@ Set the MaxGPUParticlesSpawnPerFrame override on a Niagara emitter (only effecti
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `max_gpu_particles` | number | no | Non-negative integer |
 
 **Returns:** `{ system_path: string, emitter_name: string, sim_target: string, max_gpu_particles: int, effective_for_current_sim: bool, applied: bool, saved: bool, save_error?: string }`
@@ -883,8 +885,8 @@ Toggle bRequiresPersistentIDs on a Niagara emitter (stable Particles.ID across f
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `requires_persistent_ids` | boolean | no | Boolean to assign |
 
 **Returns:** `{ system_path: string, emitter_name: string, requires_persistent_ids: bool, applied: bool, saved: bool, save_error?: string }`
@@ -895,9 +897,9 @@ Configure the simulation target of a Niagara emitter.  Sets SimTarget, and optio
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `sim_target` | string | yes | Target type — "CPUSim" or "GPUComputeSim". |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `local_space` | boolean | no | Optional bool override for bLocalSpace |
 | `deterministic` | boolean | no | Optional bool override for bDeterminism |
 
@@ -920,11 +922,11 @@ Assign a static mesh into a Niagara Mesh renderer's Meshes[] slot.  Resolves (or
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `renderer_index` | number | yes | 0-based index of the Mesh renderer (use get_niagara_emitter_renderers). |
 | `mesh_path` | string | yes | Asset path of the UStaticMesh to assign (e.g. "/Engine/BasicShapes/Cube"). |
 | `slot` | number | yes | Optional 0-based slot index into Meshes[] (default 0). The array is grown with default elements up to this index if needed. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path, emitter_name, renderer_index, renderer_class, slot, mesh_path, mesh_count, already_assigned: bool, save_error? }`
 
@@ -934,9 +936,9 @@ Enable or disable a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `module_name` | string | yes | Display name of the module to toggle |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `enabled` | boolean | no | Optional bool; defaults to true |
 | `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
 
@@ -948,10 +950,10 @@ Override a Niagara module input by writing the rapid-iteration store.  Locates t
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `emitter_name` | string | yes | Display name of the emitter handle. |
 | `module_node_name` | string | yes | The module function-call node name (from add_niagara_module_to_stack's module_node_name). |
 | `input_name` | string | yes | Leaf name of the module input (e.g. "Drag" for "Module.Drag"). |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `value_type` | string | no | One of "float", "int", "vector", or "color"; defaults to "float" |
 | `value` | any | no | For float/int: scalar number. For vector: an [x, y, z] list. For color: an [r, g, b, a] list. |
 
@@ -963,10 +965,10 @@ Set the Material UPROPERTY on a Niagara renderer (Sprite/Ribbon/Mesh).  Loads th
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `renderer_index` | number | yes | 0-based index of the renderer (use get_niagara_emitter_renderers to find the index) |
 | `material_path` | string | yes | Asset path of the UMaterialInterface to assign. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, material_path: string, material_path_read_back: string, save_error?: string }`
 
@@ -976,9 +978,9 @@ Author renderer UPROPERTYs on a Niagara renderer (Sprite/Mesh/Ribbon/Light/Decal
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle. |
 | `renderer_index` | number | yes | 0-based index of the renderer (use get_niagara_emitter_renderers). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `enabled` | string | no | Optional bool: base bIsEnabled (also accepted as renderer_enabled). |
 | `sort_order_hint` | string | no | Optional int: base SortOrderHint. |
 | `motion_vector_setting` | string | no | Optional enum name: base MotionVectorSetting (e.g. "AutoDetect"/"Precise"/"Disable"). |
@@ -1017,9 +1019,9 @@ Author the settable enum/bool/FName/FIntPoint UPROPERTYs on a UNiagaraSimulation
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `emitter_name` | string | yes | Name of the emitter handle owning the stage. |
 | `stage_name` | string | yes | Optional SimulationStageName to match if stage_index is not supplied. |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `stage_index` | number | no | Optional 0-based index into the emitter's simulation stages (use add_niagara_simulation_stage / get_niagara_emitter_runtime_summary); takes precedence over stage_name |
 | `name` | string | no | Optional FName: SimulationStageName (renames the stage; also accepted as simulation_stage_name). |
 | `enabled` | boolean | no | Optional bool: base bEnabled (written via SetEnabled). |
@@ -1040,7 +1042,7 @@ Set the bDeterminism UPROPERTY on a Niagara system via reflection.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `deterministic` | boolean | no | Boolean to assign to bDeterminism |
 
 **Returns:** `{ system_path: string, old_deterministic: bool, new_deterministic: bool, applied: bool, saved: bool }`
@@ -1063,7 +1065,7 @@ Set render/system flags on a UNiagaraSystem asset via raw reflection (no PostEdi
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
+| `system_path` | string | yes | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
 | `cast_shadow` | string | no | Optional bool: default CastShadow for spawned components (sets bCastShadow + bOverrideCastShadow). |
 | `override_cast_shadow` | string | no | Optional bool: explicitly set bOverrideCastShadow (auto-set when cast_shadow is given). |
 | `receives_decals` | string | no | Optional bool: default ReceivesDecals (sets bReceivesDecals + bOverrideReceivesDecals). |
@@ -1089,7 +1091,7 @@ Re-resolve the protected UNiagaraSystem::WarmupTickCount from the current Warmup
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 
 **Returns:** `{ system_path: string, old_warmup_tick_count: int, new_warmup_tick_count: int, warmup_time: number, warmup_tick_delta: number, applied: bool, saved: bool }`
 
@@ -1099,7 +1101,7 @@ Set the warmup tick delta (seconds per tick) on a Niagara system.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `warmup_tick_delta` | number | no | Tick delta in seconds (must be > 0) |
 
 **Returns:** `{ system_path: string, old_warmup_tick_delta: number, new_warmup_tick_delta: number, applied: bool, saved: bool }`
@@ -1110,8 +1112,8 @@ Set the warmup time in seconds of a Niagara System asset and save it; a failed s
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
-| `warmup_time` | number | no | Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `warmup_time` | number | yes | Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it. |
 
 **Returns:** `{ system_path: string, old_warmup_time: number, new_warmup_time: number, warmup_tick_count: int, applied: bool, saved: bool }`
 
@@ -1121,8 +1123,8 @@ Sets a user-exposed parameter default on a Niagara System's exposed store.  Adds
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
+| `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | User parameter name (without the "User." prefix). |
-| `system_path` | string | no | Asset path of the Niagara System. |
 | `type` | string | no | Optional type token: Float\|Vector\|Vec2\|Vec4\|Color\|Bool\|Int (case-insensitive). Defaults to Vector if a ``vector`` key is present, else Float |
 | `value` | any | no | Optional float scalar (Float), int (Int) or bool (Bool) value, per the resolved type |
 | `vector` | array | no | Optional [X, Y, Z] for Vector (also implies type=Vector when type omitted) |
@@ -1138,7 +1140,7 @@ Spawns a Niagara System as a persistent UNiagaraComponent in the editor world.  
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example) |
+| `system_path` | string | yes | Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example) |
 | `location` | array | no | World location [X, Y, Z]. |
 | `rotation` | array | no | Optional [pitch, yaw, roll]; defaults to identity |
 | `actor_label` | string | no | Optional desired editor label for the owner actor |

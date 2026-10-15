@@ -312,9 +312,9 @@ Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProc
 |---|---|---|---|
 | `volume_name` | string | yes | Editor label of the PostProcessVolume in the editor world; object names are not matched. |
 | `enabled` | boolean | no | Whether the volume is enabled (APostProcessVolume bEnabled). |
-| `priority` | string | no | Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted. |
-| `film_grain_intensity` | string | no | Film grain intensity from 0 to 1, a number; a numeric string is also accepted. |
-| `motion_blur_amount` | string | no | Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted. |
+| `priority` | number | no | Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted. |
+| `film_grain_intensity` | number | no | Film grain intensity from 0 to 1, a number; a numeric string is also accepted. |
+| `motion_blur_amount` | number | no | Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted. |
 
 **Returns:** `{ volume_name, applied_count, applied_fields: [string] }`
 

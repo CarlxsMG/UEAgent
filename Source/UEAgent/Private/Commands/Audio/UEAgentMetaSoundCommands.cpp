@@ -1681,7 +1681,7 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param input_name - Name of the input vertex (matches FMetasoundFrontendVertex::Name).
-//   @returns { metasound_path, node_id, input_name, type, value, has_value }
+//   @returns { metasound_path, node_id, input_name, type, has_value, literal_type?, value? }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInputDefault(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1739,7 +1739,7 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInputDefault(
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
-//   @param value - New value for the field, converted by FJsonObjectConverter; numbers and booleans can be passed as strings ("0.5", "true").
+//   @param value [any!] - New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true").
 //   @returns { metasound_path, node_id, property, set, value_changed, saved }
 TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	const TSharedPtr<FJsonObject>& Params)

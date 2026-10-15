@@ -796,7 +796,7 @@ TSharedPtr<FJsonObject> HandleRemoveBone(const TSharedPtr<FJsonObject>& Params)
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param old_name - Current bone name; must exist in the reference skeleton.
 //   @param new_name - Desired new bone name (must not already exist)
-//   @returns { asset_path, old_name, new_name, renamed, already_used, not_found, bone_count, saved, op: "rename_bone" }
+//   @returns { asset_path, old_name, new_name, renamed: true, not_found: false, already_used: false, bone_count, saved, save_error?, op: "rename_bone" }
 TSharedPtr<FJsonObject> HandleRenameBone(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, OldName, NewName;

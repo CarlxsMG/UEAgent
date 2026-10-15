@@ -646,10 +646,10 @@ static void MakeFoliageTypePropsJson(UFoliageType* FT, TSharedPtr<FJsonObject>& 
 //   @param density - Instances per 1000 x 1000 uu area (10 m by 10 m) when painting.
 //   @param density_adjustment_factor - Density multiplier used when reapplying: above 1 adds instances, below 1 removes them.
 //   @param radius - Minimum distance in cm between foliage instances.
-//   @param scale_x - X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
-//   @param scale_y - Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
-//   @param scale_z - Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
-//   @param z_offset - Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out.
+//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
+//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
+//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional.
+//   @param z_offset [object] - Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out.
 //   @param cull_distance - Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables.
 //   @param mobility - Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call.
 //   @param align_to_normal - Tilt instances to the normal of the surface they are placed on.
@@ -3266,7 +3266,7 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeGrassType(const TSharedPtr<FJsonObj
 
 // MCP:set_landscape_grass_type_properties - Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
 //   @param grass_path - Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field".
-//   @param variety_index [integer!] - Index of the FGrassVariety to edit, default 0 (appends if the array is empty)
+//   @param variety_index [integer] - Index of the FGrassVariety to edit, default 0 (appends if the array is empty)
 //   @param grass_mesh - Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call.
 //   @param grass_density - Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget.
 //   @param placement_jitter - Jitter of the grid placement from 0 to 1; only used when use_grid is true.
@@ -3274,9 +3274,9 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeGrassType(const TSharedPtr<FJsonObj
 //   @param end_cull_distance - Distance in cm beyond which a whole grass cluster is culled, an integer.
 //   @param min_lod - Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset.
 //   @param scaling - Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call.
-//   @param scale_x - X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; a string value is ignored.
-//   @param scale_y - Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; a string value is ignored.
-//   @param scale_z - Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; a string value is ignored.
+//   @param scale_x [object] - X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling.
+//   @param scale_y [object] - Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling.
+//   @param scale_z [object] - Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling.
 //   @param random_rotation - Give each instance a random rotation instead of a shared one.
 //   @param align_to_surface - Tilt instances to the landscape normal instead of keeping them vertical.
 //   @param use_grid - Place instances on a jittered grid instead of a Halton sequence.

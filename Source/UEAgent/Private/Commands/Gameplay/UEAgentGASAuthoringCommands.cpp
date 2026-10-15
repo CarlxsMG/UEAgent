@@ -527,13 +527,43 @@ namespace
         return nullptr;
     }
 
-    // Adds AttributeName to Blueprint as an FGameplayAttributeData member variable defaulting to DefaultValue.
-    void GASAuthoring_AddAttributeVariable(UBlueprint* Blueprint, const FString& AttributeName, double DefaultValue)
+    // Adds AttributeName to Blueprint as an FGameplayAttributeData member variable whose BaseValue and
+    // CurrentValue default to DefaultValue. False when the Blueprint or its parents already have a variable
+    // of that name (AddMemberVariable refuses it). The compiler imports a struct default as struct text,
+    // so the default is the struct exported as text: a bare number does not import and leaves 0.
+    bool GASAuthoring_AddAttributeVariable(UBlueprint* Blueprint, const FString& AttributeName, double DefaultValue)
     {
         FEdGraphPinType PinType;
         PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
         PinType.PinSubCategoryObject = FGameplayAttributeData::StaticStruct();
-        FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*AttributeName), PinType, FString::SanitizeFloat(DefaultValue));
+        const FGameplayAttributeData Default(static_cast<float>(DefaultValue));
+        FString DefaultText;
+        FGameplayAttributeData::StaticStruct()->ExportText(DefaultText, &Default, /*Defaults*/ nullptr,
+            /*OwnerObject*/ nullptr, PPF_SerializedAsImportText, /*ExportRootScope*/ nullptr);
+        return FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*AttributeName), PinType, DefaultText);
+    }
+
+    // The BaseValue of the FGameplayAttributeData member AttributeName on the CDO of Blueprint's generated
+    // class, into OutBaseValue. False when the class has no member of that name or it is of another type.
+    bool GASAuthoring_ReadAttributeBaseValue(const UBlueprint* Blueprint, const FString& AttributeName, float& OutBaseValue)
+    {
+        UClass* GeneratedClass = Blueprint->GeneratedClass;
+        const FStructProperty* Prop = GeneratedClass
+            ? FindFProperty<FStructProperty>(GeneratedClass, FName(*AttributeName))
+            : nullptr;
+        if (!Prop || Prop->Struct != FGameplayAttributeData::StaticStruct())
+        {
+            return false;
+        }
+        OutBaseValue = Prop->ContainerPtrToValuePtr<FGameplayAttributeData>(GeneratedClass->GetDefaultObject())->GetBaseValue();
+        return true;
+    }
+
+    // Whether a BaseValue read back from the CDO is the default_value that was asked for. The default
+    // travels as struct text with six decimals, so the comparison allows for that rounding.
+    bool GASAuthoring_DefaultApplied(float BaseValue, double Requested)
+    {
+        return FMath::IsNearlyEqual(static_cast<double>(BaseValue), Requested, 1e-5 * FMath::Max(1.0, FMath::Abs(Requested)));
     }
 
     // Read an FGameplayAbilitySpecConfig's public fields into JSON via reflection. The struct
@@ -717,11 +747,11 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJson
 // append one such member to an existing AttributeSet Blueprint. FBlueprintEditorUtils::AddMemberVariable is
 // the canonical Blueprint variable creator (BlueprintEditorUtils.h).
 
-// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, then add one FGameplayAttributeData variable per attributes entry and save without compiling, so run compile_blueprint before use. Returns attributes_added and added_attribute_names; refused during PIE.
+// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "AS_Character".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
-//   @param attributes - Array of {"name": "Health", "default_value": 100} objects; entries without a name are skipped, and a name the class already has is not added yet still counted. default_value is written as bare number text that FGameplayAttributeData cannot parse, so the compiled default stays 0.
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], created: bool }
+//   @param attributes - Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored.
+//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool }
 TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FGASAuthoringCreatedBlueprint Created;
@@ -735,8 +765,10 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
     const TArray<TSharedPtr<FJsonValue>>* AttrArray = nullptr;
     Params->TryGetArrayField(TEXT("attributes"), AttrArray);
 
-    int32 AttributesAdded = 0;
-    TArray<TSharedPtr<FJsonValue>> AddedNames;
+    // The names AddMemberVariable accepted, with the default each one asked for; and the names it refused
+    // because the class already has a variable of that name.
+    TArray<TPair<FString, double>> Accepted;
+    TArray<TSharedPtr<FJsonValue>> SkippedNames;
     if (AttrArray && Blueprint->GeneratedClass)
     {
         Blueprint->Modify();
@@ -755,35 +787,56 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
             }
             double DefaultValue = 0.0;
             Attr->TryGetNumberField(TEXT("default_value"), DefaultValue);
-            GASAuthoring_AddAttributeVariable(Blueprint, AttrName, DefaultValue);
-            AddedNames.Add(MakeShared<FJsonValueString>(AttrName));
-            ++AttributesAdded;
+            if (GASAuthoring_AddAttributeVariable(Blueprint, AttrName, DefaultValue))
+            {
+                Accepted.Emplace(AttrName, DefaultValue);
+            }
+            else
+            {
+                SkippedNames.Add(MakeShared<FJsonValueString>(AttrName));
+            }
         }
+    }
 
-        // Recompile so GeneratedClass reflects the new UPROPERTYs, then persist.
-        // FKismetEditorUtils::CompileBlueprint(UBlueprint*) does not exist;
-        // FBlueprintEditorUtils exposes MarkBlueprintAsModified + the standard
-        // Modify/MarkPackageDirty pattern. (BlueprintEditorUtils.h)
-        FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    // The new members reach the generated class, and their defaults the CDO, only on a compile.
+    if (Accepted.Num() > 0)
+    {
+        FKismetEditorUtilities::CompileBlueprint(Blueprint);
         if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
         {
             return SaveFailed;
         }
     }
 
+    // Read each added attribute back from the compiled class and its CDO.
+    TArray<TSharedPtr<FJsonValue>> AddedNames;
+    TArray<TSharedPtr<FJsonValue>> FailedNames;
+    for (const TPair<FString, double>& Attribute : Accepted)
+    {
+        float BaseValue = 0.f;
+        const bool bApplied = GASAuthoring_ReadAttributeBaseValue(Blueprint, Attribute.Key, BaseValue)
+            && GASAuthoring_DefaultApplied(BaseValue, Attribute.Value);
+        (bApplied ? AddedNames : FailedNames).Add(MakeShared<FJsonValueString>(Attribute.Key));
+    }
+
     TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("AttributeSet"), TEXT("is_attribute_set"));
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetNumberField(TEXT("attributes_added"), AttributesAdded);
+    Result->SetNumberField(TEXT("attributes_added"), AddedNames.Num());
     Result->SetArrayField(TEXT("added_attribute_names"), AddedNames);
+    Result->SetArrayField(TEXT("skipped_attribute_names"), SkippedNames);
+    Result->SetArrayField(TEXT("failed_attribute_names"), FailedNames);
+    const bool bApplied = FailedNames.Num() == 0;
+    Result->SetBoolField(TEXT("attributes_applied"), bApplied);
     Result->SetBoolField(TEXT("created"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bApplied,
+        bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_attribute_set_asset"), TEXT("attributes_applied")));
 }
 
-// MCP:add_attribute_to_set - Add a single FGameplayAttributeData member variable to an AttributeSet Blueprint
+// MCP:add_attribute_to_set - Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class; refused during PIE.
 //   @param attribute_set_path - Full asset path of the AttributeSet Blueprint
 //   @param attribute_name - Name of the new attribute member variable
-//   @param default_value - Initial value for the attribute, default 0
-//   @returns { attribute_set_path: string, attribute_name: string, default_value: number, added: bool, attribute_present: bool }
+//   @param default_value - Initial BaseValue and CurrentValue of the attribute, default 0; not applied to an attribute that already exists.
+//   @returns { attribute_set_path: string, attribute_name: string, default_value: number, added: bool, already_existed: bool, attribute_present: bool, base_value?: number, default_applied?: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintPath;
@@ -805,39 +858,47 @@ TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& P
             FString::Printf(TEXT("Blueprint is not a UAttributeSet: %s"), *BlueprintPath));
     }
 
-    Blueprint->Modify();
-    GASAuthoring_AddAttributeVariable(Blueprint, AttributeName, DefaultValue);
-
-    // FKismetEditorUtils::CompileBlueprint(UBlueprint*) does not exist;
-    // FBlueprintEditorUtils exposes MarkBlueprintAsModified + the standard
-    // Modify/MarkPackageDirty pattern. (BlueprintEditorUtils.h)
-    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    const bool bAdded = GASAuthoring_AddAttributeVariable(Blueprint, AttributeName, DefaultValue);
+    if (bAdded)
     {
-        return SaveFailed;
+        // The new member reaches the generated class, and its default the CDO, only on a compile.
+        FKismetEditorUtilities::CompileBlueprint(Blueprint);
+        if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+        {
+            return SaveFailed;
+        }
     }
 
-    // Readback: confirm the new variable is now visible on the generated class.
-    int32 FoundIndex = INDEX_NONE;
-    if (Blueprint->GeneratedClass)
+    float BaseValue = 0.f;
+    const bool bPresent = GASAuthoring_ReadAttributeBaseValue(Blueprint, AttributeName, BaseValue);
+    if (!bAdded && !bPresent)
     {
-        for (TFieldIterator<FProperty> It(Blueprint->GeneratedClass, EFieldIteratorFlags::IncludeSuper); It; ++It)
-        {
-            if (It->GetName() == AttributeName)
-            {
-                FoundIndex = static_cast<int32>(It->GetOffset_ForInternal() / It->GetElementSize());
-                break;
-            }
-        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Cannot add '%s' to %s: the name is not a valid variable name or is taken by a variable that is not an FGameplayAttributeData"),
+            *AttributeName, *BlueprintPath));
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("attribute_set_path"), BlueprintPath);
     Result->SetStringField(TEXT("attribute_name"), AttributeName);
     Result->SetNumberField(TEXT("default_value"), DefaultValue);
-    Result->SetBoolField(TEXT("added"), true);
-    Result->SetBoolField(TEXT("attribute_present"), FoundIndex != INDEX_NONE);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("added"), bAdded);
+    Result->SetBoolField(TEXT("already_existed"), !bAdded);
+    Result->SetBoolField(TEXT("attribute_present"), bPresent);
+    if (bPresent)
+    {
+        Result->SetNumberField(TEXT("base_value"), BaseValue);
+    }
+    // An attribute added by this call must be on the compiled class with the requested default.
+    const bool bDefaultApplied = bPresent && bAdded && GASAuthoring_DefaultApplied(BaseValue, DefaultValue);
+    if (bAdded)
+    {
+        Result->SetBoolField(TEXT("default_applied"), bDefaultApplied);
+    }
+    Result->SetBoolField(TEXT("saved"), bAdded);
+    const bool bOk = bAdded ? bDefaultApplied : bPresent;
+    return mcp_common::MakeOutcomeReply(Result, bOk, bOk ? FString()
+        : mcp_common::MeasuredOutcomeError(TEXT("add_attribute_to_set"), bPresent ? TEXT("default_applied") : TEXT("attribute_present")));
 }
 
 // GameplayEffect CDO authoring

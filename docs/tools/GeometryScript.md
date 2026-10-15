@@ -773,6 +773,7 @@ Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the 
 | `max_angle_deg` | number | no | Region parameter for region='normal_angle'. |
 | `source_material_id` | integer | no | Region parameter for region='material_id'. |
 | `polygroup_id` | integer | no | Region parameter for region='polygroup'. |
+| `polygroup_layer` | integer | no | Region parameter for region='polygroup': extended polygroup layer index (default the mesh's default polygroup layer). |
 | `min_triangle_points` | integer | no | Region parameter, 1-3. |
 | `invert` | boolean | no | Select the complement of a box, sphere, plane or normal_angle region (default false); the other regions ignore it. |
 
@@ -870,7 +871,7 @@ Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the e
 | `translate_u` | number | yes | Offset added to every U coordinate (1.0 shifts by one full tile). |
 | `translate_v` | number | yes | Offset added to every V coordinate (1.0 shifts by one full tile). |
 
-**Returns:** `{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number,`
+**Returns:** `{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }`
 
 ## `weld_mesh_edges`
 

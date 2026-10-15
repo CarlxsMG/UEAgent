@@ -931,9 +931,9 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
 //   @param input_name - Name of the new input pin, stored as given: a name another input already uses is not made unique.
 //   @param input_type - One of the 13 EFunctionInputType values: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|Texture2DArray|VolumeTexture|StaticBool|MaterialAttributes|TextureExternal|Bool|Substrate (optional, default "Scalar")
 //   @param description - Optional tooltip/description string for the input pin
-//   @param preview_value - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default.
-//   @param use_preview_value_as_default - Optional bool; if true, the preview value becomes the input's default
-//   @param sort_priority - Optional int controlling the input's display order relative to other inputs
+//   @param preview_value [object] - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default.
+//   @param use_preview_value_as_default [bool] - Optional bool; if true, the preview value becomes the input's default
+//   @param sort_priority [number] - Optional int controlling the input's display order relative to other inputs
 //   @returns { function_path: string, input_name: string, input_type: string, node_id: string, num_inputs: number, added: bool }
 
 TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObject>& Params)
@@ -1031,9 +1031,9 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
 //   @param input_name - New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material).
 //   @param input_type - Optional EFunctionInputType (the 13 values; same parser as add_material_function_input)
 //   @param description - New tooltip text of the input pin.
-//   @param preview_value - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value.
-//   @param use_preview_value_as_default - Bool: true makes the preview value the default of the input when its pin is left unconnected.
-//   @param sort_priority - Integer that orders this input pin relative to the other inputs of the function.
+//   @param preview_value [object] - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value.
+//   @param use_preview_value_as_default [bool] - Bool: true makes the preview value the default of the input when its pin is left unconnected.
+//   @param sort_priority [number] - Integer that orders this input pin relative to the other inputs of the function.
 //   @returns { function_path: string, node_id: string, input_name: string, input_type: string, applied: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJsonObject>& Params)

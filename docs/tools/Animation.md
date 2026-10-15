@@ -1071,14 +1071,14 @@ Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num
 
 ## `get_anim_state_machine_info`
 
-Read state + transition count for one state machine (read-only, no compile).
+Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Asset path of the UAnimBlueprint |
 | `state_machine_name` | string | yes | Name of the state machine |
 
-**Returns:** `{ state_machine, state_count, transition_count, states:[{name,kind,x,y}] }`
+**Returns:** `{ state_machine, state_count, conduit_count, transition_count, states:[{name,kind,x,y}] }`
 
 ## `get_animation_blueprint_info`
 
@@ -1482,14 +1482,14 @@ Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bo
 
 ## `reimport_anim_sequence`
 
-Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, unsaved; a missing source returns reimported=false with a note instead of crashing. Caveat: the call passes SourceFileIndex 1 and bAutomated false, so dialogs may appear.
+Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
 | `source_file_path` | string | no | Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data. |
 
-**Returns:** `{ anim_sequence_path, source_file_path, reimported, source_validated, note }`
+**Returns:** `{ anim_sequence_path, source_file_path, reimported, source_validated, note? }`
 
 ## `remove_anim_blueprint`
 
@@ -2001,7 +2001,7 @@ Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails 
 | `old_name` | string | yes | Current bone name; must exist in the reference skeleton. |
 | `new_name` | string | yes | Desired new bone name (must not already exist) |
 
-**Returns:** `{ asset_path, old_name, new_name, renamed, already_used, not_found, bone_count, saved, op: "rename_bone" }`
+**Returns:** `{ asset_path, old_name, new_name, renamed: true, not_found: false, already_used: false, bone_count, saved, save_error?, op: "rename_bone" }`
 
 ## `rename_ik_retarget_chain`
 
@@ -2970,7 +2970,7 @@ Set ScreenSize.Default (the screen size at which this LOD switches in) of one LO
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero". |
 | `lod_index` | number | yes | 0-based LOD index; must be below the LOD count of the mesh. |
-| `screen_size` | number | no | New ScreenSize.Default value, e.g. 0.3; the call fails without it. |
+| `screen_size` | number | yes | New ScreenSize.Default value, e.g. 0.3; the call fails without it. |
 
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, old_screen_size: float, screen_size: float, applied: bool }`
 
@@ -3117,7 +3117,7 @@ Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 
 
 ## `validate_anim_state_machine`
 
-Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. Caveat: state_count includes conduits and transitions and transition_count stays 0, so that warning always fires.
+Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. state_count counts states only (conduits and aliases excluded), transition_count the transition nodes; compile_anim_blueprint is the check that the machine compiles.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

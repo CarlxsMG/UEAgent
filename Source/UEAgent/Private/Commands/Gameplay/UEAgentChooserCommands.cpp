@@ -1295,8 +1295,11 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 	else if (ColStruct == FChooserOutputNameColumn::StaticStruct())
 	{
 		FChooserOutputNameColumn& C = Col.GetMutable<FChooserOutputNameColumn>();
+		// Read, then tested, like the Bool column: a negated read would publish default_value as
+		// required for every column type, while most of them never read it.
 		FString DV;
-		if (!Params->TryGetStringField(TEXT("default_value"), DV) || DV.IsEmpty())
+		Params->TryGetStringField(TEXT("default_value"), DV);
+		if (DV.IsEmpty())
 		{
 			return mcp_common::MakeErrorReply(
 				TEXT("set_chooser_column_default(OutputName): 'default_value' is required (string)"));

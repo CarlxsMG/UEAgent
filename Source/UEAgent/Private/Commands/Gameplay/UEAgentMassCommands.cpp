@@ -585,7 +585,7 @@ TSharedPtr<FJsonObject> HandleDespawnMassEntities(
 // ---------------------------------------------------------------------------
 // MCP:get_mass_spawner_info - Read an AMassSpawner actor of the editor world, found by actor label (first match), read-only. Returns actor_name, count and entity_types [{entity_config, proportion}] with entity_type_count; the entities it spawned are counted by count_mass_entities instead.
 //   @param actor_label - Editor label of the AMassSpawner actor
-//   @returns { actor_label, actor_name, note }
+//   @returns { actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }
 TSharedPtr<FJsonObject> HandleGetMassSpawnerInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {

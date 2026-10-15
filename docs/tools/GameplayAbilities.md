@@ -30,15 +30,15 @@ Create an ability task on the primary instance of an ability already granted to 
 
 ## `add_attribute_to_set`
 
-Add a single FGameplayAttributeData member variable to an AttributeSet Blueprint
+Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class; refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `attribute_set_path` | string | yes | Full asset path of the AttributeSet Blueprint |
 | `attribute_name` | string | yes | Name of the new attribute member variable |
-| `default_value` | number | no | Initial value for the attribute, default 0 |
+| `default_value` | number | no | Initial BaseValue and CurrentValue of the attribute, default 0; not applied to an attribute that already exists. |
 
-**Returns:** `{ attribute_set_path: string, attribute_name: string, default_value: number, added: bool, attribute_present: bool }`
+**Returns:** `{ attribute_set_path: string, attribute_name: string, default_value: number, added: bool, already_existed: bool, attribute_present: bool, base_value?: number, default_applied?: bool, saved: bool }`
 
 ## `add_gameplay_effect_component`
 
@@ -112,15 +112,15 @@ Set a GameplayAbility CDO's asset tags from a list of tag strings
 
 ## `create_attribute_set_asset`
 
-Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, then add one FGameplayAttributeData variable per attributes entry and save without compiling, so run compile_blueprint before use. Returns attributes_added and added_attribute_names; refused during PIE.
+Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name without a path, e.g. "AS_Character". |
 | `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints. |
-| `attributes` | array | no | Array of {"name": "Health", "default_value": 100} objects; entries without a name are skipped, and a name the class already has is not added yet still counted. default_value is written as bare number text that FGameplayAttributeData cannot parse, so the compiled default stays 0. |
+| `attributes` | array | no | Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored. |
 
-**Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], created: bool }`
+**Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool }`
 
 ## `create_attribute_set_blueprint`
 

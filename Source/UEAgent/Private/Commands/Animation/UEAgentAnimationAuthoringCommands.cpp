@@ -3818,10 +3818,10 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, unsaved; a missing source returns reimported=false with a note instead of crashing. Caveat: the call passes SourceFileIndex 1 and bAutomated false, so dialogs may appear.
+// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param source_file_path - Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data.
-//   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note }
+//   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note? }
 //
 // FReimportManager::Reimport() crashes the editor
 // when called against an asset whose registered factory exists (CanReimport
@@ -3911,6 +3911,8 @@ TSharedPtr<FJsonObject> HandleReimportAnimSequence(const TSharedPtr<FJsonObject>
         /*bShowNotification=*/false,
         /*PreferredReimportFile=*/EffectiveSource,
         /*SpecifiedReimportHandler=*/nullptr,
+        /*SourceFileIndex=*/INDEX_NONE,
+        /*bForceNewFile=*/false,
         /*bAutomated=*/true);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();

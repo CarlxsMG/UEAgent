@@ -684,7 +684,7 @@ Read the active level editor viewport (the focused one, else the first) without 
 
 No parameters.
 
-**Returns:** `{ realtime: bool, view_mode_index: int, view_mode: string, camera_speed: int, location: [number], rotation: [number], show_flags: object }`
+**Returns:** `{ realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }`
 
 ## `high_res_screenshot`
 
@@ -780,14 +780,14 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 
 ## `list_engine_ini_sections`
 
-List the section names GConfig holds for one INI (count, sections, file_path). Read-only. Caveat: it asks GConfig for config_file plus .ini, a form GConfig does not match to its known config files (get_engine_ini_value avoids it), so count can be 0 for a file that has sections.
+List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `config_file` | string | no | INI base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; not validated. |
+| `config_file` | string | no | INI base name, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; a trailing ".ini" is dropped. |
 | `include_base` | boolean | no | Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed. |
 
-**Returns:** `{ count, sections: [...] }`
+**Returns:** `{ count, sections: [string], found: bool, config_file, file_path }`
 
 ## `load_level`
 
@@ -1057,7 +1057,7 @@ Search console variables and commands whose name contains term (case-insensitive
 | `term` | string | yes | Substring to search (case-insensitive) |
 | `max` | number | no | Maximum number of entries to return (default 50, minimum 1). |
 
-**Returns:** `{ count, cvars: [{name, value, help}] }`
+**Returns:** `{ count, cvars: [{name, value?}] }`
 
 ## `select_actors`
 

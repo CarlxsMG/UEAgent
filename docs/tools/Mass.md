@@ -144,7 +144,7 @@ Read an AMassSpawner actor of the editor world, found by actor label (first matc
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the AMassSpawner actor |
 
-**Returns:** `{ actor_label, actor_name, note }`
+**Returns:** `{ actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }`
 
 ## `get_mass_trait_property`
 

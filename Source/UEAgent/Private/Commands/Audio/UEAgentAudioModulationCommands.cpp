@@ -896,7 +896,7 @@ TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
 // ---------------------------------------------------------------------------
 // MCP:create_modulation_parameter - Creates a USoundModulationParameter asset of the chosen concrete class at parameter_path and saves it. An existing parameter there is returned untouched with its real class (not saved). Returns parameter_path, parameter_name, parameter_class, created, already_existed, saved. Tune it with set_modulation_parameter_settings.
 //   @param parameter_path - Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name
-//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled. The filter names take ONE F: "LPFFrequency" and "HPFFrequency" are refused, although the error message lists them
+//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too.
 //   @returns { parameter_path, parameter_name, parameter_class, created, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -927,15 +927,16 @@ TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 	UClass* ConcreteClass = nullptr;
 	if      (ClassLower == TEXT("volume"))         { ConcreteClass = USoundModulationParameterVolume::StaticClass(); }
 	else if (ClassLower == TEXT("frequency"))      { ConcreteClass = USoundModulationParameterFrequency::StaticClass(); }
-	else if (ClassLower == TEXT("lpfrequency"))    { ConcreteClass = USoundModulationParameterLPFFrequency::StaticClass(); }
-	else if (ClassLower == TEXT("hpfrequency"))    { ConcreteClass = USoundModulationParameterHPFFrequency::StaticClass(); }
+	// The engine classes are USoundModulationParameterLPFFrequency / HPFFrequency: both spellings resolve.
+	else if (ClassLower == TEXT("lpfrequency") || ClassLower == TEXT("lpffrequency")) { ConcreteClass = USoundModulationParameterLPFFrequency::StaticClass(); }
+	else if (ClassLower == TEXT("hpfrequency") || ClassLower == TEXT("hpffrequency")) { ConcreteClass = USoundModulationParameterHPFFrequency::StaticClass(); }
 	else if (ClassLower == TEXT("bipolar"))        { ConcreteClass = USoundModulationParameterBipolar::StaticClass(); }
 	else if (ClassLower == TEXT("additive"))       { ConcreteClass = USoundModulationParameterAdditive::StaticClass(); }
 	else if (ClassLower == TEXT("scaled"))         { ConcreteClass = USoundModulationParameterScaled::StaticClass(); }
 	if (!ConcreteClass)
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Unknown parameter_class '%s'. Expected one of: Volume, Frequency, LPFFrequency, HPFFrequency, Bipolar, Additive, Scaled"),
+			FString::Printf(TEXT("Unknown parameter_class '%s'. Expected one of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled"),
 				*ParameterClass));
 	}
 

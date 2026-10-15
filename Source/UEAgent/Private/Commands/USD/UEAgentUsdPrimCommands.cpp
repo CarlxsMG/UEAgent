@@ -15,6 +15,7 @@
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonTypes.h"
 #include "Templates/SharedPointer.h"
+#include "Algo/Reverse.h"
 
 /**
  * USD prim CRUD + metadata + schema commands.
@@ -479,11 +480,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimDisplayName(const TSharedPtr<FJsonObject
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_usd_prims - List the direct children of one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count. Only active, loaded, defined, non-abstract children appear, and it never recurses: call it again per child to go deeper. Read-only.
+// MCP:list_usd_prims - List the prims under one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path_prefix [string] - SdfPath of the parent prim whose direct children are listed; it must exist. Default "/" (the pseudo root).
-//   @param recursive [bool] - Has no effect: true (default) and false return the same direct children, filtered by the USD default predicate, without traversing instance proxies.
-//   @returns { prims: [object], count: number }
+//   @param prim_path_prefix [string] - SdfPath of the prim whose children are listed; it must exist. Default "/" (the pseudo root).
+//   @param recursive [bool] - false (default) lists the direct children only; true lists every descendant, each parent before its children.
+//   @returns { prims: [{ prim_path, type_name, active }], count: number }
 TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -501,7 +502,7 @@ TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params
 		return mcp_common::MakeErrorReply(PathError);
 	}
 
-	bool Recursive = true;
+	bool Recursive = false;
 	Params->TryGetBoolField(TEXT("recursive"), Recursive);
 
 	UE::FUsdPrim Root;
@@ -510,20 +511,27 @@ TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params
 		return Error;
 	}
 
-	TArray<UE::FUsdPrim> Children = Recursive
-		? Root.GetFilteredChildren(/*bTraverseInstanceProxies*/ false)
-		: Root.GetChildren();
-
+	// GetChildren and GetFilteredChildren(false) both apply the USD default predicate and stop at
+	// the direct children, so the subtree is walked here: a stack in reverse child order keeps the
+	// output depth-first, each parent before its children and siblings in stage order.
 	TArray<TSharedPtr<FJsonValue>> Out;
-	Out.Reserve(Children.Num());
-	for (const UE::FUsdPrim& Child : Children)
+	TArray<UE::FUsdPrim> Pending = Root.GetFilteredChildren(/*bTraverseInstanceProxies*/ false);
+	Algo::Reverse(Pending);
+	while (Pending.Num() > 0)
 	{
-		if (!Child.IsValid()) { continue; }
+		const UE::FUsdPrim Prim = Pending.Pop(EAllowShrinking::No);
+		if (!Prim.IsValid()) { continue; }
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-		O->SetStringField(TEXT("prim_path"), Child.GetPrimPath().GetString());
-		O->SetStringField(TEXT("type_name"), Child.GetTypeName().ToString());
-		O->SetBoolField(TEXT("active"), Child.IsActive());
+		O->SetStringField(TEXT("prim_path"), Prim.GetPrimPath().GetString());
+		O->SetStringField(TEXT("type_name"), Prim.GetTypeName().ToString());
+		O->SetBoolField(TEXT("active"), Prim.IsActive());
 		Out.Add(MakeShared<FJsonValueObject>(O));
+		if (Recursive)
+		{
+			TArray<UE::FUsdPrim> Children = Prim.GetFilteredChildren(/*bTraverseInstanceProxies*/ false);
+			Algo::Reverse(Children);
+			Pending.Append(MoveTemp(Children));
+		}
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();

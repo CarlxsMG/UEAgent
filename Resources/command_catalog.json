@@ -29,7 +29,7 @@
         },
         {
           "name": "configure_ai_sight_radius",
-          "description": "Set SightRadius, and LoseSightRadius to sight_radius times 1.5, on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.",
+          "description": "Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.",
           "params": [
             {
               "name": "actor_name",
@@ -45,12 +45,12 @@
             },
             {
               "name": "lose_sight_radius",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
-              "description": "Ignored: the code never reads it and always sets LoseSightRadius to sight_radius times 1.5."
+              "description": "New LoseSightRadius in cm, the distance at which an already seen target is lost, 0 or more; default sight_radius times 1.5."
             }
           ],
-          "returns": ""
+          "returns": "{ actor_name, sight_radius, lose_sight_radius, sight_sense_count }"
         },
         {
           "name": "create_ai_controller_blueprint",
@@ -95,7 +95,7 @@
               "description": "Object name or editor label of the pawn or AIController in the editor world; the first match is used."
             }
           ],
-          "returns": "{ actor_name, perceived: [{actor_name, last_sensed_seconds}], count }"
+          "returns": "{ actor_name, perceived: [{actor_name}], count }"
         },
         {
           "name": "set_actor_team",
@@ -3187,7 +3187,7 @@
         },
         {
           "name": "get_anim_state_machine_info",
-          "description": "Read state + transition count for one state machine (read-only, no compile).",
+          "description": "Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -3202,7 +3202,7 @@
               "description": "Name of the state machine"
             }
           ],
-          "returns": "{ state_machine, state_count, transition_count, states:[{name,kind,x,y}] }"
+          "returns": "{ state_machine, state_count, conduit_count, transition_count, states:[{name,kind,x,y}] }"
         },
         {
           "name": "get_animation_blueprint_info",
@@ -3867,7 +3867,7 @@
         },
         {
           "name": "reimport_anim_sequence",
-          "description": "Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, unsaved; a missing source returns reimported=false with a note instead of crashing. Caveat: the call passes SourceFileIndex 1 and bAutomated false, so dialogs may appear.",
+          "description": "Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -3882,7 +3882,7 @@
               "description": "Absolute path of the file to reimport from on disk (e.g. \"D:/Art/Walk.fbx\"); defaults to the first source file recorded in the asset import data."
             }
           ],
-          "returns": "{ anim_sequence_path, source_file_path, reimported, source_validated, note }"
+          "returns": "{ anim_sequence_path, source_file_path, reimported, source_validated, note? }"
         },
         {
           "name": "remove_anim_blueprint",
@@ -4792,7 +4792,7 @@
               "description": "Desired new bone name (must not already exist)"
             }
           ],
-          "returns": "{ asset_path, old_name, new_name, renamed, already_used, not_found, bone_count, saved, op: \"rename_bone\" }"
+          "returns": "{ asset_path, old_name, new_name, renamed: true, not_found: false, already_used: false, bone_count, saved, save_error?, op: \"rename_bone\" }"
         },
         {
           "name": "rename_ik_retarget_chain",
@@ -7230,7 +7230,7 @@
             {
               "name": "screen_size",
               "jsonType": "number",
-              "required": false,
+              "required": true,
               "description": "New ScreenSize.Default value, e.g. 0.3; the call fails without it."
             }
           ],
@@ -7567,7 +7567,7 @@
         },
         {
           "name": "validate_anim_state_machine",
-          "description": "Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. Caveat: state_count includes conduits and transitions and transition_count stays 0, so that warning always fires.",
+          "description": "Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. state_count counts states only (conduits and aliases excluded), transition_count the transition nodes; compile_anim_blueprint is the check that the machine compiles.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -9910,7 +9910,7 @@
               "name": "parameter_class",
               "jsonType": "string",
               "required": true,
-              "description": "Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled. The filter names take ONE F: \"LPFFrequency\" and \"HPFFrequency\" are refused, although the error message lists them"
+              "description": "Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too."
             }
           ],
           "returns": "{ parameter_path, parameter_name, parameter_class, created, already_existed, saved }"
@@ -10340,7 +10340,7 @@
               "description": "Name of the input vertex (matches FMetasoundFrontendVertex::Name)."
             }
           ],
-          "returns": "{ metasound_path, node_id, input_name, type, value, has_value }"
+          "returns": "{ metasound_path, node_id, input_name, type, has_value, literal_type?, value? }"
         },
         {
           "name": "get_meta_sound_node_property",
@@ -11164,9 +11164,9 @@
             },
             {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
-              "description": "New value for the field, converted by FJsonObjectConverter; numbers and booleans can be passed as strings (\"0.5\", \"true\")."
+              "jsonType": "any",
+              "required": true,
+              "description": "New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings (\"0.5\", \"true\")."
             }
           ],
           "returns": "{ metasound_path, node_id, property, set, value_changed, saved }"
@@ -17379,12 +17379,6 @@
               "description": "0-based column index to update."
             },
             {
-              "name": "default_value",
-              "jsonType": "any",
-              "required": true,
-              "description": "Bool column: \"MatchFalse\", \"MatchTrue\" or \"MatchAny\"; OutputFloat: a number; OutputBool: a bool; OutputName: a name string; Randomize: a probability weight. Ignored by other column types."
-            },
-            {
               "name": "min",
               "jsonType": "number",
               "required": false,
@@ -17407,6 +17401,12 @@
               "jsonType": "boolean",
               "required": false,
               "description": "FloatRange column: when true, disables the upper bound (row matches any value >= min)."
+            },
+            {
+              "name": "default_value",
+              "jsonType": "any",
+              "required": false,
+              "description": "Bool column: \"MatchFalse\", \"MatchTrue\" or \"MatchAny\"; OutputFloat: a number; OutputBool: a bool; OutputName: a name string; Randomize: a probability weight. Ignored by other column types."
             },
             {
               "name": "comparison",
@@ -20374,7 +20374,7 @@
           "name": "get_viewport_state",
           "description": "Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.",
           "params": [],
-          "returns": "{ realtime: bool, view_mode_index: int, view_mode: string, camera_speed: int, location: [number], rotation: [number], show_flags: object }"
+          "returns": "{ realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }"
         },
         {
           "name": "high_res_screenshot",
@@ -20554,13 +20554,13 @@
         },
         {
           "name": "list_engine_ini_sections",
-          "description": "List the section names GConfig holds for one INI (count, sections, file_path). Read-only. Caveat: it asks GConfig for config_file plus .ini, a form GConfig does not match to its known config files (get_engine_ini_value avoids it), so count can be 0 for a file that has sections.",
+          "description": "List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.",
           "params": [
             {
               "name": "config_file",
               "jsonType": "string",
               "required": false,
-              "description": "INI base name without extension, e.g. \"Engine\" (default), \"Game\", \"Input\", \"Editor\", \"Scalability\"; not validated."
+              "description": "INI base name, e.g. \"Engine\" (default), \"Game\", \"Input\", \"Editor\", \"Scalability\"; a trailing \".ini\" is dropped."
             },
             {
               "name": "include_base",
@@ -20569,7 +20569,7 @@
               "description": "Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed."
             }
           ],
-          "returns": "{ count, sections: [...] }"
+          "returns": "{ count, sections: [string], found: bool, config_file, file_path }"
         },
         {
           "name": "load_level",
@@ -21029,7 +21029,7 @@
               "description": "Maximum number of entries to return (default 50, minimum 1)."
             }
           ],
-          "returns": "{ count, cvars: [{name, value, help}] }"
+          "returns": "{ count, cvars: [{name, value?}] }"
         },
         {
           "name": "select_actors",
@@ -21553,6 +21553,12 @@
           "description": "Add a new UNiagaraDataInterface user-parameter binding to a Niagara system.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
@@ -21563,12 +21569,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Data interface class name (e.g. \"StaticMesh\", \"Texture\"); resolved from /Script/Niagara.NiagaraDataInterface<Name> if not already loaded"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path?: string, offset?: int, added?: bool, already_exists?: bool }"
@@ -21578,16 +21578,16 @@
           "description": "Add a NiagaraDecalRendererProperties (UNiagaraDecalRendererProperties) to a Niagara emitter with decal-specific defaults applied via reflection. Companion to add_niagara_renderer with renderer_type='Decal' — use this cmd when you want to seed decal config (material, source mode, visibility tag, screen-size fade) in the same call. Then requests a system compile and saves.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle (the human-readable name in the system's emitter list)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
               "name": "material_path",
@@ -21621,16 +21621,16 @@
           "description": "Add a copy of a template emitter to a Niagara system (canonical path).  Loads the template/parent UNiagaraEmitter asset and adds a standalone copy of it to the system via FNiagaraEditorUtilities::AddEmitterToSystem — the same operation the Niagara editor's \"Add Emitter\" performs. This rebuilds the emitter's nodes and syncs the system overview graph, then requests a compile and saves the system.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")"
+            },
+            {
               "name": "emitter_asset_path",
               "jsonType": "string",
               "required": true,
               "description": "Asset path of the source UNiagaraEmitter template (e.g. \"/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain\")"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")"
             }
           ],
           "returns": "{ system_path: string, source_emitter_asset: string, emitter_handle_id: string, emitter_handle_name: string, is_valid: bool, is_enabled: bool, emitters_before: int, total_emitters: int, success: bool, saved: bool, save_error?: string }"
@@ -21642,7 +21642,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the target Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
@@ -21665,6 +21665,12 @@
           "description": "Add an event handler to a Niagara emitter (the writer for event_handler_count).  Constructs an FNiagaraEventScriptProperties (allocating its UNiagaraScript with usage ParticleEventScript, mirroring add_niagara_simulation_stage) and adds it via UNiagaraEmitter::AddEventHandler. Idempotent by source_event_name: if a handler for that event already exists it is returned (already_exists=true) without adding a duplicate. The system is saved after modification. The handler's event-script graph is created in a default state — full event wiring must be completed in the Niagara editor (reported honestly via note); the handler properties are persisted and re-readable.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21675,12 +21681,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Name of the source event this handler consumes (its identity key for idempotency)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
               "name": "execution_mode",
@@ -21726,16 +21726,16 @@
           "description": "Add a NiagaraLightRendererProperties (UNiagaraLightRendererProperties) to a Niagara emitter with light-specific defaults applied via reflection. Companion to add_niagara_renderer with renderer_type='Light' — use this cmd when you want to seed light config (radius scale, falloff mode, affects-translucency, color add) in the same call. Then requests a system compile and saves.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
               "name": "use_inverse_squared_falloff",
@@ -21805,6 +21805,12 @@
           "description": "Insert a UNiagaraScript module at a specific index in a Niagara emitter's particle stack graph.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21815,12 +21821,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Asset path of the module UNiagaraScript"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -21842,6 +21842,12 @@
           "description": "Insert an engine module script into a Niagara emitter's particle stack.  Loads the module UNiagaraScript and inserts it at the end of the emitter's ParticleSpawn or ParticleUpdate stack via FNiagaraStackGraphUtilities::AddScriptModuleToStack, then recompiles and saves.  NOTE: only the module's script-default inputs are applied — per-instance input overrides are out of scope (the response reports added_with_defaults=true). Stateless emitters (no editable graph) return a clean error.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21852,12 +21858,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Asset path of the module UNiagaraScript (e.g. \"/Niagara/Modules/Update/Forces/GravityForce.GravityForce\")"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -21873,6 +21873,12 @@
           "description": "Add a new renderer (Sprite / Ribbon / Mesh / Light) to a Niagara emitter.  Creates a UNiagaraRendererProperties instance of the requested concrete class (Sprite / Ribbon / Mesh / Light), optionally sets the Material UPROPERTY, and appends it to the emitter's RendererProperties array. Then requests a system compile and saves the asset.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21883,12 +21889,6 @@
               "jsonType": "string",
               "required": true,
               "description": "One of \"Sprite\" / \"Ribbon\" / \"Mesh\" / \"Light\" (case-insensitive)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
               "name": "material_path",
@@ -21904,6 +21904,12 @@
           "description": "Add a simulation stage to a Niagara emitter.  Creates a UNiagaraSimulationStageGeneric, configures it with default iteration source (Particles), execute behavior (Always), and GPU dispatch type (OneD), then adds it to the emitter via FVersionedNiagaraEmitterData::AddSimulationStage. The system is saved after modification.  The stage's graph is created in a default state; further graph wiring must be completed in the Niagara editor graph.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21914,12 +21920,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Name for the new simulation stage."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "iteration_count",
@@ -21954,16 +21954,16 @@
           "description": "Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, then save the system. Returns the actual name and id of the copy plus total_emitters; a failed save is not reported in the reply. Find handle names with get_niagara_emitter_handles.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
+            },
+            {
               "name": "source_emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle to copy (case-insensitive), as get_niagara_emitter_handles lists it."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             },
             {
               "name": "new_emitter_name",
@@ -21979,6 +21979,12 @@
           "description": "Duplicate a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -21989,12 +21995,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Display name of the module to duplicate"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -22059,16 +22059,16 @@
           "description": "Get detail and a UPROPERTY dump for one UNiagaraDataInterface user-parameter binding on a Niagara system.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
               "description": "Short name of the user-parameter DI"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path: string, path_name: string, properties: [{ name, type }], property_count: int }"
@@ -22080,7 +22080,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             }
           ],
@@ -22093,7 +22093,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             }
           ],
@@ -22104,16 +22104,16 @@
           "description": "List the data interface bindings on a Niagara emitter (read-only).  Reads the FVersionedNiagaraEmitterData::EmitterDependencies array (TArray<FNiagaraDataInterfaceEmitterBinding>). Each binding has a name, type, interface_class, interface_path, and instance_index.  Adding or removing data interface bindings on a script requires view-models (FNiagaraStackGraphUtilities AddDataInterface) and is editor-only -- this command lists them but does not mutate them.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, data_interface_count: int, data_interfaces: [{ emitter_name, binding_mode }] }"
@@ -22125,7 +22125,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             },
             {
@@ -22150,7 +22150,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             }
           ],
@@ -22161,16 +22161,16 @@
           "description": "List all renderers on a Niagara emitter (read-only).  Each entry also dumps the authored renderer UPROPERTYs (base bIsEnabled/SortOrderHint/MotionVectorSetting/bAllowInCullProxies plus the Sprite/Mesh-specific fields present on the concrete class) and, for Mesh renderers, the assigned static-mesh slots — so set_niagara_renderer_properties / set_niagara_mesh_renderer_mesh round-trip.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, renderer_count: int, renderers: [{ index, class, display_name, material_path, properties:{...}, meshes?:[{ slot, mesh_path }] }] }"
@@ -22180,16 +22180,16 @@
           "description": "Flat readback of a Niagara emitter's runtime knobs and counts.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, sim_target: string, bounds_mode: string, bounds_min: string, bounds_max: string, allocation_mode: string, pre_allocation_count: int, max_gpu_particles: int, local_space: bool, deterministic: bool, requires_persistent_ids: bool, update_module_count: int, spawn_module_count: int, emitter_spawn_module_count: int, emitter_update_module_count: int, renderer_count: int, event_handler_count: int, simulation_stage_count: int }"
@@ -22199,16 +22199,16 @@
           "description": "Get the simulation target configuration of a Niagara emitter.  Reads SimTarget, bLocalSpace and bDeterministic from the emitter's FVersionedNiagaraEmitterData.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, sim_target: string, is_local_space: bool, is_deterministic: bool }"
@@ -22218,16 +22218,16 @@
           "description": "List a Niagara emitter's event handlers and their properties.  Reads FVersionedNiagaraEmitterData::GetEventHandlers(); each entry reports its usage_id (the remove key), source_event_name, execution_mode, spawn/event counts and source_emitter_id.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle within the system."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, event_handler_count: int, event_handlers: [{usage_id, source_event_name, execution_mode, spawn_number, max_events_per_frame, min_spawn_number, random_spawn_number, source_emitter_id, has_script}] }"
@@ -22236,6 +22236,12 @@
           "name": "get_niagara_module_info",
           "description": "Read detail for a single UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22247,12 +22253,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Display name of the module function-call node"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -22267,6 +22267,12 @@
           "name": "get_niagara_module_input",
           "description": "Read a Niagara module input override from the rapid-iteration store.  Locates the module function-call node and the named input, reports the input's real type, and reads back any rapid-iteration override currently set for it. found=false means no override exists yet (the module is using its script default); in that case 'value' is omitted.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22284,12 +22290,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Leaf name of the module input (e.g. \"Drag\")."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, module_node_name: string, input_name: string, ri_param_name: string, value_type: string, found: bool, value?: number | [number, number, number] | [number, number, number, number], success: bool }"
@@ -22299,16 +22299,16 @@
           "description": "Read BOTH the spawn AND update module stacks of a Niagara emitter in one call (read-only). Runs the same export-safe enumeration as list_niagara_modules twice, returning the modules grouped as spawn:[...] and update:[...] (each entry also carries its own script_group tag). Honest-empty arrays per group, with a spawn_note/update_note if a graph could not be resolved.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, spawn: [{...}], update: [{...}], spawn_module_count: int, update_module_count: int, total_modules_in_stack: int, spawn_note?: string, update_note?: string }"
@@ -22317,6 +22317,12 @@
           "name": "get_niagara_renderer_info",
           "description": "Dump the full property set of a specific renderer instance owned by a system emitter. Resolves the system via path, the emitter via name (or handle_index), and the renderer via index — then runs FJsonObjectConverter::UStructToJsonObject on the renderer to produce a flat property map. get_niagara_emitter_renderers lists every renderer; this cmd returns the full UPROPERTY surface of one renderer.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Content path to the UNiagaraSystem asset."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22328,12 +22334,6 @@
               "jsonType": "number",
               "required": true,
               "description": "0-based index into FVersionedNiagaraEmitterData::RendererProperties."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Content path to the UNiagaraSystem asset."
             },
             {
               "name": "handle_index",
@@ -22351,7 +22351,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             }
           ],
@@ -22362,16 +22362,16 @@
           "description": "Read the simulation stages of a Niagara emitter (read-only). Same enumeration as list_niagara_simulation_stages, but accepts an OPTIONAL stage_index (preferred) or stage_name to return just the matching stage; with no identifier it returns the full array. Each entry reports index, stage_name, class, enabled, and (for UNiagaraSimulationStageGeneric) iteration_source. Honest-empty when the emitter has no stages or the filter matches nothing.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "stage_index",
@@ -22395,7 +22395,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example)"
             }
           ],
@@ -22408,7 +22408,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             }
           ],
@@ -22421,7 +22421,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             }
           ],
@@ -22432,16 +22432,16 @@
           "description": "Read a user-exposed parameter's current value from a Niagara System's exposed store.  Resolves the parameter by short name (no \"User.\" prefix) and the supplied ``type`` token, reads the POD value back. Round-trip companion to set_niagara_user_parameter.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
               "description": "User parameter name (without the \"User.\" prefix)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "type",
@@ -22463,16 +22463,16 @@
           "description": "List the module function-call nodes on ONE stack of a Niagara emitter (read-only). Resolves the emitter's spawn OR update group graph (script_group, default \"update\") via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index, module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -22494,16 +22494,16 @@
           "description": "List all simulation stages on a Niagara emitter (read-only). Resolves the system by path and the emitter by name, then enumerates FVersionedNiagaraEmitterData::GetSimulationStages(). Each entry reports index, stage_name (SimulationStageName), class, enabled, and (for UNiagaraSimulationStageGeneric stages) iteration_source. Honest-empty: returns simulation_stages:[] / simulation_stage_count:0 when the emitter has no stages.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, simulation_stage_count: int, simulation_stages: [{ index, stage_name, class, enabled, iteration_source? }] }"
@@ -22512,6 +22512,12 @@
           "name": "move_niagara_simulation_stage",
           "description": "Reorder a Niagara simulation stage on its emitter's stage list by moving it to a target index.  Resolves the stage on FVersionedNiagaraEmitterData::GetSimulationStages() (stage_index or stage_name), validates target_index is in range, then calls UNiagaraEmitter::MoveSimulationStageToIndex with the emitter version GUID, requests a system compile and saves the asset. Idempotent: an in-position move reports already_at_target:true with the live before/after indices. NiagaraEmitter.h (NIAGARA_API).",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22523,12 +22529,6 @@
               "jsonType": "number",
               "required": true,
               "description": "Required 0-based target index the stage should occupy after the move (must be in [0, total_simulation_stages))."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "stage_index",
@@ -22550,16 +22550,16 @@
           "description": "Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
               "description": "Short name of the user-parameter to remove (no \"User.\" prefix)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, parameter_name: string, removed: bool }"
@@ -22571,7 +22571,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             },
             {
@@ -22594,6 +22594,12 @@
           "description": "Remove an event handler from a Niagara emitter by its usage_id.  Calls UNiagaraEmitter::RemoveEventHandlerByUsageId. Idempotent: if no handler with that usage_id exists it reports already_removed without error. The system is saved after a removal.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -22604,12 +22610,6 @@
               "jsonType": "string",
               "required": true,
               "description": "The handler's usage_id (as returned by add_niagara_event_handler / get_niagara_event_handlers)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, usage_id: string, already_removed: bool, removed: bool, event_handler_count: int, saved: bool, save_error?: string }"
@@ -22618,6 +22618,12 @@
           "name": "remove_niagara_module_from_stack",
           "description": "Remove a UNiagaraNodeFunctionCall module from a Niagara emitter's spawn or update graph.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22629,12 +22635,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Display name of the module function-call node to remove"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -22650,6 +22650,12 @@
           "description": "Remove a renderer from a Niagara emitter by index.  Validates that renderer_index is in range, removes from the emitter's RendererProperties array, requests a system compile and saves the asset.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -22660,12 +22666,6 @@
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the emitter's renderers list (use get_niagara_emitter_renderers to find the index)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, removed_renderer_index: int, removed_renderer_class: string, renderer_count_after: int, save_error?: string }"
@@ -22675,16 +22675,16 @@
           "description": "Remove a Niagara simulation stage from an emitter's stage list by stage_index or stage_name.  Resolves the stage on FVersionedNiagaraEmitterData::GetSimulationStages() (stage_index preferred, stage_name matches SimulationStageName), then calls UNiagaraEmitter::RemoveSimulationStage with the emitter version GUID, requests a system compile and saves the asset. Idempotent: a missing stage reports already_removed:true with the current total_simulation_stages. NiagaraEmitter.h (NIAGARA_API).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle owning the stage."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "stage_index",
@@ -22706,6 +22706,12 @@
           "description": "Rename an emitter handle of a Niagara System asset and save the system. The engine sanitizes the name and makes it unique among the emitters of the system, so read new_name and verified (false when the stored name differs from the request); a failed save is not reported.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
+            },
+            {
               "name": "current_name",
               "jsonType": "string",
               "required": true,
@@ -22716,12 +22722,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Requested display name; it may come back sanitized or with a numeric suffix."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             }
           ],
           "returns": "{ system_path: string, old_name: string, new_name: string, verified: bool }"
@@ -22730,6 +22730,12 @@
           "name": "reorder_niagara_modules",
           "description": "Move a UNiagaraNodeFunctionCall module to a new index in its Niagara emitter stack (in-place reordering).",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -22747,12 +22753,6 @@
               "jsonType": "number",
               "required": true,
               "description": "Non-negative target index in the ordered stack"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "script_group",
@@ -23085,6 +23085,12 @@
           "description": "Set the numeric values of an array user-parameter data interface (e.g. ArrayFloat FloatData / int32 array IntData).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
@@ -23095,12 +23101,6 @@
               "jsonType": "array",
               "required": true,
               "description": "Array of numbers to store (replaces all existing array contents)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "array_property",
@@ -23116,16 +23116,16 @@
           "description": "Set the underlying asset on a UNiagaraDataInterface user-parameter binding.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
               "description": "Short name of the user-parameter DI to mutate"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "asset_path",
@@ -23147,6 +23147,12 @@
           "description": "Author the FRichCurve keys of a curve user-parameter data interface (Curve / Color / Vector curve DIs).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
@@ -23157,12 +23163,6 @@
               "jsonType": "array",
               "required": true,
               "description": "Array of { time: number, value: number } keys to set (replaces all existing keys on the channel)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "curve_property",
@@ -23177,6 +23177,12 @@
           "name": "set_niagara_data_interface_default",
           "description": "Set a default property (scalar/vector/color) on a UNiagaraDataInterface user-parameter binding by name.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "parameter_name",
               "jsonType": "string",
@@ -23194,12 +23200,6 @@
               "jsonType": "string",
               "required": true,
               "description": "String representation of the value (parsed by FProperty::ImportText_Direct)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, parameter_name: string, property_name: string, value: string, set: bool }"
@@ -23209,47 +23209,47 @@
           "description": "Assign a material to the Decal renderer at renderer_index of one emitter in a Niagara System asset and save the system; a failed save returns success false. Returns the previous and new material paths and changed. For sprite, ribbon or mesh renderers use set_niagara_renderer_material.",
           "params": [
             {
-              "name": "material_path",
-              "jsonType": "string",
-              "required": true,
-              "description": "Object path of the UMaterialInterface to assign, e.g. \"/Game/Decals/M_Blood.M_Blood\"."
-            },
-            {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Niagara System asset path, e.g. \"/Game/Niagara/NS_Example\"; the call fails without it."
             },
             {
               "name": "emitter_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it."
             },
             {
               "name": "renderer_index",
               "jsonType": "number",
-              "required": false,
+              "required": true,
               "description": "0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it."
+            },
+            {
+              "name": "material_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Object path of the UMaterialInterface to assign, e.g. \"/Game/Decals/M_Blood.M_Blood\"."
             }
           ],
-          "returns": ""
+          "returns": "{ system_path, emitter_name, renderer_index, previous_material_path, new_material_path, changed, saved }"
         },
         {
           "name": "set_niagara_effect_type",
           "description": "Assign an EffectType asset to a Niagara system.  Loads the UNiagaraEffectType from the given path and calls UNiagaraSystem::SetEffectType. The system is saved after modification.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "effect_type_path",
               "jsonType": "string",
               "required": true,
               "description": "Asset path of the UNiagaraEffectType to assign."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, effect_type_path: string, success: bool }"
@@ -23258,6 +23258,12 @@
           "name": "set_niagara_emitter_allocation_mode",
           "description": "Set the EParticleAllocationMode (and optional PreAllocationCount) on a Niagara emitter's FVersionedNiagaraEmitterData.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -23269,12 +23275,6 @@
               "jsonType": "string",
               "required": true,
               "description": "One of \"AutomaticEstimate\", \"ManualEstimate\", or \"FixedCount\" (case-insensitive; \"Automatic\" and \"Manual\" and \"Fixed\" also accepted)"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "pre_allocation_count",
@@ -23290,16 +23290,16 @@
           "description": "Set the CalculateBoundsMode and FixedBounds on a Niagara emitter's FVersionedNiagaraEmitterData.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "bounds_mode",
@@ -23327,16 +23327,16 @@
           "description": "Enable or disable an emitter handle on a Niagara system.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "enabled",
@@ -23352,21 +23352,21 @@
           "description": "Set whether one emitter of a Niagara System asset simulates in local space (bLocalSpace on its emitter data), then save the system. Returns local_space as read back, applied and saved (with save_error); the reply stays success even when the save fails, so check saved.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Display name of the emitter handle (case-insensitive)."
             },
             {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
-            },
-            {
               "name": "local_space",
               "jsonType": "boolean",
-              "required": false,
+              "required": true,
               "description": "true to simulate the particles of the emitter in its local space, false for world space; the call fails without it."
             }
           ],
@@ -23377,16 +23377,16 @@
           "description": "Set the MaxGPUParticlesSpawnPerFrame override on a Niagara emitter (only effective when SimTarget is GPUComputeSim).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "max_gpu_particles",
@@ -23402,16 +23402,16 @@
           "description": "Toggle bRequiresPersistentIDs on a Niagara emitter (stable Particles.ID across frames; small perf cost).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
               "description": "Name of the emitter handle."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "requires_persistent_ids",
@@ -23427,6 +23427,12 @@
           "description": "Configure the simulation target of a Niagara emitter.  Sets SimTarget, and optionally bLocalSpace and bDeterministic, on the emitter's FVersionedNiagaraEmitterData. The system is saved after modification.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -23437,12 +23443,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Target type — \"CPUSim\" or \"GPUComputeSim\"."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "local_space",
@@ -23483,6 +23483,12 @@
           "description": "Assign a static mesh into a Niagara Mesh renderer's Meshes[] slot.  Resolves (or grows the array to) the slot index, loads the UStaticMesh, and sets the slot's inner .Mesh via reflection on the FNiagaraMeshRendererMeshProperties element. Then requests a system compile and saves. add_niagara_renderer type=Mesh leaves Meshes empty (renders nothing); this is the command that makes a Mesh renderer actually draw. Idempotent: re-assigning the same mesh to the same slot does not grow the array.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -23505,12 +23511,6 @@
               "jsonType": "number",
               "required": true,
               "description": "Optional 0-based slot index into Meshes[] (default 0). The array is grown with default elements up to this index if needed."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path, emitter_name, renderer_index, renderer_class, slot, mesh_path, mesh_count, already_assigned: bool, save_error? }"
@@ -23519,6 +23519,12 @@
           "name": "set_niagara_module_enabled",
           "description": "Enable or disable a UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -23530,12 +23536,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Display name of the module to toggle"
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "enabled",
@@ -23557,6 +23557,12 @@
           "description": "Override a Niagara module input by writing the rapid-iteration store.  Locates the module function-call node (by its module_node_name, as returned by add_niagara_module_to_stack) on the emitter's spawn or update stack, matches the input by its leaf name, and writes the value into the owning group script's RapidIterationParameters store. The system is recompiled and saved.  HONEST GATE: bool / enum / data-interface / object inputs are not rapid-iteration eligible and return a clean error (\"override of <type> inputs requires the linked-value path, not supported headless\"). The packed value_type must also match the input's actual type or a clean error is returned.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -23573,12 +23579,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Leaf name of the module input (e.g. \"Drag\" for \"Module.Drag\")."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
               "name": "value_type",
@@ -23600,6 +23600,12 @@
           "description": "Set the Material UPROPERTY on a Niagara renderer (Sprite/Ribbon/Mesh).  Loads the material, sets it on the renderer's public Material field, requests a system compile and saves. Reads back to verify the material path is now bound.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -23616,12 +23622,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Asset path of the UMaterialInterface to assign."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             }
           ],
           "returns": "{ system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, material_path: string, material_path_read_back: string, save_error?: string }"
@@ -23630,6 +23630,12 @@
           "name": "set_niagara_renderer_properties",
           "description": "Author renderer UPROPERTYs on a Niagara renderer (Sprite/Mesh/Ribbon/Light/Decal) generically by reflection.  Writes only the supplied fields onto the LIVE concrete renderer via MergeJsonWithClamp (FJsonObjectConverter + ClampMin/Max meta), then requests a system compile and saves. Enum writes (alignment/facing_mode/sort_mode/motion_vector_setting/decal_source_mode) also fire PostEditChangeProperty so derived state updates. Light/Decal scalar fields (radius_scale, affects_translucency, color_add, decal_screen_size_fade, decal_source_mode, ...) are covered here — use set_niagara_decal_renderer_material for the decal Material (object-ref). Keys not present on the concrete renderer class are reported in not_applicable (honest, not silently swallowed). Idempotent. Covers base renderer_enabled for free.",
           "params": [
+            {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
             {
               "name": "emitter_name",
               "jsonType": "string",
@@ -23641,12 +23647,6 @@
               "jsonType": "number",
               "required": true,
               "description": "0-based index of the renderer (use get_niagara_emitter_renderers)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "enabled",
@@ -23830,6 +23830,12 @@
           "description": "Author the settable enum/bool/FName/FIntPoint UPROPERTYs on a UNiagaraSimulationStageGeneric (the spawn-without-setter companion to add_niagara_simulation_stage).  Resolves the stage on an emitter by stage_index or stage_name, writes only the supplied fields by reflection (MergeJsonWithClamp), sets bEnabled via SetEnabled, fires PostEditChangeProperty for enum writes, then requests a system compile and saves. Idempotent. HONEST GATE: the binding-valued fields num_iterations/element_count_x|y|z/data_interface are FNiagaraParameterBindingWithValue / binding structs that ImportText cannot author here -- any such key is reported in not_supported, never faked (iteration count is authored on the add path).",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "emitter_name",
               "jsonType": "string",
               "required": true,
@@ -23840,12 +23846,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Optional SimulationStageName to match if stage_index is not supplied."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "stage_index",
@@ -23923,7 +23923,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             },
             {
@@ -23967,7 +23967,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System (e.g. \"/Game/Niagara/NS_Example\")."
             },
             {
@@ -24076,7 +24076,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             }
           ],
@@ -24089,7 +24089,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System."
             },
             {
@@ -24108,13 +24108,13 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Niagara System asset path, e.g. \"/Game/FX/NS_Fire\"; the call fails without it."
             },
             {
               "name": "warmup_time",
               "jsonType": "number",
-              "required": false,
+              "required": true,
               "description": "Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it."
             }
           ],
@@ -24125,16 +24125,16 @@
           "description": "Sets a user-exposed parameter default on a Niagara System's exposed store.  Adds the parameter (under the User. namespace) if it does not yet exist, sets the value, then reads it back to verify. Supports float/vector(vec3)/vec2/vec4/color/bool/int. Type is taken from the optional ``type`` hint; if omitted, ``vector`` key implies Vector and otherwise Float (back-compat). Color is FLinearColor and bool is FNiagaraBool.",
           "params": [
             {
+              "name": "system_path",
+              "jsonType": "string",
+              "required": true,
+              "description": "Asset path of the Niagara System."
+            },
+            {
               "name": "parameter_name",
               "jsonType": "string",
               "required": true,
               "description": "User parameter name (without the \"User.\" prefix)."
-            },
-            {
-              "name": "system_path",
-              "jsonType": "string",
-              "required": false,
-              "description": "Asset path of the Niagara System."
             },
             {
               "name": "type",
@@ -24182,7 +24182,7 @@
             {
               "name": "system_path",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Asset path of the Niagara System to spawn (e.g. /Game/MyGame/NS_Example)"
             },
             {
@@ -24986,7 +24986,7 @@
         },
         {
           "name": "add_attribute_to_set",
-          "description": "Add a single FGameplayAttributeData member variable to an AttributeSet Blueprint",
+          "description": "Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class; refused during PIE.",
           "params": [
             {
               "name": "attribute_set_path",
@@ -25004,10 +25004,10 @@
               "name": "default_value",
               "jsonType": "number",
               "required": false,
-              "description": "Initial value for the attribute, default 0"
+              "description": "Initial BaseValue and CurrentValue of the attribute, default 0; not applied to an attribute that already exists."
             }
           ],
-          "returns": "{ attribute_set_path: string, attribute_name: string, default_value: number, added: bool, attribute_present: bool }"
+          "returns": "{ attribute_set_path: string, attribute_name: string, default_value: number, added: bool, already_existed: bool, attribute_present: bool, base_value?: number, default_applied?: bool, saved: bool }"
         },
         {
           "name": "add_gameplay_effect_component",
@@ -25149,7 +25149,7 @@
         },
         {
           "name": "create_attribute_set_asset",
-          "description": "Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, then add one FGameplayAttributeData variable per attributes entry and save without compiling, so run compile_blueprint before use. Returns attributes_added and added_attribute_names; refused during PIE.",
+          "description": "Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25167,10 +25167,10 @@
               "name": "attributes",
               "jsonType": "array",
               "required": false,
-              "description": "Array of {\"name\": \"Health\", \"default_value\": 100} objects; entries without a name are skipped, and a name the class already has is not added yet still counted. default_value is written as bare number text that FGameplayAttributeData cannot parse, so the compiled default stays 0."
+              "description": "Array of {\"name\": \"Health\", \"default_value\": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored."
             }
           ],
-          "returns": "{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], created: bool }"
+          "returns": "{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool }"
         },
         {
           "name": "create_attribute_set_blueprint",
@@ -28960,6 +28960,12 @@
               "description": "Region parameter for region='polygroup'."
             },
             {
+              "name": "polygroup_layer",
+              "jsonType": "integer",
+              "required": false,
+              "description": "Region parameter for region='polygroup': extended polygroup layer index (default the mesh's default polygroup layer)."
+            },
+            {
               "name": "min_triangle_points",
               "jsonType": "integer",
               "required": false,
@@ -29160,7 +29166,7 @@
               "description": "Offset added to every V coordinate (1.0 shifts by one full tile)."
             }
           ],
-          "returns": "{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number,"
+          "returns": "{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }"
         },
         {
           "name": "weld_mesh_edges",
@@ -29217,7 +29223,7 @@
             },
             {
               "name": "color",
-              "jsonType": "string",
+              "jsonType": "array",
               "required": false,
               "description": "Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor."
             }
@@ -33006,25 +33012,25 @@
             },
             {
               "name": "scale_x",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; a string value is ignored."
+              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
             },
             {
               "name": "scale_y",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; a string value is ignored."
+              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
             },
             {
               "name": "scale_z",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional; a string value is ignored."
+              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, either bound optional."
             },
             {
               "name": "z_offset",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
               "description": "Z location offset range in cm as a JSON object {\"min\":-5,\"max\":0}; either bound may be left out."
             },
@@ -33105,7 +33111,7 @@
             {
               "name": "variety_index",
               "jsonType": "integer",
-              "required": true,
+              "required": false,
               "description": "Index of the FGrassVariety to edit, default 0 (appends if the array is empty)"
             },
             {
@@ -33152,21 +33158,21 @@
             },
             {
               "name": "scale_x",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, also used for every axis with Uniform scaling; a string value is ignored."
+              "description": "X scale range as a JSON object {\"min\":0.8,\"max\":1.2}, also used for every axis with Uniform scaling."
             },
             {
               "name": "scale_y",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used only with Free scaling; a string value is ignored."
+              "description": "Y scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used only with Free scaling."
             },
             {
               "name": "scale_z",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
-              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used with Free or LockXY scaling; a string value is ignored."
+              "description": "Z scale range as a JSON object {\"min\":0.8,\"max\":1.2}, used with Free or LockXY scaling."
             },
             {
               "name": "random_rotation",
@@ -34463,19 +34469,19 @@
             },
             {
               "name": "priority",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
               "description": "Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted."
             },
             {
               "name": "film_grain_intensity",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
               "description": "Film grain intensity from 0 to 1, a number; a numeric string is also accepted."
             },
             {
               "name": "motion_blur_amount",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
               "description": "Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted."
             }
@@ -35664,7 +35670,7 @@
               "description": "Editor label of the AMassSpawner actor"
             }
           ],
-          "returns": "{ actor_label, actor_name, note }"
+          "returns": "{ actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }"
         },
         {
           "name": "get_mass_trait_property",
@@ -36034,19 +36040,19 @@
             },
             {
               "name": "preview_value",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
               "description": "JSON object {\"x\":0,\"y\":0,\"z\":0,\"w\":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default."
             },
             {
               "name": "use_preview_value_as_default",
-              "jsonType": "string",
+              "jsonType": "boolean",
               "required": false,
               "description": "Optional bool; if true, the preview value becomes the input's default"
             },
             {
               "name": "sort_priority",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
               "description": "Optional int controlling the input's display order relative to other inputs"
             }
@@ -37446,7 +37452,7 @@
             },
             {
               "name": "vector",
-              "jsonType": "string",
+              "jsonType": "array",
               "required": false,
               "description": "New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given"
             }
@@ -37508,19 +37514,19 @@
             },
             {
               "name": "preview_value",
-              "jsonType": "string",
+              "jsonType": "object",
               "required": false,
               "description": "JSON object {\"x\":0,\"y\":0,\"z\":0,\"w\":0} (FVector4f), any subset; missing components keep their current value."
             },
             {
               "name": "use_preview_value_as_default",
-              "jsonType": "string",
+              "jsonType": "boolean",
               "required": false,
               "description": "Bool: true makes the preview value the default of the input when its pin is left unconnected."
             },
             {
               "name": "sort_priority",
-              "jsonType": "string",
+              "jsonType": "number",
               "required": false,
               "description": "Integer that orders this input pin relative to the other inputs of the function."
             }
@@ -43926,16 +43932,16 @@
               "description": "Asset path of the UStateTree"
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to attach the consideration to"
+            },
+            {
               "name": "consideration_class",
               "jsonType": "string",
               "required": true,
               "description": "Struct name (FStateTreeConstantConsideration / StateTreeConstantConsideration) or alias (Constant|FloatInput|Enum Input|...)"
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to attach the consideration to"
             }
           ],
           "returns": "{ tree_path, state_name, consideration_class, consideration_count, added, saved }"
@@ -43970,16 +43976,16 @@
               "description": "Asset path to the UStateTree"
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to add the enter condition to"
+            },
+            {
               "name": "condition_struct",
               "jsonType": "string",
               "required": true,
               "description": "Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. \"StateTreeRandomCondition\")"
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to add the enter condition to"
             }
           ],
           "returns": "{ tree_path, state_name, condition_struct, enter_condition_count, added, saved }"
@@ -44014,16 +44020,16 @@
               "description": "Asset path to the UStateTree"
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to add the task to"
+            },
+            {
               "name": "task_struct",
               "jsonType": "string",
               "required": true,
               "description": "Task struct name or /Script path; must derive from StateTreeTaskBase (e.g. \"StateTreeDebugTextTask\")"
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to add the task to"
             }
           ],
           "returns": "{ tree_path, state_name, task_struct, task_count, added, saved }"
@@ -44145,8 +44151,8 @@
             },
             {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
+              "jsonType": "any",
+              "required": true,
               "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             }
           ],
@@ -44163,16 +44169,16 @@
               "description": "Asset path to the UStateTree"
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state owning the transition"
+            },
+            {
               "name": "condition_struct",
               "jsonType": "string",
               "required": true,
               "description": "Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. \"StateTreeRandomCondition\")"
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state owning the transition"
             },
             {
               "name": "transition_index",
@@ -44283,10 +44289,10 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
-              "name": "transition_index",
-              "jsonType": "number",
+              "name": "state_name",
+              "jsonType": "string",
               "required": true,
-              "description": "0-based index into the state transitions; read only when target_kind is \"transition\" and ignored otherwise, so pass 0 for an enter condition."
+              "description": "Name of the state that owns the condition; the command fails without it."
             },
             {
               "name": "condition_index",
@@ -44295,16 +44301,16 @@
               "description": "0-based index into the selected condition list, as counted by list_conditions or list_transitions."
             },
             {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the condition; the command fails without it."
-            },
-            {
               "name": "target_kind",
               "jsonType": "string",
               "required": false,
               "description": "Which list to read: \"state\" (default, the state EnterConditions) or \"transition\" (the Conditions of transition transition_index); any other value reads the enter conditions."
+            },
+            {
+              "name": "transition_index",
+              "jsonType": "number",
+              "required": false,
+              "description": "0-based index into the state transitions; required when target_kind is \"transition\" and ignored otherwise."
             }
           ],
           "returns": "{ tree_path, state_name, target_kind, transition_index, condition_index, class, instance_id, properties: {...} }"
@@ -44320,16 +44326,16 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the condition; the command fails without it."
+            },
+            {
               "name": "property",
               "jsonType": "string",
               "required": true,
               "description": "Name of a property on the condition node struct, e.g. \"bInvert\" on a compare condition; case-insensitive."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the condition; the command fails without it."
             },
             {
               "name": "target_kind",
@@ -44363,16 +44369,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into State->Considerations."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
             }
           ],
           "returns": "{ tree_path, state_name, consideration_index, class, instance_id, properties: {...} }"
@@ -44388,6 +44394,12 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the consideration; the command fails without it."
+            },
+            {
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
@@ -44398,12 +44410,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Name of a property on the consideration node struct; case-insensitive."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the consideration; the command fails without it."
             }
           ],
           "returns": "{ tree_path, state_name, consideration_index, property, type, value, has_value }"
@@ -44489,16 +44495,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "task_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into State->Tasks."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
             }
           ],
           "returns": "{ tree_path, state_name, task_index, class, instance_id, properties: {...} }"
@@ -44514,6 +44520,12 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the task; the command fails without it."
+            },
+            {
               "name": "task_index",
               "jsonType": "number",
               "required": true,
@@ -44524,12 +44536,6 @@
               "jsonType": "string",
               "required": true,
               "description": "Name of a property on the task node struct, e.g. \"FontScale\" on a debug text task; case-insensitive."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the task; the command fails without it."
             }
           ],
           "returns": "{ tree_path, state_name, task_index, property, type, value, has_value }"
@@ -44553,7 +44559,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Name of the state."
             }
           ],
@@ -44572,7 +44578,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Name of the state."
             }
           ],
@@ -44661,7 +44667,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Name of the state."
             }
           ],
@@ -44680,7 +44686,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Name of the state."
             }
           ],
@@ -44688,7 +44694,7 @@
         },
         {
           "name": "list_tree_bindings",
-          "description": "List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends (no is_output field). Add bindings with add_state_tree_binding.",
+          "description": "List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_tree_binding.",
           "params": [
             {
               "name": "tree_path",
@@ -44697,7 +44703,7 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             }
           ],
-          "returns": "{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id, is_output }] }"
+          "returns": "{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }"
         },
         {
           "name": "list_tree_parameters",
@@ -44723,16 +44729,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the state's Considerations array."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
             }
           ],
           "returns": "{ tree_path, state_name, consideration_index, removed, remaining, saved }"
@@ -44792,16 +44798,16 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the condition; the command fails without it."
+            },
+            {
               "name": "condition_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the state EnterConditions, as listed by list_conditions."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the condition; the command fails without it."
             }
           ],
           "returns": "{ tree_path, state_name, condition_index, removed, remaining, saved, note }"
@@ -44836,16 +44842,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "task_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the state's Tasks array."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
             }
           ],
           "returns": "{ tree_path, state_name, task_index, removed, remaining, saved }"
@@ -44861,16 +44867,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "transition_index",
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the state's Transitions array."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
             }
           ],
           "returns": "{ tree_path, state_name, transition_index, removed, remaining, saved }"
@@ -44886,6 +44892,12 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the transition; the command fails without it."
+            },
+            {
               "name": "transition_index",
               "jsonType": "number",
               "required": true,
@@ -44896,19 +44908,13 @@
               "jsonType": "number",
               "required": true,
               "description": "0-based index into the Conditions of that transition."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the transition; the command fails without it."
             }
           ],
           "returns": "{ tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }"
         },
         {
           "name": "remove_tree_binding",
-          "description": "Attempt to remove a StateTree property binding by its target node; in UE 5.8 this always returns an error after resolving the target, because the engine exposes no API to delete a binding, so nothing changes. To rebind a target, call add_state_tree_binding on it, which replaces the old binding.",
+          "description": "Remove the property binding whose target is target_property on one node of a StateTree asset (and any binding to a sub-property of it), the way the StateTree editor clears a binding, then save the asset. Nothing bound there is not an error: removed is false and the asset is not saved. Returns removed, removed_count and remaining (bindings left in the tree); list them with list_tree_bindings.",
           "params": [
             {
               "name": "tree_path",
@@ -44920,19 +44926,19 @@
               "name": "target_kind",
               "jsonType": "string",
               "required": true,
-              "description": "Node list of the binding target: \"task\", \"condition\" (a state enter condition), \"transition\" (a transition condition), \"global_task\" or \"evaluator\"."
+              "description": "Node list of the binding target: \"task\", \"condition\" (a state enter condition; \"enter_condition\" also works), \"consideration\", \"transition\" (a transition condition), \"global_task\" or \"evaluator\"."
             },
             {
               "name": "target_property",
               "jsonType": "string",
               "required": true,
-              "description": "Property path of the binding target on that node, e.g. \"BindableText\"; nothing is removed whatever its value."
+              "description": "Property path of the binding target on that node, as list_tree_bindings shows it in target_path, e.g. \"BindableText\"."
             },
             {
               "name": "state_name",
               "jsonType": "string",
               "required": false,
-              "description": "Name of the state that owns the target node; needed for the task, condition and transition kinds."
+              "description": "Name of the state that owns the target node; needed for the task, condition, consideration and transition kinds."
             },
             {
               "name": "transition_index",
@@ -44944,10 +44950,10 @@
               "name": "target_index",
               "jsonType": "number",
               "required": false,
-              "description": "0-based index of the target node in its list; for the transition kind, the index into the Conditions of that transition."
+              "description": "0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition."
             }
           ],
-          "returns": "{ tree_path, target_kind, target_index, target_property, removed, remaining, saved, note }"
+          "returns": "{ tree_path, target_kind, state_name?, target_index, target_property, target_struct_id, removed, removed_count, remaining, saved }"
         },
         {
           "name": "remove_tree_parameter",
@@ -45016,16 +45022,22 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state that owns the condition; the command fails without it."
+            },
+            {
               "name": "property",
               "jsonType": "string",
               "required": true,
               "description": "Name of a property on the condition node struct, e.g. \"bInvert\" on a compare condition; case-insensitive."
             },
             {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state that owns the condition; the command fails without it."
+              "name": "value",
+              "jsonType": "any",
+              "required": true,
+              "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             },
             {
               "name": "target_kind",
@@ -45044,12 +45056,6 @@
               "jsonType": "number",
               "required": false,
               "description": "0-based index into the selected condition list; omitting it fails as out of range."
-            },
-            {
-              "name": "value",
-              "jsonType": "string",
-              "required": false,
-              "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             }
           ],
           "returns": "{ tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved }"
@@ -45065,6 +45071,12 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
@@ -45077,15 +45089,9 @@
               "description": "FProperty name on the consideration struct."
             },
             {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
-            },
-            {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
+              "jsonType": "any",
+              "required": true,
               "description": "JSON value to apply (any FJsonObjectConverter-supported type)."
             }
           ],
@@ -45115,8 +45121,8 @@
             },
             {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
+              "jsonType": "any",
+              "required": true,
               "description": "New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter."
             }
           ],
@@ -45133,16 +45139,16 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to modify."
+            },
+            {
               "name": "completion_type",
               "jsonType": "string",
               "required": true,
               "description": "Aggregation policy: \"All\" (default in engine: Any) | \"Any\" (case-insensitive)."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to modify."
             }
           ],
           "returns": "{ tree_path, state_name, completion_type, set, saved }"
@@ -45158,16 +45164,16 @@
               "description": "Asset path to the owning UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to convert into a LinkedAsset state."
+            },
+            {
               "name": "linked_asset_path",
               "jsonType": "string",
               "required": true,
               "description": "Asset path to the target UStateTree to link (must exist)."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to convert into a LinkedAsset state."
             }
           ],
           "returns": "{ tree_path, state_name, state_type, linked_asset, set, saved }"
@@ -45183,16 +45189,16 @@
               "description": "Asset path to the UStateTree"
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to modify"
+            },
+            {
               "name": "selection_behavior",
               "jsonType": "string",
               "required": true,
               "description": "One of None | TryEnterState | TrySelectChildrenInOrder | TrySelectChildrenAtRandom | ..."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to modify"
             }
           ],
           "returns": "{ tree_path, state_name, selection_behavior, set, saved }"
@@ -45270,16 +45276,16 @@
               "description": "Asset path of the StateTree, e.g. \"/Game/AI/ST_Guard\"."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state to change; the command fails without it."
+            },
+            {
               "name": "state_type",
               "jsonType": "string",
               "required": true,
               "description": "Enum value name: State, Group, Linked, LinkedAsset or Subtree (an EStateTreeStateType:: prefix is accepted)."
-            },
-            {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state to change; the command fails without it."
             }
           ],
           "returns": "{ tree_path, state_name, state_type, set, saved }"
@@ -45295,6 +45301,12 @@
               "description": "Asset path to the UStateTree."
             },
             {
+              "name": "state_name",
+              "jsonType": "string",
+              "required": true,
+              "description": "Name of the state."
+            },
+            {
               "name": "task_index",
               "jsonType": "number",
               "required": true,
@@ -45307,15 +45319,9 @@
               "description": "FProperty name on the task struct."
             },
             {
-              "name": "state_name",
-              "jsonType": "string",
-              "required": false,
-              "description": "Name of the state."
-            },
-            {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
+              "jsonType": "any",
+              "required": true,
               "description": "JSON value to apply (any FJsonObjectConverter-supported type)."
             }
           ],
@@ -45334,7 +45340,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "Name of the state owning the transition"
             },
             {
@@ -45378,7 +45384,7 @@
         },
         {
           "name": "set_tree_parameter",
-          "description": "Set the value of an existing root parameter of a StateTree asset and save it. Works for bool, byte, int32, int64, float, double, name and string parameters; text, array and other types return an error. Add the parameter first with add_tree_parameter. Returns value_changed, new_value and saved.",
+          "description": "Set the value of an existing root parameter of a StateTree asset and save it. Works for bool, byte, int32, int64, float, double, name, string and text parameters; array and other types return an error. Add the parameter first with add_tree_parameter. Returns value_changed, new_value and saved.",
           "params": [
             {
               "name": "tree_path",
@@ -45394,12 +45400,12 @@
             },
             {
               "name": "value",
-              "jsonType": "string",
-              "required": false,
-              "description": "New value as JSON matching the parameter type: true or false, a number, or a string for name and string parameters."
+              "jsonType": "any",
+              "required": true,
+              "description": "New value as JSON matching the parameter type: true or false, a number, or a string for name, string and text parameters."
             }
           ],
-          "returns": "{ tree_path, parameter, set, value_changed, saved, note }"
+          "returns": "{ tree_path, parameter, set, value_changed, saved, new_value? }"
         },
         {
           "name": "update_transition",
@@ -45414,7 +45420,7 @@
             {
               "name": "state_name",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "State that owns the transition"
             },
             {
@@ -52186,7 +52192,7 @@
         },
         {
           "name": "list_usd_prims",
-          "description": "List the direct children of one prim (default the pseudo root \"/\") on a registered USD stage, each with prim_path, type_name and active, plus count. Only active, loaded, defined, non-abstract children appear, and it never recurses: call it again per child to go deeper. Read-only.",
+          "description": "List the prims under one prim (default the pseudo root \"/\") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.",
           "params": [
             {
               "name": "stage_name",
@@ -52198,16 +52204,16 @@
               "name": "prim_path_prefix",
               "jsonType": "string",
               "required": false,
-              "description": "SdfPath of the parent prim whose direct children are listed; it must exist. Default \"/\" (the pseudo root)."
+              "description": "SdfPath of the prim whose children are listed; it must exist. Default \"/\" (the pseudo root)."
             },
             {
               "name": "recursive",
               "jsonType": "boolean",
               "required": false,
-              "description": "Has no effect: true (default) and false return the same direct children, filtered by the USD default predicate, without traversing instance proxies."
+              "description": "false (default) lists the direct children only; true lists every descendant, each parent before its children."
             }
           ],
-          "returns": "{ prims: [object], count: number }"
+          "returns": "{ prims: [{ prim_path, type_name, active }], count: number }"
         },
         {
           "name": "list_usd_stage_layers",

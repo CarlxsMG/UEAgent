@@ -352,15 +352,15 @@ List every attribute of a prim on an open USD stage without changing it. Returns
 
 ## `list_usd_prims`
 
-List the direct children of one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count. Only active, loaded, defined, non-abstract children appear, and it never recurses: call it again per child to go deeper. Read-only.
+List the prims under one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
-| `prim_path_prefix` | string | no | SdfPath of the parent prim whose direct children are listed; it must exist. Default "/" (the pseudo root). |
-| `recursive` | boolean | no | Has no effect: true (default) and false return the same direct children, filtered by the USD default predicate, without traversing instance proxies. |
+| `prim_path_prefix` | string | no | SdfPath of the prim whose children are listed; it must exist. Default "/" (the pseudo root). |
+| `recursive` | boolean | no | false (default) lists the direct children only; true lists every descendant, each parent before its children. |
 
-**Returns:** `{ prims: [object], count: number }`
+**Returns:** `{ prims: [{ prim_path, type_name, active }], count: number }`
 
 ## `list_usd_stage_layers`
 

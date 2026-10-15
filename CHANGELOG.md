@@ -14,6 +14,34 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   says what the tool reads or changes, what it returns and its side effects, and every parameter says
   what it takes. About 60 of them described something the code does not do, and now match it. No
   tool, parameter, type or accepted value changed.
+- Fixed, from reading the code behind those definitions:
+  - `reimport_anim_sequence` passed `true` as the source file index, so it reimported source 1 and
+    could open dialogs; it now reimports the first source, automated.
+  - `validate_anim_state_machine` and `get_anim_state_machine_info` counted transitions as states and
+    `transition_count` was always 0, so every machine of two or more nodes got the "no transitions"
+    warning. States, conduits and transitions are now counted apart.
+  - `list_usd_prims` ignored `recursive`. With `recursive: true` it now lists the whole subtree; its
+    default is now false, which lists the direct children as before.
+  - `create_attribute_set_asset` and `add_attribute_to_set` saved without compiling and wrote each
+    default as a bare number the attribute struct cannot read, so every default stayed 0, and they
+    counted a name the class already had as added. They now compile, the compiled default is
+    `default_value`, an existing name is reported apart, and the result is read back from the
+    compiled class.
+  - `set_tree_parameter` failed on text parameters; it sets them now.
+  - `remove_tree_binding` always failed, saying UE 5.8 has no API to remove a binding; it removes it.
+  - `configure_ai_sight_radius` ignored `lose_sight_radius`.
+  - `list_engine_ini_sections` asked GConfig for `Engine.ini`, which it does not resolve, so it found
+    no sections; it reads the INI as `get_engine_ini_value` does and says whether it was `found`.
+  - `create_modulation_parameter` also accepts the engine spellings `LPFFrequency` and
+    `HPFFrequency`, which its error message listed but the code refused.
+- Schemas that now say what the code requires: `system_path` on 69 Niagara tools, `state_name` on 28
+  StateTree tools, `value` on six StateTree tools and `set_meta_sound_node_property` (any JSON),
+  `warmup_time`, `local_space`, `screen_size`, and `emitter_name` and `renderer_index` of
+  `set_niagara_decal_renderer_material` are required; `transition_index` of `get_condition_info`,
+  `default_value` of `set_chooser_column_default` and `variety_index` of
+  `set_landscape_grass_type_properties` are optional; and the parameters read through helpers have
+  their real types (`vector` and `color` arrays, scale and offset ranges, material function input
+  props, post process volume numbers). `set_mesh_uvs_from_projection` lists `polygroup_layer`.
 
 ## 1.1.0 - 2026-10-14
 

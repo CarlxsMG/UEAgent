@@ -1201,10 +1201,10 @@ Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fi
 | `density` | number | no | Instances per 1000 x 1000 uu area (10 m by 10 m) when painting. |
 | `density_adjustment_factor` | number | no | Density multiplier used when reapplying: above 1 adds instances, below 1 removes them. |
 | `radius` | number | no | Minimum distance in cm between foliage instances. |
-| `scale_x` | string | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
-| `scale_y` | string | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
-| `scale_z` | string | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
-| `z_offset` | string | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out. |
+| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
+| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
+| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional. |
+| `z_offset` | object | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out. |
 | `cull_distance` | object | no | Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. |
 | `mobility` | string | no | Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call. |
 | `align_to_normal` | boolean | no | Tilt instances to the normal of the surface they are placed on. |
@@ -1233,7 +1233,7 @@ Set fields of one grass variety of a LandscapeGrassType asset, only those you pa
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `grass_path` | string | yes | Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field". |
-| `variety_index` | integer | yes | Index of the FGrassVariety to edit, default 0 (appends if the array is empty) |
+| `variety_index` | integer | no | Index of the FGrassVariety to edit, default 0 (appends if the array is empty) |
 | `grass_mesh` | string | no | Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call. |
 | `grass_density` | number | no | Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget. |
 | `placement_jitter` | number | no | Jitter of the grid placement from 0 to 1; only used when use_grid is true. |
@@ -1241,9 +1241,9 @@ Set fields of one grass variety of a LandscapeGrassType asset, only those you pa
 | `end_cull_distance` | number | no | Distance in cm beyond which a whole grass cluster is culled, an integer. |
 | `min_lod` | number | no | Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset. |
 | `scaling` | string | no | Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call. |
-| `scale_x` | string | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; a string value is ignored. |
-| `scale_y` | string | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; a string value is ignored. |
-| `scale_z` | string | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; a string value is ignored. |
+| `scale_x` | object | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling. |
+| `scale_y` | object | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling. |
+| `scale_z` | object | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling. |
 | `random_rotation` | boolean | no | Give each instance a random rotation instead of a shared one. |
 | `align_to_surface` | boolean | no | Tilt instances to the landscape normal instead of keeping them vertical. |
 | `use_grid` | boolean | no | Place instances on a jittered grid instead of a Halton sequence. |

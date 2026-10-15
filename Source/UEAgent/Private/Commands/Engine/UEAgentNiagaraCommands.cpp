@@ -115,10 +115,10 @@ namespace
     }
 
     // True when the caller passed a non-empty `system_path`, read into OutSystemPath; the caller replies otherwise.
+    // Read with ReadRequiredString so that the catalog publishes system_path as required: every caller fails without it.
     bool ExtractNiagaraSystemPath(const TSharedPtr<FJsonObject>& Params, FString& OutSystemPath)
     {
-        return Params->TryGetStringField(TEXT("system_path"), OutSystemPath)
-            && !OutSystemPath.IsEmpty();
+        return !mcp_common::ReadRequiredString(Params, TEXT("system_path"), OutSystemPath).IsValid();
     }
 
     // The system at SystemPath; null with OutError set when there is none.
@@ -153,7 +153,9 @@ namespace
     bool Niagara_ReadSystemAndParameterNames(const TSharedPtr<FJsonObject>& Params,
         FString& OutSystemPath, FString& OutParameterName, FString& OutError)
     {
-        if (!ExtractNiagaraSystemPath(Params, OutSystemPath))
+        // Read here rather than through ExtractNiagaraSystemPath: the catalog generator follows calls two
+        // deep, and this helper is already the second one under Niagara_LoadParameterSystem.
+        if (mcp_common::ReadRequiredString(Params, TEXT("system_path"), OutSystemPath).IsValid())
         {
             OutError = TEXT("Missing required 'system_path' parameter");
             return false;
@@ -1246,7 +1248,9 @@ namespace
     bool Niagara_ReadSystemAndEmitterNames(const TSharedPtr<FJsonObject>& Params,
         FString& OutSystemPath, FString& OutEmitterName, FString& OutError)
     {
-        if (!ExtractNiagaraSystemPath(Params, OutSystemPath))
+        // Read here rather than through ExtractNiagaraSystemPath: the catalog generator follows calls two
+        // deep, and this helper is already the second one under Niagara_LoadEmitterData.
+        if (mcp_common::ReadRequiredString(Params, TEXT("system_path"), OutSystemPath).IsValid())
         {
             OutError = TEXT("Missing required 'system_path' parameter");
             return false;
@@ -5312,11 +5316,9 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTime(const TSharedPtr<FJsonO
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required 'system_path' parameter"));
     }
-    if (!Params->HasField(TEXT("warmup_time")))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'warmup_time' parameter"));
-    }
-    const float WarmupTime = static_cast<float>(Params->GetNumberField(TEXT("warmup_time")));
+    double WarmupTimeValue = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("warmup_time"), WarmupTimeValue)) { return Missing; }
+    const float WarmupTime = static_cast<float>(WarmupTimeValue);
 
     FString Error;
     UNiagaraSystem* System = Niagara_ResolveSystem(SystemPath, Error);
@@ -5814,11 +5816,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterLocalSpace(const TSharedPtr<FJson
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    if (!Params->HasField(TEXT("local_space")))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'local_space' parameter"));
-    }
-    const bool bLocalSpace = Params->GetBoolField(TEXT("local_space"));
+    bool bLocalSpace = false;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredBool(Params, TEXT("local_space"), bLocalSpace)) { return Missing; }
 
     UNiagaraSystem* System = nullptr;
     FVersionedNiagaraEmitterData* EmitterData =
@@ -7604,11 +7603,14 @@ namespace
 //   @param emitter_name - Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it.
 //   @param renderer_index - 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it.
 //   @param material_path - Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood".
+//   @returns { system_path, emitter_name, renderer_index, previous_material_path, new_material_path, changed, saved }
 TSharedPtr<FJsonObject> HandleSetNiagaraDecalRendererMaterial(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
     UNiagaraDecalRendererProperties* Renderer = nullptr;
-    if (!ResolveRendererAtIndex<UNiagaraDecalRendererProperties>(Params, TEXT("UNiagaraDecalRendererProperties"), Renderer, Error))
+    // TRenderer is deduced from Renderer: an explicit <...> would hide the call, and the param reads in
+    // ResolveRendererAtIndex, from the catalog generator.
+    if (!ResolveRendererAtIndex(Params, TEXT("UNiagaraDecalRendererProperties"), Renderer, Error))
     {
         return mcp_common::MakeErrorReply(Error);
     }

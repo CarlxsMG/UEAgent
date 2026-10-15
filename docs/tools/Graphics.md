@@ -21,7 +21,7 @@ Set DecalColor on an editor-world ADecalActor found by label; it only shows if t
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `color` | string | no | Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor. |
+| `color` | array | no | Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor. |
 
 **Returns:** `{ actor_label: string, r: float, g: float, b: float, a: float }`
 

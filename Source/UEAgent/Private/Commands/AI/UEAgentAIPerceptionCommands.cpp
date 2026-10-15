@@ -155,10 +155,11 @@ TSharedPtr<FJsonObject> HandleCreateAIControllerBlueprint(const TSharedPtr<FJson
 
 // Runtime AI perception introspection and configuration.
 
-// MCP:configure_ai_sight_radius - Set SightRadius, and LoseSightRadius to sight_radius times 1.5, on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
+// MCP:configure_ai_sight_radius - Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
 //   @param actor_name - Object name or editor label of the pawn or AIController in the editor world; the first match is used.
 //   @param sight_radius - New SightRadius in cm, greater than 0.
-//   @param lose_sight_radius - Ignored: the code never reads it and always sets LoseSightRadius to sight_radius times 1.5.
+//   @param lose_sight_radius - New LoseSightRadius in cm, the distance at which an already seen target is lost, 0 or more; default sight_radius times 1.5.
+//   @returns { actor_name, sight_radius, lose_sight_radius, sight_sense_count }
 TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -168,6 +169,10 @@ TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObjec
         !Params->TryGetNumberField(TEXT("sight_radius"), Sight) || Sight <= 0.0)
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required: actor_name, sight_radius (>0)"));
+    }
+    if (Params->TryGetNumberField(TEXT("lose_sight_radius"), Lose) && Lose < 0.0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("lose_sight_radius must be 0 or more"));
     }
     AActor* Actor = mcp_common::FindActorByName(mcp_common::GetEditorWorld(), ActorName);
     if (!Actor)
@@ -184,19 +189,23 @@ TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObjec
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' has no UAIPerceptionComponent."), *ActorName));
     }
-    const float LoseRadius = static_cast<float>((Lose < 0.0) ? (Sight * 1.5) : Lose);
+    float SightRadius = static_cast<float>(Sight);
+    float LoseRadius = static_cast<float>((Lose < 0.0) ? (Sight * 1.5) : Lose);
     // Mutate the Sight config in-place via the typed accessor; the runtime perception
     // system picks up the change on the next tick (headless-safe path).
     int32 SightSenseCount = 0;
     if (UAISenseConfig_Sight* SightCfg = PercComp->GetSenseConfig<UAISenseConfig_Sight>())
     {
         ++SightSenseCount;
-        SightCfg->SightRadius = static_cast<float>(Sight);
+        SightCfg->SightRadius = SightRadius;
         SightCfg->LoseSightRadius = LoseRadius;
+        // Report what the config holds, not the request.
+        SightRadius = SightCfg->SightRadius;
+        LoseRadius = SightCfg->LoseSightRadius;
     }
     TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
     R->SetStringField(TEXT("actor_name"), ActorName);
-    R->SetNumberField(TEXT("sight_radius"), Sight);
+    R->SetNumberField(TEXT("sight_radius"), SightRadius);
     R->SetNumberField(TEXT("lose_sight_radius"), LoseRadius);
     R->SetNumberField(TEXT("sight_sense_count"), SightSenseCount);
     return mcp_common::MakeOkReply(R);
@@ -204,7 +213,7 @@ TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObjec
 
 // MCP:get_ai_perceived_actors - List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an AIController, currently perceives by any sense, without changing anything. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns count and perceived [{actor_name}]; no last-sensed time is included.
 //   @param actor_name - Object name or editor label of the pawn or AIController in the editor world; the first match is used.
-//   @returns { actor_name, perceived: [{actor_name, last_sensed_seconds}], count }
+//   @returns { actor_name, perceived: [{actor_name}], count }
 TSharedPtr<FJsonObject> HandleGetAIPerceivedActors(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;

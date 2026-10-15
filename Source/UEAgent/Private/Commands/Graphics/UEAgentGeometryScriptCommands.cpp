@@ -2222,8 +2222,7 @@ TSharedPtr<FJsonObject> HandleSetNumUVChannels(
 //   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
 //   @param translate_u [number!] - Offset added to every U coordinate (1.0 shifts by one full tile).
 //   @param translate_v [number!] - Offset added to every V coordinate (1.0 shifts by one full tile).
-//   @returns { actor_name: string, uv_channel: int, translate_u: number, translate_v: number,
-//             translated: bool, note?: string }
+//   @returns { actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }
 TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -4153,6 +4152,7 @@ TSharedPtr<FJsonObject> HandleGetMeshSelectionBounds(const TSharedPtr<FJsonObjec
 //   @param max_angle_deg [number] - Region parameter for region='normal_angle'.
 //   @param source_material_id [int] - Region parameter for region='material_id'.
 //   @param polygroup_id [int] - Region parameter for region='polygroup'.
+//   @param polygroup_layer [int] - Region parameter for region='polygroup': extended polygroup layer index (default the mesh's default polygroup layer).
 //   @param min_triangle_points [int] - Region parameter, 1-3.
 //   @param invert [bool] - Select the complement of a box, sphere, plane or normal_angle region (default false); the other regions ignore it.
 //   @returns { actor_name, projection, uv_channel, region, triangles_affected: int, uv_channel_count: int, applied: bool }

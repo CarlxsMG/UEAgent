@@ -5669,9 +5669,9 @@ static const TCHAR* const GFlatCommandParams[] =
     TEXT("set_mesh_uvs_from_projection"),
         TEXT("actor_name"), TEXT("center"), TEXT("component_index"), TEXT("extent"), TEXT("invert"),
         TEXT("location"), TEXT("max_angle_deg"), TEXT("min_island_tri_count"),
-        TEXT("min_triangle_points"), TEXT("normal"), TEXT("polygroup_id"), TEXT("projection"),
-        TEXT("radius"), TEXT("region"), TEXT("rotation"), TEXT("scale"), TEXT("source_material_id"),
-        TEXT("split_angle"), TEXT("uv_channel"),
+        TEXT("min_triangle_points"), TEXT("normal"), TEXT("polygroup_id"), TEXT("polygroup_layer"),
+        TEXT("projection"), TEXT("radius"), TEXT("region"), TEXT("rotation"), TEXT("scale"),
+        TEXT("source_material_id"), TEXT("split_angle"), TEXT("uv_channel"),
     nullptr,
     TEXT("set_meta_sound_node_property"),
         TEXT("metasound_path"), TEXT("node_id"), TEXT("property"), TEXT("value"),
@@ -6846,7 +6846,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 2097;
-static constexpr int32 GNumParamNames = 6429;
+static constexpr int32 GNumParamNames = 6430;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

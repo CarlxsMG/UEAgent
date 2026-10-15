@@ -1965,9 +1965,9 @@ TSharedPtr<FJsonObject> HandleGetPostProcessVolumeSettings(
 // MCP:set_post_process_volume_settings - Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProcessVolume in the editor world as one undo step; only the fields you pass change, and film grain and motion blur also get their bOverride flag so they take effect. The level is not saved. Returns applied_count and applied_fields; other settings use set_post_process_setting.
 //   @param volume_name - Editor label of the PostProcessVolume in the editor world; object names are not matched.
 //   @param enabled - Whether the volume is enabled (APostProcessVolume bEnabled).
-//   @param priority - Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted.
-//   @param film_grain_intensity - Film grain intensity from 0 to 1, a number; a numeric string is also accepted.
-//   @param motion_blur_amount - Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted.
+//   @param priority [number] - Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted.
+//   @param film_grain_intensity [number] - Film grain intensity from 0 to 1, a number; a numeric string is also accepted.
+//   @param motion_blur_amount [number] - Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted.
 //   @returns { volume_name, applied_count, applied_fields: [string] }
 TSharedPtr<FJsonObject> HandleSetPostProcessVolumeSettings(
     const TSharedPtr<FJsonObject>& Params)

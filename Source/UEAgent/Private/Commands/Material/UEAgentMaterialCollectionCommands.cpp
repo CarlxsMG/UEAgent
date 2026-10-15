@@ -438,7 +438,7 @@ TSharedPtr<FJsonObject> HandleAddCollectionVectorParam(const TSharedPtr<FJsonObj
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Name of the existing parameter to update
 //   @param scalar_value - Optional new float value for a scalar parameter
-//   @param vector - New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given
+//   @param vector [array] - New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given
 //   @returns { collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }
 TSharedPtr<FJsonObject> HandleSetCollectionParamDefault(const TSharedPtr<FJsonObject>& Params)
 {

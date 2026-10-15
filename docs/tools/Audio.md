@@ -259,7 +259,7 @@ Creates a USoundModulationParameter asset of the chosen concrete class at parame
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `parameter_path` | string | yes | Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name |
-| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled. The filter names take ONE F: "LPFFrequency" and "HPFFrequency" are refused, although the error message lists them |
+| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled; the engine spellings LPFFrequency and HPFFrequency are accepted too. |
 
 **Returns:** `{ parameter_path, parameter_name, parameter_class, created, already_existed, saved }`
 
@@ -488,7 +488,7 @@ Read the default literal stored on one input of a MetaSound Source node: vertex 
 | `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 | `input_name` | string | yes | Name of the input vertex (matches FMetasoundFrontendVertex::Name). |
 
-**Returns:** `{ metasound_path, node_id, input_name, type, value, has_value }`
+**Returns:** `{ metasound_path, node_id, input_name, type, has_value, literal_type?, value? }`
 
 ## `get_meta_sound_node_property`
 
@@ -961,7 +961,7 @@ Write one field of a MetaSound Source node's Configuration struct by reflection,
 | `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
 | `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 | `property` | string | yes | FProperty name on the Configuration struct. |
-| `value` | string | no | New value for the field, converted by FJsonObjectConverter; numbers and booleans can be passed as strings ("0.5", "true"). |
+| `value` | any | yes | New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true"). |
 
 **Returns:** `{ metasound_path, node_id, property, set, value_changed, saved }`
 

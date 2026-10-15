@@ -348,7 +348,7 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 
 // MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
-//   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: int, location: [number], rotation: [number], show_flags: object }
+//   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }
 TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Params)
 {
     FEditorViewportClient* Client = nullptr;

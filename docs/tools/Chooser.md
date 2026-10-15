@@ -145,11 +145,11 @@ Set the DefaultRowValue of one UChooserTable column, the cell value rows appende
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_index` | number | yes | 0-based column index to update. |
-| `default_value` | any | yes | Bool column: "MatchFalse", "MatchTrue" or "MatchAny"; OutputFloat: a number; OutputBool: a bool; OutputName: a name string; Randomize: a probability weight. Ignored by other column types. |
 | `min` | number | no | FloatRange column: default lower bound of the row's float range. |
 | `max` | number | no | FloatRange column: default upper bound of the row's float range. |
 | `b_no_min` | boolean | no | FloatRange column: when true, disables the lower bound (row matches any value &lt;= max). |
 | `b_no_max` | boolean | no | FloatRange column: when true, disables the upper bound (row matches any value >= min). |
+| `default_value` | any | no | Bool column: "MatchFalse", "MatchTrue" or "MatchAny"; OutputFloat: a number; OutputBool: a bool; OutputName: a name string; Randomize: a probability weight. Ignored by other column types. |
 | `comparison` | string | no | Enum and Name columns: "MatchEqual", "MatchNotEqual", "MatchAny" or "Modulus"; ObjectClass column: "Equal", "NotEqual", "SubClassOf" (default), "NotSubClassOf" or "Any". Case-insensitive. |
 | `value` | any | no | Enum and OutputEnum columns: enum ordinal (clamped to 0-255); Name column: the name string to compare; MultiEnum column: the bitmask as an integer. |
 | `asset_path` | string | no | Object/OutputObject column: long package path of the UObject bound as the default row value. |

@@ -1260,10 +1260,10 @@ TSharedPtr<FJsonObject> HandleListAnimStateMachines(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_anim_state_machine_info - Read state + transition count for one state machine (read-only, no compile).
+// MCP:get_anim_state_machine_info - Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param state_machine_name - Name of the state machine
-//   @returns { state_machine, state_count, transition_count, states:[{name,kind,x,y}] }
+//   @returns { state_machine, state_count, conduit_count, transition_count, states:[{name,kind,x,y}] }
 TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString MachineName;
@@ -1274,11 +1274,13 @@ TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObje
         return Error;
     }
 
+    // A transition is also a UAnimStateNodeBase, so it is left out of the node list here and
+    // counted on its own below, like the authoring commands of this file count it.
     TArray<TSharedPtr<FJsonValue>> StateJson;
-    int32 TransitionCount = 0;
     for (UEdGraphNode* Node : SMGraph->Nodes)
     {
-        if (UAnimStateNodeBase* StateNode = Cast<UAnimStateNodeBase>(Node))
+        UAnimStateNodeBase* StateNode = Cast<UAnimStateNodeBase>(Node);
+        if (StateNode && !StateNode->IsA<UAnimStateTransitionNode>())
         {
             TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
             S->SetStringField(TEXT("name"), StateNode->GetStateName());
@@ -1287,20 +1289,17 @@ TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObje
             S->SetNumberField(TEXT("y"), StateNode->NodePosY);
             StateJson.Add(MakeShared<FJsonValueObject>(S));
         }
-        else if (Node->GetClass()->GetName().Contains(TEXT("TransitionGraph")))
-        {
-            ++TransitionCount;
-        }
     }
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("state_machine"), MachineName);
-    Data->SetNumberField(TEXT("state_count"), StateJson.Num());
-    Data->SetNumberField(TEXT("transition_count"), TransitionCount);
+    Data->SetNumberField(TEXT("state_count"), AnimBp_CountNodes<UAnimStateNode>(SMGraph));
+    Data->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
+    Data->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
     Data->SetArrayField(TEXT("states"), StateJson);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:validate_anim_state_machine - Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. Caveat: state_count includes conduits and transitions and transition_count stays 0, so that warning always fires.
+// MCP:validate_anim_state_machine - Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. state_count counts states only (conduits and aliases excluded), transition_count the transition nodes; compile_anim_blueprint is the check that the machine compiles.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param state_machine_name - Name of a state machine in the top-level AnimGraph, matched without case (see list_anim_state_machines).
 //   @returns { is_valid, errors[], warnings[], info[], state_count, transition_count }
@@ -1314,12 +1313,9 @@ TSharedPtr<FJsonObject> HandleValidateAnimStateMachine(const TSharedPtr<FJsonObj
         return Error;
     }
 
-    int32 StateCount = 0, TransitionCount = 0;
-    for (UEdGraphNode* Node : SMGraph->Nodes)
-    {
-        if (Cast<UAnimStateNodeBase>(Node)) { ++StateCount; }
-        else if (Node->GetClass()->GetName().Contains(TEXT("TransitionGraph"))) { ++TransitionCount; }
-    }
+    // UAnimStateTransitionNode derives from UAnimStateNodeBase too: count each class on its own.
+    const int32 StateCount = AnimBp_CountNodes<UAnimStateNode>(SMGraph);
+    const int32 TransitionCount = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
 
     TArray<FString> Errors, Warnings, InfoList;
     if (StateCount == 0)
