@@ -861,6 +861,25 @@ namespace UEAgentInputCommandsImpl
         }
         return Index;
     }
+
+    /**
+     * The context and key of a mapping target, for a handler where both are optional: add_input_trigger takes
+     * neither on the action target. The empty key is refused here and not in the handler, because the tool
+     * list marks a param required when the handler itself fails on its absence.
+     */
+    TSharedPtr<FJsonObject> ResolveContextAndKey(const FString& ContextRef, const FString& KeyName,
+        UInputMappingContext*& OutContext, FKey& OutKey)
+    {
+        if (KeyName.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TEXT("Missing required parameter for context target: key (or key_name)"));
+        }
+        if (TSharedPtr<FJsonObject> Failure = FindMappingContext(ContextRef, OutContext))
+        {
+            return Failure;
+        }
+        return ParseKey(KeyName, OutKey);
+    }
 }
 
 // MCP:get_input_action - Read one Enhanced Input InputAction asset in full: its value type (Bool / Axis1D / Axis2D / Axis3D), its accumulation behaviour, all the consume/pause/reserve flags, and the triggers and modifiers attached to the ACTION itself. The read-back oracle for create_input_action, set_input_action_value_type and set_input_action_flags, and the place to check b_consume_input -- an action left consuming input can swallow a key for the whole game. Triggers listed here are the action's own; the ones on a specific key binding live in the mapping context (list_input_triggers).
@@ -1285,12 +1304,12 @@ TSharedPtr<FJsonObject> HandleAddMappingToContext(const TSharedPtr<FJsonObject>&
     return Impl::MapKeyOnce(Context, Action, Key, ResultObj, TEXT("add_mapping_to_context"));
 }
 
-// MCP:add_input_trigger - Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
-//   @param context_name - Short asset name of the InputMappingContext.
+// MCP:add_input_trigger - Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
+//   @param context_name - Short asset name of the InputMappingContext. Omit it (and context_path) to append the trigger to the InputAction asset's own Triggers array instead of one of its key mappings.
 //   @param action_name - Short asset name of the InputAction.
-//   @param key - Key name of the mapping the trigger is attached to.
+//   @param key - Key name of the mapping the trigger is attached to: required with a context, and refused when there is no context.
 //   @param trigger_type - One of "Down", "Pressed", "Released", "Hold", "Tap", "Pulse", "ChordAction".
-//   @param context_path - Asset path of the Input Mapping Context. When omitted (with no key), the trigger is appended to the InputAction asset's own Triggers array instead of a context mapping.
+//   @param context_path - Asset path of the Input Mapping Context, instead of context_name.
 //   @param action_path - Asset path of the Input Action
 //   @param key_name - Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)
 //   @returns Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count, saved, save_error? }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count, saved, save_error? }
@@ -1314,14 +1333,13 @@ TSharedPtr<FJsonObject> HandleAddInputTrigger(const TSharedPtr<FJsonObject>& Par
         Params->TryGetStringField(TEXT("key_name"), KeyName);
     }
     FString TriggerType;
-    Params->TryGetStringField(TEXT("trigger_type"), TriggerType);
-
-    // action_path and trigger_type are always required. The mapping context is optional:
-    // present -> the trigger is appended to the matching context mapping;
-    // absent  -> the trigger is appended to the InputAction asset's own Triggers array.
-    if (ActionRef.IsEmpty() || TriggerType.IsEmpty())
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("trigger_type"), TriggerType))
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameters: action_name, trigger_type"));
+        return Missing;
+    }
+    if (ActionRef.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: action_name (or action_path)"));
     }
 
     UClass* TriggerClass = ResolveTriggerClass(TriggerType);
@@ -1336,69 +1354,69 @@ TSharedPtr<FJsonObject> HandleAddInputTrigger(const TSharedPtr<FJsonObject>& Par
         return Failure;
     }
 
-    // ---- Action-asset target (no context provided) --------------------------
-    if (ContextRef.IsEmpty())
+    // A context picks one of its key mappings; without one the trigger goes on the action itself. The tests ask
+    // whether a value IS there, never whether it is missing: the tool list marks a param required when the
+    // handler fails on its absence, and the action target takes neither a context nor a key.
+    if (!ContextRef.IsEmpty())
     {
-        Action->Modify();
-        UInputTrigger* NewTrigger = NewObject<UInputTrigger>(Action, TriggerClass, NAME_None, RF_Transactional);
+        UInputMappingContext* Context = nullptr;
+        FKey Key;
+        if (TSharedPtr<FJsonObject> Failure = Impl::ResolveContextAndKey(ContextRef, KeyName, Context, Key))
+        {
+            return Failure;
+        }
+
+        // A mapping that does not exist yet is created, so the trigger has somewhere to live.
+        const int32 Index = Impl::FindOrAddMappingIndex(Context, Action, Key);
+        if (Index == INDEX_NONE)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Failed to locate or create the requested mapping"));
+        }
+
+        Context->Modify();
+        UInputTrigger* NewTrigger = NewObject<UInputTrigger>(Context, TriggerClass, NAME_None, RF_Transactional);
         if (!NewTrigger)
         {
             return mcp_common::MakeErrorReply(TEXT("Failed to construct trigger object"));
         }
-        const int32 ActionIndex = Action->Triggers.Add(NewTrigger);
+        FEnhancedActionKeyMapping& Mapping = Context->GetMapping(Index);
+        Mapping.Triggers.Add(NewTrigger);
 
-        TSharedPtr<FJsonObject> ActionResult = MakeShared<FJsonObject>();
-        ActionResult->SetStringField(TEXT("action_name"), Action->GetName());
-        ActionResult->SetStringField(TEXT("action_path"), Action->GetPathName());
-        ActionResult->SetStringField(TEXT("trigger_type"), TriggerType);
-        ActionResult->SetStringField(TEXT("trigger_class"), TriggerClass->GetName());
-        ActionResult->SetNumberField(TEXT("index"), ActionIndex);
-        ActionResult->SetNumberField(TEXT("trigger_count"), Action->Triggers.Num());
-        return Impl::SaveAndReply(Action, ActionResult, TEXT("add_input_trigger"));
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("context_name"), Context->GetName());
+        ResultObj->SetStringField(TEXT("action_name"), Action->GetName());
+        ResultObj->SetStringField(TEXT("key"), KeyName);
+        ResultObj->SetStringField(TEXT("trigger_type"), TriggerType);
+        ResultObj->SetStringField(TEXT("trigger_class"), TriggerClass->GetName());
+        ResultObj->SetNumberField(TEXT("index"), Index);
+        ResultObj->SetNumberField(TEXT("trigger_count"), Context->GetMapping(Index).Triggers.Num());
+        return Impl::SaveAndReply(Context, ResultObj, TEXT("add_input_trigger"));
     }
-
-    // ---- Context-mapping target ---------------------------------------------
-    if (KeyName.IsEmpty())
+    if (!KeyName.IsEmpty())
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter for context target: key (or key_name)"));
+        // A key names one binding, and a binding lives in a context: putting the trigger on the action would
+        // change every binding of it instead of the one the caller named.
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("key '%s' names a mapping, and add_input_trigger has no context to find it in: pass context_name (or context_path), or drop key to put the trigger on the InputAction itself"),
+            *KeyName));
     }
 
-    UInputMappingContext* Context = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::FindMappingContext(ContextRef, Context))
-    {
-        return Failure;
-    }
-    FKey Key;
-    if (TSharedPtr<FJsonObject> Failure = Impl::ParseKey(KeyName, Key))
-    {
-        return Failure;
-    }
-
-    // A mapping that does not exist yet is created, so the trigger has somewhere to live.
-    const int32 Index = Impl::FindOrAddMappingIndex(Context, Action, Key);
-    if (Index == INDEX_NONE)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to locate or create the requested mapping"));
-    }
-
-    Context->Modify();
-    UInputTrigger* NewTrigger = NewObject<UInputTrigger>(Context, TriggerClass, NAME_None, RF_Transactional);
+    Action->Modify();
+    UInputTrigger* NewTrigger = NewObject<UInputTrigger>(Action, TriggerClass, NAME_None, RF_Transactional);
     if (!NewTrigger)
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to construct trigger object"));
     }
-    FEnhancedActionKeyMapping& Mapping = Context->GetMapping(Index);
-    Mapping.Triggers.Add(NewTrigger);
+    const int32 ActionIndex = Action->Triggers.Add(NewTrigger);
 
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("context_name"), Context->GetName());
-    ResultObj->SetStringField(TEXT("action_name"), Action->GetName());
-    ResultObj->SetStringField(TEXT("key"), KeyName);
-    ResultObj->SetStringField(TEXT("trigger_type"), TriggerType);
-    ResultObj->SetStringField(TEXT("trigger_class"), TriggerClass->GetName());
-    ResultObj->SetNumberField(TEXT("index"), Index);
-    ResultObj->SetNumberField(TEXT("trigger_count"), Context->GetMapping(Index).Triggers.Num());
-    return Impl::SaveAndReply(Context, ResultObj, TEXT("add_input_trigger"));
+    TSharedPtr<FJsonObject> ActionResult = MakeShared<FJsonObject>();
+    ActionResult->SetStringField(TEXT("action_name"), Action->GetName());
+    ActionResult->SetStringField(TEXT("action_path"), Action->GetPathName());
+    ActionResult->SetStringField(TEXT("trigger_type"), TriggerType);
+    ActionResult->SetStringField(TEXT("trigger_class"), TriggerClass->GetName());
+    ActionResult->SetNumberField(TEXT("index"), ActionIndex);
+    ActionResult->SetNumberField(TEXT("trigger_count"), Action->Triggers.Num());
+    return Impl::SaveAndReply(Action, ActionResult, TEXT("add_input_trigger"));
 }
 
 // MCP:add_input_modifier - Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index. The context is saved, and the call succeeds only when it reaches disk.
@@ -1430,11 +1448,13 @@ TSharedPtr<FJsonObject> HandleAddInputModifier(const TSharedPtr<FJsonObject>& Pa
         Params->TryGetStringField(TEXT("key_name"), KeyName);
     }
     FString ModifierType;
-    Params->TryGetStringField(TEXT("modifier_type"), ModifierType);
-
-    if (ContextRef.IsEmpty() || ActionRef.IsEmpty() || KeyName.IsEmpty() || ModifierType.IsEmpty())
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("modifier_type"), ModifierType))
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameters: context_name, action_name, key, modifier_type"));
+        return Missing;
+    }
+    if (ContextRef.IsEmpty() || ActionRef.IsEmpty() || KeyName.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameters: context_name, action_name, key"));
     }
 
     UClass* ModifierClass = ResolveModifierClass(ModifierType);

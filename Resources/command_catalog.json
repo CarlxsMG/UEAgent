@@ -29635,7 +29635,7 @@
             {
               "name": "modifier_type",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "One of \"Negate\", \"Swizzle\", \"DeadZone\", \"Scalar\"."
             },
             {
@@ -29661,14 +29661,8 @@
         },
         {
           "name": "add_input_trigger",
-          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
+          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
           "params": [
-            {
-              "name": "context_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Short asset name of the InputMappingContext."
-            },
             {
               "name": "action_name",
               "jsonType": "string",
@@ -29676,22 +29670,28 @@
               "description": "Short asset name of the InputAction."
             },
             {
-              "name": "key",
-              "jsonType": "string",
-              "required": true,
-              "description": "Key name of the mapping the trigger is attached to."
-            },
-            {
               "name": "trigger_type",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "One of \"Down\", \"Pressed\", \"Released\", \"Hold\", \"Tap\", \"Pulse\", \"ChordAction\"."
+            },
+            {
+              "name": "context_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Short asset name of the InputMappingContext. Omit it (and context_path) to append the trigger to the InputAction asset's own Triggers array instead of one of its key mappings."
+            },
+            {
+              "name": "key",
+              "jsonType": "string",
+              "required": false,
+              "description": "Key name of the mapping the trigger is attached to: required with a context, and refused when there is no context."
             },
             {
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context. When omitted (with no key), the trigger is appended to the InputAction asset's own Triggers array instead of a context mapping."
+              "description": "Asset path of the Input Mapping Context, instead of context_name."
             },
             {
               "name": "action_path",

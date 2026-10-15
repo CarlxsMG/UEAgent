@@ -64,6 +64,10 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   removing a mapping that is not there succeeds without saving, and the runtime key remaps fail when
   the engine refuses them. `create_soundfield_submix`, `add_soundfield_effect_to_submix` and
   `remove_soundfield_effect` state their outcome, and fail when no soundfield effect class is loaded.
+- `add_input_trigger` on the InputAction itself is reachable from the tool list: its schema required
+  a context and a key, which that form takes neither of. Its `trigger_type`, and the `modifier_type`
+  of `add_input_modifier`, are required in the schema instead of being refused by the handler, and a
+  key with no context is refused rather than read as the action.
 
 ## 1.1.0 - 2026-10-14
 

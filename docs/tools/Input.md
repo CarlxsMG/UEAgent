@@ -13,7 +13,7 @@ Reshape the VALUE a key sends before the action sees it: append a modifier (Nega
 | `context_name` | string | yes | Short asset name of the InputMappingContext. |
 | `action_name` | string | yes | Short asset name of the InputAction. |
 | `key` | string | yes | Key name of the mapping the modifier is attached to. |
-| `modifier_type` | string | no | One of "Negate", "Swizzle", "DeadZone", "Scalar". |
+| `modifier_type` | string | yes | One of "Negate", "Swizzle", "DeadZone", "Scalar". |
 | `context_path` | string | no | Asset path of the Input Mapping Context |
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
@@ -22,15 +22,15 @@ Reshape the VALUE a key sends before the action sees it: append a modifier (Nega
 
 ## `add_input_trigger`
 
-Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
+Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `context_name` | string | yes | Short asset name of the InputMappingContext. |
 | `action_name` | string | yes | Short asset name of the InputAction. |
-| `key` | string | yes | Key name of the mapping the trigger is attached to. |
-| `trigger_type` | string | no | One of "Down", "Pressed", "Released", "Hold", "Tap", "Pulse", "ChordAction". |
-| `context_path` | string | no | Asset path of the Input Mapping Context. When omitted (with no key), the trigger is appended to the InputAction asset's own Triggers array instead of a context mapping. |
+| `trigger_type` | string | yes | One of "Down", "Pressed", "Released", "Hold", "Tap", "Pulse", "ChordAction". |
+| `context_name` | string | no | Short asset name of the InputMappingContext. Omit it (and context_path) to append the trigger to the InputAction asset's own Triggers array instead of one of its key mappings. |
+| `key` | string | no | Key name of the mapping the trigger is attached to: required with a context, and refused when there is no context. |
+| `context_path` | string | no | Asset path of the Input Mapping Context, instead of context_name. |
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
