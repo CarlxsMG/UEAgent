@@ -99,6 +99,42 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * Null when ParamName is a global parameter of Type in the MID's material, otherwise the error
+	 * reply listing that type's global parameters. The Set*ParameterValue setters store an override
+	 * under ANY name, and the MID then reads that override back, so the read-back alone cannot catch
+	 * a typo. The material's own parameter set (GetAllParametersOfType takes its names from the
+	 * cached expression data and only lays overrides over names it already has) is the reference.
+	 * Setting by name addresses the global association
+	 * only, so a name that exists only inside a material layer is refused too. TypeLabel names the
+	 * type in lower case ("scalar").
+	 */
+	TSharedPtr<FJsonObject> MaterialDynamic_RefuseUnknownParam(const UMaterialInstanceDynamic* MID, EMaterialParameterType Type,
+		const FString& ParamName, const TCHAR* TypeLabel)
+	{
+		TMap<FMaterialParameterInfo, FMaterialParameterMetadata> TypeParams;
+		MID->GetAllParametersOfType(Type, TypeParams);
+		const FMaterialParameterInfo WantedInfo{ FName(*ParamName) };
+		if (TypeParams.Contains(WantedInfo))
+		{
+			return nullptr;
+		}
+		TArray<FString> Known;
+		for (const TPair<FMaterialParameterInfo, FMaterialParameterMetadata>& Pair : TypeParams)
+		{
+			if (Pair.Key.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				Known.Add(Pair.Key.Name.ToString());
+			}
+		}
+		Known.Sort();
+		FString ListLabel(TypeLabel);
+		ListLabel[0] = FChar::ToUpper(ListLabel[0]);
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("'%s' is not a global %s parameter of the material of MID %s; nothing was set. %s parameters: [%s]"),
+			*ParamName, TypeLabel, *MID->GetPathName(), *ListLabel, *FString::Join(Known, TEXT(", "))));
+	}
+
 	/** The MID's non-static parameters measured against a copy source. */
 	struct FMidCopyTally
 	{
@@ -225,31 +261,7 @@ TSharedPtr<FJsonObject> HandleSetMidScalarParam(
 	UMaterialInstanceDynamic* MID = nullptr;
 	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
 
-	// SetScalarParameterValue stores an override under ANY name, and the MID then reads that
-	// override back, so the read-back alone cannot catch a typo. The material's own parameter
-	// set (GetAllParametersOfType reads the cached expression data, never the overrides) is
-	// the reference. Setting by name addresses the global association only, so a name that
-	// exists only inside a material layer is refused too.
-	{
-		TMap<FMaterialParameterInfo, FMaterialParameterMetadata> ScalarParams;
-		MID->GetAllParametersOfType(EMaterialParameterType::Scalar, ScalarParams);
-		const FMaterialParameterInfo WantedInfo{ FName(*ParamName) };
-		if (!ScalarParams.Contains(WantedInfo))
-		{
-			TArray<FString> Known;
-			for (const TPair<FMaterialParameterInfo, FMaterialParameterMetadata>& Pair : ScalarParams)
-			{
-				if (Pair.Key.Association == EMaterialParameterAssociation::GlobalParameter)
-				{
-					Known.Add(Pair.Key.Name.ToString());
-				}
-			}
-			Known.Sort();
-			return mcp_common::MakeErrorReply(FString::Printf(
-				TEXT("'%s' is not a global scalar parameter of the material of MID %s; nothing was set. Scalar parameters: [%s]"),
-				*ParamName, *MID->GetPathName(), *FString::Join(Known, TEXT(", "))));
-		}
-	}
+	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Scalar, ParamName, TEXT("scalar"))) { return Unknown; }
 
 	// Read old value
 	float OldValue = MID->K2_GetScalarParameterValue(FName(*ParamName));
@@ -273,14 +285,14 @@ TSharedPtr<FJsonObject> HandleSetMidScalarParam(
 // ---------------------------------------------------------------------------
 // set_mid_vector_param
 // ---------------------------------------------------------------------------
-// MCP:set_mid_vector_param - Set a vector/color parameter value on a Material Instance Dynamic.
-//   @param mid_object_path - Object path of the MID
-//   @param param_name - Name of the vector parameter
-//   @param r [number] - Red component (0-1)
-//   @param g [number] - Green component (0-1)
-//   @param b [number] - Blue component (0-1)
-//   @param value - Color object {r, g, b, a} components (a defaults to 1)
-//   @returns { mid_object_path, param_name, r, g, b, a, set }
+// MCP:set_mid_vector_param - Set a vector (color) parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_name must be a global vector parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new color. Scalars and textures: set_mid_scalar_param, set_mid_texture_param.
+//   @param mid_object_path - Object path of the MID (from create_material_instance_dynamic)
+//   @param param_name - Name of a vector parameter of the MID's material
+//   @param r [number] - Not read at the top level: the red component goes in value
+//   @param g [number] - Not read at the top level: the green component goes in value
+//   @param b [number] - Not read at the top level: the blue component goes in value
+//   @param value - Color object {r, g, b, a}; a missing component is 0, a missing a is 1
+//   @returns { mid_object_path, param_name, old_value: {r, g, b, a}, new_value: {r, g, b, a}, set }
 TSharedPtr<FJsonObject> HandleSetMidVectorParam(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -306,6 +318,8 @@ TSharedPtr<FJsonObject> HandleSetMidVectorParam(
 	UMaterialInstanceDynamic* MID = nullptr;
 	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
 
+	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Vector, ParamName, TEXT("vector"))) { return Unknown; }
+
 	// Read old value
 	FLinearColor OldColor = MID->K2_GetVectorParameterValue(FName(*ParamName));
 
@@ -325,12 +339,12 @@ TSharedPtr<FJsonObject> HandleSetMidVectorParam(
 	TSharedPtr<FJsonObject> NewObj = mcp_common::LinearColorToJsonObject(ReadBack);
 	Data->SetObjectField(TEXT("new_value"), NewObj);
 
-	bool bSet = FMath::Abs(ReadBack.R - NewColor.R) < KINDA_SMALL_NUMBER &&
+	const bool bSet = FMath::Abs(ReadBack.R - NewColor.R) < KINDA_SMALL_NUMBER &&
 				FMath::Abs(ReadBack.G - NewColor.G) < KINDA_SMALL_NUMBER &&
 				FMath::Abs(ReadBack.B - NewColor.B) < KINDA_SMALL_NUMBER &&
 				FMath::Abs(ReadBack.A - NewColor.A) < KINDA_SMALL_NUMBER;
 	Data->SetBoolField(TEXT("set"), bSet);
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_mid_vector_param"), TEXT("set")));
 }
 
 // ---------------------------------------------------------------------------
@@ -475,9 +489,9 @@ TSharedPtr<FJsonObject> HandleCopyMidParamsFromSource(
 // ---------------------------------------------------------------------------
 // set_mid_texture_param
 // ---------------------------------------------------------------------------
-// MCP:set_mid_texture_param - Set a texture parameter value on a Material Instance Dynamic
+// MCP:set_mid_texture_param - Set a texture parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. parameter_name must be a global texture parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new texture. Scalars and vectors: set_mid_scalar_param, set_mid_vector_param.
 //   @param mid_path - Object path of the MID (transient or component-owned full path)
-//   @param parameter_name - Name of the texture parameter
+//   @param parameter_name - Name of a texture parameter of the MID's material
 //   @param texture_path - Content path to the texture to assign
 //   @returns { mid_path, parameter_name, old_texture_path, new_texture_path, requested_texture_path, set }
 TSharedPtr<FJsonObject> HandleSetMidTextureParam(
@@ -494,6 +508,8 @@ TSharedPtr<FJsonObject> HandleSetMidTextureParam(
 
 	UMaterialInstanceDynamic* MID = nullptr;
 	if (TSharedPtr<FJsonObject> NotFound = MaterialDynamic_ResolveMIDOrError(MIDPath, MID)) { return NotFound; }
+
+	if (TSharedPtr<FJsonObject> Unknown = MaterialDynamic_RefuseUnknownParam(MID, EMaterialParameterType::Texture, ParamName, TEXT("texture"))) { return Unknown; }
 
 	UTexture* NewTexture = mcp_common::LoadAssetOrSoftPath<UTexture>(TexturePath);
 	if (!NewTexture)
@@ -517,8 +533,9 @@ TSharedPtr<FJsonObject> HandleSetMidTextureParam(
 	Data->SetStringField(TEXT("old_texture_path"), OldTexture ? OldTexture->GetPathName() : TEXT(""));
 	Data->SetStringField(TEXT("new_texture_path"), ReadBack ? ReadBack->GetPathName() : TEXT(""));
 	Data->SetStringField(TEXT("requested_texture_path"), NewTexture->GetPathName());
-	Data->SetBoolField(TEXT("set"), ReadBack == NewTexture);
-	return mcp_common::MakeOkReply(Data);
+	const bool bSet = (ReadBack == NewTexture);
+	Data->SetBoolField(TEXT("set"), bSet);
+	return mcp_common::MakeOutcomeReply(Data, bSet, mcp_common::MeasuredOutcomeError(TEXT("set_mid_texture_param"), TEXT("set")));
 }
 
 // ---------------------------------------------------------------------------

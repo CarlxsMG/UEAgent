@@ -47,19 +47,8 @@ namespace UEAgentUsdPrimCommands
 
 namespace
 {
-	// Parse a "Def" | "Over" | "Class" string into UE::ESdfSpecifier. Def is the
-	// USD default. We are case-sensitive here (pxr:: specifier token form) —
-	// "def" lowercase is also accepted for caller convenience.
-	UE::ESdfSpecifier ParseSpecifier(const FString& In)
-	{
-		const FString S = In.IsEmpty() ? TEXT("Def") : In;
-		if (S.Equals(TEXT("Def"), ESearchCase::IgnoreCase)) { return UE::ESdfSpecifier::Def; }
-		if (S.Equals(TEXT("Over"), ESearchCase::IgnoreCase)) { return UE::ESdfSpecifier::Over; }
-		if (S.Equals(TEXT("Class"), ESearchCase::IgnoreCase)) { return UE::ESdfSpecifier::Class; }
-		return UE::ESdfSpecifier::Def;
-	}
-
-	// The strict form of ParseSpecifier: false for anything but Def, Over or Class (case-insensitive).
+	// Parse a "Def" | "Over" | "Class" string (case-insensitive) into UE::ESdfSpecifier: false,
+	// with Out untouched, for anything else.
 	bool TryParseSpecifier(const FString& In, UE::ESdfSpecifier& Out)
 	{
 		if (In.Equals(TEXT("Def"), ESearchCase::IgnoreCase)) { Out = UE::ESdfSpecifier::Def; return true; }
@@ -333,11 +322,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimActive(const TSharedPtr<FJsonObject>& Pa
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_specifier - Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. Caveat: an unrecognized value is silently applied as "Def" and the reply echoes the input, not the applied specifier. Returns specifier and set; not saved to disk.
+// MCP:set_usd_prim_specifier - Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. An unknown specifier is refused before anything is authored. specifier reports the one written, only when the write succeeded (set); a failed write fails the call. Not saved to disk.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
-//   @param specifier [string!] - "Def", "Over" or "Class", case-insensitive; anything else is applied as "Def".
-//   @returns { set: bool, specifier: string }
+//   @param specifier [string!] - "Def", "Over" or "Class", case-insensitive; anything else is refused.
+//   @returns { set: bool, specifier?: string, requested?: object }
 TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -354,6 +343,12 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 		return mcp_common::MakeErrorReply(
 			TEXT("specifier is required (Def|Over|Class)"));
 	}
+	UE::ESdfSpecifier Spec = UE::ESdfSpecifier::Def;
+	if (!TryParseSpecifier(SpecStr, Spec))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Unknown specifier '%s': expected Def, Over or Class. Nothing was authored."), *SpecStr));
+	}
 
 	UE::FUsdPrim Prim;
 	if (TSharedPtr<FJsonObject> Error = UsdPrim_FindPrim(Stage, StageName, PrimPath, Prim))
@@ -361,13 +356,18 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 		return Error;
 	}
 
-	const UE::ESdfSpecifier Spec = ParseSpecifier(SpecStr);
+	// The wrapper has no specifier getter, so the write's own result is the only evidence of the
+	// specifier now authored at the edit target.
 	const bool SetOk = Prim.SetSpecifier(Spec);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("specifier"), SpecStr);
+	if (SetOk)
+	{
+		Data->SetStringField(TEXT("specifier"), SpecifierName(Spec));
+	}
 	Data->SetBoolField(TEXT("set"), SetOk);
-	return mcp_common::MakeOkReply(Data);
+	mcp_common::AddRequestedEcho(Data, Params, { TEXT("specifier") });
+	return mcp_common::MakeOutcomeReply(Data, SetOk, mcp_common::MeasuredOutcomeError(TEXT("set_usd_prim_specifier"), TEXT("set")));
 }
 
 // MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "documentation", "kind") on an existing prim of a registered USD stage, at the current edit target. USD returns set=false when the value type does not match the field type; the reply echoes the converted value. Not saved to disk.

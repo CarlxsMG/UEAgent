@@ -2539,10 +2539,10 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:copy_mesh_uv_channel - Copy UV data from one UV channel to another on the same mesh.
+// MCP:copy_mesh_uv_channel - Copy UV data from one UV channel to another on the same mesh. A dest_channel the mesh does not have yet is added first (the channel count only grows, and channels added in between have no UVs set); a source_channel the mesh does not have, or a dest_channel of 8 or more, is an error checked before anything changes. copied is false, and the call fails, when the engine reports an error; the same channel for both is a no-op that succeeds with copied false and a note. No undo entry, nothing saved.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param source_channel [number!] - Source UV channel index (required)
-//   @param dest_channel [number!] - Destination UV channel index (required, auto-grown if >= NumUVSets)
+//   @param dest_channel [number!] - Destination UV channel index, 0 to 7 (required, added to the mesh when it does not have it yet)
 //   @returns { actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.
 TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
     const TSharedPtr<FJsonObject>& Params)
@@ -2562,14 +2562,16 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("source_channel must be >= 0 (got %d)"), SourceChannel));
     }
+    // Read as a double so an out-of-range number is refused instead of wrapping into a valid channel.
     double DestD = 0.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("dest_channel"), DestD)) { return Missing; }
-    const int32 DestChannel = static_cast<int32>(DestD);
-    if (DestChannel < 0)
+    if (DestD < 0.0 || DestD >= GeometryScript_MaxUVChannels)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("dest_channel must be >= 0 (got %d)"), DestChannel));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("dest_channel must be between 0 and %d (got %g): a dynamic mesh has at most %d UV channels"),
+            GeometryScript_MaxUVChannels - 1, DestD, GeometryScript_MaxUVChannels));
     }
+    const int32 DestChannel = static_cast<int32>(DestD);
 
     // Validate source exists.
     const int32 NumChannelsBefore = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
@@ -2580,33 +2582,44 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
                 SourceChannel, NumChannelsBefore));
     }
 
-    // Engine CopyUVSet auto-grows dest if dest >= NumUVSets (same pattern as
-    // SetMeshUVsFromPlanarProjection). No explicit pre-grow needed.
-    const bool SameChannel = (SourceChannel == DestChannel);
-
-    UGeometryScriptLibrary_MeshUVFunctions::CopyUVSet(
-        DynMesh, SourceChannel, DestChannel, /*Debug*/ nullptr);
-
-    const int32 NumChannelsAfter = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
-
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
     ResultObj->SetNumberField(TEXT("source_channel"), SourceChannel);
     ResultObj->SetNumberField(TEXT("dest_channel"), DestChannel);
-    ResultObj->SetBoolField(TEXT("copied"), !SameChannel);
-    ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsAfter);
-    if (SameChannel)
+
+    // Copying a channel onto itself changes nothing (CopyUVSet refuses it), so the mesh is left alone.
+    if (SourceChannel == DestChannel)
     {
+        ResultObj->SetBoolField(TEXT("copied"), false);
+        ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsBefore);
         ResultObj->SetStringField(TEXT("note"),
-            TEXT("source_channel == dest_channel; copy is identity and engine no-ops. "
+            TEXT("source_channel == dest_channel; copy is identity and the mesh is unchanged. "
                  "Use distinct channels to actually duplicate UV data."));
+        return mcp_common::MakeOkReply(ResultObj);
     }
-    else if (DestChannel >= NumChannelsBefore)
+
+    // CopyUVSet copies only into a channel the mesh already has: for a missing one it reports an error through
+    // Debug and copies nothing. So a missing destination is added first; the count only ever grows.
+    if (DestChannel >= NumChannelsBefore)
+    {
+        UGeometryScriptLibrary_MeshUVFunctions::SetNumUVSets(DynMesh, DestChannel + 1, /*Debug*/ nullptr);
+    }
+
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshUVFunctions::CopyUVSet(DynMesh, SourceChannel, DestChannel, Debug);
+    const FString CopyError = GeometryScript_FirstError(Debug);
+    const bool bCopied = CopyError.IsEmpty();
+
+    const int32 NumChannelsAfter = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
+
+    ResultObj->SetBoolField(TEXT("copied"), bCopied);
+    ResultObj->SetNumberField(TEXT("num_uv_channels_after"), NumChannelsAfter);
+    if (NumChannelsAfter > NumChannelsBefore)
     {
         ResultObj->SetStringField(TEXT("note"),
-            FString::Printf(TEXT("dest_channel was >= NumUVSets; engine auto-grew UV channels %d -> %d."),
+            FString::Printf(TEXT("dest_channel was >= NumUVSets; the mesh grew UV channels %d -> %d before the copy."),
                 NumChannelsBefore, NumChannelsAfter));
     }
-    return mcp_common::MakeOkReply(ResultObj);
+    return GeometryScript_OutcomeReply(ResultObj, bCopied, TEXT("copy_mesh_uv_channel"), TEXT("copied"), CopyError);
 }
 
 // ===========================================================================
@@ -2866,10 +2879,10 @@ TSharedPtr<FJsonObject> HandleSetMeshUVElementPosition(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:rebuild_mesh_bvh - Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
+// MCP:rebuild_mesh_bvh - Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMesh and read it back with IsBVHValidForMesh. The BVH is a temporary that is not kept: the spatial-query tools build their own on every call, so this only checks that a BVH can be built for the mesh as it is now. bvh_rebuilt is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param b_only_if_invalid [bool] - Optional: only rebuild if currently invalid (default true)
-//   @returns { actor_name, bvh_rebuilt: true, b_only_if_invalid, bvh_valid }
+//   @param b_only_if_invalid [bool] - Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds
+//   @returns { actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }
 TSharedPtr<FJsonObject> HandleRebuildMeshBVH(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
@@ -2882,18 +2895,23 @@ TSharedPtr<FJsonObject> HandleRebuildMeshBVH(const TSharedPtr<FJsonObject>& Para
         Params->TryGetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     }
 
-    // RebuildBVHForMesh takes an FGeometryScriptDynamicMeshBVH& and re-fills it in-place;
-    // we keep a transient local that we can report `bvh_valid` against after the rebuild.
+    // RebuildBVHForMesh re-fills the BVH it is given. This one is a local that starts empty, so the engine always
+    // rebuilds it (bOnlyIfInvalid only skips a BVH already built for this mesh) and it is dropped on return. A
+    // refusal is reported only through Debug, and the result is read back with IsBVHValidForMesh.
     FGeometryScriptDynamicMeshBVH BVH;
-    UGeometryScriptLibrary_MeshSpatial::RebuildBVHForMesh(DynMesh, BVH, bOnlyIfInvalid, /*Debug*/ nullptr);
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshSpatial::RebuildBVHForMesh(DynMesh, BVH, bOnlyIfInvalid, Debug);
+    const FString RebuildError = GeometryScript_FirstError(Debug);
     bool bIsValidAfter = false;
     UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh(DynMesh, BVH, bIsValidAfter, /*Debug*/ nullptr);
+    const bool bRebuilt = RebuildError.IsEmpty() && bIsValidAfter;
 
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
-    ResultObj->SetBoolField(TEXT("bvh_rebuilt"), true);
+    ResultObj->SetBoolField(TEXT("bvh_rebuilt"), bRebuilt);
     ResultObj->SetBoolField(TEXT("b_only_if_invalid"), bOnlyIfInvalid);
     ResultObj->SetBoolField(TEXT("bvh_valid"), bIsValidAfter);
-    return mcp_common::MakeOkReply(ResultObj);
+    return GeometryScript_OutcomeReply(ResultObj, bRebuilt, TEXT("rebuild_mesh_bvh"), TEXT("bvh_rebuilt"),
+        RebuildError.IsEmpty() ? FString(TEXT("the rebuilt BVH does not read back as valid for the mesh")) : RebuildError);
 }
 
 // MCP:get_num_uv_islands - Get the number of UV islands in a UV channel.
@@ -3070,12 +3088,12 @@ TSharedPtr<FJsonObject> HandleRecomputeMeshUVs(const TSharedPtr<FJsonObject>& Pa
         RecomputeError);
 }
 
-// MCP:repack_mesh_uvs - Pack existing UV islands on a UV channel into standard UV space.
+// MCP:repack_mesh_uvs - Pack existing UV islands on a UV channel into standard UV space. A channel the mesh does not have, or an empty mesh, is an error checked before anything changes. A channel with no UVs set has no islands to pack: the call succeeds with repacked false and a note, leaving the mesh unchanged. Otherwise repacked is false, and the call fails, when the engine reports an error. No undo entry, nothing saved.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param uv_channel [number]  - UV channel index (default 0)
 //   @param target_image_width [number] - target image width in pixels (default 512)
 //   @param optimize_island_rotation [bool] - whether to optimize island rotation (default true)
-//   @returns { actor_name, uv_channel, target_image_width, optimize_island_rotation, repacked }
+//   @returns { actor_name, uv_channel, target_image_width, optimize_island_rotation, num_uv_islands, repacked, note? }
 TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;
@@ -3100,15 +3118,43 @@ TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Param
         Options.bOptimizeIslandRotation = bOptimize;
     }
 
-    UGeometryScriptLibrary_MeshUVFunctions::RepackMeshUVs(
-        DynMesh, UVChannel, Options, /*Debug*/ nullptr);
+    // The engine writes nothing to a channel the mesh lacks, and an empty mesh has nothing to pack.
+    if (TSharedPtr<FJsonObject> Failure = GeometryScript_CheckUVChannelExists(DynMesh, UVChannel))
+    {
+        return Failure;
+    }
+    if (DynMesh->GetTriangleCount() == 0)
+    {
+        return mcp_common::MakeErrorReply(TEXT("The dynamic mesh is empty: there are no UV islands to repack"));
+    }
+
+    // Islands are counted over the triangles that have UVs set; a channel with none (one just added, say) gives
+    // the packer nothing to move, so that valid request succeeds with repacked false and the mesh untouched.
+    bool bIsValidChannel = false;
+    const int32 NumIslands = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVIslands(DynMesh, UVChannel, bIsValidChannel);
 
     TSharedPtr<FJsonObject> ResultObj = GeometryScript_NewMeshData(DynMesh);
     ResultObj->SetNumberField(TEXT("uv_channel"), UVChannel);
     ResultObj->SetNumberField(TEXT("target_image_width"), Options.TargetImageWidth);
     ResultObj->SetBoolField(TEXT("optimize_island_rotation"), Options.bOptimizeIslandRotation);
-    ResultObj->SetBoolField(TEXT("repacked"), true);
-    return mcp_common::MakeOkReply(ResultObj);
+    ResultObj->SetNumberField(TEXT("num_uv_islands"), FMath::Max(0, NumIslands));
+    if (NumIslands <= 0)
+    {
+        ResultObj->SetBoolField(TEXT("repacked"), false);
+        ResultObj->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("UV channel %d has no UVs set: there are no islands to pack, and the mesh is unchanged"), UVChannel));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+
+    // A refusal is reported only through Debug.
+    UGeometryScriptDebug* Debug = GeometryScript_NewDebug();
+    UGeometryScriptLibrary_MeshUVFunctions::RepackMeshUVs(
+        DynMesh, UVChannel, Options, Debug);
+    const FString RepackError = GeometryScript_FirstError(Debug);
+
+    ResultObj->SetBoolField(TEXT("repacked"), RepackError.IsEmpty());
+    return GeometryScript_OutcomeReply(ResultObj, RepackError.IsEmpty(), TEXT("repack_mesh_uvs"), TEXT("repacked"),
+        RepackError);
 }
 
 // MCP:delete_triangle_from_mesh - Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the editor world; a missing ID is not an error, deleted just comes back false. No undo entry; reply actor_name is the component name, not the actor label.

@@ -368,7 +368,7 @@ TSharedPtr<FJsonObject> HandleSetAudioBusChannels(const TSharedPtr<FJsonObject>&
 //   @param name - Name of the new Sound Source Bus asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param source_bus_channels - ESourceBusChannels: 'Mono' | 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo. The default applies to a new asset only.
-//   @param duration - Duration in seconds (ClampMin=0.0; 0.0 means indefinite). Default 1.0 on a new asset only.
+//   @param duration - Duration in seconds, at least 0 (0.0 means indefinite); a negative value is an error. Default 1.0 on a new asset only.
 //   @param audio_bus_path - Optional full content path of a UAudioBus to assign as the AudioBus return.
 //   @returns { name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool (each true when this call wrote the field: given, or the default on a new asset), applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>& Params)
@@ -388,12 +388,14 @@ TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>
 				*ChTok));
 	}
 
-	// duration (default for a new asset: 1.0; clamp to >= 0.0 per UPROPERTY meta ClampMin="0.0")
+	// duration (default for a new asset: 1.0). The property is ClampMin="0.0" and 0 means "play indefinitely",
+	// so a negative value is refused rather than clamped into that very different meaning.
 	double DurationD = 1.0;
 	const bool bDurationGiven = Params->TryGetNumberField(TEXT("duration"), DurationD);
-	if (bDurationGiven)
+	if (bDurationGiven && (!FMath::IsFinite(DurationD) || DurationD < 0.0))
 	{
-		DurationD = FMath::Max(0.0, DurationD);
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Invalid duration %g: it must be a finite number of seconds >= 0 (0 plays indefinitely)"), DurationD));
 	}
 
 	// audio_bus_path (optional; load UAudioBus and assign SSB->AudioBus)

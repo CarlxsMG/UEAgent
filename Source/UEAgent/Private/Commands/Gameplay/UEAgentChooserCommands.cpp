@@ -4,6 +4,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EditorAssetLibrary.h"
 #include "Misc/PackageName.h"
+#include "ScopedTransaction.h"                 // FScopedTransaction: every table edit is one undo step
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
@@ -492,16 +493,6 @@ namespace
 		return mcp_common::SaveAssetPackage(Table->GetOutermost(), Table, OutSaveError);
 	}
 
-	/** Chooser_CompileAndSave for a command whose reply does not carry the save outcome: a failed save is logged. */
-	void Chooser_CompileAndSave(UChooserTable* Table)
-	{
-		FString SaveError;
-		if (!Chooser_CompileAndSave(Table, SaveError))
-		{
-			UE_LOG(LogTemp, Verbose, TEXT("[Chooser] SaveAssetPackage returned: %s"), *SaveError);
-		}
-	}
-
 	/**
 	 * The optional inputs of both evaluate commands: context_object_path (OutContextObject, null when
 	 * absent) and object_class (OutResultClass, UObject when absent and never null, since
@@ -541,12 +532,12 @@ namespace
 	}
 }
 
-// MCP:create_chooser_table - Create (or load if it already exists) a UChooserTable asset under the given package path.
+// MCP:create_chooser_table - Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails.
 //   @param name - Asset short name (e.g. "MyChooser"); becomes the package short name.
 //   @param package_path - Long package root (default "/Game/MCP"); full asset path = <package_path>/<name>.
 //   @param result_type - EObjectChooserResultType: "Object" (default), "Class", or "NoPrimaryResult".
 //   @param output_object_class - UClass path used as OutputObjectType (default UObject), loaded via LoadObject<UClass>.
-//   @returns { asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null }
+//   @returns { asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid())
@@ -565,7 +556,7 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 	const FString FullPath = PackagePath / Name;
 
 	FString ResultTypeStr = TEXT("Object");
-	Params->TryGetStringField(TEXT("result_type"), ResultTypeStr);
+	const bool bHasResultType = Params->TryGetStringField(TEXT("result_type"), ResultTypeStr) && !ResultTypeStr.IsEmpty();
 	const EObjectChooserResultType ResultType = ResultTypeFromString(ResultTypeStr);
 
 	FString OutputObjectClassPath;
@@ -579,52 +570,72 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Failed to create UChooserTable: %s"), *CreateError));
 	}
-	if (!bCreated)
-	{
-		// Honor requested settings on existing asset (the tool spec says "load and return").
-		Chooser->ResultType = ResultType;
-		if (!OutputObjectClassPath.IsEmpty())
-		{
-			if (UClass* Cls = LoadObject<UClass>(nullptr, *OutputObjectClassPath))
-			{
-				Chooser->OutputObjectType = Cls;
-			}
-		}
-		Chooser->Compile(true);
 
+	// The reply echoes the settings the table holds, read back after any write.
+	auto MakeReplyData = [Chooser, bCreated]()
+	{
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 		Data->SetStringField(TEXT("asset_path"), Chooser->GetPathName());
-		Data->SetBoolField(TEXT("already_existed"), true);
+		Data->SetBoolField(TEXT("already_existed"), !bCreated);
 		Data->SetStringField(TEXT("result_type"), ResultTypeToString(Chooser->ResultType));
 		Data->SetStringField(TEXT("output_object_class"),
 			Chooser->OutputObjectType ? Chooser->OutputObjectType->GetPathName() : FString());
-		return mcp_common::MakeOkReply(Data);
-	}
+		return Data;
+	};
 
-	Chooser->ResultType = ResultType;
+	UClass* RequestedClass = nullptr;
 	if (!OutputObjectClassPath.IsEmpty())
 	{
-		if (UClass* Cls = LoadObject<UClass>(nullptr, *OutputObjectClassPath))
-		{
-			Chooser->OutputObjectType = Cls;
-		}
-		else
+		RequestedClass = LoadObject<UClass>(nullptr, *OutputObjectClassPath);
+		if (!RequestedClass)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[Chooser] Could not load OutputObjectType UClass: %s"), *OutputObjectClassPath);
 		}
 	}
-	Chooser_CompileAndSave(Chooser);
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("asset_path"), Chooser->GetPathName());
-	Data->SetBoolField(TEXT("already_existed"), false);
-	Data->SetStringField(TEXT("result_type"), ResultTypeToString(Chooser->ResultType));
-	Data->SetStringField(TEXT("output_object_class"),
-		Chooser->OutputObjectType ? Chooser->OutputObjectType->GetPathName() : FString());
-	return mcp_common::MakeOkReply(Data);
+	if (!bCreated)
+	{
+		// An existing table is loaded and returned. Only the settings the request names are applied to it, so a
+		// call without them leaves it as it is; a change is one undo step and is saved.
+		const bool bChangeResultType = bHasResultType && Chooser->ResultType != ResultType;
+		const bool bChangeOutputClass = RequestedClass != nullptr && Chooser->OutputObjectType != RequestedClass;
+		if (!bChangeResultType && !bChangeOutputClass)
+		{
+			TSharedPtr<FJsonObject> Data = MakeReplyData();
+			Data->SetBoolField(TEXT("saved"), false);
+			return mcp_common::MakeOkReply(Data);
+		}
+
+		FString SaveError;
+		bool bSaved = false;
+		{
+			const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetChooserTableSettings", "Set Chooser Table Settings (MCP)"));
+			Chooser->Modify();
+			if (bChangeResultType)
+			{
+				Chooser->ResultType = ResultType;
+			}
+			if (bChangeOutputClass)
+			{
+				Chooser->OutputObjectType = RequestedClass;
+			}
+			bSaved = Chooser_CompileAndSave(Chooser, SaveError);
+		}
+		return mcp_common::MakeSavedReply(MakeReplyData(), bSaved, TEXT("create_chooser_table"), SaveError);
+	}
+
+	// A new asset: its creation is not an undoable edit, so its first settings are written directly.
+	Chooser->ResultType = ResultType;
+	if (RequestedClass)
+	{
+		Chooser->OutputObjectType = RequestedClass;
+	}
+	FString SaveError;
+	const bool bSaved = Chooser_CompileAndSave(Chooser, SaveError);
+	return mcp_common::MakeSavedReply(MakeReplyData(), bSaved, TEXT("create_chooser_table"), SaveError);
 }
 
-// MCP:add_chooser_column_to_table - Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+// MCP:add_chooser_column_to_table - Append a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_type - Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
 //   @param column_name - Label echoed back in the reply only; it is not stored on the column.
@@ -708,6 +719,8 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		}
 	});
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddChooserColumn", "Add Chooser Column (MCP)"));
+	Table->Modify();
 	const int32 NewIndex = Table->ColumnsStructs.Add(MoveTemp(NewCol));
 	FString SaveError;
 	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
@@ -724,9 +737,9 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_column_to_table"), SaveError);
 }
 
-// MCP:add_chooser_row - Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one.
+// MCP:add_chooser_row - Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one, as one undo step, then compiles and saves the table; success is false, with save_error, when the save fails.
 //   @param table_path - Long package path of an existing UChooserTable.
-//   @returns { table_path: string, row_index: int, row_count: int }
+//   @returns { table_path: string, row_index: int, row_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddChooserRow(const TSharedPtr<FJsonObject>& Params)
 {
 	TSharedPtr<FJsonObject> Error;
@@ -735,6 +748,9 @@ TSharedPtr<FJsonObject> HandleAddChooserRow(const TSharedPtr<FJsonObject>& Param
 	{
 		return Error;
 	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddChooserRow", "Add Chooser Row (MCP)"));
+	Table->Modify();
 
 	// Grow every column's row-array by one, using the column's DefaultRowValue when defined
 	// and a default-constructed entry otherwise.
@@ -750,20 +766,21 @@ TSharedPtr<FJsonObject> HandleAddChooserRow(const TSharedPtr<FJsonObject>& Param
 	Table->ResultsStructs.AddDefaulted();
 	const int32 NewIndex = Table->ResultsStructs.Num() - 1;
 
-	Chooser_CompileAndSave(Table);
+	FString SaveError;
+	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("table_path"), Table->GetPathName());
 	Data->SetNumberField(TEXT("row_index"), NewIndex);
 	Data->SetNumberField(TEXT("row_count"), EffectiveRowCount(Table));
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_row"), SaveError);
 }
 
-// MCP:set_chooser_row_outcome - Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable.
+// MCP:set_chooser_row_outcome - Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable, as one undo step, then compile and save the table; success is false, with save_error, when the save fails. A row already bound to that asset is left as it is (already_existed true, saved false).
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param row_index - 0-based row index to assign the outcome to (must be within the OutputObject column's RowValues range).
 //   @param asset_path - Long package path of the UObject to bind as the row's result via FAssetChooser (e.g. "/Game/MyAsset").
-//   @returns { table_path: string, row_index: int, asset_path: string, already_existed: bool }
+//   @returns { table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
@@ -823,12 +840,16 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 		}
 	}
 
+	bool bSaved = false;
+	FString SaveError;
 	if (!bAlreadyExisted)
 	{
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetChooserRowOutcome", "Set Chooser Row Outcome (MCP)"));
+		Table->Modify();
 		FAssetChooser NewOutcome;
 		NewOutcome.Asset = Asset;
 		OutCol.RowValues[RowIndex].Value = FInstancedStruct::Make<FAssetChooser>(NewOutcome);
-		Chooser_CompileAndSave(Table);
+		bSaved = Chooser_CompileAndSave(Table, SaveError);
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -836,7 +857,13 @@ TSharedPtr<FJsonObject> HandleSetChooserRowOutcome(const TSharedPtr<FJsonObject>
 	Data->SetNumberField(TEXT("row_index"), RowIndex);
 	Data->SetStringField(TEXT("asset_path"), Asset->GetPathName());
 	Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-	return mcp_common::MakeOkReply(Data);
+	if (bAlreadyExisted)
+	{
+		// Nothing was written, so nothing was saved.
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_chooser_row_outcome"), SaveError);
 }
 
 // MCP:inspect_chooser_table - Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
@@ -881,7 +908,7 @@ TSharedPtr<FJsonObject> HandleInspectChooserTable(const TSharedPtr<FJsonObject>&
 // Typed delete + row removal + table enumeration.
 // ---------------------------------------------------------------------------
 
-// MCP:delete_chooser_table - Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UChooserTable, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:delete_chooser_table - Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UChooserTable, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 //   @param table_path - Full /Game/.../Chooser asset path.
 //   @returns { table_path, deleted, already_existed, asset_class?, note? }
 //   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
@@ -915,26 +942,29 @@ TSharedPtr<FJsonObject> HandleDeleteChooserTable(const TSharedPtr<FJsonObject>& 
 		Resp->SetStringField(TEXT("table_path"), TablePath);
 		Resp->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
 		Resp->SetBoolField(TEXT("deleted"), false);
-		Resp->SetStringField(TEXT("note"),
-			FString::Printf(TEXT("asset is not a UChooserTable (got %s) - wrong type, refusing to delete"),
-				*Asset->GetClass()->GetName()));
-		return mcp_common::MakeOkReply(Resp);
+		const FString Note = FString::Printf(TEXT("asset is not a UChooserTable (got %s) - wrong type, refusing to delete"),
+			*Asset->GetClass()->GetName());
+		Resp->SetStringField(TEXT("note"), Note);
+		return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(TEXT("delete_chooser_table: %s"), *Note));
 	}
 
+	// The class name is read before the delete: ForceDeleteObjects can collect garbage, which frees the table.
+	const FString AssetClassName = Table->GetClass()->GetName();
 	const bool bDeleted = UEditorAssetLibrary::DeleteAsset(TablePath);
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
 	Resp->SetStringField(TEXT("table_path"), TablePath);
-	Resp->SetStringField(TEXT("asset_class"), Table->GetClass()->GetName());
+	Resp->SetStringField(TEXT("asset_class"), AssetClassName);
 	Resp->SetBoolField(TEXT("deleted"), bDeleted);
 	Resp->SetBoolField(TEXT("already_existed"), true);
-	return mcp_common::MakeOkReply(Resp);
+	return mcp_common::MakeOutcomeReply(Resp, bDeleted, bDeleted ? FString()
+		: FString::Printf(TEXT("delete_chooser_table: the engine did not delete %s (see the editor log for why)"), *TablePath));
 }
 
-// MCP:remove_chooser_row - Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A chooser row is not a real object: this shrinks EVERY column's RowValues array by one -- at row_index if given, else the last row -- and shrinks ResultsStructs to match, then re-compiles the table so the transient caches follow. Use remove_chooser_column to drop a column instead.
+// MCP:remove_chooser_row - Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A chooser row is not a real object: this shrinks EVERY column's RowValues array by one -- at row_index if given, else the last row -- and shrinks ResultsStructs to match, as one undo step, then compiles and saves the table like add_chooser_row; success is false, with save_error, when the save fails. A table with no rows is left as it is (note, saved false). Use remove_chooser_column to drop a column instead.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param row_index - Optional 0-based row index to remove (default: last row).
-//   @returns { table_path, removed_row_index, previous_row_count, new_row_count }
+//   @returns { table_path, removed_row_index, previous_row_count, new_row_count, saved, save_error?, note? }
 
 TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Params)
 {
@@ -956,6 +986,7 @@ TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Pa
 		Resp->SetNumberField(TEXT("removed_row_index"), INDEX_NONE);
 		Resp->SetNumberField(TEXT("previous_row_count"), 0);
 		Resp->SetNumberField(TEXT("new_row_count"), 0);
+		Resp->SetBoolField(TEXT("saved"), false);
 		Resp->SetStringField(TEXT("note"), TEXT("table has zero rows; nothing to remove"));
 		return mcp_common::MakeOkReply(Resp);
 	}
@@ -970,6 +1001,9 @@ TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Pa
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("row_index %d out of range [0, %d)"), RowIndex, RowCountBefore));
 	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveChooserRow", "Remove Chooser Row (MCP)"));
+	Table->Modify();
 
 	// Shrink every column's row-array at RowIndex (parallel arrays must stay in sync).
 	for (FInstancedStruct& Col : Table->ColumnsStructs)
@@ -987,14 +1021,15 @@ TSharedPtr<FJsonObject> HandleRemoveChooserRow(const TSharedPtr<FJsonObject>& Pa
 		Table->ResultsStructs.RemoveAt(RowIndex);
 	}
 
-	Table->Compile(true);
+	FString SaveError;
+	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
 	Resp->SetStringField(TEXT("table_path"), Table->GetPathName());
 	Resp->SetNumberField(TEXT("removed_row_index"), RowIndex);
 	Resp->SetNumberField(TEXT("previous_row_count"), RowCountBefore);
 	Resp->SetNumberField(TEXT("new_row_count"), EffectiveRowCount(Table));
-	return mcp_common::MakeOkReply(Resp);
+	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_chooser_row"), SaveError);
 }
 
 // MCP:list_chooser_tables - List every UChooserTable asset under a package path via the AssetRegistry.
@@ -1045,10 +1080,10 @@ TSharedPtr<FJsonObject> HandleListChooserTables(const TSharedPtr<FJsonObject>& P
 // against the same UChooserTable pipeline; no PIE, no render.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_chooser_column - Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). Re-compiles the table so the transient caches follow. Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
+// MCP:remove_chooser_column - Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_index - Optional 0-based column index (default -1 = last column).
-//   @returns { table_path, removed_column_index, previous_column_count, new_column_count, column_type, note? }
+//   @returns { table_path, removed_column_index, previous_column_count, new_column_count, column_type, saved, save_error?, note? }
 //   NOTE (impl): drops the FInstancedStruct at Table->ColumnsStructs[column_index]; the parallel RowValues live inside it.
 
 TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>& Params)
@@ -1074,6 +1109,7 @@ TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>&
 		Resp->SetNumberField(TEXT("removed_column_index"), INDEX_NONE);
 		Resp->SetNumberField(TEXT("previous_column_count"), 0);
 		Resp->SetNumberField(TEXT("new_column_count"), 0);
+		Resp->SetBoolField(TEXT("saved"), false);
 		Resp->SetStringField(TEXT("note"), TEXT("table has zero columns; nothing to remove"));
 		return mcp_common::MakeOkReply(Resp);
 	}
@@ -1101,8 +1137,11 @@ TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>&
 		? Table->ColumnsStructs[ColumnIndex].GetScriptStruct()->GetName()
 		: FString();
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveChooserColumn", "Remove Chooser Column (MCP)"));
+	Table->Modify();
 	Table->ColumnsStructs.RemoveAt(ColumnIndex);
-	Chooser_CompileAndSave(Table);
+	FString SaveError;
+	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
 	Resp->SetStringField(TEXT("table_path"), Table->GetPathName());
@@ -1110,10 +1149,10 @@ TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>&
 	Resp->SetNumberField(TEXT("previous_column_count"), PreviousCount);
 	Resp->SetNumberField(TEXT("new_column_count"), Table->ColumnsStructs.Num());
 	Resp->SetStringField(TEXT("column_type"), RemovedType);
-	return mcp_common::MakeOkReply(Resp);
+	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_chooser_column"), SaveError);
 }
 
-// MCP:set_chooser_column_default - Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. Compiles and saves only on a change (already_existed=true otherwise).
+// MCP:set_chooser_column_default - Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_index - 0-based column index to update.
 //   @param min - FloatRange column: default lower bound of the row's float range.
@@ -1125,7 +1164,7 @@ TSharedPtr<FJsonObject> HandleRemoveChooserColumn(const TSharedPtr<FJsonObject>&
 //   @param value - Enum and OutputEnum columns: enum ordinal (clamped to 0-255); Name column: the name string to compare; MultiEnum column: the bitmask as an integer.
 //   @param asset_path - Object/OutputObject column: long package path of the UObject bound as the default row value.
 //   @param class_path - ObjectClass column: path of the UClass to match (e.g. "/Script/Engine.Pawn" or "/Game/BP_Enemy.BP_Enemy_C"), used with comparison (default SubClassOf).
-//   @returns { table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved }
+//   @returns { table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved, save_error? }
 
 TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1137,7 +1176,10 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 	{
 		return LoadError;
 	}
-	FInstancedStruct& Col = *ColPtr;
+	// The new default is written into a copy of the column. The table takes it only when it differs, inside a
+	// transaction opened before that write, so a refused or no-op request leaves the table, its undo history and
+	// its package untouched.
+	FInstancedStruct Col = *ColPtr;
 	const UScriptStruct* ColStruct = Col.GetScriptStruct();
 	const FString ColumnType = ColStruct->GetName();
 
@@ -1461,9 +1503,14 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 			FString::Printf(TEXT("set_chooser_column_default: column type '%s' is not supported (FloatRange|Bool|Enum|Object|OutputObject|OutputFloat|OutputBool|OutputName|ObjectClass|Name|OutputEnum|MultiEnum|Randomize only)"), *ColumnType));
 	}
 
+	bool bSaved = false;
+	FString SaveError;
 	if (bAnyChange)
 	{
-		Chooser_CompileAndSave(Table);
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetChooserColumnDefault", "Set Chooser Column Default (MCP)"));
+		Table->Modify();
+		*ColPtr = Col;
+		bSaved = Chooser_CompileAndSave(Table, SaveError);
 	}
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
@@ -1471,7 +1518,6 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 	Resp->SetNumberField(TEXT("column_index"), ColumnIndex);
 	Resp->SetStringField(TEXT("column_type"), ColumnType);
 	Resp->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-	Resp->SetBoolField(TEXT("saved"), bAnyChange);
 
 	// Echo the actual set value so a caller can verify it landed: a Bool or Object column in its own
 	// shape, every other type in the cell shape of get_chooser_row_values.
@@ -1491,7 +1537,13 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 		Chooser_VisitColumn(Col, [&Resp](const auto& Column) { Chooser_WriteCell(Resp, Column, Column.DefaultRowValue); });
 	}
 
-	return mcp_common::MakeOkReply(Resp);
+	if (!bAnyChange)
+	{
+		// Nothing was written, so nothing was saved.
+		Resp->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Resp);
+	}
+	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_chooser_column_default"), SaveError);
 }
 
 // MCP:evaluate_chooser_table - Actually RUN a UChooserTable and get the SINGLE chosen result -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null. Use evaluate_chooser_table_multi when you want EVERY matching result instead of the first.

@@ -727,9 +727,9 @@ TSharedPtr<FJsonObject> HandlePauseLevelSequenceRuntime(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:stop_level_sequence_runtime - Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (always true) and playing as read just after Stop. Use pause_level_sequence_runtime to keep the player.
+// MCP:stop_level_sequence_runtime - Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (true when a playing or paused player was stopped, read back after Stop) and playing as read just after Stop. A player that had already stopped (it reached its end, say) is still released: success with stopped false and a note. A player still playing or paused after Stop is an error, and the key and its actor are kept. Use pause_level_sequence_runtime to keep the player.
 //   @param player_key - Player key returned from play_level_sequence_runtime
-//   @returns { player_key: string, stopped: bool, playing: bool }
+//   @returns { player_key: string, stopped: bool, playing: bool, note?: string }
 TSharedPtr<FJsonObject> HandleStopLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;
@@ -742,8 +742,20 @@ TSharedPtr<FJsonObject> HandleStopLevelSequenceRuntime(const TSharedPtr<FJsonObj
     {
         return Found.Error;
     }
+    // Stop only acts on a playing or paused player, and defers itself while the player is evaluating, so the
+    // state is read on both sides of the call. A stop that did not take keeps the key and the actor.
+    const bool bWasRunning = Found.Player->IsPlaying() || Found.Player->IsPaused();
     Found.Player->Stop();
     const bool bStillPlaying = Found.Player->IsPlaying();
+    if (bWasRunning && (bStillPlaying || Found.Player->IsPaused()))
+    {
+        TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+        Report->SetStringField(TEXT("player_key"), PlayerKey);
+        Report->SetBoolField(TEXT("stopped"), false);
+        Report->SetBoolField(TEXT("playing"), bStillPlaying);
+        return mcp_common::MakeOutcomeReply(Report, false,
+            TEXT("stop_level_sequence_runtime: the player is still playing or paused after Stop (it may be mid-evaluation); the key and its actor are kept, call again"));
+    }
 
     // Forget the player and tear down the actor that hosted it.
     RuntimePlayersByKey.Remove(PlayerKey);
@@ -756,8 +768,13 @@ TSharedPtr<FJsonObject> HandleStopLevelSequenceRuntime(const TSharedPtr<FJsonObj
 
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
     Report->SetStringField(TEXT("player_key"), PlayerKey);
-    Report->SetBoolField(TEXT("stopped"), true);
+    Report->SetBoolField(TEXT("stopped"), bWasRunning);
     Report->SetBoolField(TEXT("playing"), bStillPlaying);
+    if (!bWasRunning)
+    {
+        Report->SetStringField(TEXT("note"),
+            TEXT("The player was already stopped; its key was released and its actor destroyed."));
+    }
     return mcp_common::MakeOkReply(Report);
 }
 
@@ -886,7 +903,7 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
+// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks, the camera cut track included, with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
 //   @param sequence_name - Name of the target level sequence
 //   @returns { sequence_name: string, master_tracks: [object], bindings: [object], master_track_count: int, binding_count: int, total_track_count: int }
 TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& Params)
@@ -913,6 +930,11 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
         {
             RootTracks.Add(MakeShared<FJsonValueObject>(Impl::DescribeTrack(*Track, /*bIncludeTrackName*/ true)));
         }
+    }
+    // The camera cut track is a root track too, but the movie scene keeps it apart from GetTracks().
+    if (const UMovieSceneTrack* CameraCutTrack = Scene->GetCameraCutTrack())
+    {
+        RootTracks.Add(MakeShared<FJsonValueObject>(Impl::DescribeTrack(*CameraCutTrack, /*bIncludeTrackName*/ true)));
     }
 
     // Object bindings (possessables and spawnables), each with its own tracks.

@@ -67,7 +67,7 @@ Fill an entire render target with a solid color via the canvas. drawn is false, 
 
 *Destructive, idempotent.*
 
-Clear a render target to a solid color via ClearRenderTarget2D
+Clear a render target to a solid color via ClearRenderTarget2D. Render-target contents live on the GPU only, so nothing is saved or undoable. cleared is false, and the call fails, when the engine skips the clear: a render target without a resource, which is every render target in a process that cannot render (-nullrhi, a commandlet).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -331,7 +331,7 @@ Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UC
 
 *Destructive.*
 
-Export a render target to an image file on disk
+Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA32f render target, which writes HDR when filename ends in .hdr and EXR otherwise. exported is measured on disk: the file must exist, hold bytes and have been written by this call. It is false, and the call fails saying why, for a render target without a resource (every render target in a process that cannot render: -nullrhi, a commandlet), an invalid path, a file that cannot be opened for writing, or an image that cannot be read back; an empty file left by a failed export is removed when the call created it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

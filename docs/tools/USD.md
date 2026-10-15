@@ -659,15 +659,15 @@ Author one metadata field (e.g. "comment", "documentation", "kind") on an existi
 
 *Destructive, idempotent.*
 
-Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. Caveat: an unrecognized value is silently applied as "Def" and the reply echoes the input, not the applied specifier. Returns specifier and set; not saved to disk.
+Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. An unknown specifier is refused before anything is authored. specifier reports the one written, only when the write succeeded (set); a failed write fails the call. Not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
-| `specifier` | string | yes | "Def", "Over" or "Class", case-insensitive; anything else is applied as "Def". |
+| `specifier` | string | yes | "Def", "Over" or "Class", case-insensitive; anything else is refused. |
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
-**Returns:** `{ set: bool, specifier: string }`
+**Returns:** `{ set: bool, specifier?: string, requested?: object }`
 
 ## `set_usd_prim_type`
 

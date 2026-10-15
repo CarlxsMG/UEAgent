@@ -654,15 +654,15 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundInfo(const TSharedPtr<FJsonObject>& Pa
 // member). Saves the asset. Supports an optional default value (float/int/bool/
 // string) baked into the literal.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_graph_input - Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding (the reliable headless path) and calls UMetaSoundBuilderBase::AddGraphInputNode, adding a real graph input node (and its backing graph input member) of the given data type. Optionally bakes a typed default into the input's literal — provide at most one of ``default_value`` (float), ``int_value``, ``bool_value`` or ``string_value``.          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").         "Bool", "String", "Audio", "Trigger").
-//   @param metasound_path - Asset path of the MetaSound Source (e.g.
+// MCP:add_metasound_graph_input - Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
+//   @param metasound_path - Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example"
 //   @param input_name - Name of the graph input node to add.
 //   @param data_type - Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float")
 //   @param default_value - Float default baked into the literal (optional)
 //   @param int_value - Int32 default baked into the literal (optional, mutually exclusive with other defaults)
 //   @param bool_value - Bool default baked into the literal (optional, mutually exclusive with other defaults)
 //   @param string_value - String default baked into the literal (optional, mutually exclusive with other defaults)
-//   @returns { asset_path: string, input_name: string, data_type: string, added: bool, has_default: bool, saved: bool, save_error: string? }
+//   @returns { asset_path: string, input_name: string, data_type: string, added: bool, already_exists?: bool, has_default: bool, note?: string, saved: bool, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -705,6 +705,35 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObjec
     {
         double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
         DefaultLiteral.Set(static_cast<float>(V)); bHasDefault = true;
+    }
+
+    // AddGraphInputNode hands back an input that already has this name, whatever its type, without touching it
+    // (the default passed in is dropped), so a taken name is answered here without calling it: the same type is
+    // the state asked for (nothing is written or saved), another type is an error.
+    const FName InputFName(*InputName);
+    if (Builder->GetConstBuilder().FindGraphInputNode(InputFName) != nullptr)
+    {
+        const FMetasoundFrontendClassInput* ExistingInput = Builder->GetConstBuilder().FindGraphInput(InputFName);
+        const FName ExistingType = ExistingInput ? ExistingInput->TypeName : FName();
+        if (!ExistingType.IsEqual(FName(*DataType), ENameCase::IgnoreCase))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Graph input '%s' already exists with data type '%s', not '%s'; remove it first (remove_metasound_graph_input) to change its type"),
+                *InputName, *ExistingType.ToString(), *DataType));
+        }
+        TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+        Data->SetStringField(TEXT("input_name"), InputName);
+        Data->SetStringField(TEXT("data_type"), ExistingType.ToString());
+        Data->SetBoolField(TEXT("added"), false);
+        Data->SetBoolField(TEXT("already_exists"), true);
+        Data->SetBoolField(TEXT("has_default"), false);
+        Data->SetBoolField(TEXT("saved"), false);
+        if (bHasDefault)
+        {
+            Data->SetStringField(TEXT("note"),
+                TEXT("The input already exists; its default was left unchanged (set it with metasound_set_input_default)."));
+        }
+        return mcp_common::MakeOkReply(Data);
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundAddGraphInput", "MetaSound Add Graph Input"));

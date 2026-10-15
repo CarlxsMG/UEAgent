@@ -268,7 +268,7 @@ Add a bone named bone_name to the reference skeleton of a USkeleton asset under 
 
 *Additive, idempotent.*
 
-Add an IK goal to an IK Rig, associated with a bone.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: existing goal with the same bone returns success without re-creating.
+Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, and the asset is saved again. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -380,7 +380,7 @@ Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if
 
 *Additive.*
 
-Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
+Add a named notify TRACK to a UAnimSequence (the track itself, not events on it) in an undo transaction and save it. A track of that name already there is a success with already_existed=true and nothing saved; a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -388,7 +388,7 @@ Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
 | `track_name` | string | yes | Notify track name to add. |
 | `color` | string | no | Optional track color as an [r,g,b] or [r,g,b,a] float array (default white). |
 
-**Returns:** `{ animation_path, track_name, track_names, track_count, already_existed, saved, message }`
+**Returns:** `{ animation_path, track_name, track_names, track_count, already_existed, saved, save_error, message }`
 
 ## `add_pose_search_channel_to_schema`
 
@@ -436,14 +436,14 @@ Add a pose copied from the skeleton reference pose to a UPoseAsset under the giv
 
 *Additive.*
 
-Add a retarget op to an IK Retargeter's op stack. Default type: FK Chains op.
+Add a retarget op to the op stack of an IK Retargeter asset through its controller (one undo transaction), then save the asset; op_index and op_name are where and how the engine placed it. Default type: FK Chains op. An unknown op type, or a singleton op type the stack already has, is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_retargeter_path` | string | yes | Path to the UIKRetargeter asset |
 | `op_type` | string | no | Optional op class path (default "/Script/IKRig.IKRetargetFKChainsOp") |
 
-**Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, op_count: int }`
+**Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, op_count: int, saved: bool, save_error?: string }`
 
 ## `add_rig_bone`
 
@@ -1007,7 +1007,7 @@ Create and save a UPoseSearchSchema data asset bound to a USkeleton
 
 *Additive.*
 
-Create a new retarget pose for editing in an IK Retargeter.  The pose is set as the current pose after creation, ready for bone rotation edits via set_retarget_pose_bone_rotation.
+Create a new retarget pose for editing in an IK Retargeter through its controller, then save the asset.  The engine makes the name unique, so read pose_name back. The pose is set as the current pose after creation, ready for bone rotation edits via set_retarget_pose_bone_rotation. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1078,7 +1078,7 @@ Disconnect a goal from a solver, removing that solver's per-goal effector/settin
 
 *Additive.*
 
-Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; the save result is not reported, and a name taken by an asset of another class is refused. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
+Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; a name taken by an asset of another class is refused. A failed save makes success false, with saved=false and save_error, and the copy stays in memory only. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1086,7 +1086,7 @@ Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton
 | `new_name` | string | yes | Name of the new duplicate. |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/MCP) |
 
-**Returns:** `{ source_path, duplicate_path, duplicate_class }`
+**Returns:** `{ source_path, duplicate_path, duplicate_class, saved, save_error }`
 
 ## `edit_anim_notify`
 
@@ -1690,15 +1690,15 @@ List every FMotionWarpingTarget on an actor's UMotionWarpingComponent. Read-only
 
 *Destructive.*
 
-Move a solver from one position to another in the IK Rig solver stack.
+Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 | `from_index` | number | yes | Source 0-based solver index |
-| `to_index` | number | yes | Target 0-based solver index |
+| `to_index` | number | yes | Target 0-based solver index, below the solver count |
 
-**Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int }`
+**Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string }`
 
 ## `play_animation`
 
@@ -1757,14 +1757,14 @@ Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
 
 *Destructive.*
 
-Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack) and save the package; removed=false when no track has that bone name, and the save result is not reported. List tracks with get_anim_curve_names.
+Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack, one undo step) and save the package. No track with that bone name is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. List tracks with get_anim_curve_names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `bone_name` | string | yes | Name of the bone track to remove (must match an existing track). |
+| `bone_name` | string | yes | Name of the bone track to remove; a name no track has removes nothing. |
 
-**Returns:** `{ sequence_path, bone_name, removed }`
+**Returns:** `{ sequence_path, bone_name, removed, saved, save_error }`
 
 ## `remove_anim_composite`
 
@@ -1809,7 +1809,7 @@ Remove a conduit node (and its bound rule subgraph) from a state machine.
 
 *Destructive.*
 
-Remove a float or transform curve by name from a UAnimSequence through its data controller and save the package (the save result is not reported); removed=false when no such curve exists. Any curve_type other than transform targets float curves.
+Remove a float or transform curve by name from a UAnimSequence through its data controller (one undo step) and save the package. No such curve is a success with removed=false and nothing saved; a failed save makes success false, with saved=false and save_error. Any curve_type other than transform targets float curves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1817,7 +1817,7 @@ Remove a float or transform curve by name from a UAnimSequence through its data 
 | `curve_name` | string | yes | Name of the curve to remove. |
 | `curve_type` | string | no | Curve type to target: float (default) or transform |
 
-**Returns:** `{ sequence_path, curve_name, curve_type, removed }`
+**Returns:** `{ sequence_path, curve_name, curve_type, removed, saved, save_error }`
 
 ## `remove_anim_curve_name`
 
@@ -1848,14 +1848,14 @@ Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
 
 *Destructive.*
 
-Remove all UAnimNotify events matching a name from an AnimSequence
+Remove every notify event whose NotifyName matches notify_name from a UAnimSequence (UAnimationBlueprintLibrary::RemoveAnimationNotifyEventsByName) in an undo transaction and save it. A name no event has is a success with removed=false, already_absent=true and nothing saved; a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `animation_path` | string | yes | Full asset path to the UAnimSequence. |
 | `notify_name` | string | yes | Name of the notify to remove (matches FAnimNotifyEvent.NotifyName). |
 
-**Returns:** `{ animation_path, notify_name, removed, removed_count, already_absent }`
+**Returns:** `{ animation_path, notify_name, removed, removed_count, already_absent, saved, save_error }`
 
 ## `remove_anim_sequence`
 
@@ -1900,14 +1900,14 @@ Remove a state node (and its bound animation subgraph) from a state machine.
 
 *Destructive.*
 
-Remove every authored sync marker with the given name from a UAnimSequence and save the package (no undo transaction; the save result is not reported). Returns markers_before, markers_after and removed, which is false when no marker had that name.
+Remove every authored sync marker with the given name from a UAnimSequence in an undo transaction and save the package. Returns markers_before, markers_after and removed; no marker with that name is a success with removed=false and nothing saved, and a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `marker_name` | string | yes | Name of the marker to remove. |
 
-**Returns:** `{ sequence_path, marker_name, markers_before, markers_after, removed }`
+**Returns:** `{ sequence_path, marker_name, markers_before, markers_after, removed, saved, save_error }`
 
 ## `remove_anim_transition`
 
@@ -2018,27 +2018,27 @@ Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches
 
 *Destructive.*
 
-Remove a retarget chain from an IK Rig by name.
+Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 | `chain_name` | string | yes | Name of the retarget chain to remove |
 
-**Returns:** `{ asset_path: string, chain_name: string, removed: bool, chain_count: int }`
+**Returns:** `{ asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string }`
 
 ## `remove_ik_solver`
 
 *Destructive.*
 
-Remove a solver from an IK Rig's solver stack by index.
+Remove the solver at a 0-based index from the solver stack of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An out-of-range index is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 | `solver_index` | number | yes | 0-based index of the solver to remove |
 
-**Returns:** `{ asset_path: string, removed_solver_index: int, solver_count: int, removed: bool }`
+**Returns:** `{ asset_path: string, removed_solver_index: int, solver_count: int, removed: bool, saved: bool, save_error?: string }`
 
 ## `remove_montage_notify`
 
@@ -2186,7 +2186,7 @@ Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-d
 
 *Destructive, idempotent.*
 
-Remove a retarget pose from an IK Retargeter by name.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent — removing a pose that isn't present is a no-op (removed:false, already_absent:true). The engine's built-in default pose cannot be removed (honest error).
+Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a no-op (removed:false, already_absent:true), and the asset is still saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2200,14 +2200,14 @@ Remove a retarget pose from an IK Retargeter by name.  Inverse of create_retarge
 
 *Destructive.*
 
-Remove a retarget op from an IK Retargeter by index.
+Remove the op at a 0-based index, with any child ops, from the op stack of an IK Retargeter asset through its controller (one undo transaction), then save the asset. An out-of-range index is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_retargeter_path` | string | yes | Path to the UIKRetargeter asset |
 | `op_index` | number | yes | 0-based op index |
 
-**Returns:** `{ asset_path: string, removed_op_index: int, removed: bool, op_count: int }`
+**Returns:** `{ asset_path: string, removed_op_index: int, removed: bool, op_count: int, saved: bool, save_error?: string }`
 
 ## `remove_rig_element`
 
@@ -2349,7 +2349,7 @@ Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails 
 
 *Destructive.*
 
-Rename a retarget chain of an IK Rig asset and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. The save result is not reported.
+Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2357,7 +2357,7 @@ Rename a retarget chain of an IK Rig asset and save it. The engine makes the new
 | `chain_name` | string | yes | Current name of the retarget chain, as get_ik_rig_info lists it. |
 | `new_name` | string | yes | Requested new name; the engine may add a suffix to keep it unique. |
 
-**Returns:** `{ asset_path: string, old_name: string, new_name: string, renamed: bool }`
+**Returns:** `{ asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string }`
 
 ## `rename_montage_section`
 
@@ -2493,7 +2493,7 @@ Create or update a character Animation Blueprint with a "Locomotion" state machi
 
 *Destructive.*
 
-Retime a FLOAT curve on a UAnimSequence: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+Retime a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2502,7 +2502,7 @@ Retime a FLOAT curve on a UAnimSequence: every key TIME becomes (t - origin) * f
 | `factor` | number | no | Scale factor applied to each key TIME (default 1.0). |
 | `origin` | number | no | Time origin the key times are scaled about (default 0.0). |
 
-**Returns:** `{ anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, message }`
+**Returns:** `{ anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, save_error, message }`
 
 ## `set_anim_additive_settings`
 
@@ -2524,21 +2524,21 @@ Set the additive-animation type and base pose on a UAnimSequence
 
 *Destructive, idempotent.*
 
-Set per-key bone transforms (translation/rotation/scale) on a UAnimSequence bone track (real pose data, not identity).
+Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `keys` | array | yes | Array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1]. |
-| `bone_name` | string | no | Skeleton bone whose track to author (resolved/validated against the skeleton; first bone if empty). |
+| `bone_name` | string | no | Name of a bone of the skeleton of the sequence; omitted or empty means the root bone. |
 
-**Returns:** `{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, message }`
+**Returns:** `{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, save_error, message }`
 
 ## `set_anim_curve_color`
 
 *Destructive, idempotent.*
 
-Set the editor display color of a FLOAT curve on a UAnimSequence (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+Set the editor display color of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2546,13 +2546,13 @@ Set the editor display color of a FLOAT curve on a UAnimSequence (cosmetic: it t
 | `curve_name` | string | yes | Name of the float curve. |
 | `color` | array | no | RGBA color as [r, g, b, a] in 0..1 (default [1,1,1,1]). |
 
-**Returns:** `{ anim_sequence_path, curve_name, color, applied, saved, message }`
+**Returns:** `{ anim_sequence_path, curve_name, color, applied, saved, save_error, message }`
 
 ## `set_anim_curve_comment`
 
 *Destructive, idempotent.*
 
-Set the author comment of a FLOAT curve on a UAnimSequence (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
+Set the author comment of a FLOAT curve on a UAnimSequence through its data controller (one undo step), then save the package (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: a name that is not a float curve of the sequence, a transform curve included, is an error and nothing is written. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2560,7 +2560,7 @@ Set the author comment of a FLOAT curve on a UAnimSequence (metadata only; it do
 | `curve_name` | string | yes | Name of the float curve. |
 | `comment` | string | no | Comment string to set (default empty). |
 
-**Returns:** `{ anim_sequence_path, curve_name, comment, applied, saved, message }`
+**Returns:** `{ anim_sequence_path, curve_name, comment, applied, saved, save_error, message }`
 
 ## `set_anim_curve_interp_mode`
 
@@ -2596,14 +2596,14 @@ Replace every key of an existing float curve on a UAnimSequence with the given [
 
 *Destructive, idempotent.*
 
-Set the sampling frame rate of a UAnimSequence (IAnimationDataController::SetFrameRate).
+Set the frame rate of the data model of a UAnimSequence (IAnimationDataController::SetFrameRate, one undo step) to fps rounded to whole frames per second, then save the package; fps, numerator and denominator are read back from the data model. The data controller only takes a rate that is a multiple or a factor of the current one, and the frame count must stay whole at the new rate: any other rate is an error and nothing changes. A failed save makes success false, with saved=false and save_error. get_anim_sequence_info reads the rate.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `fps` | number | yes | New frame rate in frames per second (integer > 0). |
+| `fps` | number | yes | New frame rate in frames per second, rounded to a whole number that must be at least 1. |
 
-**Returns:** `{ sequence_path, fps, numerator, denominator }`
+**Returns:** `{ sequence_path, fps, numerator, denominator, saved, save_error }`
 
 ## `set_anim_graph_node_pin_binding`
 
@@ -2685,14 +2685,14 @@ Rebind a UAnimMontage to a different USkeleton (clears existing source link + re
 
 *Destructive, idempotent.*
 
-Set the number of sampled frames on a UAnimSequence (IAnimationDataController::SetNumberOfFrames).
+Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the UAnimSequence. |
 | `frame_count` | number | yes | New number of frames (integer > 0). |
 
-**Returns:** `{ sequence_path, frame_count }`
+**Returns:** `{ sequence_path, frame_count, saved, save_error }`
 
 ## `set_anim_retarget_source`
 
@@ -2876,7 +2876,7 @@ Update the local reference-pose transform of an existing bone
 
 *Destructive, idempotent.*
 
-Set bone-specific settings for a bone within a solver.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
+Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2885,13 +2885,13 @@ Set bone-specific settings for a bone within a solver.  Partial update (idempote
 | `bone_name` | string | yes | Name of the bone to modify. |
 | `settings` | object | yes | Object with bone-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, bone_name: string, success: bool, saved: bool, save_error?: string }`
 
 ## `set_ik_goal_settings`
 
 *Destructive, idempotent.*
 
-Set goal-specific settings for a goal connected to a solver.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error.
+Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2900,7 +2900,7 @@ Set goal-specific settings for a goal connected to a solver.  Partial update (id
 | `goal_name` | string | yes | Name of the goal to modify. |
 | `settings` | object | yes | Object with goal-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool, saved: bool, save_error?: string }`
 
 ## `set_ik_retarget_chain_bones`
 
@@ -2937,7 +2937,7 @@ Set the start bone and/or end bone of one solver in an IK Rig asset (0-based sta
 
 *Destructive, idempotent.*
 
-Enable or disable a solver in an IK Rig's solver stack.
+Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2945,13 +2945,13 @@ Enable or disable a solver in an IK Rig's solver stack.
 | `solver_index` | number | yes | 0-based solver index |
 | `enabled` | boolean | no | Optional bool; defaults to true |
 
-**Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool }`
+**Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool, saved: bool, save_error?: string }`
 
 ## `set_ik_solver_settings`
 
 *Destructive, idempotent.*
 
-Set detailed solver-specific settings on a solver in an IK Rig.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side.
+Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2959,7 +2959,7 @@ Set detailed solver-specific settings on a solver in an IK Rig.  Partial update:
 | `solver_index` | number | yes | Index of the solver in the rig's solver stack. |
 | `settings` | object | yes | Object with solver-type-specific fields to set. |
 
-**Returns:** `{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool }`
+**Returns:** `{ ik_rig_path: string, solver_index: int, solver_type: string, success: bool, saved: bool, save_error?: string }`
 
 ## `set_montage_blend_times`
 
@@ -3237,7 +3237,7 @@ Bind (or rebind) the USkeleton of the schema's FPoseSearchRoledSkeleton entry un
 
 *Destructive, idempotent.*
 
-Set a bone's rotation offset in the current retarget pose (euler degrees). Creates a default pose if none is current.
+Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3254,7 +3254,7 @@ Set a bone's rotation offset in the current retarget pose (euler degrees). Creat
 | `rotation` | object | no | Optional nested {x, y, z, w} quaternion object |
 | `pose_name` | string | no | Optional explicit retarget pose name; created if missing |
 
-**Returns:** `{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number }`
+**Returns:** `{ asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, saved: bool, save_error?: string }`
 
 ## `set_retargeter_chain_mapping`
 

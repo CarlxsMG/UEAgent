@@ -1233,12 +1233,12 @@ Set a scalar parameter override on a transient Material Instance Dynamic (MID), 
 
 *Destructive, idempotent.*
 
-Set a texture parameter value on a Material Instance Dynamic
+Set a texture parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. parameter_name must be a global texture parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new texture. Scalars and vectors: set_mid_scalar_param, set_mid_vector_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `mid_path` | string | yes | Object path of the MID (transient or component-owned full path) |
-| `parameter_name` | string | yes | Name of the texture parameter |
+| `parameter_name` | string | yes | Name of a texture parameter of the MID's material |
 | `texture_path` | string | yes | Content path to the texture to assign |
 
 **Returns:** `{ mid_path, parameter_name, old_texture_path, new_texture_path, requested_texture_path, set }`
@@ -1247,18 +1247,18 @@ Set a texture parameter value on a Material Instance Dynamic
 
 *Destructive, idempotent.*
 
-Set a vector/color parameter value on a Material Instance Dynamic.
+Set a vector (color) parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_name must be a global vector parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new color. Scalars and textures: set_mid_scalar_param, set_mid_texture_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `mid_object_path` | string | yes | Object path of the MID |
-| `param_name` | string | yes | Name of the vector parameter |
-| `value` | object | yes | Color object {r, g, b, a} components (a defaults to 1) |
-| `r` | number | no | Red component (0-1) |
-| `g` | number | no | Green component (0-1) |
-| `b` | number | no | Blue component (0-1) |
+| `mid_object_path` | string | yes | Object path of the MID (from create_material_instance_dynamic) |
+| `param_name` | string | yes | Name of a vector parameter of the MID's material |
+| `value` | object | yes | Color object {r, g, b, a}; a missing component is 0, a missing a is 1 |
+| `r` | number | no | Not read at the top level: the red component goes in value |
+| `g` | number | no | Not read at the top level: the green component goes in value |
+| `b` | number | no | Not read at the top level: the blue component goes in value |
 
-**Returns:** `{ mid_object_path, param_name, r, g, b, a, set }`
+**Returns:** `{ mid_object_path, param_name, old_value: {r, g, b, a}, new_value: {r, g, b, a}, set }`
 
 ## `set_mpci_parent_collection`
 

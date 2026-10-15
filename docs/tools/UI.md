@@ -800,7 +800,7 @@ Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisi
 
 *Destructive.*
 
-Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
+Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets: stopped is true when the animation was playing before the call and is not after it; one that was not playing (stopped or paused) succeeds with stopped:false and a note, and one still playing after the call is an error. Falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

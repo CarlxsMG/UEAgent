@@ -22,11 +22,11 @@ Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose targ
 
 *Additive.*
 
-Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding (the reliable headless path) and calls UMetaSoundBuilderBase::AddGraphInputNode, adding a real graph input node (and its backing graph input member) of the given data type. Optionally bakes a typed default into the input's literal — provide at most one of ``default_value`` (float), ``int_value``, ``bool_value`` or ``string_value``.          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").         "Bool", "String", "Audio", "Trigger").
+Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example" |
 | `input_name` | string | yes | Name of the graph input node to add. |
 | `data_type` | string | no | Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float") |
 | `default_value` | number | no | Float default baked into the literal (optional) |
@@ -34,7 +34,7 @@ Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a
 | `bool_value` | boolean | no | Bool default baked into the literal (optional, mutually exclusive with other defaults) |
 | `string_value` | string | no | String default baked into the literal (optional, mutually exclusive with other defaults) |
 
-**Returns:** `{ asset_path: string, input_name: string, data_type: string, added: bool, has_default: bool, saved: bool, save_error: string? }`
+**Returns:** `{ asset_path: string, input_name: string, data_type: string, added: bool, already_exists?: bool, has_default: bool, note?: string, saved: bool, save_error: string? }`
 
 ## `add_metasound_graph_output`
 
@@ -401,7 +401,7 @@ Creates a USoundSourceBus asset at package_path/name, or loads the one already t
 | `name` | string | yes | Name of the new Sound Source Bus asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
 | `source_bus_channels` | string | no | ESourceBusChannels: 'Mono' \| 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo. The default applies to a new asset only. |
-| `duration` | number | no | Duration in seconds (ClampMin=0.0; 0.0 means indefinite). Default 1.0 on a new asset only. |
+| `duration` | number | no | Duration in seconds, at least 0 (0.0 means indefinite); a negative value is an error. Default 1.0 on a new asset only. |
 | `audio_bus_path` | string | no | Optional full content path of a UAudioBus to assign as the AudioBus return. |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool (each true when this call wrote the field: given, or the default on a new asset), applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }`

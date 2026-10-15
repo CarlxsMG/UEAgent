@@ -211,13 +211,13 @@ Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStatic
 
 *Additive.*
 
-Copy UV data from one UV channel to another on the same mesh.
+Copy UV data from one UV channel to another on the same mesh. A dest_channel the mesh does not have yet is added first (the channel count only grows, and channels added in between have no UVs set); a source_channel the mesh does not have, or a dest_channel of 8 or more, is an error checked before anything changes. copied is false, and the call fails, when the engine reports an error; the same channel for both is a no-op that succeeds with copied false and a note. No undo entry, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | DynamicMeshActor name (required) |
 | `source_channel` | number | yes | Source UV channel index (required) |
-| `dest_channel` | number | yes | Destination UV channel index (required, auto-grown if >= NumUVSets) |
+| `dest_channel` | number | yes | Destination UV channel index, 0 to 7 (required, added to the mesh when it does not have it yet) |
 
 **Returns:** `{ actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.`
 
@@ -603,14 +603,14 @@ Test whether a 3D point is inside the mesh using Fast Winding Number via UGeomet
 
 *Destructive.*
 
-Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
+Build a BVH for the live dynamic mesh of a DynamicMeshActor with RebuildBVHForMesh and read it back with IsBVHValidForMesh. The BVH is a temporary that is not kept: the spatial-query tools build their own on every call, so this only checks that a BVH can be built for the mesh as it is now. bvh_rebuilt is true when the engine reported no error and the BVH reads back as valid; the call fails otherwise. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `b_only_if_invalid` | boolean | no | Optional: only rebuild if currently invalid (default true) |
+| `b_only_if_invalid` | boolean | no | Optional, default true; it has no effect, since every call starts from an empty temporary BVH that the engine always rebuilds |
 
-**Returns:** `{ actor_name, bvh_rebuilt: true, b_only_if_invalid, bvh_valid }`
+**Returns:** `{ actor_name, bvh_rebuilt: bool, b_only_if_invalid, bvh_valid }`
 
 ## `recompute_mesh_normals`
 
@@ -686,7 +686,7 @@ Remove the vertices no triangle references from a DynamicMeshActor's live dynami
 
 *Destructive.*
 
-Pack existing UV islands on a UV channel into standard UV space.
+Pack existing UV islands on a UV channel into standard UV space. A channel the mesh does not have, or an empty mesh, is an error checked before anything changes. A channel with no UVs set has no islands to pack: the call succeeds with repacked false and a note, leaving the mesh unchanged. Otherwise repacked is false, and the call fails, when the engine reports an error. No undo entry, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -695,7 +695,7 @@ Pack existing UV islands on a UV channel into standard UV space.
 | `target_image_width` | number | no | target image width in pixels (default 512) |
 | `optimize_island_rotation` | boolean | no | whether to optimize island rotation (default true) |
 
-**Returns:** `{ actor_name, uv_channel, target_image_width, optimize_island_rotation, repacked }`
+**Returns:** `{ actor_name, uv_channel, target_image_width, optimize_island_rotation, num_uv_islands, repacked, note? }`
 
 ## `repair_mesh_self_intersections`
 

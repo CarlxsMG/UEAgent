@@ -4779,7 +4779,7 @@ namespace
 // pass the SHORT name (no "User." prefix) and we add it as-is - same pattern
 // as HandleSetNiagaraUserParameter.
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_data_interface - Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (already_exists true, nothing saved). The inverse is remove_niagara_data_interface.
+// MCP:add_niagara_data_interface - Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (added false, already_exists true, nothing saved); one with this name and any other type is an error. The inverse is remove_niagara_data_interface.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the new user-parameter (no "User." prefix)
 //   @param data_interface_class - Data interface class name (e.g. "StaticMesh", "Texture"): a loaded data interface class with that name, else /Script/Niagara.NiagaraDataInterface<Name>
@@ -4816,11 +4816,22 @@ TSharedPtr<FJsonObject> HandleAddNiagaraDataInterface(const TSharedPtr<FJsonObje
     const FNiagaraTypeDefinition TypeDef(DIClass);
     const FNiagaraVariable NewVar(TypeDef, FName(*ParameterName));
 
+    // The store keys parameters by name AND type, so AddParameter would add a second user parameter of the
+    // same name next to one of another type. The lookup is by name only: the same class is the state asked
+    // for (nothing is written or saved), any other type is an error.
     FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
-    if (Exposed.FindParameterVariable(NewVar))
+    if (const FNiagaraVariableWithOffset* Existing = Exposed.FindParameterVariable(NewVar, /*IgnoreType=*/true))
     {
+        const FNiagaraTypeDefinition ExistingType = Existing->GetType();
+        if (ExistingType.GetClass() != DIClass)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("User parameter '%s' already exists with type '%s', not '%s'; remove it first to change its type"),
+                *ParameterName, *ExistingType.GetName(), *DIClass->GetName()));
+        }
         TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
         Result->SetStringField(TEXT("data_interface_class"), DIClass->GetName());
+        Result->SetBoolField(TEXT("added"), false);
         Result->SetBoolField(TEXT("already_exists"), true);
         Result->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Result);
@@ -4853,10 +4864,10 @@ TSharedPtr<FJsonObject> HandleAddNiagaraDataInterface(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // remove_niagara_data_interface
 // ---------------------------------------------------------------------------
-// MCP:remove_niagara_data_interface - Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name.
+// MCP:remove_niagara_data_interface - Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name, inside an undo transaction, request a recompile and save the system; success requires the save. A name with no user parameter, or a user parameter that is not a data interface, is an error and nothing is changed.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter to remove (no "User." prefix)
-//   @returns { system_path: string, parameter_name: string, removed: bool }
+//   @returns { system_path: string, parameter_name: string, data_interface_class: string, removed: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4869,30 +4880,48 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonO
 
     FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
     const FNiagaraTypeDefinition DITypeDef(UNiagaraDataInterface::StaticClass());
-    FNiagaraVariable VarToRemove(DITypeDef, FName(*ParameterName));
     // The redirect store keys its TMap by short name and the value carries the
     // FULL "User.X" variable with the concrete DI subclass as its type. Our wire
     // payload only knows the short name + the base UNiagaraDataInterface type,
     // so the type-strict operator== on the TMap would fail. Use IgnoreType=true
     // for the name-only lookup, then rebuild the FNiagaraVariable from the
     // resolved entry so RemoveParameter sees the exact stored signature.
-    const FNiagaraVariableWithOffset* Found = Exposed.FindParameterVariable(VarToRemove, /*IgnoreType=*/true);
-    if (Found)
-    {
-        VarToRemove = FNiagaraVariable(Found->GetType(), Found->GetName());
-    }
-    const bool bRemoved = Exposed.RemoveParameter(VarToRemove);
-    if (!bRemoved)
+    const FNiagaraVariableWithOffset* Found =
+        Exposed.FindParameterVariable(FNiagaraVariable(DITypeDef, FName(*ParameterName)), /*IgnoreType=*/true);
+    if (!Found)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Failed to remove parameter '%s' (not found)"), *ParameterName));
     }
+    // The name-only lookup also finds user parameters of any other type; this tool only removes data interfaces.
+    if (!Found->IsDataInterface())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("User parameter '%s' is a '%s', not a data interface; nothing was removed"),
+            *ParameterName, *Found->GetType().GetName()));
+    }
+    const FNiagaraVariable VarToRemove(Found->GetType(), Found->GetName());
+    const FString DIClassName = Found->GetType().GetName();
+
+    // The exposed store is a property of the system, so the system is what the transaction records.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveNiagaraDI", "Remove Niagara Data Interface (MCP)"));
+    System->Modify();
+
+    const bool bRemoved = Exposed.RemoveParameter(VarToRemove);
+    if (!bRemoved)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Failed to remove parameter '%s' of type '%s'"), *ParameterName, *DIClassName));
+    }
 
     System->RequestCompile(true);
+    FString SaveError;
+    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
+    Result->SetStringField(TEXT("data_interface_class"), DIClassName);
     Result->SetBoolField(TEXT("removed"), true);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_niagara_data_interface"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

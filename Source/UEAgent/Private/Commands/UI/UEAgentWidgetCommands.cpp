@@ -2575,7 +2575,7 @@ TSharedPtr<FJsonObject> HandlePlayWidgetAnimation(const TSharedPtr<FJsonObject>&
 // stop_widget_animation -- REAL stop (mirrors play_widget_animation) when a live PIE instance of
 // this WidgetBP is found; honest headless gate otherwise.
 // ---------------------------------------------------------------------------
-// MCP:stop_widget_animation - Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
+// MCP:stop_widget_animation - Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets: stopped is true when the animation was playing before the call and is not after it; one that was not playing (stopped or paused) succeeds with stopped:false and a note, and one still playing after the call is an error. Falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param animation_name - object name OR display label of the animation to stop
 //   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). In a 2-player PIE session EVERY client has its OWN widgets, so the default may well read the other player's HUD.
@@ -2602,15 +2602,26 @@ TSharedPtr<FJsonObject> HandleStopWidgetAnimation(const TSharedPtr<FJsonObject>&
 
     if (Live.Instance && Live.Animation)
     {
+        // The playback state is read on both sides of the call: an animation that was not playing has
+        // nothing to stop, and one still playing afterwards was not stopped.
+        const bool bWasPlaying = Live.Instance->IsAnimationPlaying(Live.Animation);
         Live.Instance->StopAnimation(Live.Animation);
+        const bool bStillPlaying = Live.Instance->IsAnimationPlaying(Live.Animation);
 
-        Resp->SetBoolField(TEXT("stopped"), true);
+        Resp->SetBoolField(TEXT("stopped"), bWasPlaying && !bStillPlaying);
         Resp->SetBoolField(TEXT("headless"), false);
         Resp->SetBoolField(TEXT("requires_pie"), false);
         Resp->SetStringField(TEXT("live_widget_name"), Live.Instance->GetName());
         Resp->SetStringField(TEXT("live_animation_name"), Live.Animation->GetName());
-        Resp->SetStringField(TEXT("note"), TEXT("Stopped on a live PIE instance via UUserWidget::StopAnimation."));
+        Resp->SetStringField(TEXT("note"), bWasPlaying
+            ? TEXT("Stopped on a live PIE instance via UUserWidget::StopAnimation.")
+            : TEXT("The animation was not playing on the live PIE instance; StopAnimation was still called, which resets a paused one."));
         Resp->SetBoolField(TEXT("saved"), false);
+        if (bStillPlaying)
+        {
+            return mcp_common::MakeOutcomeReply(Resp, false,
+                TEXT("stop_widget_animation: the animation is still playing after UUserWidget::StopAnimation."));
+        }
         return mcp_common::MakeOkReply(Resp);
     }
 

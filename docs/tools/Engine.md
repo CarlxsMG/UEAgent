@@ -8,7 +8,7 @@
 
 *Additive.*
 
-Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (already_exists true, nothing saved). The inverse is remove_niagara_data_interface.
+Add a new UNiagaraDataInterface user-parameter binding to a Niagara system, inside an undo transaction, request a recompile and save the system; success requires the save. A user parameter that already has this name and class is left as is (added false, already_exists true, nothing saved); one with this name and any other type is an error. The inverse is remove_niagara_data_interface.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -592,14 +592,14 @@ Reorder a Niagara simulation stage on its emitter's stage list by moving it to a
 
 *Destructive.*
 
-Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name.
+Remove a UNiagaraDataInterface user-parameter binding from a Niagara system by name, inside an undo transaction, request a recompile and save the system; success requires the save. A name with no user parameter, or a user parameter that is not a data interface, is an error and nothing is changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 | `parameter_name` | string | yes | Short name of the user-parameter to remove (no "User." prefix) |
 
-**Returns:** `{ system_path: string, parameter_name: string, removed: bool }`
+**Returns:** `{ system_path: string, parameter_name: string, data_interface_class: string, removed: bool, saved: bool, save_error?: string }`
 
 ## `remove_niagara_emitter_handle`
 

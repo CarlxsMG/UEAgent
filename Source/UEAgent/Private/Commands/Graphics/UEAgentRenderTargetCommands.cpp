@@ -374,7 +374,7 @@ TSharedPtr<FJsonObject> HandleGetRenderTargetCubeInfo(const TSharedPtr<FJsonObje
 // clear_render_target
 // UKismetRenderingLibrary::ClearRenderTarget2D(World, RT, FLinearColor).
 // ---------------------------------------------------------------------------
-// MCP:clear_render_target - Clear a render target to a solid color via ClearRenderTarget2D
+// MCP:clear_render_target - Clear a render target to a solid color via ClearRenderTarget2D. Render-target contents live on the GPU only, so nothing is saved or undoable. cleared is false, and the call fails, when the engine skips the clear: a render target without a resource, which is every render target in a process that cannot render (-nullrhi, a commandlet).
 //   @param render_target_path - Asset path of the render target
 //   @param color - Optional [r, g, b, a] clear color, defaults to opaque black
 //   @returns { render_target_path: string, cleared: bool, clear_color: [number] }
@@ -389,13 +389,18 @@ TSharedPtr<FJsonObject> HandleClearRenderTarget(const TSharedPtr<FJsonObject>& P
 
     const FLinearColor Color = ParseLinearColorWithDefault(Params, TEXT("color"), FLinearColor::Black);
 
+    // With the world and the render target resolved, a missing resource is the only condition under which
+    // ClearRenderTarget2D returns without clearing.
+    const bool bCleared = RT->GetResource() != nullptr;
     UKismetRenderingLibrary::ClearRenderTarget2D(World, RT, Color);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
-    Data->SetBoolField(TEXT("cleared"), true);
+    Data->SetBoolField(TEXT("cleared"), bCleared);
     Data->SetArrayField(TEXT("clear_color"), mcp_common::ColorToJsonArray(Color));
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bCleared, bCleared ? FString()
+        : FString(TEXT("clear_render_target: cleared is false, nothing was cleared: the render target has no resource ")
+                  TEXT("(a process that cannot render, -nullrhi or a commandlet, never creates one)")));
 }
 
 // ---------------------------------------------------------------------------
@@ -433,10 +438,10 @@ TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTarget(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // export_render_target
 // UKismetRenderingLibrary::ExportRenderTarget(World, RT, Dir, Name) -> writes a
-// PNG (LDR formats) or HDR (float formats) file to disk. Verifies the file
-// exists afterwards via IFileManager.
+// PNG, or for RGBA16f/RGBA32f an HDR or EXR file, to disk. The export reports
+// nothing, so it is measured on disk afterwards via IFileManager.
 // ---------------------------------------------------------------------------
-// MCP:export_render_target - Export a render target to an image file on disk
+// MCP:export_render_target - Export a render target to an image file on disk: PNG, except an RGBA16f or RGBA32f render target, which writes HDR when filename ends in .hdr and EXR otherwise. exported is measured on disk: the file must exist, hold bytes and have been written by this call. It is false, and the call fails saying why, for a render target without a resource (every render target in a process that cannot render: -nullrhi, a commandlet), an invalid path, a file that cannot be opened for writing, or an image that cannot be read back; an empty file left by a failed export is removed when the call created it.
 //   @param render_target_path - Asset path of the render target to export
 //   @param output_directory - Absolute directory path to write into, created if missing
 //   @param filename - Output file name including extension, e.g. RT_Example.png
@@ -461,30 +466,66 @@ TSharedPtr<FJsonObject> HandleExportRenderTarget(const TSharedPtr<FJsonObject>& 
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
 
-    // Ensure the output directory exists (ExportRenderTarget itself does not
-    // create it; a missing dir silently produces no file).
+    // ExportRenderTarget writes to exactly this path (it adds no extension) and reports nothing. It skips the
+    // write, with only a message-log warning, for a render target without a resource or an invalid path, so
+    // those are checked first. Otherwise it opens (and truncates) the file before encoding the image: a failed
+    // encode leaves an empty file, and a file it cannot open keeps its old contents. So the export is measured
+    // on disk: the file must exist, hold bytes, and carry a write time that changed during the call.
+    const FString FullPath = FPaths::Combine(OutputDirectory, FileName);
+    FString Reason;
+    FText PathError;
+    if (RT->GetResource() == nullptr)
+    {
+        Reason = TEXT("the render target has no resource (a process that cannot render, -nullrhi or a commandlet, never creates one)");
+    }
+    else if (!FPaths::ValidatePath(FullPath, &PathError))
+    {
+        Reason = FString::Printf(TEXT("the file path is invalid: %s"), *PathError.ToString());
+    }
+
     IFileManager& FM = IFileManager::Get();
-    FM.MakeDirectory(*OutputDirectory, /*Tree*/ true);
+    const bool bExistedBefore = FM.FileExists(*FullPath);
+    const FDateTime StampBefore = FM.GetTimeStamp(*FullPath);
+    const bool bAttempted = Reason.IsEmpty();
+    if (bAttempted)
+    {
+        // ExportRenderTarget does not create the directory; without it the file cannot be opened.
+        FM.MakeDirectory(*OutputDirectory, /*Tree*/ true);
+        UKismetRenderingLibrary::ExportRenderTarget(World, RT, OutputDirectory, FileName);
+    }
 
-    UKismetRenderingLibrary::ExportRenderTarget(World, RT, OutputDirectory, FileName);
-
-    // ExportRenderTarget appends no extension if one is present; it writes PNG for
-    // LDR formats and HDR for float formats. Build the expected full path and
-    // verify it exists.
-    FString FullPath = FPaths::Combine(OutputDirectory, FileName);
     bool bExists = FM.FileExists(*FullPath);
-
     int64 FileSize = bExists ? FM.FileSize(*FullPath) : -1;
+    const bool bWritten = bExists && FM.GetTimeStamp(*FullPath) != StampBefore;
+    const bool bExported = bAttempted && bWritten && FileSize > 0;
+    if (bAttempted && !bExported)
+    {
+        if (!bWritten)
+        {
+            Reason = TEXT("the file could not be opened for writing");
+        }
+        else
+        {
+            Reason = TEXT("the image could not be read back from the render target or encoded, so the file was left empty");
+            // An empty file this call created is removed, so a failed export leaves nothing behind.
+            if (!bExistedBefore && FM.Delete(*FullPath, /*RequireExists*/ false, /*EvenReadOnly*/ false, /*Quiet*/ true))
+            {
+                bExists = false;
+                FileSize = -1;
+            }
+        }
+    }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetStringField(TEXT("output_directory"), OutputDirectory);
     Data->SetStringField(TEXT("filename"), FileName);
     Data->SetStringField(TEXT("file_path"), FullPath);
-    Data->SetBoolField(TEXT("exported"), true);
+    Data->SetBoolField(TEXT("exported"), bExported);
     Data->SetBoolField(TEXT("file_exists"), bExists);
     Data->SetNumberField(TEXT("file_size_bytes"), (double)FileSize);
-    return mcp_common::MakeOkReply(Data);
+    return mcp_common::MakeOutcomeReply(Data, bExported, bExported ? FString()
+        : FString::Printf(TEXT("export_render_target: exported is false, no image was written: %s"), *Reason));
 }
 
 // ===========================================================================

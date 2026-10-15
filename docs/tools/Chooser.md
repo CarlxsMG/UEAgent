@@ -8,7 +8,7 @@
 
 *Additive.*
 
-Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+Append a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -22,19 +22,19 @@ Append a column of column_type, its input left unbound, to a UChooserTable asset
 
 *Additive.*
 
-Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one.
+Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one, as one undo step, then compiles and saves the table; success is false, with save_error, when the save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 
-**Returns:** `{ table_path: string, row_index: int, row_count: int }`
+**Returns:** `{ table_path: string, row_index: int, row_count: int, saved: bool, save_error?: string }`
 
 ## `create_chooser_table`
 
 *Additive.*
 
-Create (or load if it already exists) a UChooserTable asset under the given package path.
+Create (or load if it already exists) a UChooserTable asset under the given package path. A new table is compiled and saved. On an existing table only the result_type and output_object_class the call gives are applied, as one undo step, and the table is compiled and saved only when that changes it (saved false otherwise). success is false, with save_error, when the save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -43,13 +43,13 @@ Create (or load if it already exists) a UChooserTable asset under the given pack
 | `result_type` | string | no | EObjectChooserResultType: "Object" (default), "Class", or "NoPrimaryResult". |
 | `output_object_class` | string | no | UClass path used as OutputObjectType (default UObject), loaded via LoadObject&lt;UClass>. |
 
-**Returns:** `{ asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null }`
+**Returns:** `{ asset_path: string, already_existed: bool, result_type: string, output_object_class: string|null, saved: bool, save_error?: string }`
 
 ## `delete_chooser_table`
 
 *Destructive, idempotent.*
 
-Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UChooserTable, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UChooserTable, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -139,33 +139,33 @@ List every UChooserTable asset under a package path via the AssetRegistry.
 
 *Destructive.*
 
-Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). Re-compiles the table so the transient caches follow. Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
+Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_index` | number | no | Optional 0-based column index (default -1 = last column). |
 
-**Returns:** `{ table_path, removed_column_index, previous_column_count, new_column_count, column_type, note? }`
+**Returns:** `{ table_path, removed_column_index, previous_column_count, new_column_count, column_type, saved, save_error?, note? }`
 
 ## `remove_chooser_row`
 
 *Destructive.*
 
-Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A chooser row is not a real object: this shrinks EVERY column's RowValues array by one -- at row_index if given, else the last row -- and shrinks ResultsStructs to match, then re-compiles the table so the transient caches follow. Use remove_chooser_column to drop a column instead.
+Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A chooser row is not a real object: this shrinks EVERY column's RowValues array by one -- at row_index if given, else the last row -- and shrinks ResultsStructs to match, as one undo step, then compiles and saves the table like add_chooser_row; success is false, with save_error, when the save fails. A table with no rows is left as it is (note, saved false). Use remove_chooser_column to drop a column instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `row_index` | number | no | Optional 0-based row index to remove (default: last row). |
 
-**Returns:** `{ table_path, removed_row_index, previous_row_count, new_row_count }`
+**Returns:** `{ table_path, removed_row_index, previous_row_count, new_row_count, saved, save_error?, note? }`
 
 ## `set_chooser_column_default`
 
 *Destructive, idempotent.*
 
-Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. Compiles and saves only on a change (already_existed=true otherwise).
+Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. A change is one undo step and is compiled and saved, and success is false, with save_error, when the save fails; a value the column already holds changes nothing (already_existed true, saved false).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -181,13 +181,13 @@ Set the DefaultRowValue of one UChooserTable column, the cell value rows appende
 | `asset_path` | string | no | Object/OutputObject column: long package path of the UObject bound as the default row value. |
 | `class_path` | string | no | ObjectClass column: path of the UClass to match (e.g. "/Script/Engine.Pawn" or "/Game/BP_Enemy.BP_Enemy_C"), used with comparison (default SubClassOf). |
 
-**Returns:** `{ table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved }`
+**Returns:** `{ table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved, save_error? }`
 
 ## `set_chooser_row_outcome`
 
 *Destructive, idempotent.*
 
-Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable.
+Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable, as one undo step, then compile and save the table; success is false, with save_error, when the save fails. A row already bound to that asset is left as it is (already_existed true, saved false).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -195,4 +195,4 @@ Set the FAssetChooser outcome (UObject reference) for a specific row in a UChoos
 | `row_index` | number | yes | 0-based row index to assign the outcome to (must be within the OutputObject column's RowValues range). |
 | `asset_path` | string | yes | Long package path of the UObject to bind as the row's result via FAssetChooser (e.g. "/Game/MyAsset"). |
 
-**Returns:** `{ table_path: string, row_index: int, asset_path: string, already_existed: bool }`
+**Returns:** `{ table_path: string, row_index: int, asset_path: string, already_existed: bool, saved: bool, save_error?: string }`
