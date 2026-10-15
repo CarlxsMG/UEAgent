@@ -12,6 +12,7 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
+#include "HAL/FileManager.h"             // IFileManager::FileExists (delete_level_sequence: is the file still on disk)
 // Level sequence asset model: the movie scene, its tracks and its object bindings
 #include "MovieScene.h"
 #include "MovieSceneTrack.h"
@@ -427,12 +428,15 @@ TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>&
     // Delete through the editor asset library, then ask again whether the asset exists:
     // only a delete that reported success AND left nothing behind is actually_deleted. The
     // registry forgets the asset even when its file could not be removed, so the file on disk
-    // is checked too: a file left behind brings the sequence back when the editor restarts.
+    // is checked too: a file left behind brings the sequence back when the editor restarts. It is
+    // asked of the file system, not of FPackageName::DoesPackageExist, which answers from the
+    // registry first and can still list a package whose file was just deleted.
     const FString AssetPath = Target.Sequence->GetPathName();
-    const FString PackageName = Target.Sequence->GetPackage()->GetName();
+    FString PackageFile;
+    mcp_common::FindPackageFileOnDisk(Target.Sequence->GetPackage()->GetName(), PackageFile);
     const bool bDeleteReported = UEditorAssetLibrary::DeleteAsset(AssetPath);
     const bool bStillThere = UEditorAssetLibrary::DoesAssetExist(AssetPath);
-    const bool bFileStillThere = FPackageName::DoesPackageExist(PackageName);
+    const bool bFileStillThere = !PackageFile.IsEmpty() && IFileManager::Get().FileExists(*PackageFile);
     const bool bActuallyDeleted = bDeleteReported && !bStillThere && !bFileStillThere;
 
     TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);

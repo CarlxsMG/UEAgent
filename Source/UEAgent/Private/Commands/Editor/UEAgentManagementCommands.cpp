@@ -16,6 +16,7 @@
 #include "Blueprint/BlueprintSupport.h"
 #include "Engine/Selection.h"
 #include "HAL/PlatformFilemanager.h"
+#include "HAL/FileManager.h"             // IFileManager::FileExists (delete_asset: is the file still on disk)
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "EditorAssetLibrary.h"
@@ -958,11 +959,16 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
     Report->SetNumberField(TEXT("original_file_size_mb"), BytesBefore / (1024.0 * 1024.0));
     Report->SetBoolField(TEXT("delete_success"), bDeleteSuccess);
 
+    // Whether the file is still on disk, asked of the file system: FPackageName::DoesPackageExist
+    // answers from the asset registry first, and right after a delete the registry can still list a
+    // package whose file is already gone (measured: a false "still there" with no delete error logged).
+    auto FileStillOnDisk = [&OnDiskFilePath]() { return !OnDiskFilePath.IsEmpty() && IFileManager::Get().FileExists(*OnDiskFilePath); };
+
     if (!bDeleteSuccess)
     {
         Report->SetStringField(TEXT("delete_message"), TEXT("Failed to delete asset (ForceDeleteObjects returned 0)"));
         Report->SetBoolField(TEXT("asset_verified_deleted"), false);
-        Report->SetBoolField(TEXT("file_still_exists"), FPackageName::DoesPackageExist(PackageName));
+        Report->SetBoolField(TEXT("file_still_exists"), FileStillOnDisk());
         return mcp_common::MakeOutcomeReply(Report, false, FString::Printf(
             TEXT("delete_asset: the engine deleted nothing (ForceDeleteObjects returned 0), so '%s' is still there."), *AssetPath));
     }
@@ -971,7 +977,7 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
     // longer be findable in memory. ForceDeleteObjects counts the purged objects whether or not
     // the file could be removed, so either one left behind is a failed delete: the file brings
     // the asset back when the editor restarts, and a loaded object can be saved back to disk.
-    const bool bFileStillExists = FPackageName::DoesPackageExist(PackageName);
+    const bool bFileStillExists = FileStillOnDisk();
     const bool bObjectStillLoaded = StaticFindObject(UObject::StaticClass(), nullptr, *ResolvedObjectPath) != nullptr;
     FString Failure;
     if (bFileStillExists)
