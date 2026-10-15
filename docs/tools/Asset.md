@@ -22,7 +22,7 @@ Adds an asset to an existing collection and reads back its object count.        
 
 *Additive.*
 
-Add a socket to a static mesh with location, rotation, scale and tag.
+Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. Names are not checked, so repeating a socket_name adds a second socket of that name. location and scale take [x, y, z] arrays: any other value given reads as 0,0,0. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -105,9 +105,9 @@ Creates a static Content Browser collection (idempotent).  Uses the UE 5.7 proje
 
 ## `create_editable_static_mesh`
 
-*Additive.*
+*Additive, idempotent.*
 
-Duplicate a static mesh to an editable location in /Game.
+Copy a UStaticMesh (default /Engine/BasicShapes/Cube) into a new asset at package_path/static_mesh_name with StaticDuplicateObject, creating the folder if needed, and save it, so an engine or other read-only mesh can be edited as a copy; the source is not modified and there is no undo. Idempotent: a static mesh already at that path is returned untouched with created=false, whatever its source. A source that does not load, a name taken by another asset class or a failed save is an error. duplicate_asset copies any asset type inside its own folder.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -270,7 +270,7 @@ Render a material full-screen quad into a render target
 
 *Destructive.*
 
-Draw a material into a region of a render target via the canvas
+Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is always true, even when a zero size draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -285,7 +285,7 @@ Draw a material into a region of a render target via the canvas
 
 *Destructive.*
 
-Draw a string of text into a render target via the canvas
+Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is always true (an empty text draws nothing) and font_resolved says a font was found. Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -301,7 +301,7 @@ Draw a string of text into a render target via the canvas
 
 *Destructive.*
 
-Draw a texture into a region of a render target via the canvas
+Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is always true, even when a zero size draws nothing. For a material use draw_material_to_render_target_region.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -539,7 +539,7 @@ Batch variant of get_asset_metadata: read the Asset Registry tags of N assets in
 
 *Read-only.*
 
-Lists the asset object paths contained in a collection.          must match the collection's share type.
+List the object paths of the assets directly in one Content Browser collection (child collections are not included), without changing anything. The collection is looked up by collection_name within share_type, default Local; an unrecognized share_type also falls back to Local, and a name not found under that share type is an error. get_collections lists every collection with its share_type. Returns assets and asset_count; change membership with add_asset_to_collection or remove_asset_from_collection.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

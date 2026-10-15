@@ -616,7 +616,7 @@ Reads type, debug color and runtime flags of a UDataLayerAsset.
 
 *Read-only.*
 
-Lists all UDataLayerAsset assets under a content path via the AssetRegistry.
+Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, each with name, object path and type (Editor, Runtime or Unknown). Every match is loaded to read its type; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances. For one asset's runtime flags and debug color use get_data_layer_asset_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1295,7 +1295,7 @@ Lock or unlock an actor in the EDITOR world so viewport dragging cannot move it 
 
 *Destructive, idempotent.*
 
-Assign a material to an actor's mesh component slot
+Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. slot_index is not range-checked: past the mesh's slots it has no visible effect, and a negative one does nothing. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1585,7 +1585,7 @@ Sets whether a streaming sub-level should be loaded (ULevelStreaming::SetShouldB
 
 *Destructive, idempotent.*
 
-Sets whether a streaming sub-level should be visible (ULevelStreaming::SetShouldBeVisible).
+Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name, inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

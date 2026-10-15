@@ -360,10 +360,10 @@ Write one key of the running blackboard of an editor-world actor, converting the
 
 *Destructive.*
 
-Stop execution of a running behavior tree on an actor
+Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. A tree that is not running is not an error: was_running (measured) comes back false, while stopped is always true. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor running the behavior tree |
+| `actor_name` | string | yes | Object name or label of the pawn or AIController in the editor world (first match) |
 
 **Returns:** `{ actor_name: string, was_running: bool, stopped: bool }`

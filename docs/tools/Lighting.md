@@ -69,7 +69,7 @@ Retrieve comprehensive properties of a light actor including intensity, color, p
 
 *Read-only.*
 
-Analyze and report comprehensive lighting quality metrics for the current level including light counts by type/mobility, intensity statistics, and a lighting
+Read-only census of the actors with a light component in the engine's first world context (normally the editor level): counts by type and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max, per-light light_details, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. Sky lights are not counted. For one light use get_light_properties, for lights near a point get_lighting_in_area.
 
 No parameters.
 
@@ -536,7 +536,7 @@ Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as
 
 *Additive.*
 
-Spawns a SkyLight actor and optionally sets intensity / recaptures the sky.
+Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

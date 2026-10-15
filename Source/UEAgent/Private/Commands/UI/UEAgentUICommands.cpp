@@ -538,7 +538,7 @@ TSharedPtr<FJsonObject> HandleListLevelWidgetComponents(const TSharedPtr<FJsonOb
 
 // Widget creation and removal
 
-// MCP:create_widget - Create a new UMG widget from a class and optionally add it to the viewport.
+// MCP:create_widget - Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget only finds editor-world widgets.
 //   @param widget_class_path - Full path to widget class, e.g. '/Game/UI/MyWidget.MyWidget_C'
 //   @param widget_name - Name to assign to the created widget instance (a name another widget already has gets a unique variant, which widget_name in the response reports)
 //   @param add_to_viewport - If true, AddToViewport the widget (optional, default false). It only ever really adds when the target world has a local PlayerController -- check added_to_viewport in the response, and see target_world for when that is possible at all.
@@ -635,8 +635,8 @@ TSharedPtr<FJsonObject> HandleCreateWidget(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:remove_widget - Remove a widget by name from its parent or viewport.
-//   @param widget_name - Name of the widget to remove
+// MCP:remove_widget - Detach a runtime UserWidget, found by object name in the editor world only (first one hosted by a level UWidgetComponent, then any other UserWidget of that world), from the viewport or panel holding it with RemoveFromParent. The object is not deleted, no asset changes and there is no undo. Widgets of a PIE world, such as those create_widget makes while PIE runs, are not found (an error). was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
+//   @param widget_name - Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it
 //   @returns { widget_name: string, was_in_viewport: bool, had_parent: bool }
 
 TSharedPtr<FJsonObject> HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params)

@@ -46,14 +46,14 @@ Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; ret
 
 *Read-only.*
 
-Retrieve metadata existence path and file size for a save slot
+Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to query |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
-**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int }`
+**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }`
 
 ## `get_save_game_slot_info`
 

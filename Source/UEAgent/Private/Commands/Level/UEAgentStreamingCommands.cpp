@@ -308,7 +308,7 @@ TSharedPtr<FJsonObject> HandleSetStreamingLevelLoaded(const TSharedPtr<FJsonObje
 // set_streaming_level_visible
 // ---------------------------------------------------------------------------
 
-// MCP:set_streaming_level_visible - Sets whether a streaming sub-level should be visible (ULevelStreaming::SetShouldBeVisible).
+// MCP:set_streaming_level_visible - Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name, inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.
 //   @param level_package_path - Package path of an existing streaming sub-level.
 //   @param visible - Desired should-be-visible state.
 //   @returns { package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_visible: bool, applied: bool }

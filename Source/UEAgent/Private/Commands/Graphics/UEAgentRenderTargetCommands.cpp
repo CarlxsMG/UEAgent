@@ -535,7 +535,7 @@ TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObj
 // Begin -> Canvas->K2_DrawText(font, text, position, scale, color, ...) -> End.
 // Font defaults to GEngine->GetMediumFont() (falls back to GetTinyFont()).
 // ---------------------------------------------------------------------------
-// MCP:draw_text_to_render_target - Draw a string of text into a render target via the canvas
+// MCP:draw_text_to_render_target - Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is always true (an empty text draws nothing) and font_resolved says a font was found. Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param text - Text to draw
 //   @param position - Optional [x, y] text position, default [0,0]
@@ -658,7 +658,7 @@ TSharedPtr<FJsonObject> HandleDrawLineToRenderTarget(const TSharedPtr<FJsonObjec
 // draw_texture_to_render_target
 // Begin -> Canvas->K2_DrawTexture(texture, position, size, ...) -> End.
 // ---------------------------------------------------------------------------
-// MCP:draw_texture_to_render_target - Draw a texture into a region of a render target via the canvas
+// MCP:draw_texture_to_render_target - Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is always true, even when a zero size draws nothing. For a material use draw_material_to_render_target_region.
 //   @param render_target_path - Asset path of the destination render target
 //   @param texture_path - Asset path of the UTexture to draw, e.g. /Engine/EngineResources/WhiteSquareTexture
 //   @param position - Optional [x, y] destination position, default [0,0]
@@ -726,7 +726,7 @@ TSharedPtr<FJsonObject> HandleDrawTextureToRenderTarget(const TSharedPtr<FJsonOb
 // Draws the material into a sub-region of the render target (unlike
 // DrawMaterialToRenderTarget which is always full-screen).
 // ---------------------------------------------------------------------------
-// MCP:draw_material_to_render_target_region - Draw a material into a region of a render target via the canvas
+// MCP:draw_material_to_render_target_region - Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is always true, even when a zero size draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param material_path - Asset path of the UMaterialInterface to draw
 //   @param position - Optional [x, y] destination position, default [0,0]

@@ -504,7 +504,7 @@ TSharedPtr<FJsonObject> HandleBindActorToSequence(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("bind_actor_to_sequence"));
 }
 
-// MCP:get_sequence_bindings - Lists every object binding in a Level Sequence with its tracks.
+// MCP:get_sequence_bindings - Lists every object binding of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive), with each binding's tracks (class and section count); read-only, needs no open Sequencer. spawnable is true when the binding has a spawn track and possessable otherwise; possessable_count and spawnable_count are the movie scene's own counts and can disagree with those flags. Root tracks are not listed: use get_sequence_tracks. For one binding's tracks with display names use get_binding_tracks.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @returns { sequence_name: string, bindings: [{guid, name, spawnable, possessable, track_count, tracks: [{class, section_count}]}], binding_count: int, possessable_count: int, spawnable_count: int }
 
@@ -767,7 +767,7 @@ TSharedPtr<FJsonObject> ResolveSectionFromParams(const TSharedPtr<FJsonObject>& 
 //   @param sequence_name - Name of the target Level Sequence (or sequence_path).
 //   @param sequence_path - Asset path of the target Level Sequence (alias for sequence_name).
 //   @param binding_guid - GUID of the attachee binding that owns the attach track.
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string (alias for binding_guid).
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @param track_index - Optional index into the binding's tracks (default 0).
 //   @param track_type - Optional class filter to pick the track ("transform"|"float"|"bool"|"vector"|"color"|"visibility"|"audio"|"event"|"fade"|"skeletalanimation"|"subsequence"|"cameracut"|"property"); used when track_index is omitted.
 //   @param section_index - Optional index of the section on the track (default 0).
@@ -933,7 +933,7 @@ TSharedPtr<FJsonObject> HandleAddTransformKeyframe(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_transform_keyframe"));
 }
 
-// MCP:set_section_range - Sets the frame range of a binding track's first section.
+// MCP:set_section_range - Sets the frame range of the FIRST section of one track on a Level Sequence binding (sequence found by asset name under /Game), in an undo transaction, and saves the sequence. track_index picks the track in the binding's track order; no other section can be targeted, and an unknown binding reads as zero tracks. Frames are tick-resolution frames, rounded; keys are not moved or rescaled. range_set is false when the stored range differs from the request. Read a section's range with get_section_info; for the whole sequence use set_sequence_playback_range.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param binding_guid - GUID of the binding.
 //   @param start_frame - Inclusive start frame (tick resolution).
@@ -1194,7 +1194,7 @@ TSharedPtr<FJsonObject> HandleCreateCineCameraInSequence(const TSharedPtr<FJsonO
 // Playback range / marked frames
 // ---------------------------------------------------------------------------
 
-// MCP:set_sequence_playback_range - Sets the playback range (in tick frames) of a Level Sequence's movie scene.
+// MCP:set_sequence_playback_range - Sets the playback range of a Level Sequence found by asset name under /Game, in tick-resolution frames (start inclusive, end exclusive, rounded), in an undo transaction, and saves the sequence. Tracks, sections and keys are not moved or clipped, and the Sequencer's playback-range lock does not block it. range_set compares the stored range with the request. To set a length in seconds from 0 use set_sequence_duration; the editor-only timeline windows are set_sequence_view_range and set_sequence_working_range.
 //   @param sequence_name - Name of the target Level Sequence (found by AssetName under /Game).
 //   @param start_frame - Inclusive lower bound of the playback range, in tick frames.
 //   @param end_frame - Exclusive upper bound of the playback range (must be > start_frame).
@@ -1242,7 +1242,7 @@ TSharedPtr<FJsonObject> HandleSetSequencePlaybackRange(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_playback_range"));
 }
 
-// MCP:add_marked_frame - Adds a user marked frame to a Level Sequence's movie scene.
+// MCP:add_marked_frame - Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-resolution frame of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; is_determinism_fence turns the same mark into an evaluation fence. Idempotent per frame: an existing mark at that frame is updated instead of duplicated, its label replaced when one is given and both flags overwritten with the values passed (false when omitted); already_existed says which. Read marks with get_marked_frames, delete one with remove_marked_frame.
 //   @param sequence_name - Name of the target Level Sequence.
 //   @param frame - Tick frame number to mark.
 //   @param label - Optional human-readable label (auto-generated if empty).
@@ -2195,7 +2195,7 @@ namespace UEAgentSequencerImpl
     }
 }
 
-// MCP:add_subsequence_track - Adds a subsequence (UMovieSceneSubTrack) to a Level Sequence and nests a sub section.
+// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset. Each call adds another section. If no inner sequence resolves, the track is still saved and section_added is false. For cinematic shots use add_shot_track.
 //   @param sequence_path - Full /Game path (e.g. "/Game/MyGame/SUBSEQ_Example") OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param sub_sequence_path - Optional content path of the sub Level Sequence to nest. If omitted, a sibling inner Level Sequence is created and persisted.
@@ -2786,7 +2786,7 @@ static bool StringToBlendType(const FString& Str, EMovieSceneBlendType& OutType)
 //   @param use_manual - bool, use Manual* ease durations instead of Auto* (default true).
 //   @param ease_in_frames - Ease-in duration in frames (omit to leave unchanged).
 //   @param ease_out_frames - Ease-out duration in frames (omit to leave unchanged).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Params)
@@ -2852,7 +2852,7 @@ TSharedPtr<FJsonObject> HandleSetSectionEasing(const TSharedPtr<FJsonObject>& Pa
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param completion_mode - One of "keep_state", "restore_state", "project_default".
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, completion_mode: string, set: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSectionCompletionMode(const TSharedPtr<FJsonObject>& Params)
@@ -2891,7 +2891,7 @@ TSharedPtr<FJsonObject> HandleSetSectionCompletionMode(const TSharedPtr<FJsonObj
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param blend_type - One of "absolute", "additive", "relative", "additive_from_base", "override".
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>& Params)
@@ -2932,7 +2932,7 @@ TSharedPtr<FJsonObject> HandleSetSectionBlendType(const TSharedPtr<FJsonObject>&
 //   @param track_type - Optional class filter (see set_section_easing).
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, start_frame: int, end_frame: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, completion_mode: string, blend_type: string, blend_type_valid: bool, is_locked: bool, is_active: bool, is_attach_section: bool, attach_rules: object? }
 
 TSharedPtr<FJsonObject> HandleGetSectionInfo(const TSharedPtr<FJsonObject>& Params)
@@ -2991,7 +2991,7 @@ TSharedPtr<FJsonObject> HandleGetSectionInfo(const TSharedPtr<FJsonObject>& Para
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param active [bool] - Desired active state (true = evaluated, false = muted).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, is_active: bool, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSectionActive(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3026,7 +3026,7 @@ TSharedPtr<FJsonObject> HandleSetSectionActive(const TSharedPtr<FJsonObject>& Pa
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param locked [bool] - Desired locked state.
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3071,7 +3071,7 @@ TSharedPtr<FJsonObject> HandleSetSectionLocked(const TSharedPtr<FJsonObject>& Pa
 //   @param track_type - Optional class filter (see set_section_easing).
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track to remove (default 0).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, track_type: string, track_index: int, removed: bool, remaining_sections: int, saved: bool }
 TSharedPtr<FJsonObject> HandleRemoveSection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3147,7 +3147,7 @@ static UClass* ResolveComponentClass(const FString& ClassName)
     return nullptr;
 }
 
-// MCP:add_subcomponent_possessable - Add a possessable for a subcomponent type, parented to an existing binding.
+// MCP:add_subcomponent_possessable - Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID or an unresolvable class is an error.
 //   @param sequence_name - Name of the level sequence asset.
 //   @param parent_binding_guid - GUID of the parent binding (spawnable or possessable).
 //   @param component_class - Component class name (e.g. 'StaticMeshComponent', 'SpotLightComponent').
@@ -3545,7 +3545,7 @@ namespace UEAgentSequencerImpl
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param pre_roll_frames - Optional pre-roll frames (omit to leave unchanged).
 //   @param post_roll_frames - Optional post-roll frames (omit to leave unchanged).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSectionPrePostRollout(const TSharedPtr<FJsonObject>& Params)
@@ -3612,7 +3612,7 @@ TSharedPtr<FJsonObject> HandleSetSequenceViewRange(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_view_range"));
 }
 
-// MCP:set_sequence_working_range - Set the editor working range of a Level Sequence (in seconds).  The working range is the timeline window used for evaluation / playback preview in the Sequencer editor. Backed by UMovieScene::SetWorkingRange(double, double) -- MOVIESCENE_API.
+// MCP:set_sequence_working_range - Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so although the package is saved the value is not written: after a reload the working range is recomputed from the playback range. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_seconds - Start of the working range, in seconds.
@@ -3786,16 +3786,16 @@ TSharedPtr<FJsonObject> HandleGetSequenceMasterTracks(const TSharedPtr<FJsonObje
 // commands delegate to add_property_track.
 // ========================================================================== //
 
-// MCP:set_transform_track_interp_mode - Set EMovieSceneBlendType on a transform track's section (absolute|additive|relative|additive_from_base|override).
+// MCP:set_transform_track_interp_mode - Sets the blend type of one section on a Level Sequence binding (how it layers with other sections, e.g. additive adds a delta, override replaces), in an undo transaction, and saves the sequence. Despite the name it changes no key interpolation and accepts any track kind. The section is section_index on the binding's first track of track_type, else its track_index-th track; a blend type the track does not support is refused. set_section_blend_type does the same without that check; for slerp rotation use set_transform_section_quaternion_interp.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param binding_guid - GUID of the binding the section lives under.
-//   @param track_type - Optional class filter (defaults to transform track lookup).
+//   @param track_type - Optional track kind such as "transform", "float" or "audio": picks the binding's first track of that kind. Omitted or unrecognised, track_index picks the track instead.
 //   @param track_index - Index into the binding's tracks (0 = first track, default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param interp_mode - Blend type string; one of absolute|additive|relative|additive_from_base|override. Also accepted under "blend_type".
 //   @param blend_type - Alias for interp_mode (absolute|additive|relative|additive_from_base|override)
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetTransformTrackInterpMode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5235,7 +5235,7 @@ TSharedPtr<FJsonObject> HandleAddMaterialParameterCollectionTrack(const TSharedP
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_material_parameter_collection_track"));
 }
 
-// MCP:add_component_material_track - Add a component material parameter track to an object binding (animates an indexed material slot), optionally keying a scalar parameter (asset-level, headless).
+// MCP:add_component_material_track - Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame); without it, it only adds a section spanning the playback range when the track has none. An unknown binding_guid is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
 //   @param sequence_name - Name of the target Level Sequence
 //   @param binding_guid - GUID of the actor/component object binding to attach the material track to
 //   @param material_index - Optional indexed material slot the track animates (default 0)
@@ -6023,7 +6023,7 @@ TSharedPtr<FJsonObject> HandleGetAudioSectionProperties(const TSharedPtr<FJsonOb
 //   @param track_index - Index into the binding's tracks (default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param channels - Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None.
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, saved: bool, note: string }
 TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6069,15 +6069,15 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionMask(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_transform_section_mask"));
 }
 
-// MCP:set_transform_section_quaternion_interp - Toggle quaternion (slerp) rotation interpolation on a 3D transform section (UMovieScene3DTransformSection::SetUseQuaternionInterpolation).
+// MCP:set_transform_section_quaternion_interp - Turns quaternion (slerp) rotation interpolation on or off for one 3D transform section of a Level Sequence binding, in an undo transaction, and saves the sequence; keys are kept. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; a section that is not a 3D transform section is an error. For the section's blend type use set_transform_track_interp_mode; to enable or disable channels use set_transform_section_mask.
 //   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param binding_guid - GUID of the binding whose transform section to edit.
-//   @param track_type - Optional class filter (default resolves the transform track).
+//   @param track_type - Optional track kind, e.g. "transform": picks the binding's first track of that kind. Omitted or unrecognised, track_index picks the track instead.
 //   @param track_index - Index into the binding's tracks (default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param use_quaternion [bool] - Desired quaternion-interpolation state.
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetTransformSectionQuaternionInterp(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6124,7 +6124,7 @@ TSharedPtr<FJsonObject> HandleSetTransformSectionQuaternionInterp(const TSharedP
 //   @param skip_anim_notifiers [bool] - bSkipAnimNotifiers (omit to leave unchanged).
 //   @param force_custom_mode [bool] - bForceCustomMode (omit to leave unchanged).
 //   @param play_rate - Constant playback rate (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6197,7 +6197,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalAnimationSectionParams(const TSharedPtr
 //   @param track_index - Index into the binding's tracks (default 0).
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param row_index - Desired row index (int, >= 0).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSectionRowIndex(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6248,7 +6248,7 @@ TSharedPtr<FJsonObject> HandleSetSectionRowIndex(const TSharedPtr<FJsonObject>& 
 //   @param g - Green component 0-255 (int; default 0).
 //   @param b - Blue component 0-255 (int; default 0).
 //   @param a - Alpha component 0-255 (int; default 255).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSectionColor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6325,7 +6325,7 @@ TSharedPtr<FJsonObject> HandleSetSectionColor(const TSharedPtr<FJsonObject>& Par
 //   @param section_index - Index of the section on the resolved track (default 0).
 //   @param channel_type - Channel value kind: "double" (default) | "float" | "bool".
 //   @param channel_index [int] - Index of the channel within its proxy view (default 0).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, channel_index: int, channel_type: string, key_count: int, keyframes: [{ index: int, frame: int, time_seconds: number, value: number|bool, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number }] }
 TSharedPtr<FJsonObject> HandleGetChannelKeyframes(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6393,7 +6393,7 @@ TSharedPtr<FJsonObject> HandleGetChannelKeyframes(const TSharedPtr<FJsonObject>&
 //   @param frame [int] - Frame of the key to move (resolved via FindKey; provide index OR frame).
 //   @param tolerance [int] - Optional FindKey frame tolerance when locating by frame (default 0).
 //   @param new_frame [int!] - Destination frame number for the key.
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6451,7 +6451,7 @@ TSharedPtr<FJsonObject> HandleMoveKeyframe(const TSharedPtr<FJsonObject>& Params
 //   @param index [int] - Index of the key to remove (mutually exclusive with frame).
 //   @param frame [int] - Frame of the key to remove (resolved via FindKey; provide index OR frame).
 //   @param tolerance [int] - Optional FindKey frame tolerance when locating by frame (default 0).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, channel_type: string, channel_index: int, removed_frame: int, key_index: int, removed: bool, key_count_after: int, saved: bool }
 TSharedPtr<FJsonObject> HandleRemoveKeyframe(const TSharedPtr<FJsonObject>& Params)
 {
@@ -6523,7 +6523,7 @@ static bool SeqApplyKeyEdit(ValueType& Key, const TSharedPtr<FJsonObject>& Param
 //   @param tangent_mode - Optional tangent mode (Cubic only): "Auto" | "User" | "Break" (default leaves unchanged).
 //   @param arrive_tangent [number] - Optional arrive tangent value (Cubic).
 //   @param leave_tangent [number] - Optional leave tangent value (Cubic).
-//   @param binding_name_or_guid - Sequencer binding: the bound object's name or its GUID string.
+//   @param binding_name_or_guid - Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.
 //   @returns { sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetBindingChannelKeyframeInterp(const TSharedPtr<FJsonObject>& Params)
 {

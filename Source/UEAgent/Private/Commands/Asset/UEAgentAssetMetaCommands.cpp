@@ -377,7 +377,7 @@ TSharedPtr<FJsonObject> HandleGetCollections(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_collection_assets - Lists the asset object paths contained in a collection.          must match the collection's share type.
+// MCP:get_collection_assets - List the object paths of the assets directly in one Content Browser collection (child collections are not included), without changing anything. The collection is looked up by collection_name within share_type, default Local; an unrecognized share_type also falls back to Local, and a name not found under that share type is an error. get_collections lists every collection with its share_type. Returns assets and asset_count; change membership with add_asset_to_collection or remove_asset_from_collection.
 //   @param collection_name - Name of the (existing) collection.
 //   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local")
 //   @returns { collection_name: string, share_type: string, assets: [string], asset_count: number }

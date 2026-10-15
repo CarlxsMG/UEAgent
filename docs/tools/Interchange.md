@@ -222,9 +222,9 @@ Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditor
 
 ## `interchange_save_pipeline`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Save an Interchange pipeline asset's package to disk; saved is what UPackage::Save returned.
+Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk with UPackage::SavePackage, dirty or not; saved is what SavePackage returned, and false makes success false. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Unlike save_asset it has no PIE refusal and no read-only-root guard. A path that does not load as a pipeline is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

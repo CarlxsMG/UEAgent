@@ -39,7 +39,7 @@ Append one enumerator to a Blueprint Enum (UUserDefinedEnum) and give it a displ
 
 *Additive.*
 
-Add an entry to a named engine Message Log listing.
+Add one message to a named editor Message Log listing (for example "PIE", "MapCheck" or a new name, created on demand) at Info, Warning or Error severity; an unrecognised severity becomes Info, and a missing log_name or message is an error. Entries stay in memory for the editor session and are never saved. Use it for diagnostics meant for Window > Message Log; print_to_output_log writes to the Output Log instead. message_count is the listing's message count after the add. Read entries back with get_message_log_entries, show the window with open_message_log, empty the listing with clear_message_log.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -992,9 +992,9 @@ Loads the ENGINE default template map into the editor. It does NOT create a leve
 
 ## `open_message_log`
 
-*Destructive.*
+*Additive, idempotent.*
 
-Open the editor Message Log window to a given listing.
+Open or focus the editor Message Log window on one listing (PIE by default), creating the listing empty when it does not exist yet and enabling message log display; no message is changed. opened only says the request was made: without an editor UI nothing shows. module_available says whether the MessageLog module loaded. To read the messages use get_message_log_entries rather than the window; add or empty them with add_message_log_entry and clear_message_log.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1288,7 +1288,7 @@ Move, rotate and/or scale ONE actor (omitted components are left as they are) an
 
 *Destructive, idempotent.*
 
-Toggle cinematic-control on the active editor viewport (Sequencer overrride)
+Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_allow_cinematic_control.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1475,7 +1475,7 @@ Set the active editor viewport type (perspective / top / bottom / left / right /
 
 *Destructive, idempotent.*
 
-Move the active editor viewport camera to a new location and or rotation
+Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array in cm, else the camera goes to the origin. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

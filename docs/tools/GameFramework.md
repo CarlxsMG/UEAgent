@@ -36,7 +36,7 @@ Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of AGameStateBase (or AGameState). Idempotent on re-run.
+Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path is returned as is with already_exists=true, without checking its parent (parent_class echoes the request). A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -143,7 +143,7 @@ No parameters.
 
 *Destructive, idempotent.*
 
-Set the AGameModeBase::DefaultPawnClass UPROPERTY on the GameMode's CDO.
+Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. Memory only: no transaction, no dirty flag, no save, so GameModes spawned later (the next PIE) use it, and it is lost when the editor closes unless a Blueprint GameMode's package is saved with save_asset. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

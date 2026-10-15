@@ -209,7 +209,7 @@ TSharedPtr<FJsonObject> HandleDetachActor(const TSharedPtr<FJsonObject>& Params)
     return Result;
 }
 
-// MCP:set_actor_material - Assign a material to an actor's mesh component slot
+// MCP:set_actor_material - Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. slot_index is not range-checked: past the mesh's slots it has no visible effect, and a negative one does nothing. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
 //   @param actor_name - Name or label of the target actor
 //   @param material_path - Full asset path of the UMaterialInterface
 //   @param slot_index - Material slot index, default 0

@@ -253,7 +253,7 @@ namespace UEAgentAnimationImpl
     }
 }
 
-// MCP:get_animation_blueprint_info - Retrieve metadata and optional full data for an Animation Blueprint asset
+// MCP:get_animation_blueprint_info - Find an Animation Blueprint in the Asset Registry and report its object path, class, package, is_loaded and the size and timestamp of its .uasset on disk. With load_full_data it also loads the asset and adds the target skeleton, its bone count, the generated class and is_abstract. Read-only. blueprint_name takes an object path, a package path or a short name searched under /Game (the first match when several share it); no match is an error. For parent class, graphs and state machines use get_anim_blueprint_info.
 //   @param blueprint_name - Name or full path of the Animation Blueprint asset
 //   @param load_full_data - When true, loads the asset and reports target skeleton, generated class, and bone count (optional, default false)
 //   @returns { blueprint_name: string, blueprint_path: string, blueprint_class: string, package_name: string, is_loaded: bool, file_size_bytes: number, file_size_kb: number, file_size_mb: number, last_modified: string, loaded_successfully: bool?, is_valid: bool?, target_skeleton: string?, skeleton_bone_count: number?, has_target_skeleton: bool?, generated_class: string?, is_abstract: bool?, load_error: string? }
@@ -348,8 +348,8 @@ TSharedPtr<FJsonObject> HandleConfigureAnimationEvents(const TSharedPtr<FJsonObj
     return Report;
 }
 
-// MCP:set_animation_speed - Set the animation playback speed for a skeletal mesh component
-//   @param component_name - Name of the skeletal mesh component
+// MCP:set_animation_speed - Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_anim_montage_rate_scale on the asset.
+//   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param speed - Playback speed multiplier; must be between 0.0 and 10.0
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
 //   @returns { component_name: string, requested_speed: number, previous_speed: number, actual_speed: number, speed_set_successfully: bool, previous_tick_enabled: bool, current_tick_enabled: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, anim_instance_valid: bool?, warning: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
@@ -643,7 +643,7 @@ TSharedPtr<FJsonObject> HandleRemoveBlendSpace1D(const TSharedPtr<FJsonObject>& 
     return HandleRemoveTypedAnimAsset<UBlendSpace1D>(Params, TEXT("remove_blendspace_1d"));
 }
 
-// MCP:remove_pose_asset - Delete a UPoseAsset asset after verifying the asset is a UPoseAsset.
+// MCP:remove_pose_asset - Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error, and so does an asset of another class; during PIE the delete fails with deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UPoseAsset.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemovePoseAsset(const TSharedPtr<FJsonObject>& Params)

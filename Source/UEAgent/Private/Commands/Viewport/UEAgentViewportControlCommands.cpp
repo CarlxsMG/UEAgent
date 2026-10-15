@@ -290,7 +290,7 @@ TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Para
 // set_viewport_camera
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_camera - Move the active editor viewport camera to a new location and or rotation
+// MCP:set_viewport_camera - Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array in cm, else the camera goes to the origin. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
 //   @param location - Optional [x, y, z] world location
 //   @param rotation - Optional [pitch, yaw, roll] world rotation
 //   @returns { applied: bool, location_set: bool, rotation_set: bool, location: [number], rotation: [number] }
@@ -578,7 +578,7 @@ TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
 // set_allow_cinematic_control
 // ---------------------------------------------------------------------------
 
-// MCP:set_allow_cinematic_control - Toggle cinematic-control on the active editor viewport (Sequencer overrride)
+// MCP:set_allow_cinematic_control - Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_allow_cinematic_control.
 //   @param allow - True to allow cinematic control, false to block it
 //   @returns { applied: bool, requested: bool, allows_cinematic_control: bool }
 TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObject>& Params)

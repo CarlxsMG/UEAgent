@@ -364,11 +364,11 @@ How big is the LEVEL: one world-space bounding box aggregated over every level-b
 
 *Read-only.*
 
-Walk the bone list of a UGeometryCollection. Reads FTransformCollection typed attributes.
+List every bone (transform) of a UGeometryCollection asset in index order with its name, parent index (-1 for a root) and simulation type ("Rigid", "Clustered" or "None"), plus transform_count and root_count. Read-only: nothing is generated or saved. A path that does not load or a collection without geometry data is an error. For levels, root indices and whether proximity is computed use get_gc_hierarchy_info; for damage, mass and source settings use get_geometry_collection_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `geometry_collection_path` | string | yes | Required asset path. |
+| `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection, as a package path (/Game/Chaos/GC_Rock) or an object path (/Game/Chaos/GC_Rock.GC_Rock); required. |
 
 **Returns:** `{ geometry_collection_path, transform_count, root_count, bones: [{name, parent, sim_type}] }`
 
@@ -526,7 +526,7 @@ Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComp
 
 *Destructive, idempotent.*
 
-Configure clustering and connection-graph settings on a Geometry Collection
+Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_gc_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -543,12 +543,12 @@ Configure clustering and connection-graph settings on a Geometry Collection
 
 *Destructive, idempotent.*
 
-Configure the damage model and thresholds on a geometry collection
+Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. The save result is not checked: success is true even when nothing reached disk. The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
-| `damage_model` | string | no | Threshold or Simple, default Threshold |
+| `damage_model` | string | no | Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model. |
 | `damage_thresholds` | array | no | Optional array of per-level damage threshold floats |
 
 **Returns:** `{ geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool }`
@@ -675,15 +675,15 @@ Writes only the given advanced FBodyInstance fields (damping, mass scale, inerti
 
 *Destructive, idempotent.*
 
-Set FBodyInstance / UBodySetup properties on one body of a physics asset
+Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither still saves and reports updated=true. An asset with no bodies, no body found or an unknown physics_type is an error. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
-| `body_index` | number | no | Explicit index of the body to configure |
-| `bone_name` | string | no | Name of the skeleton bone |
-| `physics_type` | string | no | Body physics type (Default\|Kinematic\|Simulated) |
-| `mass` | number | no | Mass override in kilograms |
+| `body_index` | number | no | 0-based index of the body in the asset; wins over bone_name when both are given |
+| `bone_name` | string | no | Bone whose body to configure, used when body_index is absent |
+| `physics_type` | string | no | Body physics type (Default\|Kinematic\|Simulated), case-insensitive; omit to keep the current one |
+| `mass` | number | no | Mass override in kilograms; also switches the mass override on. Omit to keep the current mass |
 
 **Returns:** `{ physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, updated, saved, save_error }`
 
@@ -805,7 +805,7 @@ Spawn an AFieldSystemActor in the editor world and assign a UFieldSystem.  Spawn
 
 *Additive.*
 
-Spawn an APhysicsConstraintActor in the editor world, optionally wiring the two constrained actors.
+Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

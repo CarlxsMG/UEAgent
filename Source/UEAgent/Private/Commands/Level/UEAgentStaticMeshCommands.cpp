@@ -128,7 +128,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_static_mesh
 // ---------------------------------------------------------------------------
-// MCP:create_editable_static_mesh - Duplicate a static mesh to an editable location in /Game.
+// MCP:create_editable_static_mesh - Copy a UStaticMesh (default /Engine/BasicShapes/Cube) into a new asset at package_path/static_mesh_name with StaticDuplicateObject, creating the folder if needed, and save it, so an engine or other read-only mesh can be edited as a copy; the source is not modified and there is no undo. Idempotent: a static mesh already at that path is returned untouched with created=false, whatever its source. A source that does not load, a name taken by another asset class or a failed save is an error. duplicate_asset copies any asset type inside its own folder.
 //   @param package_path - Target folder path (e.g. "/Game/MyMeshes").
 //   @param static_mesh_name - Name for the new mesh asset.
 //   @param source_mesh - Source mesh to duplicate (defaults to engine Cube)
@@ -329,7 +329,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 // ---------------------------------------------------------------------------
 // add_static_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_static_mesh_socket - Add a socket to a static mesh with location, rotation, scale and tag.
+// MCP:add_static_mesh_socket - Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. Names are not checked, so repeating a socket_name adds a second socket of that name. location and scale take [x, y, z] arrays: any other value given reads as 0,0,0. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param socket_name - Name for the new socket.
 //   @param location - Socket relative location as [x, y, z] (optional)

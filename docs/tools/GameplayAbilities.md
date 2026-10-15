@@ -63,14 +63,14 @@ Add one empty UGameplayEffectComponent of a standard type to the GEComponents of
 
 *Additive.*
 
-Append a modifier to a GameplayEffect CDO's Modifiers array
+Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry (the save is refused during PIE). attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
-| `attribute_name` | string | yes | Attribute to modify, Health or MySet.Health |
-| `modifier_op` | string | yes | Add, Multiply, Divide, or Override |
-| `magnitude` | number | yes | Numeric magnitude of the modifier |
+| `attribute_name` | string | yes | Attribute to modify, Health or MySet.Health: the bare name or AttributeSetClass.Attribute, case-insensitive, first match among the loaded AttributeSet classes |
+| `modifier_op` | string | yes | Add, Multiply, Divide, or Override (case-insensitive) |
+| `magnitude` | number | yes | Constant magnitude of the modifier, stored as a ScalableFloat without a curve |
 
 **Returns:** `{ ge_blueprint_path: string, attribute_name: string, modifier_op: string, magnitude: number, modifier_index: int, modifier_count: int, magnitude_readback_ok: bool, magnitude_readback: number, added: bool }`
 
@@ -269,7 +269,7 @@ Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnit
 
 *Read-only.*
 
-Read activation info and asset tags from a GA Blueprint CDO
+Read the AssetTags of a GameplayAbility Blueprint from its class default object: ability_tags, asset_tag_count, and ability_name (the default object name). Despite the tool name, no activation data is read: no activation policy, required or blocked tags, cost or cooldown. Read-only and editor-time: it loads the asset and needs no actor or PIE; a path that is not a GameplayAbility Blueprint is an error. configure_ability_tags writes these tags; get_ability_info reads an ability granted to an actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -368,13 +368,13 @@ Read one attribute from the attribute sets registered on an editor-world actor a
 
 *Read-only.*
 
-Get list of attributes for an actor's attribute set
+List every attribute of the attribute sets registered on the ability system component of an editor-world actor (its IAbilitySystemInterface answer, else its first UAbilitySystemComponent), each with attribute_name, attribute_set, value (current, modifiers included), base_value and found, plus count. Read-only. A missing actor or component is an error; a component with no registered set gives count 0. Use get_attribute_value for one attribute, set_attribute_base_value to change one.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to query for attributes |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 
-**Returns:** `{ attribute_name, attribute_set, value, base_value, found, actor_name, attributes, count }`
+**Returns:** `{ actor_name: string, attributes: [{ attribute_name: string, attribute_set?: string, value: number, base_value: number, found: bool }], count: int }`
 
 ## `get_gameplay_cue_notify_info`
 
@@ -592,7 +592,7 @@ Author the DataTable&lt;FAttributeMetaData> that gives a UAttributeSet class its
 
 *Destructive, idempotent.*
 
-Set CDO lifetime/instancing/override properties on an AGameplayCueNotify_Actor (or _Looping) Blueprint
+Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. During PIE the save is refused after the in-memory edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -747,13 +747,13 @@ Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to
 
 *Destructive, idempotent.*
 
-Set a GameplayEffect Blueprint CDO's duration policy and duration
+Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy or a non-GE Blueprint fails before any edit; during PIE the save is refused after the in-memory edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
 | `duration_policy` | string | yes | Instant, Infinite, or HasDuration |
-| `duration_seconds` | number | yes | Required when duration_policy is HasDuration |
+| `duration_seconds` | number | yes | Duration in seconds, written only when duration_policy is HasDuration; ignored for Instant and Infinite, but the schema still requires a number, so pass 0 there |
 
 **Returns:** `{ ge_blueprint_path: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }`
 
@@ -892,7 +892,7 @@ Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime b
 
 *Destructive, idempotent.*
 
-Set the periodic execution Period (seconds) on a GameplayEffect CDO (damage/heal-over-time).
+Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint is an error; during PIE the save is refused after the in-memory edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

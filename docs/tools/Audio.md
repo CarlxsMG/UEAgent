@@ -40,7 +40,7 @@ Adds a graph INPUT node to an existing MetaSound Source and saves it.  Obtains a
 
 *Additive.*
 
-Adds a graph OUTPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding and calls UMetaSoundBuilderBase::AddGraphOutputNode, adding a real graph output node of the given data type.          "Int32", "Bool", "String", "Trigger").
+Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is not duplicated or retyped: the engine hands back that output and the reply still says added=true, so check get_metasound_info first. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -168,9 +168,9 @@ Wire a child node into a parent node's input slot
 
 ## `create_audio_bus`
 
-*Additive.*
+*Destructive.*
 
-Create (or load) a UAudioBus asset and set its channel layout
+Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted nothing is written, so a new bus keeps the engine default (Mono, not Stereo) and an existing one keeps its own. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -178,7 +178,7 @@ Create (or load) a UAudioBus asset and set its channel layout
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
 | `channels` | string | no | EAudioBusChannels: 'Mono' \| 'Stereo' (default) \| 'Quad' \| 'FiveDotOne' \| 'SevenDotOne' |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, created: bool, already_exists: bool, saved: bool }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool, created: bool, already_exists: bool, saved: bool }`
 
 ## `create_control_bus`
 
@@ -364,9 +364,9 @@ Create an empty USoundCue (no nodes, no first node) at package_path/name and sav
 
 ## `create_sound_mix`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Create a USoundMix asset and optionally set its EQ toggle / duration
+Create a USoundMix asset at package_path/name (package_path defaults to /Game/Audio) and save it; a sound mix already there is loaded instead (already_exists true) and the eq_enabled and duration you pass overwrite its values before it is saved. Omitted fields keep their current values; the reply reads eq_enabled and duration back from the asset. An invalid path, or an asset of another class there, is an error; a failed save is an error with the change kept in memory. Idempotent. Add per-class volume and pitch adjusters with set_sound_mix_class_override; create the classes with create_sound_class.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -392,9 +392,9 @@ Creates a USoundModulationPatch asset at package_path/patch_name with no inputs 
 
 ## `create_sound_source_bus`
 
-*Additive.*
+*Destructive.*
 
-Create (or load) a USoundSourceBus asset and wire its routing fields
+Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration are always written, so on an existing asset omitted ones are overwritten with the defaults (Stereo, 1.0 s). audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -602,11 +602,11 @@ Reads the MetaSound Source document graph: node/connection counts + I/O.  Reads 
 
 *Read-only.*
 
-Reads metadata for a UMetaSoundSource: class, graph class name and I/O.          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").
+Read the top-level metadata of a MetaSound Source asset, loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, and interface_count, the number of interfaces the document declares. Read-only; a path that does not resolve to a UMetaSoundSource is an error. For node and connection counts use get_metasound_graph_info; list_meta_sound_nodes lists the nodes and list_meta_sounds finds sources.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example" |
 
 **Returns:** `{ source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }`
 
@@ -686,7 +686,7 @@ Read one level of the hierarchy of a USoundClass asset: its parent and parent_pa
 
 *Read-only.*
 
-Gets sound class properties and hierarchy info from a USoundClass.
+Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is "None" for a root class. One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -919,9 +919,9 @@ Set the default literal of a named input pin on a concrete node (by node_id from
 
 ## `play_sound`
 
-*Destructive.*
+*Additive.*
 
-Plays sound on an audio component that has a sound already assigned.
+Starts the sound already assigned to an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. was_playing and playing are read just before and just after the call. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1066,7 +1066,7 @@ Change the channel layout (AudioBusChannels) of an existing UAudioBus asset and 
 
 *Destructive, idempotent.*
 
-Assigns a sound asset to an audio component for playback.
+Sets the sound asset of an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none). Start playback with play_sound.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1092,7 +1092,7 @@ Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Ma
 
 *Destructive, idempotent.*
 
-Set the target value (and optional fades) of a bus's stage in a mix
+Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, with no undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

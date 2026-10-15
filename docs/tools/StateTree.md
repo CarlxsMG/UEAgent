@@ -328,7 +328,7 @@ Read a StateTree asset without changing it: every state with its type, selection
 
 *Read-only.*
 
-Serialize a single task's instance data (FJsonObjectConverter over the task struct) for inspection.
+Read one task of a named state in a StateTree asset without changing it: the task node's struct name (class), its instance_id and every property of the node struct as JSON (properties). The task's instance data is not included. Errors when the tree, its editor data or the state is missing, or task_index is out of range; state_name picks the first state with that name. List a state's tasks with list_tasks; read or write one field with get_task_property or set_task_property; global tasks: list_global_tasks.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

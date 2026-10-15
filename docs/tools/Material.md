@@ -119,12 +119,12 @@ Clear all parameter overrides on a Material Instance Constant.  Resets all scala
 
 *Destructive, idempotent.*
 
-Force the world's MPCI back to the parent's default values
+Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
 
 **Returns:** `{ collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }`
 
@@ -214,9 +214,9 @@ Bulk-copy every scalar, vector and texture OVERRIDE from one material instance t
 
 ## `copy_mid_params_from_source`
 
-*Additive.*
+*Destructive.*
 
-Copy all parameter values from a source material into a Material Instance Dynamic.
+Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. copied is always true, so verify with get_mid_all_params. For saved Material Instance Constant assets use copy_material_instance_params.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -392,14 +392,14 @@ Create a UMaterialParameterCollection asset at package_path/name and save it to 
 
 ## `create_material_parameter_collection_instance`
 
-*Additive.*
+*Destructive.*
 
-Get or create a transient MPCI on the target world
+Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
 
 **Returns:** `{ collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }`
 
@@ -1177,14 +1177,14 @@ Define which material-layer and blend functions a layered material instance stac
 
 *Destructive, idempotent.*
 
-Set a value/property on a material expression node (e.g. a Constant value or parameter name).
+Write one value on an expression node of a UMaterial asset (not an instance), found by its object name node_id. ParameterName renames a node that has a parameter name; otherwise Constant, ScalarParameter, Constant3Vector, Constant4Vector and VectorParameter nodes ignore param_name and take value as their main value (R, DefaultValue or Constant); other node types set the named property by reflection. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). An unknown node or property is an error, an unparsable value is not. Instances: set_material_instance_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Material asset path |
 | `node_id` | string | yes | Id of the target expression in the material |
 | `param_name` | string | yes | Name of the property to set (e.g. "ParameterName", "R", "DefaultValue") |
-| `value` | string | no | String value to import (parsed per property type) |
+| `value` | string | no | Text to write: a number for Constant and ScalarParameter, "(R=1,G=0.5,B=0,A=1)" for the vector nodes (unparsable text gives black), the new name for ParameterName, else UE import text for the property; omitted means empty text. |
 
 **Returns:** `{ material: string, node_id: string, param_name: string, value: string }`
 
@@ -1219,7 +1219,7 @@ Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist
 
 *Destructive, idempotent.*
 
-Set a scalar parameter value on a Material Instance Dynamic.
+Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. An unknown param_name is not rejected: the override is stored and read back, so set is true even though no material input uses it -- check names with get_mid_all_params. old_value is 0 for a parameter without a value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1264,12 +1264,12 @@ Set a vector/color parameter value on a Material Instance Dynamic.
 
 *Destructive, idempotent.*
 
-Rebind the world's MPCI to a different parent collection
+Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the new parent MPC |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
 
 **Returns:** `{ collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }`
 
@@ -1292,7 +1292,7 @@ Override a scalar parameter value on the world's MPCI
 
 *Destructive, idempotent.*
 
-Override a vector parameter value on the world's MPCI
+Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1303,7 +1303,7 @@ Override a vector parameter value on the world's MPCI
 | `g` | number | no | Optional green channel |
 | `b` | number | no | Optional blue channel |
 | `a` | number | no | Optional alpha channel |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
 
 **Returns:** `{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }`
 

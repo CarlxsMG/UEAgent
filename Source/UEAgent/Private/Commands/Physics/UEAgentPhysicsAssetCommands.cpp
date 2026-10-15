@@ -491,12 +491,12 @@ TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_physics_body_properties - Set FBodyInstance / UBodySetup properties on one body of a physics asset
+// MCP:set_physics_body_properties - Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither still saves and reports updated=true. An asset with no bodies, no body found or an unknown physics_type is an error. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
 //   @param physics_asset_path - /Game path to the UPhysicsAsset.
-//   @param body_index - Explicit index of the body to configure
-//   @param bone_name - Name of the skeleton bone
-//   @param physics_type - Body physics type (Default|Kinematic|Simulated)
-//   @param mass - Mass override in kilograms
+//   @param body_index - 0-based index of the body in the asset; wins over bone_name when both are given
+//   @param bone_name - Bone whose body to configure, used when body_index is absent
+//   @param physics_type - Body physics type (Default|Kinematic|Simulated), case-insensitive; omit to keep the current one
+//   @param mass - Mass override in kilograms; also switches the mass override on. Omit to keep the current mass
 //   @returns { physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, updated, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObject>& Params)
 {

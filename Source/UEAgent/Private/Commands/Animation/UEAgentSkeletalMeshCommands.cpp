@@ -166,7 +166,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_skeletal_mesh
 // ---------------------------------------------------------------------------
-// MCP:create_editable_skeletal_mesh - Duplicate a skeletal mesh to an editable location in /Game.
+// MCP:create_editable_skeletal_mesh - Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name under /Game so it can be edited, creating the folder if needed; /Game/ is prepended to a package_path that lacks it. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. duplicate_asset copies other asset types.
 //   @param package_path - Destination package path (e.g. /Game/MyGame)
 //   @param skeletal_mesh_name - Name for the new skeletal mesh asset
 //   @param source_mesh - Content path to source mesh to duplicate (default /Engine/EngineMeshes/SkeletalCube)
@@ -299,7 +299,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshInfo(
 // ---------------------------------------------------------------------------
 // add_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_skeletal_mesh_socket - Add a socket to a skeletal mesh on a named bone.
+// MCP:add_skeletal_mesh_socket - Add a socket on a named bone of a skeletal mesh asset and save the mesh; a failed save is an error. The engine also adds a copy to the mesh's skeleton (unless it has a socket of that name), leaving the skeleton modified but unsaved. Errors when the mesh does not load or the bone is not in its reference skeleton. A socket_name the mesh already has is silently not added while the call still succeeds, so check socket_count. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param socket_name - Name for the new socket
 //   @param bone_name - Name of the bone to attach the socket to
@@ -744,7 +744,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 // ---------------------------------------------------------------------------
 // create_skeletal_mesh_morph_target
 // ---------------------------------------------------------------------------
-// MCP:create_skeletal_mesh_morph_target - Create a new empty morph target on a skeletal mesh.
+// MCP:create_skeletal_mesh_morph_target - Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty. Idempotent: an existing name returns created=false and already_exists=true.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset (e.g. /Game/MyGame/SKM_Example)
 //   @param morph_target_name - Name for the new morph target
 //   @returns { morph_target_name: string, skeletal_mesh_path: string, created: bool, persisted_to_disk: bool, total_morph_targets: int, note: string }
@@ -1516,7 +1516,7 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:remove_skeletal_mesh_lod - Remove an LOD entry by index via USkeletalMesh::RemoveSourceModel. LOD 0 is protected.
+// MCP:remove_skeletal_mesh_lod - Remove one LOD from a skeletal mesh asset, with its source model and cached reduction data; higher LODs shift down one index. lod_index must be 1 or more and below the LOD count, otherwise an error (LOD 0 is never removed). Marks the mesh dirty without saving or rebuilding render data, so follow with save_asset. Use add_skeletal_mesh_lod to append a LOD, get_skeletal_mesh_lod_info to inspect them, set_skeletal_mesh_min_lod to skip the most detailed LODs while keeping them.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param lod_index - Index of the LOD to remove (must be > 0)
 //   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, removed: bool }
@@ -2134,7 +2134,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshAllowCpuAccess(
 // ---------------------------------------------------------------------------
 // set_morph_target_generated_by_engine
 // ---------------------------------------------------------------------------
-// MCP:set_morph_target_generated_by_engine - Mark morph targets on a skeletal mesh as generated-by-engine (the runtime optimization that rebuilds them rather than using the imported source data).
+// MCP:set_morph_target_generated_by_engine - Flag morph targets of a skeletal mesh asset as generated by engine tools rather than imported from a source file, on every LOD, then save the mesh (a failed save is an error). The flag is only ever set, never cleared; names not on the mesh are ignored, and an empty or missing list flags every morph. When any flag changes the engine runs PreEditChange/PostEditChange on the mesh, which rebuilds it. modified says whether anything changed; flagged lists every morph now marked on LOD 0. Names come from get_skeletal_mesh_morph_targets.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param morph_target_names - List of morph target names to flag; empty list = flag every morph on the mesh
 //   @returns { skeletal_mesh_path: string, requested_count: int, named_list: bool, modified: bool, flagged: [string], note: string }

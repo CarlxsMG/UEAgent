@@ -310,7 +310,7 @@ TSharedPtr<FJsonObject> HandleGetDataLayerAssetInfo(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_data_layer_assets - Lists all UDataLayerAsset assets under a content path via the AssetRegistry.
+// MCP:get_data_layer_assets - Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, each with name, object path and type (Editor, Runtime or Unknown). Every match is loaded to read its type; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances. For one asset's runtime flags and debug color use get_data_layer_asset_info.
 //   @param path - Content path to search (optional, default "/Game", recursive)
 //   @returns { path: string, data_layer_assets: [{ name: string, path: string, type: string }], count: number }
 

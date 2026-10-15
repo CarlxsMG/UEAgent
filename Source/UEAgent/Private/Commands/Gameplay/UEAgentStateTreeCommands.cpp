@@ -2187,7 +2187,7 @@ TSharedPtr<FJsonObject> HandleListTaskTypes(
 // ---------------------------------------------------------------------------
 // get_task_info — full struct dump of a state's task instance
 // ---------------------------------------------------------------------------
-// MCP:get_task_info - Serialize a single task's instance data (FJsonObjectConverter over the task struct) for inspection.
+// MCP:get_task_info - Read one task of a named state in a StateTree asset without changing it: the task node's struct name (class), its instance_id and every property of the node struct as JSON (properties). The task's instance data is not included. Errors when the tree, its editor data or the state is missing, or task_index is out of range; state_name picks the first state with that name. List a state's tasks with list_tasks; read or write one field with get_task_property or set_task_property; global tasks: list_global_tasks.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param state_name [string!] - Name of the state.
 //   @param task_index - 0-based index into State->Tasks.

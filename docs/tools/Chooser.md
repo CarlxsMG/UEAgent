@@ -6,15 +6,15 @@
 
 ## `add_chooser_column_to_table`
 
-*Additive.*
+*Additive, idempotent.*
 
-Append a typed column (FloatRange/Bool/Enum/Object/OutputObject) to a UChooserTable.
+Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table (save failures are not reported). Columns are matched by type, not name: when one of that type exists its index comes back with already_existed=true and nothing changes, so the call is idempotent and a second column of one type cannot be added. The new column has no row cells, so add columns before add_chooser_row. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_type` | string | yes | Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
-| `column_name` | string | yes | Display name; used to detect duplicates (already_existed = true if a column of this type is matched). |
+| `column_name` | string | yes | Label echoed back in the reply only: it is not stored on the column and plays no part in duplicate detection, which goes by column_type. |
 
 **Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool }`
 

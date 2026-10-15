@@ -243,7 +243,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundClass(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------- //
 // create_sound_mix
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_mix - Create a USoundMix asset and optionally set its EQ toggle / duration
+// MCP:create_sound_mix - Create a USoundMix asset at package_path/name (package_path defaults to /Game/Audio) and save it; a sound mix already there is loaded instead (already_exists true) and the eq_enabled and duration you pass overwrite its values before it is saved. Omitted fields keep their current values; the reply reads eq_enabled and duration back from the asset. An invalid path, or an asset of another class there, is an error; a failed save is an error with the change kept in memory. Idempotent. Add per-class volume and pitch adjusters with set_sound_mix_class_override; create the classes with create_sound_class.
 //   @param name - Name of the new Sound Mix asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param eq_enabled - Optional bool, sets USoundMix::bApplyEQ (whether to apply the EQ effect). Left at the asset default when absent.

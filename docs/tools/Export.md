@@ -88,9 +88,9 @@ Load an asset and write its class, package and every editable or Blueprint-visib
 
 ## `export_blueprint_data`
 
-*Destructive.*
+*Additive.*
 
-Exports blueprint structure and metadata to JSON or TXT format.
+Load a Blueprint asset and write a summary of it to a new file Saved/Exports/Blueprints/&lt;Name>_&lt;YYYYMMDD_HHMMSS>.json or .txt in the project: parent class, compile status, counts of function graphs, event graphs and variables, function graph names, and member variables (name, pin type, category; JSON adds public and editable flags). No graph nodes; the Blueprint is not modified or compiled. Errors if the asset is missing or not a Blueprint; an unsupported format writes nothing (export_success=false). For an inline reply use get_blueprint_info; for a full dump, export_asset_as_text.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -126,14 +126,14 @@ No parameters.
 
 *Additive.*
 
-Generates comprehensive asset analysis report with property statistics to JSON or TXT format.
+Load an asset and write a property report to a new file Saved/Reports/Assets/&lt;Name>_Report_&lt;YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size. Those statistics go only into the file; the reply carries its path, size and status. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_data writes only editable or Blueprint-visible properties; export_asset_as_text returns a canonical dump inline.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Full path to the asset to analyze (e.g., '/Game/MyAsset'). |
 | `report_format` | string | yes | Report format: 'json' or 'txt'. |
 
-**Returns:** `{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_directory: string, total_properties: int, editable_properties: int, blueprint_visible_properties: int, file_size_bytes: int, file_size_mb: number }`
+**Returns:** `{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_type: string, report_directory: string }`
 
 ## `get_engine_stats`
 

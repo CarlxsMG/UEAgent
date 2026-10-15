@@ -278,10 +278,10 @@ TSharedPtr<FJsonObject> HandleDeleteSaveGame(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOutcomeReply(Payload, bErased, Failure);
 }
 
-// MCP:get_save_game_info - Retrieve metadata existence path and file size for a save slot
+// MCP:get_save_game_info - Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.
 //   @param slot_name - Save slot name to query
-//   @param user_index - Optional user index, default 0
-//   @returns { slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int }
+//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
+//   @returns { slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }
 TSharedPtr<FJsonObject> HandleGetSaveGameInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString Slot;

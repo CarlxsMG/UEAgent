@@ -235,7 +235,7 @@ TSharedPtr<FJsonObject> HandleSetGameModeOverride(
 // ---------------------------------------------------------------------------
 // set_game_mode_default_pawn  (AGameModeBase CDO :: DefaultPawnClass)
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_default_pawn - Set the AGameModeBase::DefaultPawnClass UPROPERTY on the GameMode's CDO.
+// MCP:set_game_mode_default_pawn - Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. Memory only: no transaction, no dirty flag, no save, so GameModes spawned later (the next PIE) use it, and it is lost when the editor closes unless a Blueprint GameMode's package is saved with save_asset. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param pawn_class - APawn-derivative class name
@@ -608,7 +608,7 @@ namespace
     }
 }
 
-// MCP:create_game_state_class_bp - Create a Blueprint subclass of AGameStateBase (or AGameState). Idempotent on re-run.
+// MCP:create_game_state_class_bp - Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path is returned as is with already_exists=true, without checking its parent (parent_class echoes the request). A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from AGameStateBase.
 //   @param package_path - Target content folder; defaults to /Game/MCP.

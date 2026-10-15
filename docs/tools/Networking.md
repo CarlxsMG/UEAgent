@@ -99,11 +99,11 @@ Enumerate the actors with bReplicates=true in the EDITOR world, optionally filte
 
 *Destructive, idempotent.*
 
-Sets the network authority role for a specified actor to Authority, SimulatedProxy, AutonomousProxy, or None.
+Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_net_role (by label) or list_replicated_actors; choose what replicates with configure_replication or set_actor_replicates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | The name of the actor to set authority for |
+| `actor_name` | string | yes | Object name of the editor-world actor (case-insensitive); labels are not matched |
 | `authority` | string | yes | The network authority role to set; valid values: Authority, SimulatedProxy, AutonomousProxy, None |
 
 **Returns:** `{ actor_name: string, authority_set: bool, previous_authority: string, requested_authority: string, actual_authority: string, actor_valid: bool, actor_class: string }`

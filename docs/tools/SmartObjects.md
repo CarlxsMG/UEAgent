@@ -216,7 +216,7 @@ Remove a definition-level default behavior (by index) from a USmartObjectDefinit
 
 *Destructive.*
 
-Remove a slot (by index) from a USmartObjectDefinition; the private Slots array is resized via FScriptArrayHelper (reflection-based element destruct).
+Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. No undo. To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -313,7 +313,7 @@ Replace a slot's activity tags (which activity it supports) on a USmartObjectDef
 
 *Destructive, idempotent.*
 
-Toggle whether a slot is initially enabled on a USmartObjectDefinition.
+Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -341,7 +341,7 @@ Replace a slot's initial runtime tags (FGameplayTagContainer) on a USmartObjectD
 
 *Destructive, idempotent.*
 
-Set a slot's local offset and/or rotation relative to the parent object.
+Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

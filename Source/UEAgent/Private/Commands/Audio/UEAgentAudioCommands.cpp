@@ -734,10 +734,11 @@ TSharedPtr<FJsonObject> HandleGetAudioSettings(const TSharedPtr<FJsonObject>& Pa
 
 // Playback
 
-// MCP:play_sound - Plays sound on an audio component that has a sound already assigned.
+// MCP:play_sound - Starts the sound already assigned to an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. was_playing and playing are read just before and just after the call. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.
 //   @param audio_component_name - Name of the audio component to play sound on
 //   @param start_time - Optional offset in seconds to start playback at
 //   @returns { audio_component_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, success: bool }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandlePlaySound(const TSharedPtr<FJsonObject>& Params)
 {
@@ -849,7 +850,7 @@ TSharedPtr<FJsonObject> HandlePlaySoundAtLocation(const TSharedPtr<FJsonObject>&
     return Report;
 }
 
-// MCP:set_audio_sound - Assigns a sound asset to an audio component for playback.
+// MCP:set_audio_sound - Sets the sound asset of an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none). Start playback with play_sound.
 //   @param audio_component_name - Name of the audio component to modify
 //   @param sound_path - Full asset path to the sound (e.g. '/Game/Audio/MySound.MySound')
 //   @returns { audio_component_name: string, sound_path: string, sound_name: string, previous_sound_name: string, sound_duration: number, success: bool }

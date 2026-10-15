@@ -144,9 +144,9 @@ Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "
 
 ## `add_widget_to_blueprint`
 
-*Additive.*
+*Additive, idempotent.*
 
-Add a widget to a Widget Blueprint's tree under a named panel (or the root).
+Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name is returned as is (already_existed true), even if its class differs, without compiling or saving although saved reads true. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -226,7 +226,7 @@ Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if abse
 
 *Additive.*
 
-Create a new UMG widget from a class and optionally add it to the viewport.
+Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget only finds editor-world widgets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -454,11 +454,11 @@ Remove a UMVVMViewModelContext (by context name) from a Widget BP's MVVM authori
 
 *Destructive.*
 
-Remove a widget by name from its parent or viewport.
+Detach a runtime UserWidget, found by object name in the editor world only (first one hosted by a level UWidgetComponent, then any other UserWidget of that world), from the viewport or panel holding it with RemoveFromParent. The object is not deleted, no asset changes and there is no undo. Widgets of a PIE world, such as those create_widget makes while PIE runs, are not found (an error). was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_name` | string | yes | Name of the widget to remove |
+| `widget_name` | string | yes | Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it |
 
 **Returns:** `{ widget_name: string, was_in_viewport: bool, had_parent: bool }`
 
@@ -767,7 +767,7 @@ Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressi
 
 *Destructive, idempotent.*
 
-Set CanvasPanelSlot layout for a widget parented under a CanvasPanel.
+Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

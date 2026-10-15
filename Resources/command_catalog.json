@@ -1002,7 +1002,7 @@
       "commands": [
         {
           "name": "add_anim_bone_track",
-          "description": "Add a bone curve track with identity keys to a UAnimSequence",
+          "description": "Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). An empty or unknown bone_name silently falls back to the root bone, so read bone_name in the reply; a missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1020,14 +1020,14 @@
               "name": "num_keys",
               "jsonType": "number",
               "required": false,
-              "description": "Number of identity keyframes to generate (default 2)"
+              "description": "Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence."
             }
           ],
           "returns": "{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, message }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -1076,7 +1076,7 @@
         },
         {
           "name": "add_anim_conduit",
-          "description": "Add a conduit node to a state machine inside an Animation Blueprint.",
+          "description": "Add a conduit node named conduit_name to an existing state machine of an Animation Blueprint (a missing blueprint or machine is an error; create the machine with add_anim_state_machine), then mark the blueprint structurally modified and save it without compiling. Idempotent by name: an existing conduit is returned unchanged (already_existed true). The conduit is placed unconnected: link it to states with add_anim_transition; remove_anim_conduit undoes it. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -1101,13 +1101,13 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
         {
           "name": "add_anim_curve_name",
-          "description": "Add a curve metadata entry (curve name) to a USkeleton",
+          "description": "Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is kept, reported as already_existed=true, and the skeleton is saved anyway. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false.",
           "params": [
             {
               "name": "curve_name",
@@ -1119,20 +1119,20 @@
               "name": "skeleton_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the target Skeleton"
+              "description": "Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved."
             }
           ],
           "returns": "{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
         {
           "name": "add_anim_float_curve",
-          "description": "Add a named float curve with keys to a UAnimSequence",
+          "description": "Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1156,8 +1156,8 @@
           "returns": "{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, success, saved, message }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -1367,7 +1367,7 @@
         },
         {
           "name": "add_anim_state_machine",
-          "description": "Add a state-machine node to the AnimGraph of an Animation Blueprint.",
+          "description": "Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_anim_graph_pins, fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_animation_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -1386,7 +1386,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -1571,7 +1571,7 @@
         },
         {
           "name": "add_bone",
-          "description": "Add a new bone to a skeleton's reference skeleton",
+          "description": "Add a bone named bone_name to the reference skeleton of a USkeleton asset under parent_name (omitted or empty: an extra root bone), with local_transform relative to the parent (a zero or missing scale becomes 1), then save the skeleton. Idempotent by name: an existing bone is returned (added false, already_existed true) without checking its parent or saving. An unknown parent is an error, and so is a failed save. Only the skeleton changes: skeletal meshes using it get no new bone, and there is no undo entry. No commit_bone_changes is needed; set_bone_parent and set_bone_transform edit bones, add_virtual_bone adds virtual ones.",
           "params": [
             {
               "name": "skeleton_path",
@@ -1583,7 +1583,7 @@
               "name": "bone_name",
               "jsonType": "string",
               "required": true,
-              "description": "Name for the new bone (must not already exist)"
+              "description": "Name for the new bone; when a bone of that name already exists nothing changes (added false)"
             },
             {
               "name": "parent_name",
@@ -1602,7 +1602,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -2140,7 +2140,7 @@
         },
         {
           "name": "add_rigvm_link",
-          "description": "Wire a link between two RigVM pins output to input",
+          "description": "Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. The Blueprint is then compiled and saved, even when the link fails, which is an error (pins missing, incompatible or already linked). Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.",
           "params": [
             {
               "name": "control_rig_path",
@@ -2164,7 +2164,7 @@
           "returns": "{ asset_path: string, source_pin: string, target_pin: string, linked: bool, link_count: int, saved: bool, save_error: string }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -2233,7 +2233,7 @@
         },
         {
           "name": "add_skeletal_mesh_socket",
-          "description": "Add a socket to a skeletal mesh on a named bone.",
+          "description": "Add a socket on a named bone of a skeletal mesh asset and save the mesh; a failed save is an error. The engine also adds a copy to the mesh's skeleton (unless it has a socket of that name), leaving the skeleton modified but unsaved. Errors when the mesh does not load or the bone is not in its reference skeleton. A socket_name the mesh already has is silently not added while the call still succeeds, so check socket_count. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -2956,7 +2956,7 @@
         },
         {
           "name": "create_anim_sequence",
-          "description": "Create and save a real UAnimSequence via the Animation Data Model",
+          "description": "Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save still answers success, with saved=false. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.",
           "params": [
             {
               "name": "anim_name",
@@ -2993,7 +2993,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3079,7 +3079,7 @@
         },
         {
           "name": "create_editable_skeletal_mesh",
-          "description": "Duplicate a skeletal mesh to an editable location in /Game.",
+          "description": "Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name under /Game so it can be edited, creating the folder if needed; /Game/ is prepended to a package_path that lacks it. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. duplicate_asset copies other asset types.",
           "params": [
             {
               "name": "package_path",
@@ -3104,7 +3104,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3209,7 +3209,7 @@
         },
         {
           "name": "create_pose_asset",
-          "description": "Create and save a UPoseAsset asset bound to a USkeleton, under /Game",
+          "description": "Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true, even when bound to another skeleton. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.",
           "params": [
             {
               "name": "name",
@@ -3234,7 +3234,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3370,7 +3370,7 @@
         },
         {
           "name": "create_skeletal_mesh_morph_target",
-          "description": "Create a new empty morph target on a skeletal mesh.",
+          "description": "Register a new morph target on a skeletal mesh asset in memory only, for the rest of the editor session: it is never saved (persisted_to_disk is always false), and a mesh rebuild or reload drops any morph the mesh's imported source data does not contain. Each LOD gets one tiny seed delta on vertex 0 so the morph counts as valid; write real deltas with set_morph_target_deltas. Marks the mesh dirty. Idempotent: an existing name returns created=false and already_exists=true.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -3389,7 +3389,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -3891,7 +3891,7 @@
         },
         {
           "name": "get_animation_blueprint_info",
-          "description": "Retrieve metadata and optional full data for an Animation Blueprint asset",
+          "description": "Find an Animation Blueprint in the Asset Registry and report its object path, class, package, is_loaded and the size and timestamp of its .uasset on disk. With load_full_data it also loads the asset and adds the target skeleton, its bone count, the generated class and is_abstract. Read-only. blueprint_name takes an object path, a package path or a short name searched under /Game (the first match when several share it); no match is an error. For parent class, graphs and state machines use get_anim_blueprint_info.",
           "params": [
             {
               "name": "blueprint_name",
@@ -4085,7 +4085,7 @@
         },
         {
           "name": "get_ik_solver_bones",
-          "description": "Get the start and end bone names for a solver in an IK Rig.",
+          "description": "Read the start and end bone of one solver in an IK Rig asset, chosen by its 0-based position in the solver stack. Read-only; an out-of-range solver_index or a rig that does not load is an error. A solver type without an end bone returns \"None\" as end_bone. get_ik_solver_details adds the type, enabled state and connected goals; set_ik_solver_bones writes the bones.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -4110,7 +4110,7 @@
         },
         {
           "name": "get_ik_solver_details",
-          "description": "Get detailed info about a solver: type name, enabled state, bones, connected goals.",
+          "description": "Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the solver struct name, e.g. \"IKRigFullBodyIKSolver\"), unique_name (\"<index+1> - <display name>\"), enabled, start and end bone, and the names of the goals connected to it. Read-only; an out-of-range solver_index or a rig that does not load is an error. Use get_ik_solver_bones for just the bones, get_ik_solver_settings for its tunables, get_ik_rig_info for the goals and chains of the whole rig.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -5474,7 +5474,7 @@
         },
         {
           "name": "remove_pose_asset",
-          "description": "Delete a UPoseAsset asset after verifying the asset is a UPoseAsset.",
+          "description": "Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error, and so does an asset of another class; during PIE the delete fails with deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.",
           "params": [
             {
               "name": "asset_path",
@@ -5487,7 +5487,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -5755,7 +5755,7 @@
         },
         {
           "name": "remove_skeletal_mesh_lod",
-          "description": "Remove an LOD entry by index via USkeletalMesh::RemoveSourceModel. LOD 0 is protected.",
+          "description": "Remove one LOD from a skeletal mesh asset, with its source model and cached reduction data; higher LODs shift down one index. lod_index must be 1 or more and below the LOD count, otherwise an error (LOD 0 is never removed). Marks the mesh dirty without saving or rebuilding render data, so follow with save_asset. Use add_skeletal_mesh_lod to append a LOD, get_skeletal_mesh_lod_info to inspect them, set_skeletal_mesh_min_lod to skip the most detailed LODs while keeping them.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -6545,7 +6545,7 @@
         },
         {
           "name": "set_anim_curve_interp_mode",
-          "description": "Set the interpolation mode (tangent flags) on an animation curve",
+          "description": "Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6582,7 +6582,7 @@
         },
         {
           "name": "set_anim_curve_keys",
-          "description": "Set the keys (time/value pairs) on an animation curve",
+          "description": "Replace every key of an existing curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first), keys needs at least one valid pair, and a curve_type other than float or transform is an error. Only float curves take keys: on a transform curve nothing changes, yet applied is true. A failed save makes success false.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6600,7 +6600,7 @@
               "name": "keys",
               "jsonType": "array",
               "required": false,
-              "description": "JSON array of {time, value, arrive_tangent?, leave_tangent?, interp_mode?} objects"
+              "description": "JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given."
             },
             {
               "name": "curve_type",
@@ -7076,13 +7076,13 @@
         },
         {
           "name": "set_animation_speed",
-          "description": "Set the animation playback speed for a skeletal mesh component",
+          "description": "Set the play rate of a skeletal mesh component, found by object name in the editor world (or the world the world param selects), and switch its component tick on. Only a component in Use Animation Asset (single node) mode takes it: in Animation Blueprint mode nothing changes and actual_speed reads 0, so check speed_set_successfully. Transient: nothing is saved or undoable. A speed outside 0-10 or no such component is an error. For montages use play_animation with play_rate, or set_anim_montage_rate_scale on the asset.",
           "params": [
             {
               "name": "component_name",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the skeletal mesh component"
+              "description": "Object name of the USkeletalMeshComponent, e.g. \"CharacterMesh0\", case-insensitive; the first actor in the world that has one with that name wins"
             },
             {
               "name": "speed",
@@ -7420,7 +7420,7 @@
         },
         {
           "name": "set_ik_retarget_chain_bones",
-          "description": "Set start bone, end bone, and/or goal for a retarget chain in an IK Rig.",
+          "description": "Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain or a bone not in the rig skeleton is not an error but start_bone_set, end_bone_set or goal_set false; an unknown goal_name sets the goal to \"None\" with goal_set true, so check goal_name. The save result is not reported. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7453,7 +7453,7 @@
               "description": "Optional new associated IK goal"
             }
           ],
-          "returns": "{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_ok?: bool, end_ok?: bool, goal_ok?: bool }",
+          "returns": "{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -7463,7 +7463,7 @@
         },
         {
           "name": "set_ik_solver_bones",
-          "description": "Set the start and/or end bone for a solver in an IK Rig.",
+          "description": "Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. The save result is not reported. get_ik_solver_bones reads them.",
           "params": [
             {
               "name": "ik_rig_path",
@@ -7808,7 +7808,7 @@
         },
         {
           "name": "set_morph_target_generated_by_engine",
-          "description": "Mark morph targets on a skeletal mesh as generated-by-engine (the runtime optimization that rebuilds them rather than using the imported source data).",
+          "description": "Flag morph targets of a skeletal mesh asset as generated by engine tools rather than imported from a source file, on every LOD, then save the mesh (a failed save is an error). The flag is only ever set, never cleared; names not on the mesh are ignored, and an empty or missing list flags every morph. When any flag changes the engine runs PreEditChange/PostEditChange on the mesh, which rebuilds it. modified says whether anything changed; flagged lists every morph now marked on LOD 0. Names come from get_skeletal_mesh_morph_targets.",
           "params": [
             {
               "name": "skeletal_mesh_path",
@@ -8019,7 +8019,7 @@
         },
         {
           "name": "set_pose_asset_base_pose",
-          "description": "Set the base pose of a UPoseAsset by name (UPoseAsset::SetBasePoseName).",
+          "description": "Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes; check applied, false when the engine refused the name, and a failed save makes success false. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -8272,7 +8272,7 @@
         },
         {
           "name": "set_retargeter_chain_mapping",
-          "description": "Map a source chain to a target chain in an IK Retargeter.",
+          "description": "Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. The save result is not reported. get_ik_retargeter_info shows the per-op mappings.",
           "params": [
             {
               "name": "ik_retargeter_path",
@@ -8296,7 +8296,7 @@
               "name": "op_name",
               "jsonType": "string",
               "required": false,
-              "description": "Optional retarget op name to scope the mapping"
+              "description": "Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated"
             }
           ],
           "returns": "{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool }",
@@ -9168,7 +9168,7 @@
         },
         {
           "name": "setup_foot_ik",
-          "description": "Add a UAnimGraphNode_LegIK to the AnimGraph of an Animation Blueprint, binding the foot bone references.",
+          "description": "Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, then mark the blueprint structurally modified and save it without compiling. The foot bones are NOT bound: the node has no LeftFootBone or RightFootBone property (its legs live in LegsDefinition), so left_foot_bone and right_foot_bone are only echoed back, and the node is left unwired. Configure it with set_anim_graph_node_property and connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.",
           "params": [
             {
               "name": "anim_blueprint_path",
@@ -9180,20 +9180,20 @@
               "name": "left_foot_bone",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the left foot bone in the skeleton."
+              "description": "Name of the left foot bone; required and echoed back, but not written to the node and not checked against the skeleton."
             },
             {
               "name": "right_foot_bone",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the right foot bone in the skeleton."
+              "description": "Name of the right foot bone; required and echoed back, but not written to the node and not checked against the skeleton."
             }
           ],
           "returns": "{ anim_blueprint_path, left_foot_bone, right_foot_bone, ik_node_count, already_existed, saved }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -9371,7 +9371,7 @@
         },
         {
           "name": "add_static_mesh_socket",
-          "description": "Add a socket to a static mesh with location, rotation, scale and tag.",
+          "description": "Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. Names are not checked, so repeating a socket_name adds a second socket of that name. location and scale take [x, y, z] arrays: any other value given reads as 0,0,0. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.",
           "params": [
             {
               "name": "static_mesh_path",
@@ -9563,7 +9563,7 @@
         },
         {
           "name": "create_editable_static_mesh",
-          "description": "Duplicate a static mesh to an editable location in /Game.",
+          "description": "Copy a UStaticMesh (default /Engine/BasicShapes/Cube) into a new asset at package_path/static_mesh_name with StaticDuplicateObject, creating the folder if needed, and save it, so an engine or other read-only mesh can be edited as a copy; the source is not modified and there is no undo. Idempotent: a static mesh already at that path is returned untouched with created=false, whatever its source. A source that does not load, a name taken by another asset class or a failed save is an error. duplicate_asset copies any asset type inside its own folder.",
           "params": [
             {
               "name": "package_path",
@@ -9588,7 +9588,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -9958,7 +9958,7 @@
         },
         {
           "name": "draw_material_to_render_target_region",
-          "description": "Draw a material into a region of a render target via the canvas",
+          "description": "Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is always true, even when a zero size draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.",
           "params": [
             {
               "name": "render_target_path",
@@ -9995,7 +9995,7 @@
         },
         {
           "name": "draw_text_to_render_target",
-          "description": "Draw a string of text into a render target via the canvas",
+          "description": "Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is always true (an empty text draws nothing) and font_resolved says a font was found. Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.",
           "params": [
             {
               "name": "render_target_path",
@@ -10038,7 +10038,7 @@
         },
         {
           "name": "draw_texture_to_render_target",
-          "description": "Draw a texture into a region of a render target via the canvas",
+          "description": "Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is always true, even when a zero size draws nothing. For a material use draw_material_to_render_target_region.",
           "params": [
             {
               "name": "render_target_path",
@@ -10512,7 +10512,7 @@
         },
         {
           "name": "get_collection_assets",
-          "description": "Lists the asset object paths contained in a collection.          must match the collection's share type.",
+          "description": "List the object paths of the assets directly in one Content Browser collection (child collections are not included), without changing anything. The collection is looked up by collection_name within share_type, default Local; an unrecognized share_type also falls back to Local, and a name not found under that share type is an error. get_collections lists every collection with its share_type. Returns assets and asset_count; change membership with add_asset_to_collection or remove_asset_from_collection.",
           "params": [
             {
               "name": "collection_name",
@@ -11580,7 +11580,7 @@
         },
         {
           "name": "add_metasound_graph_output",
-          "description": "Adds a graph OUTPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding and calls UMetaSoundBuilderBase::AddGraphOutputNode, adding a real graph output node of the given data type.          \"Int32\", \"Bool\", \"String\", \"Trigger\").",
+          "description": "Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is not duplicated or retyped: the engine hands back that output and the reply still says added=true, so check get_metasound_info first. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.",
           "params": [
             {
               "name": "metasound_path",
@@ -11883,7 +11883,7 @@
         },
         {
           "name": "create_audio_bus",
-          "description": "Create (or load) a UAudioBus asset and set its channel layout",
+          "description": "Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted nothing is written, so a new bus keeps the engine default (Mono, not Stereo) and an existing one keeps its own. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.",
           "params": [
             {
               "name": "name",
@@ -11904,10 +11904,10 @@
               "description": "EAudioBusChannels: 'Mono' | 'Stereo' (default) | 'Quad' | 'FiveDotOne' | 'SevenDotOne'"
             }
           ],
-          "returns": "{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, created: bool, already_exists: bool, saved: bool }",
+          "returns": "{ name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool, created: bool, already_exists: bool, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -12317,7 +12317,7 @@
         },
         {
           "name": "create_sound_mix",
-          "description": "Create a USoundMix asset and optionally set its EQ toggle / duration",
+          "description": "Create a USoundMix asset at package_path/name (package_path defaults to /Game/Audio) and save it; a sound mix already there is loaded instead (already_exists true) and the eq_enabled and duration you pass overwrite its values before it is saved. Omitted fields keep their current values; the reply reads eq_enabled and duration back from the asset. An invalid path, or an asset of another class there, is an error; a failed save is an error with the change kept in memory. Idempotent. Add per-class volume and pitch adjusters with set_sound_mix_class_override; create the classes with create_sound_class.",
           "params": [
             {
               "name": "name",
@@ -12347,8 +12347,8 @@
           "returns": "{ name: string, package_path: string, asset_path: string, asset_class: string, eq_enabled: bool, duration: number, applied_eq_enabled: bool, applied_duration: bool, created: bool, already_exists: bool, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -12379,7 +12379,7 @@
         },
         {
           "name": "create_sound_source_bus",
-          "description": "Create (or load) a USoundSourceBus asset and wire its routing fields",
+          "description": "Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration are always written, so on an existing asset omitted ones are overwritten with the defaults (Stereo, 1.0 s). audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.",
           "params": [
             {
               "name": "name",
@@ -12415,7 +12415,7 @@
           "returns": "{ name: string, package_path: string, asset_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string, applied_channels: bool, applied_duration: bool, applied_audio_bus: bool, created: bool, already_exists: bool, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -12784,13 +12784,13 @@
         },
         {
           "name": "get_metasound_info",
-          "description": "Reads metadata for a UMetaSoundSource: class, graph class name and I/O.          \"/Game/MetaSounds/MS_Example\" or fully-qualified \".MS_Example\").",
+          "description": "Read the top-level metadata of a MetaSound Source asset, loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, and interface_count, the number of interfaces the document declares. Read-only; a path that does not resolve to a UMetaSoundSource is an error. For node and connection counts use get_metasound_graph_info; list_meta_sound_nodes lists the nodes and list_meta_sounds finds sources.",
           "params": [
             {
               "name": "metasound_path",
               "jsonType": "string",
               "required": true,
-              "description": "Asset path of the MetaSound Source (e.g."
+              "description": "Asset path of the MetaSound Source, as a package path like \"/Game/MetaSounds/MS_Example\" or an object path like \"/Game/MetaSounds/MS_Example.MS_Example\""
             }
           ],
           "returns": "{ source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }",
@@ -12917,7 +12917,7 @@
         },
         {
           "name": "get_sound_class_properties",
-          "description": "Gets sound class properties and hierarchy info from a USoundClass.",
+          "description": "Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is \"None\" for a root class. One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.",
           "params": [
             {
               "name": "sound_class_path",
@@ -13373,7 +13373,7 @@
         },
         {
           "name": "play_sound",
-          "description": "Plays sound on an audio component that has a sound already assigned.",
+          "description": "Starts the sound already assigned to an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. start_time is an offset in seconds into the sound. A component without a sound is an error: assign one with set_audio_sound. Transient: nothing is saved, marked dirty or undoable. was_playing and playing are read just before and just after the call. Stop with stop_sound; to play an asset at a location without a component use play_sound_at_location.",
           "params": [
             {
               "name": "audio_component_name",
@@ -13391,7 +13391,7 @@
           "returns": "{ audio_component_name: string, playing: bool, was_playing: bool, sound_name: string, start_time: number, success: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
+            "destructiveHint": false,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -13660,7 +13660,7 @@
         },
         {
           "name": "set_audio_sound",
-          "description": "Assigns a sound asset to an audio component for playback.",
+          "description": "Sets the sound asset of an audio component of the editor world, matched by object name (case-insensitive) against the first audio component of each actor; components in a running PIE world are not reached. A component that is playing restarts with the new sound unless it allows multiple instances. The change is not saved, marked dirty or undoable. A missing component or a sound that does not load is an error. previous_sound_name names the sound it replaced (None when there was none). Start playback with play_sound.",
           "params": [
             {
               "name": "audio_component_name",
@@ -13710,7 +13710,7 @@
         },
         {
           "name": "set_control_bus_mix_stage_value",
-          "description": "Set the target value (and optional fades) of a bus's stage in a mix",
+          "description": "Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, with no undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.",
           "params": [
             {
               "name": "mix_path",
@@ -15680,13 +15680,13 @@
         },
         {
           "name": "stop_behavior_tree",
-          "description": "Stop execution of a running behavior tree on an actor",
+          "description": "Stop the behavior tree of an editor-world actor with StopTree (Safe mode), through its AIController brain component or else a UBehaviorTreeComponent on the actor. Runtime state only, nothing saved; editor world only, never PIE. A tree that is not running is not an error: was_running (measured) comes back false, while stopped is always true. An unknown actor, or one with no behavior tree component, is an error. Unlike pause_behavior_tree it cannot be continued with resume_behavior_tree: start again with restart_behavior_tree (the last tree) or run_behavior_tree.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the actor running the behavior tree"
+              "description": "Object name or label of the pawn or AIController in the editor world (first match)"
             }
           ],
           "returns": "{ actor_name: string, was_running: bool, stopped: bool }",
@@ -20005,7 +20005,7 @@
         },
         {
           "name": "add_spring_arm",
-          "description": "Add or configure a USpringArmComponent on an existing actor (camera boom / third-person follow distance / lag / collision probe).",
+          "description": "Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.",
           "params": [
             {
               "name": "actor_name",
@@ -20017,7 +20017,7 @@
               "name": "component_name",
               "jsonType": "string",
               "required": false,
-              "description": "Optional name for the new component (defaults to \"SpringArm\"). If a component with this name already exists, only the provided fields are updated."
+              "description": "Optional name for a new component (defaults to \"SpringArm\"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name."
             },
             {
               "name": "target_arm_length",
@@ -20107,7 +20107,7 @@
           "returns": "{ actor_name, component_name, already_existed, applied_count, target_arm_length, socket_offset: [x,y,z], target_offset: [x,y,z], probe_size, probe_channel, b_do_collision_test, b_use_pawn_control_rotation, b_inherit_pitch, b_inherit_yaw, b_inherit_roll, b_enable_camera_lag, b_enable_camera_rotation_lag, camera_lag_speed, camera_rotation_lag_speed }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -20133,7 +20133,7 @@
         },
         {
           "name": "create_camera",
-          "description": "Spawn a new camera actor in the editor world with optional initial transform.",
+          "description": "Spawn a new ACameraActor in the editor world (never in PIE) at an optional location and rotation, with camera_name as its outliner label. Labels need not be unique, so address the camera later by the returned actor_name. Each location axis must be within +-100000, otherwise an error. The level is marked dirty, not saved. location_set, rotation_set and label_set compare what the spawned actor reports with the request. Move or re-aim it with set_camera_transform; spawn_actor places a CameraActor in PIE too; add_camera_component puts a camera on an existing actor.",
           "params": [
             {
               "name": "camera_name",
@@ -20703,7 +20703,7 @@
         },
         {
           "name": "set_camera_rig_root_node",
-          "description": "Sets a UCameraRigAsset's RootNode to a new node of the given UCameraNode subclass.",
+          "description": "Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.",
           "params": [
             {
               "name": "camera_rig_path",
@@ -20931,7 +20931,7 @@
       "commands": [
         {
           "name": "add_chooser_column_to_table",
-          "description": "Append a typed column (FloatRange/Bool/Enum/Object/OutputObject) to a UChooserTable.",
+          "description": "Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table (save failures are not reported). Columns are matched by type, not name: when one of that type exists its index comes back with already_existed=true and nothing changes, so the call is idempotent and a second column of one type cannot be added. The new column has no row cells, so add columns before add_chooser_row. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.",
           "params": [
             {
               "name": "table_path",
@@ -20949,14 +20949,14 @@
               "name": "column_name",
               "jsonType": "string",
               "required": true,
-              "description": "Display name; used to detect duplicates (already_existed = true if a column of this type is matched)."
+              "description": "Label echoed back in the reply only: it is not stored on the column and plays no part in duplicate detection, which goes by column_type."
             }
           ],
           "returns": "{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -23070,7 +23070,7 @@
         },
         {
           "name": "remove_string_table_entry",
-          "description": "Remove an entry and its metadata from a UStringTable by key",
+          "description": "Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that was not in the table is not an error -- existed comes back false while removed (the key is absent afterwards) is still true, and the table is saved anyway. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.",
           "params": [
             {
               "name": "string_table_path",
@@ -23089,7 +23089,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -23658,7 +23658,7 @@
         },
         {
           "name": "add_message_log_entry",
-          "description": "Add an entry to a named engine Message Log listing.",
+          "description": "Add one message to a named editor Message Log listing (for example \"PIE\", \"MapCheck\" or a new name, created on demand) at Info, Warning or Error severity; an unrecognised severity becomes Info, and a missing log_name or message is an error. Entries stay in memory for the editor session and are never saved. Use it for diagnostics meant for Window > Message Log; print_to_output_log writes to the Output Log instead. message_count is the listing's message count after the add. Read entries back with get_message_log_entries, show the window with open_message_log, empty the listing with clear_message_log.",
           "params": [
             {
               "name": "log_name",
@@ -25493,7 +25493,7 @@
         },
         {
           "name": "open_message_log",
-          "description": "Open the editor Message Log window to a given listing.",
+          "description": "Open or focus the editor Message Log window on one listing (PIE by default), creating the listing empty when it does not exist yet and enabling message log display; no message is changed. opened only says the request was made: without an editor UI nothing shows. module_available says whether the MessageLog module loaded. To read the messages use get_message_log_entries rather than the window; add or empty them with add_message_log_entry and clear_message_log.",
           "params": [
             {
               "name": "log_name",
@@ -25505,8 +25505,8 @@
           "returns": "{ opened: bool, log_name: string, module_available: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -26053,7 +26053,7 @@
         },
         {
           "name": "set_allow_cinematic_control",
-          "description": "Toggle cinematic-control on the active editor viewport (Sequencer overrride)",
+          "description": "Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_allow_cinematic_control.",
           "params": [
             {
               "name": "allow",
@@ -26385,7 +26385,7 @@
         },
         {
           "name": "set_viewport_camera",
-          "description": "Move the active editor viewport camera to a new location and or rotation",
+          "description": "Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array in cm, else the camera goes to the origin. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.",
           "params": [
             {
               "name": "location",
@@ -28611,7 +28611,7 @@
         },
         {
           "name": "set_niagara_data_interface_asset",
-          "description": "Set the underlying asset on a UNiagaraDataInterface user-parameter binding.",
+          "description": "Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), then requests a system recompile. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error. The tool does not save the system, mark it dirty or open an undo transaction: persist it with save_asset. For non-asset fields use set_niagara_data_interface_default.",
           "params": [
             {
               "name": "system_path",
@@ -28648,7 +28648,7 @@
         },
         {
           "name": "set_niagara_data_interface_curve",
-          "description": "Author the FRichCurve keys of a curve user-parameter data interface (Curve / Color / Vector curve DIs).",
+          "description": "Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.",
           "params": [
             {
               "name": "system_path",
@@ -28685,7 +28685,7 @@
         },
         {
           "name": "set_niagara_data_interface_default",
-          "description": "Set a default property (scalar/vector/color) on a UNiagaraDataInterface user-parameter binding by name.",
+          "description": "Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works (\"1.5\", \"(X=1,Y=2,Z=3)\", \"(R=1,G=0,B=0,A=1)\", an enum name), then requests a system recompile. A missing DI or property, or text that does not parse, is an error. The tool does not save the system, mark it dirty or open an undo transaction (persist with save_asset); value is echoed, not read back. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.",
           "params": [
             {
               "name": "system_path",
@@ -30047,7 +30047,7 @@
         },
         {
           "name": "export_blueprint_data",
-          "description": "Exports blueprint structure and metadata to JSON or TXT format.",
+          "description": "Load a Blueprint asset and write a summary of it to a new file Saved/Exports/Blueprints/<Name>_<YYYYMMDD_HHMMSS>.json or .txt in the project: parent class, compile status, counts of function graphs, event graphs and variables, function graph names, and member variables (name, pin type, category; JSON adds public and editable flags). No graph nodes; the Blueprint is not modified or compiled. Errors if the asset is missing or not a Blueprint; an unsupported format writes nothing (export_success=false). For an inline reply use get_blueprint_info; for a full dump, export_asset_as_text.",
           "params": [
             {
               "name": "blueprint_path",
@@ -30065,7 +30065,7 @@
           "returns": "{ blueprint_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, blueprint_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
+            "destructiveHint": false,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -30109,7 +30109,7 @@
         },
         {
           "name": "generate_asset_report",
-          "description": "Generates comprehensive asset analysis report with property statistics to JSON or TXT format.",
+          "description": "Load an asset and write a property report to a new file Saved/Reports/Assets/<Name>_Report_<YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size. Those statistics go only into the file; the reply carries its path, size and status. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_data writes only editable or Blueprint-visible properties; export_asset_as_text returns a canonical dump inline.",
           "params": [
             {
               "name": "asset_path",
@@ -30124,7 +30124,7 @@
               "description": "Report format: 'json' or 'txt'."
             }
           ],
-          "returns": "{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_directory: string, total_properties: int, editable_properties: int, blueprint_visible_properties: int, file_size_bytes: int, file_size_mb: number }",
+          "returns": "{ asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_type: string, report_directory: string }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
@@ -30410,7 +30410,7 @@
         },
         {
           "name": "create_game_state_class_bp",
-          "description": "Create a Blueprint subclass of AGameStateBase (or AGameState). Idempotent on re-run.",
+          "description": "Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path is returned as is with already_exists=true, without checking its parent (parent_class echoes the request). A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.",
           "params": [
             {
               "name": "asset_name",
@@ -30633,7 +30633,7 @@
         },
         {
           "name": "set_game_mode_default_pawn",
-          "description": "Set the AGameModeBase::DefaultPawnClass UPROPERTY on the GameMode's CDO.",
+          "description": "Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. Memory only: no transaction, no dirty flag, no save, so GameModes spawned later (the next PIE) use it, and it is lost when the editor closes unless a Blueprint GameMode's package is saved with save_asset. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.",
           "params": [
             {
               "name": "pawn_class",
@@ -30930,7 +30930,7 @@
         },
         {
           "name": "add_gameplay_effect_modifier",
-          "description": "Append a modifier to a GameplayEffect CDO's Modifiers array",
+          "description": "Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry (the save is refused during PIE). attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -30942,19 +30942,19 @@
               "name": "attribute_name",
               "jsonType": "string",
               "required": true,
-              "description": "Attribute to modify, Health or MySet.Health"
+              "description": "Attribute to modify, Health or MySet.Health: the bare name or AttributeSetClass.Attribute, case-insensitive, first match among the loaded AttributeSet classes"
             },
             {
               "name": "modifier_op",
               "jsonType": "string",
               "required": true,
-              "description": "Add, Multiply, Divide, or Override"
+              "description": "Add, Multiply, Divide, or Override (case-insensitive)"
             },
             {
               "name": "magnitude",
               "jsonType": "number",
               "required": true,
-              "description": "Numeric magnitude of the modifier"
+              "description": "Constant magnitude of the modifier, stored as a ScalableFloat without a curve"
             }
           ],
           "returns": "{ ge_blueprint_path: string, attribute_name: string, modifier_op: string, magnitude: number, modifier_index: int, modifier_count: int, magnitude_readback_ok: bool, magnitude_readback: number, added: bool }",
@@ -31371,7 +31371,7 @@
         },
         {
           "name": "get_ability_activation_info",
-          "description": "Read activation info and asset tags from a GA Blueprint CDO",
+          "description": "Read the AssetTags of a GameplayAbility Blueprint from its class default object: ability_tags, asset_tag_count, and ability_name (the default object name). Despite the tool name, no activation data is read: no activation policy, required or blocked tags, cost or cooldown. Read-only and editor-time: it loads the asset and needs no actor or PIE; a path that is not a GameplayAbility Blueprint is an error. configure_ability_tags writes these tags; get_ability_info reads an ability granted to an actor.",
           "params": [
             {
               "name": "ability_path",
@@ -31541,16 +31541,16 @@
         },
         {
           "name": "get_attributes",
-          "description": "Get list of attributes for an actor's attribute set",
+          "description": "List every attribute of the attribute sets registered on the ability system component of an editor-world actor (its IAbilitySystemInterface answer, else its first UAbilitySystemComponent), each with attribute_name, attribute_set, value (current, modifiers included), base_value and found, plus count. Read-only. A missing actor or component is an error; a component with no registered set gives count 0. Use get_attribute_value for one attribute, set_attribute_base_value to change one.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the actor to query for attributes"
+              "description": "Object name (not the label) of the editor-world actor, e.g. \"BP_Hero_C_1\", matched case-insensitively; find_actors_by_name maps labels to names"
             }
           ],
-          "returns": "{ attribute_name, attribute_set, value, base_value, found, actor_name, attributes, count }",
+          "returns": "{ actor_name: string, attributes: [{ attribute_name: string, attribute_set?: string, value: number, base_value: number, found: bool }], count: int }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -31984,7 +31984,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_actor_properties",
-          "description": "Set CDO lifetime/instancing/override properties on an AGameplayCueNotify_Actor (or _Looping) Blueprint",
+          "description": "Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. During PIE the save is refused after the in-memory edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -32384,7 +32384,7 @@
         },
         {
           "name": "set_gameplay_effect_duration",
-          "description": "Set a GameplayEffect Blueprint CDO's duration policy and duration",
+          "description": "Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy or a non-GE Blueprint fails before any edit; during PIE the save is refused after the in-memory edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32402,7 +32402,7 @@
               "name": "duration_seconds",
               "jsonType": "number",
               "required": true,
-              "description": "Required when duration_policy is HasDuration"
+              "description": "Duration in seconds, written only when duration_policy is HasDuration; ignored for Instant and Infinite, but the schema still requires a number, so pass 0 there"
             }
           ],
           "returns": "{ ge_blueprint_path: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }",
@@ -32777,7 +32777,7 @@
         },
         {
           "name": "set_gameplay_effect_period",
-          "description": "Set the periodic execution Period (seconds) on a GameplayEffect CDO (damage/heal-over-time).",
+          "description": "Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint is an error; during PIE the save is refused after the in-memory edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -33025,7 +33025,7 @@
         },
         {
           "name": "trigger_behavior_on_actor",
-          "description": "Trigger a UGameplayBehaviorConfig on a Pawn in the editor world.",
+          "description": "Start the behavior of a UGameplayBehaviorConfig on a Pawn found by label in the editor world: the config supplies its UGameplayBehavior, whose Trigger runs on the pawn, and the world UGameplayBehaviorSubsystem tracks it until it ends or end_behavior_on_actor stops it. triggered=false means the behavior refused. Runtime only: nothing is saved or undoable. A config without BehaviorClass (see set_behavior_class), no subsystem in the editor world (see get_behavior_subsystem_info), a missing actor or a non-Pawn is an error.",
           "params": [
             {
               "name": "config_path",
@@ -33628,7 +33628,7 @@
       "commands": [
         {
           "name": "append_mesh_primitive",
-          "description": "Append a primitive shape to a DynamicMeshActor's dynamic mesh",
+          "description": "Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy, inside an editor transaction; nothing is saved to an asset. An unknown actor or primitive is an error; appended is true when the triangle count grew. To merge another actor's mesh use append_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.",
           "params": [
             {
               "name": "actor_name",
@@ -33752,7 +33752,7 @@
         },
         {
           "name": "apply_mesh_boolean",
-          "description": "Apply a CSG boolean to a DynamicMeshActor's dynamic mesh",
+          "description": "Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. boolean_applied is always true: compare triangle_count with triangle_count_before. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.",
           "params": [
             {
               "name": "actor_name",
@@ -33931,7 +33931,7 @@
         },
         {
           "name": "apply_uniform_remesh",
-          "description": "Uniform-remesh a DynamicMeshActor's dynamic mesh to a target edge length or triangle count",
+          "description": "Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type uniform and mixed work, but uv_preserving matches no engine name: it falls back to Mixed and leaves preserve_sharp_edges and auto_compact at true, so check the echoed settings. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.",
           "params": [
             {
               "name": "actor_name",
@@ -34351,7 +34351,7 @@
         },
         {
           "name": "generate_mesh_uvs",
-          "description": "Planar-project a UV set onto a DynamicMeshActor's dynamic mesh",
+          "description": "Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. It first sets the mesh's UV channel count to exactly uv_channel + 1, so higher channels are discarded. Idempotent, in an editor transaction, nothing saved; uvs_generated is always true, even for uv_channel 8 or more, which changes nothing. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.",
           "params": [
             {
               "name": "actor_name",
@@ -34369,8 +34369,8 @@
           "returns": "{ actor_name: string, uv_channel: int, triangle_count: int, vertex_count: int, uvs_generated: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -34999,7 +34999,7 @@
         },
         {
           "name": "recompute_mesh_normals",
-          "description": "Recompute per-overlay normals on a DynamicMeshActor's dynamic mesh",
+          "description": "Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved; recomputed is always true. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.",
           "params": [
             {
               "name": "actor_name",
@@ -35024,7 +35024,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -35234,7 +35234,7 @@
         },
         {
           "name": "rotate_dynamic_mesh",
-          "description": "Rotate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::RotateMesh.",
+          "description": "Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. rotation is required (omitting it is an error). Runs in an editor transaction, nothing saved; applied is always true. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.",
           "params": [
             {
               "name": "actor_name",
@@ -35246,10 +35246,10 @@
               "name": "rotation",
               "jsonType": "array",
               "required": false,
-              "description": "[pitch, yaw, roll] Euler rotation in degrees"
+              "description": "Required (the call fails without it): [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh"
             }
           ],
-          "returns": "{ actor_name, rotation:{}, applied: true }",
+          "returns": "{ actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -35845,7 +35845,7 @@
         },
         {
           "name": "set_num_uv_channels",
-          "description": "Set the number of UV channels on a dynamic mesh.",
+          "description": "Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8; a larger count changes nothing yet still reports changed true. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.",
           "params": [
             {
               "name": "actor_name",
@@ -37995,7 +37995,7 @@
         },
         {
           "name": "interchange_save_pipeline",
-          "description": "Save an Interchange pipeline asset's package to disk; saved is what UPackage::Save returned.",
+          "description": "Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk with UPackage::SavePackage, dirty or not; saved is what SavePackage returned, and false makes success false. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Unlike save_asset it has no PIE refusal and no read-only-root guard. A path that does not load as a pipeline is an error.",
           "params": [
             {
               "name": "pipeline_path",
@@ -38008,7 +38008,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -39362,7 +39362,7 @@
         },
         {
           "name": "get_data_layer_assets",
-          "description": "Lists all UDataLayerAsset assets under a content path via the AssetRegistry.",
+          "description": "Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, each with name, object path and type (Editor, Runtime or Unknown). Every match is loaded to read its type; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances. For one asset's runtime flags and debug color use get_data_layer_asset_info.",
           "params": [
             {
               "name": "path",
@@ -40720,7 +40720,7 @@
         },
         {
           "name": "set_actor_material",
-          "description": "Assign a material to an actor's mesh component slot",
+          "description": "Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. slot_index is not range-checked: past the mesh's slots it has no visible effect, and a negative one does nothing. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.",
           "params": [
             {
               "name": "actor_name",
@@ -41453,7 +41453,7 @@
         },
         {
           "name": "set_streaming_level_visible",
-          "description": "Sets whether a streaming sub-level should be visible (ULevelStreaming::SetShouldBeVisible).",
+          "description": "Set the game-time should-be-visible request flag (ULevelStreaming bShouldBeVisible) of a streaming sub-level of the editor world, found by package path or short name, inside an undo transaction. It is a request, not an immediate change, and the editor viewport follows the level's separate editor-visibility flag, so is_level_visible may not change. Marks the map dirty without saving; an unknown level is an error. applied compares the flag with visible. Loading: set_streaming_level_loaded; current state: get_streaming_levels; adding a sub-level: add_streaming_level.",
           "params": [
             {
               "name": "level_package_path",
@@ -41924,7 +41924,7 @@
         },
         {
           "name": "get_lighting_quality",
-          "description": "Analyze and report comprehensive lighting quality metrics for the current level including light counts by type/mobility, intensity statistics, and a lighting",
+          "description": "Read-only census of the actors with a light component in the engine's first world context (normally the editor level): counts by type and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max, per-light light_details, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. Sky lights are not counted. For one light use get_light_properties, for lights near a point get_lighting_in_area.",
           "params": [],
           "returns": "{ level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating }",
           "annotations": {
@@ -43204,7 +43204,7 @@
         },
         {
           "name": "spawn_sky_light",
-          "description": "Spawns a SkyLight actor and optionally sets intensity / recaptures the sky.",
+          "description": "Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.",
           "params": [
             {
               "name": "location",
@@ -43302,7 +43302,7 @@
       "commands": [
         {
           "name": "add_primary_asset_rule",
-          "description": "Add or update a Primary Asset Type rule in the Asset Manager settings",
+          "description": "Add a PrimaryAssetTypesToScan rule to the Asset Manager project settings, or update the rule of that type, then write DefaultGame.ini (no undo); a failed write makes success false. An update always resets the base class (to UObject when base_class_path is omitted), appends directory unless already listed and sets priority only when given; idempotent. Nothing is rescanned: run scan_primary_assets so the running Asset Manager registers the assets. Cook rules: set_primary_asset_cook_rule; inverse: remove_primary_asset_rule; list rules: get_primary_asset_types.",
           "params": [
             {
               "name": "primary_asset_type",
@@ -43332,8 +43332,8 @@
           "returns": "{ type, base_class, saved, updated_existing, directory_count, type_count }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -43580,7 +43580,7 @@
         },
         {
           "name": "get_asset_bundle_entry",
-          "description": "Get the bundle entry for a specific primary asset and bundle name.",
+          "description": "Read one named asset bundle of a primary asset from the running Asset Manager's bundle cache (UAssetManager::GetAssetBundleEntry), loading nothing: bundle_objects lists the asset paths in it. Only scanned primary assets are cached, so an unscanned asset, an unknown bundle, a malformed id or an empty bundle all give found=false with an empty list, not an error. For every bundle of one asset by object path, read from the Asset Registry, use get_asset_bundle_data; get_primary_asset_id turns a path into the id.",
           "params": [
             {
               "name": "primary_asset_id",
@@ -43898,7 +43898,7 @@
         },
         {
           "name": "set_primary_asset_cook_rule",
-          "description": "Set the CookRule (and optional ChunkId / bApplyRecursively) on an existing primary asset type",
+          "description": "Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_cook_rules; the reply's cook_rule is the short name of the stored rule.",
           "params": [
             {
               "name": "primary_asset_type",
@@ -43910,7 +43910,7 @@
               "name": "cook_rule",
               "jsonType": "string",
               "required": true,
-              "description": "One of \"Unknown\" / \"Never\" / \"Development\" / \"Production\" / \"Always\"."
+              "description": "One of \"Unknown\" / \"Never\" / \"Development\" / \"DevelopmentAlways\" / \"Always\", case-insensitive; \"Development\" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. \"AlwaysCook\", \"DevelopmentAlwaysProductionUnknownCook\") are accepted too."
             },
             {
               "name": "chunk_id",
@@ -43940,7 +43940,7 @@
       "commands": [
         {
           "name": "add_mass_trait",
-          "description": "Add a UMassEntityTraitBase-derived trait to a Mass entity config",
+          "description": "Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, nothing is added, though added is still true (compare trait_count). trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.",
           "params": [
             {
               "name": "config_path",
@@ -43959,7 +43959,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -44792,7 +44792,7 @@
         },
         {
           "name": "clear_mpci_parameter_overrides",
-          "description": "Force the world's MPCI back to the parent's default values",
+          "description": "Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.",
           "params": [
             {
               "name": "collection_path",
@@ -44804,7 +44804,7 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Optional world context label, default editor"
+              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
             }
           ],
           "returns": "{ collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }",
@@ -45003,7 +45003,7 @@
         },
         {
           "name": "copy_mid_params_from_source",
-          "description": "Copy all parameter values from a source material into a Material Instance Dynamic.",
+          "description": "Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. copied is always true, so verify with get_mid_all_params. For saved Material Instance Constant assets use copy_material_instance_params.",
           "params": [
             {
               "name": "mid_object_path",
@@ -45021,7 +45021,7 @@
           "returns": "{ mid_object_path, source_material_path, source_material_name, copied }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -45382,7 +45382,7 @@
         },
         {
           "name": "create_material_parameter_collection_instance",
-          "description": "Get or create a transient MPCI on the target world",
+          "description": "Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.",
           "params": [
             {
               "name": "collection_path",
@@ -45394,13 +45394,13 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Optional world context label, default editor"
+              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
             }
           ],
           "returns": "{ collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -47011,7 +47011,7 @@
         },
         {
           "name": "set_material_node_param",
-          "description": "Set a value/property on a material expression node (e.g. a Constant value or parameter name).",
+          "description": "Write one value on an expression node of a UMaterial asset (not an instance), found by its object name node_id. ParameterName renames a node that has a parameter name; otherwise Constant, ScalarParameter, Constant3Vector, Constant4Vector and VectorParameter nodes ignore param_name and take value as their main value (R, DefaultValue or Constant); other node types set the named property by reflection. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). An unknown node or property is an error, an unparsable value is not. Instances: set_material_instance_param.",
           "params": [
             {
               "name": "material_path",
@@ -47035,7 +47035,7 @@
               "name": "value",
               "jsonType": "string",
               "required": false,
-              "description": "String value to import (parsed per property type)"
+              "description": "Text to write: a number for Constant and ScalarParameter, \"(R=1,G=0.5,B=0,A=1)\" for the vector nodes (unparsable text gives black), the new name for ParameterName, else UE import text for the property; omitted means empty text."
             }
           ],
           "returns": "{ material: string, node_id: string, param_name: string, value: string }",
@@ -47104,7 +47104,7 @@
         },
         {
           "name": "set_mid_scalar_param",
-          "description": "Set a scalar parameter value on a Material Instance Dynamic.",
+          "description": "Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. An unknown param_name is not rejected: the override is stored and read back, so set is true even though no material input uses it -- check names with get_mid_all_params. old_value is 0 for a parameter without a value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.",
           "params": [
             {
               "name": "mid_object_path",
@@ -47215,7 +47215,7 @@
         },
         {
           "name": "set_mpci_parent_collection",
-          "description": "Rebind the world's MPCI to a different parent collection",
+          "description": "Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.",
           "params": [
             {
               "name": "collection_path",
@@ -47227,7 +47227,7 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Optional world context label, default editor"
+              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
             }
           ],
           "returns": "{ collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }",
@@ -47277,7 +47277,7 @@
         },
         {
           "name": "set_mpci_vector_parameter_value",
-          "description": "Override a vector parameter value on the world's MPCI",
+          "description": "Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.",
           "params": [
             {
               "name": "collection_path",
@@ -47325,7 +47325,7 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Optional world context label, default editor"
+              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
             }
           ],
           "returns": "{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }",
@@ -47405,7 +47405,7 @@
       "commands": [
         {
           "name": "clear_procedural_mesh",
-          "description": "Clear a single section or all sections on a procedural mesh component.",
+          "description": "Empty the geometry of one section, or drop every section, of a UProceduralMeshComponent on an editor-world actor found by label, then rebuild its bounds and collision. A single cleared section keeps its slot (remaining_sections unchanged); with section_index omitted or -1 all sections go. Transient: nothing is marked dirty, saved or undoable. A missing actor or component_index is an error, a section_index past the end is silently ignored, and any other negative index is unchecked, so never pass one. remove_procedural_mesh_component deletes the component itself.",
           "params": [
             {
               "name": "actor_label",
@@ -47423,7 +47423,7 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional target section; defaults to INDEX_NONE (clear all)"
+              "description": "Optional 0-based section to empty; omit it, or pass -1, to drop all sections"
             }
           ],
           "returns": "{ actor_label: string, section_cleared: int, remaining_sections: int }",
@@ -47479,7 +47479,7 @@
         },
         {
           "name": "create_procedural_grid_mesh",
-          "description": "Generate a welded grid mesh via UKismetProceduralMeshLibrary::CreateGridMeshWelded and push it into a procedural mesh component as a single section.",
+          "description": "Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component is an error; a negative section_index is unchecked, so never pass one. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.",
           "params": [
             {
               "name": "actor_label",
@@ -47503,13 +47503,13 @@
               "name": "num_x",
               "jsonType": "number",
               "required": false,
-              "description": "Optional X subdivision count; defaults to 10"
+              "description": "Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10"
             },
             {
               "name": "num_y",
               "jsonType": "number",
               "required": false,
-              "description": "Optional Y subdivision count; defaults to 10"
+              "description": "Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10"
             },
             {
               "name": "grid_spacing",
@@ -47527,7 +47527,7 @@
           "returns": "{ actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -47916,7 +47916,7 @@
         },
         {
           "name": "add_eqs_test",
-          "description": "Adds a UEnvQueryTest subclass to an option's Tests array.",
+          "description": "Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it. Marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.",
           "params": [
             {
               "name": "query_path",
@@ -47941,7 +47941,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -48611,13 +48611,13 @@
         },
         {
           "name": "set_network_authority",
-          "description": "Sets the network authority role for a specified actor to Authority, SimulatedProxy, AutonomousProxy, or None.",
+          "description": "Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_net_role (by label) or list_replicated_actors; choose what replicates with configure_replication or set_actor_replicates.",
           "params": [
             {
               "name": "actor_name",
               "jsonType": "string",
               "required": true,
-              "description": "The name of the actor to set authority for"
+              "description": "Object name of the editor-world actor (case-insensitive); labels are not matched"
             },
             {
               "name": "authority",
@@ -50179,13 +50179,13 @@
         },
         {
           "name": "list_geometry_collection_bones",
-          "description": "Walk the bone list of a UGeometryCollection. Reads FTransformCollection typed attributes.",
+          "description": "List every bone (transform) of a UGeometryCollection asset in index order with its name, parent index (-1 for a root) and simulation type (\"Rigid\", \"Clustered\" or \"None\"), plus transform_count and root_count. Read-only: nothing is generated or saved. A path that does not load or a collection without geometry data is an error. For levels, root indices and whether proximity is computed use get_gc_hierarchy_info; for damage, mass and source settings use get_geometry_collection_info.",
           "params": [
             {
               "name": "geometry_collection_path",
               "jsonType": "string",
               "required": true,
-              "description": "Required asset path."
+              "description": "Asset path of the UGeometryCollection, as a package path (/Game/Chaos/GC_Rock) or an object path (/Game/Chaos/GC_Rock.GC_Rock); required."
             }
           ],
           "returns": "{ geometry_collection_path, transform_count, root_count, bones: [{name, parent, sim_type}] }",
@@ -50568,7 +50568,7 @@
         },
         {
           "name": "set_gc_connection_settings",
-          "description": "Configure clustering and connection-graph settings on a Geometry Collection",
+          "description": "Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_gc_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -50617,7 +50617,7 @@
         },
         {
           "name": "set_geometry_collection_damage",
-          "description": "Configure the damage model and thresholds on a geometry collection",
+          "description": "Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. The save result is not checked: success is true even when nothing reached disk. The reply reads back damage_model (\"Threshold\", \"MaterialStrength\" or \"Unknown\") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -50629,7 +50629,7 @@
               "name": "damage_model",
               "jsonType": "string",
               "required": false,
-              "description": "Threshold or Simple, default Threshold"
+              "description": "Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model."
             },
             {
               "name": "damage_thresholds",
@@ -51091,7 +51091,7 @@
         },
         {
           "name": "set_physics_body_properties",
-          "description": "Set FBodyInstance / UBodySetup properties on one body of a physics asset",
+          "description": "Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither still saves and reports updated=true. An asset with no bodies, no body found or an unknown physics_type is an error. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.",
           "params": [
             {
               "name": "physics_asset_path",
@@ -51103,25 +51103,25 @@
               "name": "body_index",
               "jsonType": "number",
               "required": false,
-              "description": "Explicit index of the body to configure"
+              "description": "0-based index of the body in the asset; wins over bone_name when both are given"
             },
             {
               "name": "bone_name",
               "jsonType": "string",
               "required": false,
-              "description": "Name of the skeleton bone"
+              "description": "Bone whose body to configure, used when body_index is absent"
             },
             {
               "name": "physics_type",
               "jsonType": "string",
               "required": false,
-              "description": "Body physics type (Default|Kinematic|Simulated)"
+              "description": "Body physics type (Default|Kinematic|Simulated), case-insensitive; omit to keep the current one"
             },
             {
               "name": "mass",
               "jsonType": "number",
               "required": false,
-              "description": "Mass override in kilograms"
+              "description": "Mass override in kilograms; also switches the mass override on. Omit to keep the current mass"
             }
           ],
           "returns": "{ physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, updated, saved, save_error }",
@@ -51500,7 +51500,7 @@
         },
         {
           "name": "spawn_physics_constraint",
-          "description": "Spawn an APhysicsConstraintActor in the editor world, optionally wiring the two constrained actors.",
+          "description": "Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.",
           "params": [
             {
               "name": "location",
@@ -53449,7 +53449,7 @@
         },
         {
           "name": "get_save_game_info",
-          "description": "Retrieve metadata existence path and file size for a save slot",
+          "description": "Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/<slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.",
           "params": [
             {
               "name": "slot_name",
@@ -53461,10 +53461,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
-              "description": "Optional user index, default 0"
+              "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             }
           ],
-          "returns": "{ slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int }",
+          "returns": "{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -54182,7 +54182,7 @@
         },
         {
           "name": "remove_smart_object_slot",
-          "description": "Remove a slot (by index) from a USmartObjectDefinition; the private Slots array is resized via FScriptArrayHelper (reflection-based element destruct).",
+          "description": "Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. No undo. To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.",
           "params": [
             {
               "name": "definition_path",
@@ -54393,7 +54393,7 @@
         },
         {
           "name": "set_smart_object_slot_enabled",
-          "description": "Toggle whether a slot is initially enabled on a USmartObjectDefinition.",
+          "description": "Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.",
           "params": [
             {
               "name": "definition_path",
@@ -54455,7 +54455,7 @@
         },
         {
           "name": "set_smart_object_slot_transform",
-          "description": "Set a slot's local offset and/or rotation relative to the parent object.",
+          "description": "Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.",
           "params": [
             {
               "name": "definition_path",
@@ -55260,7 +55260,7 @@
         },
         {
           "name": "get_task_info",
-          "description": "Serialize a single task's instance data (FJsonObjectConverter over the task struct) for inspection.",
+          "description": "Read one task of a named state in a StateTree asset without changing it: the task node's struct name (class), its instance_id and every property of the node struct as JSON (properties). The task's instance data is not included. Errors when the tree, its editor data or the state is missing, or task_index is out of range; state_name picks the first state with that name. List a state's tasks with list_tasks; read or write one field with get_task_property or set_task_property; global tasks: list_global_tasks.",
           "params": [
             {
               "name": "tree_path",
@@ -56526,7 +56526,7 @@
       "commands": [
         {
           "name": "inspect_subsystem_instance",
-          "description": "Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the instance via the lifetime hint (engine/gameinstance/world/editor/localplayer) + subsystem class.",
+          "description": "Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.",
           "params": [
             {
               "name": "subsystem_class",
@@ -56547,7 +56547,7 @@
               "description": "Local player index, used only when lifetime is \"localplayer\" (default 0)."
             }
           ],
-          "returns": "",
+          "returns": "{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -56993,7 +56993,7 @@
         },
         {
           "name": "validate_assets_in_path",
-          "description": "Run data validation on every asset under a content path.",
+          "description": "Run the enabled editor data validators (Script use case, as validate_asset does) on every asset under a content path, recursively by default, up to max_results assets; truncated tells when more were found. Loads each asset but changes and saves nothing. Per asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings; totals in num_valid, num_invalid and num_not_validated. A path with no assets returns zero counts, not an error. Use validate_asset for one asset, list_validators to see which validators run.",
           "params": [
             {
               "name": "path",
@@ -57331,7 +57331,7 @@
         },
         {
           "name": "add_component_material_track",
-          "description": "Add a component material parameter track to an object binding (animates an indexed material slot), optionally keying a scalar parameter (asset-level, headless).",
+          "description": "Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame); without it, it only adds a section spanning the playback range when the track has none. An unknown binding_guid is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.",
           "params": [
             {
               "name": "sequence_name",
@@ -57529,7 +57529,7 @@
         },
         {
           "name": "add_marked_frame",
-          "description": "Adds a user marked frame to a Level Sequence's movie scene.",
+          "description": "Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-resolution frame of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; is_determinism_fence turns the same mark into an evaluation fence. Idempotent per frame: an existing mark at that frame is updated instead of duplicated, its label replaced when one is given and both flags overwritten with the values passed (false when omitted); already_existed says which. Read marks with get_marked_frames, delete one with remove_marked_frame.",
           "params": [
             {
               "name": "sequence_name",
@@ -57565,8 +57565,8 @@
           "returns": "{ sequence_name: string, frame: int, mark_index: int, label: string, is_determinism_fence: bool, is_inclusive: bool, already_existed: bool, marked_frame_count: int, saved: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
-            "idempotentHint": false,
+            "destructiveHint": true,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -57845,7 +57845,7 @@
         },
         {
           "name": "add_subcomponent_possessable",
-          "description": "Add a possessable for a subcomponent type, parented to an existing binding.",
+          "description": "Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID or an unresolvable class is an error.",
           "params": [
             {
               "name": "sequence_name",
@@ -57882,7 +57882,7 @@
         },
         {
           "name": "add_subsequence_track",
-          "description": "Adds a subsequence (UMovieSceneSubTrack) to a Level Sequence and nests a sub section.",
+          "description": "Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset. Each call adds another section. If no inner sequence resolves, the track is still saved and section_added is false. For cinematic shots use add_shot_track.",
           "params": [
             {
               "name": "sequence_path",
@@ -58338,7 +58338,7 @@
         },
         {
           "name": "create_level_sequence",
-          "description": "Create a new Level Sequence asset with a specified duration and frame rate",
+          "description": "Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate. If that asset already exists it is loaded and those settings are overwritten without migrating its keys, which can shift them in time; sequence_created is true either way. Not undoable; another asset class at the path is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.",
           "params": [
             {
               "name": "sequence_name",
@@ -58356,19 +58356,19 @@
               "name": "duration",
               "jsonType": "number",
               "required": false,
-              "description": "Playback duration in seconds, 0 to 3600, default 10"
+              "description": "Playback duration in seconds, above 0 and at most 3600, default 10"
             },
             {
               "name": "frame_rate",
               "jsonType": "number",
               "required": false,
-              "description": "Frame rate in fps, 0 to 120, default 30"
+              "description": "Frame rate in fps, above 0 and at most 120, truncated to whole fps, default 30"
             }
           ],
           "returns": "{ sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool, saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -58555,7 +58555,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -58675,7 +58675,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -58689,7 +58689,7 @@
         },
         {
           "name": "get_sequence_bindings",
-          "description": "Lists every object binding in a Level Sequence with its tracks.",
+          "description": "Lists every object binding of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive), with each binding's tracks (class and section count); read-only, needs no open Sequencer. spawnable is true when the binding has a spawn track and possessable otherwise; possessable_count and spawnable_count are the movie scene's own counts and can disagree with those flags. Root tracks are not listed: use get_sequence_tracks. For one binding's tracks with display names use get_binding_tracks.",
           "params": [
             {
               "name": "sequence_name",
@@ -58861,7 +58861,7 @@
         },
         {
           "name": "get_sequence_tracks",
-          "description": "Read the master and binding tracks for a Level Sequence",
+          "description": "Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count adds root tracks and bindings, not the tracks inside bindings. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.",
           "params": [
             {
               "name": "sequence_name",
@@ -58978,7 +58978,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -59105,7 +59105,7 @@
         },
         {
           "name": "play_timeline",
-          "description": "Start playback in the open Sequencer editor on a target sequence",
+          "description": "Starts playback in the editor's Sequencer on a Level Sequence found by asset name under /Game, first opening it there when it is not the sequence shown. Editor preview only, no PIE or game player (use play_level_sequence_runtime for that). Returns at once and changes no asset; calling it while playing keeps playing. playing is read right after the call. Errors when the sequence is missing or no Sequencer can show it. Pause with pause_timeline; move the playhead with set_timeline_time.",
           "params": [
             {
               "name": "sequence_name",
@@ -59117,8 +59117,8 @@
           "returns": "{ sequence_name: string, playing: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -59197,7 +59197,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -59291,7 +59291,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -59430,7 +59430,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string (alias for binding_guid).",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             },
             {
@@ -59798,7 +59798,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60040,7 +60040,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60103,7 +60103,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60184,7 +60184,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60247,7 +60247,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60322,7 +60322,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60385,7 +60385,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60454,7 +60454,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60468,7 +60468,7 @@
         },
         {
           "name": "set_section_range",
-          "description": "Sets the frame range of a binding track's first section.",
+          "description": "Sets the frame range of the FIRST section of one track on a Level Sequence binding (sequence found by asset name under /Game), in an undo transaction, and saves the sequence. track_index picks the track in the binding's track order; no other section can be targeted, and an unknown binding reads as zero tracks. Frames are tick-resolution frames, rounded; keys are not moved or rescaled. range_set is false when the stored range differs from the request. Read a section's range with get_section_info; for the whole sequence use set_sequence_playback_range.",
           "params": [
             {
               "name": "sequence_name",
@@ -60560,7 +60560,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -60656,7 +60656,7 @@
         },
         {
           "name": "set_sequence_playback_range",
-          "description": "Sets the playback range (in tick frames) of a Level Sequence's movie scene.",
+          "description": "Sets the playback range of a Level Sequence found by asset name under /Game, in tick-resolution frames (start inclusive, end exclusive, rounded), in an undo transaction, and saves the sequence. Tracks, sections and keys are not moved or clipped, and the Sequencer's playback-range lock does not block it. range_set compares the stored range with the request. To set a length in seconds from 0 use set_sequence_duration; the editor-only timeline windows are set_sequence_view_range and set_sequence_working_range.",
           "params": [
             {
               "name": "sequence_name",
@@ -60725,7 +60725,7 @@
         },
         {
           "name": "set_sequence_working_range",
-          "description": "Set the editor working range of a Level Sequence (in seconds).  The working range is the timeline window used for evaluation / playback preview in the Sequencer editor. Backed by UMovieScene::SetWorkingRange(double, double) -- MOVIESCENE_API.",
+          "description": "Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so although the package is saved the value is not written: after a reload the working range is recomputed from the playback range. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.",
           "params": [
             {
               "name": "sequence_path",
@@ -60848,7 +60848,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -61047,7 +61047,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -61061,7 +61061,7 @@
         },
         {
           "name": "set_transform_section_quaternion_interp",
-          "description": "Toggle quaternion (slerp) rotation interpolation on a 3D transform section (UMovieScene3DTransformSection::SetUseQuaternionInterpolation).",
+          "description": "Turns quaternion (slerp) rotation interpolation on or off for one 3D transform section of a Level Sequence binding, in an undo transaction, and saves the sequence; keys are kept. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; a section that is not a 3D transform section is an error. For the section's blend type use set_transform_track_interp_mode; to enable or disable channels use set_transform_section_mask.",
           "params": [
             {
               "name": "sequence_path",
@@ -61092,7 +61092,7 @@
               "name": "track_type",
               "jsonType": "string",
               "required": false,
-              "description": "Optional class filter (default resolves the transform track)."
+              "description": "Optional track kind, e.g. \"transform\": picks the binding's first track of that kind. Omitted or unrecognised, track_index picks the track instead."
             },
             {
               "name": "track_index",
@@ -61110,7 +61110,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string.",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -61124,7 +61124,7 @@
         },
         {
           "name": "set_transform_track_interp_mode",
-          "description": "Set EMovieSceneBlendType on a transform track's section (absolute|additive|relative|additive_from_base|override).",
+          "description": "Sets the blend type of one section on a Level Sequence binding (how it layers with other sections, e.g. additive adds a delta, override replaces), in an undo transaction, and saves the sequence. Despite the name it changes no key interpolation and accepts any track kind. The section is section_index on the binding's first track of track_type, else its track_index-th track; a blend type the track does not support is refused. set_section_blend_type does the same without that check; for slerp rotation use set_transform_section_quaternion_interp.",
           "params": [
             {
               "name": "sequence_path",
@@ -61155,7 +61155,7 @@
               "name": "track_type",
               "jsonType": "string",
               "required": false,
-              "description": "Optional class filter (defaults to transform track lookup)."
+              "description": "Optional track kind such as \"transform\", \"float\" or \"audio\": picks the binding's first track of that kind. Omitted or unrecognised, track_index picks the track instead."
             },
             {
               "name": "track_index",
@@ -61180,7 +61180,7 @@
               "name": "binding_name_or_guid",
               "jsonType": "string",
               "required": false,
-              "description": "Sequencer binding: the bound object's name or its GUID string",
+              "description": "Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved.",
               "aliasOf": "binding_guid"
             }
           ],
@@ -61930,7 +61930,7 @@
         },
         {
           "name": "add_widget_to_blueprint",
-          "description": "Add a widget to a Widget Blueprint's tree under a named panel (or the root).",
+          "description": "Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name is returned as is (already_existed true), even if its class differs, without compiling or saving although saved reads true. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -61961,7 +61961,7 @@
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": false,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
@@ -62145,7 +62145,7 @@
         },
         {
           "name": "create_widget",
-          "description": "Create a new UMG widget from a class and optionally add it to the viewport.",
+          "description": "Create a runtime UUserWidget instance of a concrete UserWidget class in a running PIE world (the default while PIE runs) or the editor world, owned by that world's first local PlayerController when there is one, and optionally AddToViewport it. Nothing is saved, and an unreferenced widget is garbage-collected. In the editor world add_to_viewport never adds (no PlayerController): read added_to_viewport. A taken name gets a unique variant, reported in widget_name; a class that does not load, is abstract or is not a UserWidget is an error. To change the asset use add_widget_to_blueprint; remove_widget only finds editor-world widgets.",
           "params": [
             {
               "name": "widget_class_path",
@@ -62665,13 +62665,13 @@
         },
         {
           "name": "remove_widget",
-          "description": "Remove a widget by name from its parent or viewport.",
+          "description": "Detach a runtime UserWidget, found by object name in the editor world only (first one hosted by a level UWidgetComponent, then any other UserWidget of that world), from the viewport or panel holding it with RemoveFromParent. The object is not deleted, no asset changes and there is no undo. Widgets of a PIE world, such as those create_widget makes while PIE runs, are not found (an error). was_in_viewport and had_parent are measured before the call: both false means nothing was detached, as for a component-hosted widget. It never edits a Widget Blueprint asset.",
           "params": [
             {
               "name": "widget_name",
               "jsonType": "string",
               "required": true,
-              "description": "Name of the widget to remove"
+              "description": "Object name of the runtime widget to detach (case-insensitive), as list_level_widget_components or create_widget report it"
             }
           ],
           "returns": "{ widget_name: string, was_in_viewport: bool, had_parent: bool }",
@@ -63536,7 +63536,7 @@
         },
         {
           "name": "set_widget_slot_properties",
-          "description": "Set CanvasPanelSlot layout for a widget parented under a CanvasPanel.",
+          "description": "Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.",
           "params": [
             {
               "name": "widget_bp_path",
@@ -64128,7 +64128,7 @@
         },
         {
           "name": "define_usd_prim",
-          "description": "Define (or re-author) a prim at the given path with a USD type",
+          "description": "Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. A specifier of Over or Class is applied afterwards (specifier_set_ok); an unknown one means Def but is echoed as given. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.",
           "params": [
             {
               "name": "prim_path",
@@ -64155,10 +64155,10 @@
               "description": "\"Def\" | \"Over\" | \"Class\". Default: Def"
             }
           ],
-          "returns": "{ prim_path: string, type_name: string, specifier: string, is_valid: bool }",
+          "returns": "{ prim_path: string, type_name: string, specifier: string, is_valid: bool, specifier_set_ok: bool }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -64743,57 +64743,57 @@
         },
         {
           "name": "override_usd_prim",
-          "description": "Create (or retrieve) an Over specifier at the given path",
+          "description": "Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched, even a def, though the reply still says specifier Over. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.",
           "params": [
             {
               "name": "prim_path",
               "jsonType": "string",
               "required": true,
-              "description": "SdfPath to author an Over for"
+              "description": "Absolute SdfPath to author the over at, e.g. \"/World/Cube\""
             },
             {
               "name": "stage_name",
               "jsonType": "string",
               "required": false,
-              "description": "Stage cache key"
+              "description": "Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier."
             }
           ],
-          "returns": "{ prim_path: string, is_valid: bool }",
+          "returns": "{ prim_path: string, is_valid: bool, specifier?: string }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
+            "destructiveHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },
         {
           "name": "remove_usd_attribute",
-          "description": "Remove a USD attribute (or any property) from a prim",
+          "description": "Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute.",
           "params": [
             {
               "name": "stage_name",
               "jsonType": "string",
               "required": true,
-              "description": "Stage cache key"
+              "description": "Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default \"Untitled\")."
             },
             {
               "name": "prim_path",
               "jsonType": "string",
               "required": true,
-              "description": "Target prim path"
+              "description": "Absolute SdfPath of an existing prim on that stage, e.g. \"/World/Cube\"."
             },
             {
               "name": "attr_name",
               "jsonType": "string",
               "required": true,
-              "description": "Attribute name to remove"
+              "description": "Name of the attribute to remove, e.g. \"size\""
             }
           ],
           "returns": "{ prim_path: string, attr_name: string, removed: bool, present: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
-            "idempotentHint": false,
+            "idempotentHint": true,
             "openWorldHint": false
           }
         },

@@ -8,7 +8,7 @@
 
 *Additive.*
 
-Append a primitive shape to a DynamicMeshActor's dynamic mesh
+Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy, inside an editor transaction; nothing is saved to an asset. An unknown actor or primitive is an error; appended is true when the triangle count grew. To merge another actor's mesh use append_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -55,7 +55,7 @@ Adaptive-remesh a DynamicMeshActor's dynamic mesh using a target edge length and
 
 *Destructive.*
 
-Apply a CSG boolean to a DynamicMeshActor's dynamic mesh
+Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. boolean_applied is always true: compare triangle_count with triangle_count_before. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -120,7 +120,7 @@ Voxel-wrap a DynamicMeshActor's dynamic mesh (replaces the mesh with a voxelised
 
 *Destructive.*
 
-Uniform-remesh a DynamicMeshActor's dynamic mesh to a target edge length or triangle count
+Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type uniform and mixed work, but uv_preserving matches no engine name: it falls back to Mixed and leaves preserve_sharp_edges and auto_compact at true, so check the echoed settings. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -294,9 +294,9 @@ Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrar
 
 ## `generate_mesh_uvs`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Planar-project a UV set onto a DynamicMeshActor's dynamic mesh
+Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. It first sets the mesh's UV channel count to exactly uv_channel + 1, so higher channels are discarded. Idempotent, in an editor transaction, nothing saved; uvs_generated is always true, even for uv_channel 8 or more, which changes nothing. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -614,9 +614,9 @@ Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
 
 ## `recompute_mesh_normals`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Recompute per-overlay normals on a DynamicMeshActor's dynamic mesh
+Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved; recomputed is always true. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -717,14 +717,14 @@ Boolean-union a DynamicMeshActor's dynamic mesh with itself to repair self-inter
 
 *Destructive.*
 
-Rotate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::RotateMesh.
+Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. rotation is required (omitting it is an error). Runs in an editor transaction, nothing saved; applied is always true. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `rotation` | array | no | [pitch, yaw, roll] Euler rotation in degrees |
+| `rotation` | array | no | Required (the call fails without it): [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh |
 
-**Returns:** `{ actor_name, rotation:{}, applied: true }`
+**Returns:** `{ actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool }`
 
 ## `rotate_mesh_uvs`
 
@@ -916,7 +916,7 @@ Set the number of extended polygroup layers on the live dynamic mesh of a Dynami
 
 *Destructive, idempotent.*
 
-Set the number of UV channels on a dynamic mesh.
+Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8; a larger count changes nothing yet still reports changed true. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

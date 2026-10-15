@@ -613,8 +613,8 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
 // Loads the UMetaSoundSource and reports its UClass, root graph class name and the
 // document's input/output counts (read from the root graph's default interface).
 // ---------------------------------------------------------------------------
-// MCP:get_metasound_info - Reads metadata for a UMetaSoundSource: class, graph class name and I/O.          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").
-//   @param metasound_path - Asset path of the MetaSound Source (e.g.
+// MCP:get_metasound_info - Read the top-level metadata of a MetaSound Source asset, loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, and interface_count, the number of interfaces the document declares. Read-only; a path that does not resolve to a UMetaSoundSource is an error. For node and connection counts use get_metasound_graph_info; list_meta_sound_nodes lists the nodes and list_meta_sounds finds sources.
+//   @param metasound_path - Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example"
 //   @returns { source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }
 
 TSharedPtr<FJsonObject> HandleGetMetaSoundInfo(const TSharedPtr<FJsonObject>& Params)
@@ -736,7 +736,7 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObjec
 // FindOrBeginBuilding for an existing asset + AddGraphOutputNode(name, dataType,
 // default literal). Adds a real graph output node. Saves the asset.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_graph_output - Adds a graph OUTPUT node to an existing MetaSound Source and saves it.  Obtains a builder for the saved asset via FindOrBeginBuilding and calls UMetaSoundBuilderBase::AddGraphOutputNode, adding a real graph output node of the given data type.          "Int32", "Bool", "String", "Trigger").
+// MCP:add_metasound_graph_output - Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is not duplicated or retyped: the engine hands back that output and the reply still says added=true, so check get_metasound_info first. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param output_name - Name of the graph output node to add.
 //   @param data_type - Frontend data type for the output node (optional, default "Audio")

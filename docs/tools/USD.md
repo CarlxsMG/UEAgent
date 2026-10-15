@@ -194,9 +194,9 @@ Spawn an AUsdStageActor into the editor's current world (or return the existing 
 
 ## `define_usd_prim`
 
-*Additive.*
+*Destructive.*
 
-Define (or re-author) a prim at the given path with a USD type
+Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. A specifier of Over or Class is applied afterwards (specifier_set_ok); an unknown one means Def but is echoed as given. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -205,7 +205,7 @@ Define (or re-author) a prim at the given path with a USD type
 | `type_name` | string | no | USD type name (Xform, Mesh, Cube, Scope, Camera, DistantLight...). Default: Xform |
 | `specifier` | string | no | "Def" \| "Over" \| "Class". Default: Def |
 
-**Returns:** `{ prim_path: string, type_name: string, specifier: string, is_valid: bool }`
+**Returns:** `{ prim_path: string, type_name: string, specifier: string, is_valid: bool, specifier_set_ok: bool }`
 
 ## `flatten_usd_stage`
 
@@ -490,28 +490,28 @@ Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage 
 
 ## `override_usd_prim`
 
-*Destructive.*
+*Additive, idempotent.*
 
-Create (or retrieve) an Over specifier at the given path
+Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched, even a def, though the reply still says specifier Over. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | SdfPath to author an Over for |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath to author the over at, e.g. "/World/Cube" |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
-**Returns:** `{ prim_path: string, is_valid: bool }`
+**Returns:** `{ prim_path: string, is_valid: bool, specifier?: string }`
 
 ## `remove_usd_attribute`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Remove a USD attribute (or any property) from a prim
+Remove one attribute from a prim on a registered USD stage by deleting its scene description in the current edit target layer only, so opinions from other layers or references can keep it composed. Idempotent: an absent attribute gives present=false and removed=false, not an error, and a relationship of that name counts as absent. A stage not registered under stage_name or a missing prim is an error. In memory only: save_usd_stage writes it. To keep the attribute and drop its values use clear_usd_attribute.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
-| `attr_name` | string | yes | Attribute name to remove |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
+| `attr_name` | string | yes | Name of the attribute to remove, e.g. "size" |
 
 **Returns:** `{ prim_path: string, attr_name: string, removed: bool, present: bool }`
 

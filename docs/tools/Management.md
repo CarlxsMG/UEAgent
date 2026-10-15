@@ -6,9 +6,9 @@
 
 ## `add_primary_asset_rule`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Add or update a Primary Asset Type rule in the Asset Manager settings
+Add a PrimaryAssetTypesToScan rule to the Asset Manager project settings, or update the rule of that type, then write DefaultGame.ini (no undo); a failed write makes success false. An update always resets the base class (to UObject when base_class_path is omitted), appends directory unless already listed and sets priority only when given; idempotent. Nothing is rescanned: run scan_primary_assets so the running Asset Manager registers the assets. Cook rules: set_primary_asset_cook_rule; inverse: remove_primary_asset_rule; list rules: get_primary_asset_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -133,7 +133,7 @@ Read the AssetBundles tag of one asset from the Asset Registry without loading i
 
 *Read-only.*
 
-Get the bundle entry for a specific primary asset and bundle name.
+Read one named asset bundle of a primary asset from the running Asset Manager's bundle cache (UAssetManager::GetAssetBundleEntry), loading nothing: bundle_objects lists the asset paths in it. Only scanned primary assets are cached, so an unscanned asset, an unknown bundle, a malformed id or an empty bundle all give found=false with an empty list, not an error. For every bundle of one asset by object path, read from the Asset Registry, use get_asset_bundle_data; get_primary_asset_id turns a path into the id.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -300,12 +300,12 @@ Synchronously rescan the directories and specific assets of every PrimaryAssetTy
 
 *Destructive, idempotent.*
 
-Set the CookRule (and optional ChunkId / bApplyRecursively) on an existing primary asset type
+Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_cook_rules; the reply's cook_rule is the short name of the stored rule.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `primary_asset_type` | string | yes | Name of the primary asset type (e.g. "Item"). |
-| `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "Production" / "Always". |
+| `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "DevelopmentAlways" / "Always", case-insensitive; "Development" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. "AlwaysCook", "DevelopmentAlwaysProductionUnknownCook") are accepted too. |
 | `chunk_id` | number | no | Optional chunk ID override for the rule |
 | `apply_recursively` | boolean | no | Optional flag to apply the rule recursively |
 

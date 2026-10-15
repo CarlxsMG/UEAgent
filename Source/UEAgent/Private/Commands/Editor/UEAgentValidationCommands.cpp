@@ -413,7 +413,7 @@ TSharedPtr<FJsonObject> HandleValidateAsset(const TSharedPtr<FJsonObject>& Param
 // validate_assets_in_path
 // ---------------------------------------------------------------------------
 
-// MCP:validate_assets_in_path - Run data validation on every asset under a content path.
+// MCP:validate_assets_in_path - Run the enabled editor data validators (Script use case, as validate_asset does) on every asset under a content path, recursively by default, up to max_results assets; truncated tells when more were found. Loads each asset but changes and saves nothing. Per asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings; totals in num_valid, num_invalid and num_not_validated. A path with no assets returns zero counts, not an error. Use validate_asset for one asset, list_validators to see which validators run.
 //   @param path - Package path to scan, e.g. "/Game/MyGame".
 //   @param recursive - Whether to scan sub-paths (optional, default true)
 //   @param max_results - Maximum number of assets to validate (optional, default 1000, valid 1-100000)
