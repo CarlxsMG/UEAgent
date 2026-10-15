@@ -78,6 +78,27 @@ namespace
 	}
 
 	/**
+	 * The optional "section_index" param into OutSectionIndex, which keeps its default when the param is absent;
+	 * null on success, else the error reply. It is read as a double because the int32 read fails on a number outside
+	 * int32 and leaves the default in place, so such an index would silently act on section 0 (on every section, for
+	 * clear_procedural_mesh).
+	 */
+	TSharedPtr<FJsonObject> ProceduralMesh_ReadSectionIndex(const TSharedPtr<FJsonObject>& Params, int32& OutSectionIndex)
+	{
+		double SectionIndexD = 0.0;
+		if (Params->TryGetNumberField(TEXT("section_index"), SectionIndexD))
+		{
+			if (SectionIndexD < TNumericLimits<int32>::Min() || SectionIndexD > TNumericLimits<int32>::Max())
+			{
+				return mcp_common::MakeErrorReply(
+					FString::Printf(TEXT("section_index %g is out of range; nothing was changed"), SectionIndexD));
+			}
+			OutSectionIndex = static_cast<int32>(SectionIndexD);
+		}
+		return nullptr;
+	}
+
+	/**
 	 * Null when SectionIndex is >= 0; otherwise the error reply. UProceduralMeshComponent indexes its section array
 	 * with the raw value after checking only the upper bound, so a negative index reads out of bounds and crashes.
 	 */
@@ -87,6 +108,64 @@ namespace
 		{
 			return mcp_common::MakeErrorReply(
 				FString::Printf(TEXT("section_index must be >= 0 (got %d)"), SectionIndex));
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Null when SectionIndex names an existing section of PMC or the next new one (the section count); otherwise the
+	 * error reply. CreateMeshSection grows the section array to SectionIndex + 1, so an index far past the end
+	 * allocates that many empty sections: about 1e8 runs the editor out of memory and 2147483647 overflows the size.
+	 */
+	TSharedPtr<FJsonObject> ProceduralMesh_CheckNewSectionIndex(const UProceduralMeshComponent* PMC, int32 SectionIndex,
+		const FString& ActorLabel)
+	{
+		const int32 NumSections = PMC->GetNumSections();
+		if (SectionIndex > NumSections)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("section_index %d is past the end (num_sections=%d) on actor '%s': name an existing section to replace it, or %d to append a new one; nothing was changed"),
+				SectionIndex, NumSections, *ActorLabel, NumSections));
+		}
+		return nullptr;
+	}
+
+	/**
+	 * The most vertices create_procedural_grid_mesh builds (1000 x 1000). A grid vertex costs about 300 bytes: its
+	 * position, UV and share of six triangle indices in CreateGridMeshWelded's arrays, the FProcMeshVertex and indices
+	 * of the section copy CreateMeshSection makes, and the render proxy's buffers. So one call stays near 300 MB, and
+	 * every index CreateGridMeshWelded computes stays far inside int32.
+	 */
+	constexpr int32 ProceduralMesh_MaxGridVertices = 1000000;
+
+	/**
+	 * Null when a grid of NumX by NumY vertices (read as doubles, so a number outside int32 is refused instead of
+	 * failing the int32 read and silently keeping the default) may be built; otherwise the error reply.
+	 * CreateGridMeshWelded builds NumX * NumY vertices once both are 2 or more (below that, no geometry at all); past
+	 * ProceduralMesh_MaxGridVertices one call would exhaust memory or overflow the int32 indices it computes.
+	 */
+	TSharedPtr<FJsonObject> ProceduralMesh_CheckGridSize(double NumX, double NumY)
+	{
+		auto OutOfInt32 = [](double Value)
+		{
+			return Value < TNumericLimits<int32>::Min() || Value > TNumericLimits<int32>::Max();
+		};
+		if (OutOfInt32(NumX))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(TEXT("num_x %g is out of range; nothing was changed"), NumX));
+		}
+		if (OutOfInt32(NumY))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(TEXT("num_y %g is out of range; nothing was changed"), NumY));
+		}
+		// The counts the handler passes on are these, truncated to int32 as it does.
+		const int32 CountX = static_cast<int32>(NumX);
+		const int32 CountY = static_cast<int32>(NumY);
+		if (CountX >= 2 && CountY >= 2 && static_cast<int64>(CountX) * CountY > ProceduralMesh_MaxGridVertices)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("num_x * num_y must be at most %d vertices (got %d x %d); nothing was changed"),
+				ProceduralMesh_MaxGridVertices, CountX, CountY));
 		}
 		return nullptr;
 	}
@@ -181,10 +260,10 @@ TSharedPtr<FJsonObject> HandleCreateProceduralMeshComponent(
 //   Generates a box mesh with UKismetProceduralMeshLibrary::GenerateBoxMesh
 //   and pushes it into the procedural mesh component as one section.
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_box_mesh - Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section. A negative section_index is an error.
+// MCP:create_procedural_box_mesh - Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section: section_index replaces an existing section, or equals the section count to append a new one. A negative section_index, or one past the section count, is an error checked before anything changes.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Optional target section index (>= 0); defaults to 0
+//   @param section_index - Optional target section index, 0 to the current section count (which appends a new section); defaults to 0
 //   @param box_radius - Optional [x, y, z] half-extents; defaults to (50, 50, 50)
 //   @param create_collision - Optional bool; defaults to false
 //   @returns { actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }
@@ -197,7 +276,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 	bool bCreateCollision = false;
 	Params->TryGetBoolField(TEXT("create_collision"), bCreateCollision);
@@ -216,6 +295,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
 	if (!PMC) { return Err; }
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckNewSectionIndex(PMC, SectionIndex, ActorLabel)) { return BadIndex; }
 
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
@@ -238,12 +318,12 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 // create_procedural_grid_mesh {actor_label, component_index?, section_index?,
 //   num_x?=10, num_y?=10, grid_spacing?=16.0, create_collision?=false}
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_grid_mesh - Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component, or a negative section_index, is an error. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
+// MCP:create_procedural_grid_mesh - Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists, or appending a new one when section_index equals the section count. A missing actor or component, or a section_index that is negative or past the section count, is an error checked before anything changes. num_x * num_y is capped at 1,000,000 vertices (1000 x 1000) because each grid vertex costs about 300 bytes across the generated arrays, the section copy and the render buffers, so one call stays near 300 MB with every index far inside int32; a larger grid, or a count outside int32, is an error too. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Optional target section index; defaults to 0
-//   @param num_x - Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10
-//   @param num_y - Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10
+//   @param section_index - Optional target section index, 0 to the current section count (which appends a new section); defaults to 0
+//   @param num_x - Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000
+//   @param num_y - Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000
 //   @param grid_spacing - Optional grid cell size in world units; defaults to 16.0
 //   @param create_collision - Optional bool; defaults to false
 //   @returns { actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }
@@ -256,12 +336,15 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
-	int32 NumX = 10;
-	Params->TryGetNumberField(TEXT("num_x"), NumX);
-	int32 NumY = 10;
-	Params->TryGetNumberField(TEXT("num_y"), NumY);
+	double NumXD = 10.0;
+	Params->TryGetNumberField(TEXT("num_x"), NumXD);
+	double NumYD = 10.0;
+	Params->TryGetNumberField(TEXT("num_y"), NumYD);
+	if (TSharedPtr<FJsonObject> BadSize = ProceduralMesh_CheckGridSize(NumXD, NumYD)) { return BadSize; }
+	const int32 NumX = static_cast<int32>(NumXD);
+	const int32 NumY = static_cast<int32>(NumYD);
 	double GridSpacing = 16.0;
 	Params->TryGetNumberField(TEXT("grid_spacing"), GridSpacing);
 	bool bCreateCollision = false;
@@ -270,6 +353,7 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
 	if (!PMC) { return Err; }
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckNewSectionIndex(PMC, SectionIndex, ActorLabel)) { return BadIndex; }
 
 	TArray<int32> Triangles;
 	TArray<FVector> Vertices;
@@ -312,7 +396,7 @@ TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 
 	TArray<FVector> Vertices;
@@ -368,7 +452,7 @@ TSharedPtr<FJsonObject> HandleClearProceduralMesh(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = INDEX_NONE;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 	// -1 (INDEX_NONE) means every section; any other negative index would crash ClearMeshSection.
 	if (SectionIndex != INDEX_NONE)
 	{
@@ -468,7 +552,7 @@ TSharedPtr<FJsonObject> HandleSetProceduralMeshSectionVisible(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
@@ -504,7 +588,7 @@ TSharedPtr<FJsonObject> HandleGetProceduralMeshSectionVisible(
 	int32 ComponentIndex = 0;
 	Params->TryGetNumberField(TEXT("component_index"), ComponentIndex);
 	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
+	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 
 	TSharedPtr<FJsonObject> Err;
 	UProceduralMeshComponent* PMC = ProceduralMesh_FindComponent(ActorLabel, ComponentIndex, Err);
@@ -731,11 +815,11 @@ TSharedPtr<FJsonObject> HandleRemoveProceduralMeshComponent(const TSharedPtr<FJs
 	return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:set_procedural_mesh_material - Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.
+// MCP:set_procedural_mesh_material - Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material. element_index may name a slot the component has (one per section, or an existing override) or the next one past them; a negative one, or one further past, is an error checked before anything changes. A slot that already holds the material succeeds with material_set false and a note, touching nothing; otherwise material_set is read back from the slot and the call fails when it is false.
 //   @param actor_label - Editor label or object name of the actor; the first actor matching either is used
 //   @param material_path - Material or material instance asset path, e.g. "/Game/Materials/M_Rock"
-//   @param element_index - Material slot index, usually the section index; default 0 (not range-checked)
-//   @returns { actor_label, material_path, element_index, material_set, previous_material_path? }
+//   @param element_index - Material slot index, usually the section index; default 0; from 0 up to the larger of the section count and the override count
+//   @returns { actor_label, material_path, element_index, material_set, previous_material_path?, note? }
 
 TSharedPtr<FJsonObject> HandleSetProceduralMeshMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -743,8 +827,9 @@ TSharedPtr<FJsonObject> HandleSetProceduralMeshMaterial(const TSharedPtr<FJsonOb
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
 	FString MaterialPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), MaterialPath)) { return Missing; }
-	int32 ElementIndex = 0;
-	Params->TryGetNumberField(TEXT("element_index"), ElementIndex);
+	// Read as a double so a number outside int32 is refused below instead of failing the int32 read and naming slot 0.
+	double ElementIndexD = 0.0;
+	Params->TryGetNumberField(TEXT("element_index"), ElementIndexD);
 
 	UWorld* EditorWorld = nullptr;
 	if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(EditorWorld)) { return NoWorld; }
@@ -759,29 +844,57 @@ TSharedPtr<FJsonObject> HandleSetProceduralMeshMaterial(const TSharedPtr<FJsonOb
 	{
 		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' has no UProceduralMeshComponent"), *ActorLabel));
 	}
+
+	// SetMaterial ignores a negative slot and grows the override list up to any other, so a far index allocates that
+	// many slots (2147483647 overflows the count and crashes). A slot may name one the component has (a section's or
+	// an override's) or the next one past them.
+	const int32 NumSections = MeshComponent->GetNumMaterials();
+	const int32 NumOverrides = MeshComponent->GetNumOverrideMaterials();
+	const int32 MaxElementIndex = FMath::Max(NumSections, NumOverrides);
+	if (ElementIndexD < 0.0 || ElementIndexD > MaxElementIndex)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("element_index must be between 0 and %d (got %g): actor '%s' has %d sections and %d material overrides, and a slot may be at most one past them; nothing was changed"),
+			MaxElementIndex, ElementIndexD, *ActorLabel, NumSections, NumOverrides));
+	}
+	const int32 ElementIndex = static_cast<int32>(ElementIndexD);
+
 	UMaterialInterface* NewMaterial = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
 	if (NewMaterial == nullptr)
 	{
 		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not load UMaterialInterface at %s"), *MaterialPath));
 	}
 
-	// Remember what the slot held before assigning (Modify first), then dirty the owning package.
-	const UMaterialInterface* Previous = MeshComponent->GetMaterial(ElementIndex);
-	const FString PreviousPath = Previous ? Previous->GetPathName() : FString();
-	MeshComponent->Modify();
-	MeshComponent->SetMaterial(ElementIndex, NewMaterial);
-	Owner->MarkPackageDirty();
-
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
 	Resp->SetStringField(TEXT("actor_label"), Owner->GetActorLabel());
 	Resp->SetStringField(TEXT("material_path"), NewMaterial->GetPathName());
 	Resp->SetNumberField(TEXT("element_index"), ElementIndex);
-	Resp->SetBoolField(TEXT("material_set"), true);
+
+	// Remember what the slot held before assigning. A slot that already holds this material is left alone: the
+	// engine would change nothing, so neither the component nor its package is touched.
+	const UMaterialInterface* Previous = MeshComponent->GetMaterial(ElementIndex);
+	const FString PreviousPath = Previous ? Previous->GetPathName() : FString();
 	if (!PreviousPath.IsEmpty())
 	{
 		Resp->SetStringField(TEXT("previous_material_path"), PreviousPath);
 	}
-	return mcp_common::MakeOkReply(Resp);
+	if (Previous == NewMaterial)
+	{
+		Resp->SetBoolField(TEXT("material_set"), false);
+		Resp->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("Slot %d already has this material; nothing was changed"), ElementIndex));
+		return mcp_common::MakeOkReply(Resp);
+	}
+
+	// Modify first, then dirty the owning package; material_set is read back from the slot.
+	MeshComponent->Modify();
+	MeshComponent->SetMaterial(ElementIndex, NewMaterial);
+	Owner->MarkPackageDirty();
+	const bool bMaterialSet = MeshComponent->GetMaterial(ElementIndex) == NewMaterial;
+
+	Resp->SetBoolField(TEXT("material_set"), bMaterialSet);
+	return mcp_common::MakeOutcomeReply(Resp, bMaterialSet, bMaterialSet ? FString()
+		: mcp_common::MeasuredOutcomeError(TEXT("set_procedural_mesh_material"), TEXT("material_set")));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

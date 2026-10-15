@@ -4927,9 +4927,9 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // get_niagara_data_interfaces  - list all user-param DIs on the system.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_data_interfaces - List all UNiagaraDataInterface user-parameter bindings on a Niagara system.
+// MCP:get_niagara_data_interfaces - List all UNiagaraDataInterface user-parameter bindings on a Niagara system. parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store.
 //   @param system_path - Asset path of the Niagara System.
-//   @returns { system_path: string, count: int, data_interfaces: [{ index, parameter_name, data_interface_class, data_interface_class_path, path_name }] }
+//   @returns { system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4942,18 +4942,35 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
     const FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
     const TArray<UNiagaraDataInterface*>& DIs = Exposed.GetDataInterfaces();
 
+    // The user parameter that owns each data interface, by the DI's offset in the store's data interface array.
+    // The store names it "User.<name>"; the other data interface tools take the short name, as
+    // get_niagara_system_info lists it, so that is what parameter_name carries.
+    TMap<int32, FString> ParameterNameByOffset;
+    for (const FNiagaraVariableWithOffset& Var : Exposed.ReadParameterVariables())
+    {
+        if (Var.IsDataInterface())
+        {
+            FString ShortName = Var.GetName().ToString();
+            ShortName.RemoveFromStart(TEXT("User."));
+            ParameterNameByOffset.Add(Var.Offset, ShortName);
+        }
+    }
+
     TArray<TSharedPtr<FJsonValue>> DIArray;
     int32 Idx = 0;
     for (UNiagaraDataInterface* DI : DIs)
     {
-        if (!DI)
+        // A slot no user parameter points at is not a binding, and no other tool can reach it.
+        const FString* ParameterName = ParameterNameByOffset.Find(Idx);
+        if (!DI || !ParameterName)
         {
             ++Idx;
             continue;
         }
         TSharedPtr<FJsonObject> DObj = MakeShared<FJsonObject>();
         DObj->SetNumberField(TEXT("index"), Idx);
-        DObj->SetStringField(TEXT("parameter_name"), DI->GetName());
+        DObj->SetStringField(TEXT("parameter_name"), *ParameterName);
+        DObj->SetStringField(TEXT("object_name"), DI->GetName());
         DObj->SetStringField(TEXT("data_interface_class"), DI->GetClass()->GetName());
         DObj->SetStringField(TEXT("data_interface_class_path"), DI->GetClass()->GetPathName());
         DObj->SetStringField(TEXT("path_name"), DI->GetPathName());

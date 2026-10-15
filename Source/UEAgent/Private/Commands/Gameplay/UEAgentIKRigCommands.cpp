@@ -94,11 +94,9 @@ namespace
         return O;
     }
 
-    /** Apply JSON values onto an FIKRigFullBodyIKSolver (partial update — only set fields present in JSON). */
-    void ApplyFBIKSolverJson(FIKRigFullBodyIKSolver& S, const TSharedPtr<FJsonObject>& J)
+    /** Apply JSON values onto the FIKRigFBIKSettings of a FullBodyIK solver (partial update: only fields present in the JSON are set). */
+    void ApplyFBIKSolverJson(FIKRigFBIKSettings& Cfg, const TSharedPtr<FJsonObject>& J)
     {
-        // Solver-level tunables live on the nested FIKRigFBIKSettings Settings member.
-        FIKRigFBIKSettings& Cfg = S.Settings;
         FString Str;
         double Num;
         bool Bool;
@@ -425,16 +423,46 @@ namespace
             Out->SetArrayField(TEXT("chains"), ChainArr);
         }
     }
+
+    /**
+     * The reply of a valid call that changed nothing: success with saved=false and Note. The asset was neither
+     * dirtied nor saved, so a Play-in-Editor session or a read-only root does not turn the no-op into a failure.
+     */
+    TSharedPtr<FJsonObject> IKRig_NoChangeReply(const TSharedPtr<FJsonObject>& Resp, const FString& Note)
+    {
+        Resp->SetBoolField(TEXT("saved"), false);
+        Resp->SetStringField(TEXT("note"), Note);
+        return mcp_common::MakeOkReply(Resp);
+    }
+
+    /**
+     * Whether Apply, run on a scratch copy of the Type struct at Live, leaves the copy different from Live. Lets a
+     * settings write that would change nothing return before Modify() dirties the asset.
+     */
+    bool IKRig_WouldChangeStruct(const UScriptStruct* Type, const void* Live, TFunctionRef<void(void*)> Apply)
+    {
+        FInstancedStruct Scratch;
+        Scratch.InitializeAs(Type, static_cast<const uint8*>(Live));
+        Apply(Scratch.GetMutableMemory());
+        return !Type->CompareScriptStruct(Scratch.GetMemory(), Live, PPF_None);
+    }
+
+    /** Whether the IK Rig of Controller has a retarget chain named ChainName. */
+    bool IKRig_HasRetargetChain(const UIKRigController* Controller, FName ChainName)
+    {
+        return Controller->GetRetargetChains().ContainsByPredicate(
+            [ChainName](const FBoneChain& Chain) { return Chain.ChainName == ChainName; });
+    }
 }
 
 // ---------------------------------------------------------------------------
 // create_ik_rig
 // ---------------------------------------------------------------------------
-// MCP:create_ik_rig - Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: if the asset already exists, loads and (re)applies the mesh. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube.
+// MCP:create_ik_rig - Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: an existing rig is loaded and only given the mesh, then saved, when it has another one; when it already has that mesh, or the mesh does not load or the engine refuses it (skeletal_mesh_set false), nothing changes, nothing is saved and a note says why. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube. A failed save makes success false, with saved=false and save_error.
 //   @param package_path - UE content folder, e.g. /Game/MyGame
 //   @param name - Asset name for the new IK Rig
 //   @param skeletal_mesh_path - Optional USkeletalMesh asset path; defaults to /Engine/EngineMeshes/SkeletalCube
-//   @returns { asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreateIKRig(const TSharedPtr<FJsonObject>& Params)
 {
@@ -474,6 +502,24 @@ TSharedPtr<FJsonObject> HandleCreateIKRig(const TSharedPtr<FJsonObject>& Params)
     if (!Controller)
         return mcp_common::MakeErrorReply(TEXT("Could not get IK Rig controller"));
 
+    // An existing rig is only touched when there is a loaded mesh it does not have yet: SetSkeletalMesh
+    // calls Modify() even for the mesh the rig already has, which would dirty the asset for nothing.
+    const bool bMeshAlreadySet = Mesh && Controller->GetSkeletalMesh() == Mesh;
+    if (!bCreated && (!Mesh || bMeshAlreadySet))
+    {
+        USkeletalMesh* CurrentMesh = Controller->GetSkeletalMesh();
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+        Resp->SetStringField(TEXT("name"), Name);
+        Resp->SetStringField(TEXT("skeletal_mesh"), CurrentMesh ? CurrentMesh->GetPathName() : TEXT(""));
+        Resp->SetBoolField(TEXT("skeletal_mesh_set"), bMeshAlreadySet);
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        return IKRig_NoChangeReply(Resp, bMeshAlreadySet
+            ? TEXT("The IK Rig already exists with that skeletal mesh; nothing changed and nothing was saved.")
+            : FString::Printf(TEXT("The IK Rig already exists and skeletal_mesh_path '%s' did not load as a USkeletalMesh; nothing changed and nothing was saved."), *SkeletalMeshPath));
+    }
+
     bool bMeshSet = false;
     if (Mesh)
     {
@@ -481,7 +527,26 @@ TSharedPtr<FJsonObject> HandleCreateIKRig(const TSharedPtr<FJsonObject>& Params)
         bMeshSet = Controller->SetSkeletalMesh(Mesh);
     }
 
-    FAssetRegistryModule::AssetCreated(Rig);
+    // The engine refused the new mesh of an existing rig (it lacks bones the rig uses): the rig is unchanged.
+    if (!bCreated && !bMeshSet)
+    {
+        USkeletalMesh* CurrentMesh = Controller->GetSkeletalMesh();
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+        Resp->SetStringField(TEXT("name"), Name);
+        Resp->SetStringField(TEXT("skeletal_mesh"), CurrentMesh ? CurrentMesh->GetPathName() : TEXT(""));
+        Resp->SetBoolField(TEXT("skeletal_mesh_set"), false);
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        return IKRig_NoChangeReply(Resp, FString::Printf(
+            TEXT("The engine refused skeletal mesh %s for this IK Rig (it lacks bones the rig uses, see the editor log); nothing changed and nothing was saved."),
+            *Mesh->GetPathName()));
+    }
+
+    if (bCreated)
+    {
+        FAssetRegistryModule::AssetCreated(Rig);
+    }
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
@@ -501,7 +566,7 @@ TSharedPtr<FJsonObject> HandleCreateIKRig(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_ik_solver
 // ---------------------------------------------------------------------------
-// MCP:add_ik_solver - Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error.
+// MCP:add_ik_solver - Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_type - Optional solver type: "FullBodyIK"|"Limb"|"Pole"|"BodyMover"|"SetTransform"|"StretchLimb"; defaults to "FullBodyIK"
 //   @returns { asset_path: string, solver_index: int, solver_type: string, solver_struct: string, solver_count: int, saved: bool, save_error?: string }
@@ -545,11 +610,11 @@ TSharedPtr<FJsonObject> HandleAddIKSolver(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_ik_goal
 // ---------------------------------------------------------------------------
-// MCP:add_ik_goal - Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, and the asset is saved again. A failed save makes success false, with saved=false and save_error.
+// MCP:add_ik_goal - Add an IK goal to an IK Rig, associated with a bone, through the IK Rig controller (one undo transaction), then save the asset.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: a goal of that name on the same bone is not re-created but returned with already_exists=true, saved=false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param goal_name - Unique name for the new goal
 //   @param bone_name - Optional bone name to attach the goal to
-//   @returns { asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string }
+//   @returns { asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleAddIKGoal(const TSharedPtr<FJsonObject>& Params)
 {
@@ -579,18 +644,14 @@ TSharedPtr<FJsonObject> HandleAddIKGoal(const TSharedPtr<FJsonObject>& Params)
     UIKRigEffectorGoal* ExistingGoal = Controller->GetGoal(GoalFName);
     if (ExistingGoal && ExistingGoal->BoneName == BoneName)
     {
-        // Goal already exists with same bone — return success (idempotent)
-        FString SaveErr;
-        const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+        // The goal the caller asked for is already there: nothing changes, so nothing is saved.
         TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
         Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
         Resp->SetStringField(TEXT("goal_name"), GoalName);
         Resp->SetStringField(TEXT("bone_name"), BoneName.ToString());
         Resp->SetNumberField(TEXT("goal_count"), Controller->GetAllGoals().Num());
-        Resp->SetBoolField(TEXT("saved"), bSaved);
         Resp->SetBoolField(TEXT("already_exists"), true);
-        if (!bSaved) Resp->SetStringField(TEXT("save_error"), SaveErr);
-        return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_ik_goal"), SaveErr);
+        return IKRig_NoChangeReply(Resp, TEXT("A goal of that name already exists on that bone; nothing changed and nothing was saved."));
     }
 
     const FName ResultGoal = Controller->AddNewGoal(FName(*GoalName), BoneName);
@@ -612,10 +673,10 @@ TSharedPtr<FJsonObject> HandleAddIKGoal(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // remove_ik_goal
 // ---------------------------------------------------------------------------
-// MCP:remove_ik_goal - Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent — removing a goal that isn't present is a no-op (removed:false, already_absent:true).
+// MCP:remove_ik_goal - Remove an IK goal from an IK Rig by name through the IK Rig controller (one undo transaction), then save the asset.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent: removing a goal that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param goal_name - Name of the goal to remove
-//   @returns { asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string }
+//   @returns { asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveIKGoal(const TSharedPtr<FJsonObject>& Params)
 {
@@ -633,23 +694,26 @@ TSharedPtr<FJsonObject> HandleRemoveIKGoal(const TSharedPtr<FJsonObject>& Params
     const FName GoalFName(*GoalName);
     const bool bExisted = Controller->GetGoal(GoalFName) != nullptr;
 
-    bool bRemoved = false;
-    if (bExisted)
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+    Resp->SetStringField(TEXT("goal_name"), GoalName);
+    if (!bExisted)
     {
-        bRemoved = Controller->RemoveGoal(GoalFName);
-        if (!bRemoved)
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("RemoveGoal failed for goal '%s'"), *GoalName));
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("already_absent"), true);
+        Resp->SetNumberField(TEXT("goal_count"), Controller->GetAllGoals().Num());
+        return IKRig_NoChangeReply(Resp, TEXT("The IK Rig has no goal of that name; nothing changed and nothing was saved."));
     }
+
+    if (!Controller->RemoveGoal(GoalFName))
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("RemoveGoal failed for goal '%s'"), *GoalName));
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("goal_name"), GoalName);
-    Resp->SetBoolField(TEXT("removed"), bRemoved);
-    Resp->SetBoolField(TEXT("already_absent"), !bExisted);
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetBoolField(TEXT("already_absent"), false);
     Resp->SetNumberField(TEXT("goal_count"), Controller->GetAllGoals().Num());
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_ik_goal"), SaveErr);
 }
@@ -657,11 +721,11 @@ TSharedPtr<FJsonObject> HandleRemoveIKGoal(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // connect_ik_goal_to_solver
 // ---------------------------------------------------------------------------
-// MCP:connect_ik_goal_to_solver - Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent — re-connecting an already-connected goal is a no-op (already_connected:true), avoiding the duplicate the raw engine call would create.
+// MCP:connect_ik_goal_to_solver - Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings, in one undo transaction, then save the asset.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent: re-connecting an already-connected goal is a success with already_connected:true, saved:false and a note, and nothing is saved, avoiding the duplicate the raw engine call would create. An unknown goal or out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Content path to the IK Rig asset.
 //   @param goal_name - Name of an existing goal (created via add_ik_goal).
 //   @param solver_index - Index of the solver in the rig's solver stack.
-//   @returns { ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool }
+//   @returns { ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleConnectIKGoalToSolver(const TSharedPtr<FJsonObject>& Params)
 {
@@ -682,14 +746,26 @@ TSharedPtr<FJsonObject> HandleConnectIKGoalToSolver(const TSharedPtr<FJsonObject
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Goal '%s' does not exist in the IK Rig. Add it first with add_ik_goal."), *GoalName));
 
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
+    Resp->SetStringField(TEXT("goal_name"), GoalName);
+    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
+
     // Idempotent: the raw ConnectGoalToSolver calls AddGoal unconditionally (would
     // duplicate the effector), so short-circuit when already connected.
-    const bool bAlready = Controller->IsGoalConnectedToSolver(GoalFName, SolverIndex);
-    bool bConnected = bAlready;
-    if (!bAlready)
+    if (Controller->IsGoalConnectedToSolver(GoalFName, SolverIndex))
     {
-        bConnected = Controller->ConnectGoalToSolver(GoalFName, SolverIndex);
-        if (!bConnected)
+        Resp->SetBoolField(TEXT("connected"), true);
+        Resp->SetBoolField(TEXT("already_connected"), true);
+        return IKRig_NoChangeReply(Resp, TEXT("The goal is already connected to that solver; nothing changed and nothing was saved."));
+    }
+
+    {
+        // ConnectGoalToSolver writes the solver stack without calling Modify(), so the rig is recorded here
+        // to make the connection undoable, as disconnect_ik_goal_from_solver is.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "ConnectIKGoalToSolver", "Connect IK Goal To Solver"));
+        Rig->Modify();
+        if (!Controller->ConnectGoalToSolver(GoalFName, SolverIndex))
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("ConnectGoalToSolver failed for goal '%s' on solver %d."), *GoalName, SolverIndex));
     }
@@ -697,23 +773,19 @@ TSharedPtr<FJsonObject> HandleConnectIKGoalToSolver(const TSharedPtr<FJsonObject
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("goal_name"), GoalName);
-    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
-    Resp->SetBoolField(TEXT("connected"), bConnected);
-    Resp->SetBoolField(TEXT("already_connected"), bAlready);
+    Resp->SetBoolField(TEXT("connected"), true);
+    Resp->SetBoolField(TEXT("already_connected"), false);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("connect_ik_goal_to_solver"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
 // disconnect_ik_goal_from_solver
 // ---------------------------------------------------------------------------
-// MCP:disconnect_ik_goal_from_solver - Disconnect a goal from a solver, removing that solver's per-goal effector/settings.  Inverse of connect_ik_goal_to_solver. Idempotent — disconnecting a goal that isn't connected is a no-op (was_connected:false).
+// MCP:disconnect_ik_goal_from_solver - Disconnect a goal from a solver, removing that solver's per-goal effector/settings, through the IK Rig controller (one undo transaction), then save the asset.  Inverse of connect_ik_goal_to_solver. Idempotent: disconnecting a goal that isn't connected is a success with was_connected:false, saved:false and a note, and nothing is saved. An out-of-range solver_index is an error. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Content path to the IK Rig asset.
 //   @param goal_name - Name of the goal.
 //   @param solver_index - Index of the solver in the rig's solver stack.
-//   @returns { ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool }
+//   @returns { ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, was_connected: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleDisconnectIKGoalFromSolver(const TSharedPtr<FJsonObject>& Params)
 {
@@ -730,32 +802,36 @@ TSharedPtr<FJsonObject> HandleDisconnectIKGoalFromSolver(const TSharedPtr<FJsonO
     if (TSharedPtr<FJsonObject> Error = IKRig_CheckSolverIndex(Controller, SolverIndex, /*bShowRange=*/true)) { return Error; }
 
     const FName GoalFName(*GoalName);
-    const bool bWas = Controller->IsGoalConnectedToSolver(GoalFName, SolverIndex);
-    if (bWas)
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
+    Resp->SetStringField(TEXT("goal_name"), GoalName);
+    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
+
+    if (!Controller->IsGoalConnectedToSolver(GoalFName, SolverIndex))
     {
-        if (!Controller->DisconnectGoalFromSolver(GoalFName, SolverIndex))
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("DisconnectGoalFromSolver failed for goal '%s' on solver %d."), *GoalName, SolverIndex));
+        Resp->SetBoolField(TEXT("connected"), false);
+        Resp->SetBoolField(TEXT("was_connected"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The goal is not connected to that solver; nothing changed and nothing was saved."));
     }
+
+    if (!Controller->DisconnectGoalFromSolver(GoalFName, SolverIndex))
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("DisconnectGoalFromSolver failed for goal '%s' on solver %d."), *GoalName, SolverIndex));
 
     const bool bConnectedNow = Controller->IsGoalConnectedToSolver(GoalFName, SolverIndex);
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("goal_name"), GoalName);
-    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
     Resp->SetBoolField(TEXT("connected"), bConnectedNow);
-    Resp->SetBoolField(TEXT("was_connected"), bWas);
+    Resp->SetBoolField(TEXT("was_connected"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("disconnect_ik_goal_from_solver"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
 // add_ik_retarget_chain
 // ---------------------------------------------------------------------------
-// MCP:add_ik_retarget_chain - Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.
+// MCP:add_ik_retarget_chain - Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero".
 //   @param chain_name - Name for the new retarget chain (uniquified by the engine)
 //   @param start_bone - First bone of the chain; must exist in the skeleton of the rig.
@@ -825,12 +901,12 @@ TSharedPtr<FJsonObject> HandleGetIKRigInfo(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // create_ik_retargeter
 // ---------------------------------------------------------------------------
-// MCP:create_ik_retargeter - Create and save a UIKRetargeter asset wiring source + target IK Rigs.
+// MCP:create_ik_retargeter - Create and save a UIKRetargeter asset wiring source + target IK Rigs. An existing retargeter at that path is rewired and saved when either rig differs; when it already uses both rigs nothing changes, nothing is saved (saved=false) and a note says so. A failed save makes success false, with saved=false and save_error.
 //   @param package_path - UE content folder, e.g. /Game/MyGame
 //   @param name - Asset name for the new IK Retargeter
 //   @param source_ik_rig_path - Path to the source UIKRigDefinition (copy FROM)
 //   @param target_ik_rig_path - Path to the target UIKRigDefinition (copy TO)
-//   @returns { asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, name: string, source_ik_rig: string, target_ik_rig: string, created: bool, already_existed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreateIKRetargeter(const TSharedPtr<FJsonObject>& Params)
 {
@@ -874,6 +950,21 @@ TSharedPtr<FJsonObject> HandleCreateIKRetargeter(const TSharedPtr<FJsonObject>& 
     if (!Controller)
         return mcp_common::MakeErrorReply(TEXT("Could not get IK Retargeter controller"));
 
+    // An existing retargeter already wired to both rigs is left as it is: nothing to change, nothing to save.
+    if (!bCreated
+        && Controller->GetIKRig(ERetargetSourceOrTarget::Source) == SourceRig
+        && Controller->GetIKRig(ERetargetSourceOrTarget::Target) == TargetRig)
+    {
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("asset_path"), Retargeter->GetPathName());
+        Resp->SetStringField(TEXT("name"), Name);
+        Resp->SetStringField(TEXT("source_ik_rig"), SourceRig->GetPathName());
+        Resp->SetStringField(TEXT("target_ik_rig"), TargetRig->GetPathName());
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        return IKRig_NoChangeReply(Resp, TEXT("The IK Retargeter already exists with those source and target IK Rigs; nothing changed and nothing was saved."));
+    }
+
     // Wire source + target IK Rigs.
     Controller->SetIKRig(ERetargetSourceOrTarget::Source, SourceRig);
     Controller->SetIKRig(ERetargetSourceOrTarget::Target, TargetRig);
@@ -882,7 +973,10 @@ TSharedPtr<FJsonObject> HandleCreateIKRetargeter(const TSharedPtr<FJsonObject>& 
     const UIKRigDefinition* ReadSource = Controller->GetIKRig(ERetargetSourceOrTarget::Source);
     const UIKRigDefinition* ReadTarget = Controller->GetIKRig(ERetargetSourceOrTarget::Target);
 
-    FAssetRegistryModule::AssetCreated(Retargeter);
+    if (bCreated)
+    {
+        FAssetRegistryModule::AssetCreated(Retargeter);
+    }
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
 
@@ -938,11 +1032,11 @@ TSharedPtr<FJsonObject> HandleRemoveIKSolver(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // move_ik_solver_in_stack
 // ---------------------------------------------------------------------------
-// MCP:move_ik_solver_in_stack - Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false. A failed save makes success false, with saved=false and save_error.
+// MCP:move_ik_solver_in_stack - Move the solver at from_index so that it ends up at to_index (both 0-based positions in the solver stack) of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. An index outside the stack is an error and nothing moves; from_index equal to to_index is not an error but moved false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param from_index - Source 0-based solver index
 //   @param to_index - Target 0-based solver index, below the solver count
-//   @returns { asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string }
+//   @returns { asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleMoveIKSolverInStack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -967,16 +1061,27 @@ TSharedPtr<FJsonObject> HandleMoveIKSolverInStack(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("to_index %d out of range (0..%d)"), ToIndex, NumSolvers - 1));
 
-    const bool bMoved = Controller->MoveSolverInStack(FromIndex, ToIndex);
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
-
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
     Resp->SetNumberField(TEXT("from_index"), FromIndex);
     Resp->SetNumberField(TEXT("to_index"), ToIndex);
-    Resp->SetBoolField(TEXT("moved"), bMoved);
+
+    if (FromIndex == ToIndex)
+    {
+        // The solver is already at to_index (the engine refuses this move without touching the rig).
+        Resp->SetBoolField(TEXT("moved"), false);
+        Resp->SetNumberField(TEXT("solver_count"), NumSolvers);
+        return IKRig_NoChangeReply(Resp, TEXT("from_index equals to_index; nothing moved and nothing was saved."));
+    }
+
+    if (!Controller->MoveSolverInStack(FromIndex, ToIndex))
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("MoveSolverInStack refused moving solver %d to %d (see the editor log)"), FromIndex, ToIndex));
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+
+    Resp->SetBoolField(TEXT("moved"), true);
     Resp->SetNumberField(TEXT("solver_count"), Controller->GetNumSolvers());
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("move_ik_solver_in_stack"), SaveErr);
 }
@@ -984,11 +1089,11 @@ TSharedPtr<FJsonObject> HandleMoveIKSolverInStack(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // set_ik_solver_enabled
 // ---------------------------------------------------------------------------
-// MCP:set_ik_solver_enabled - Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false. A failed save makes success false, with saved=false and save_error.
+// MCP:set_ik_solver_enabled - Enable or disable the solver at a 0-based index of an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset; enabled is read back. An out-of-range index is not an error but set_ok false, and a solver already in the requested state gives changed false: in both cases saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @param enabled - Optional bool; defaults to true
-//   @returns { asset_path: string, solver_index: int, enabled: bool, set_ok: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, solver_index: int, enabled: bool, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKSolverEnabled(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1003,6 +1108,28 @@ TSharedPtr<FJsonObject> HandleSetIKSolverEnabled(const TSharedPtr<FJsonObject>& 
     UIKRigController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
 
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
+
+    // Neither an index outside the stack nor the state the solver already has changes anything; calling
+    // SetSolverEnabled for the second would still Modify() and dirty the rig.
+    if (SolverIndex < 0 || SolverIndex >= Controller->GetNumSolvers())
+    {
+        Resp->SetBoolField(TEXT("enabled"), false);
+        Resp->SetBoolField(TEXT("set_ok"), false);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, FString::Printf(
+            TEXT("solver_index %d is out of range (0..%d); nothing changed and nothing was saved."), SolverIndex, Controller->GetNumSolvers() - 1));
+    }
+    if (Controller->GetSolverEnabled(SolverIndex) == bEnabled)
+    {
+        Resp->SetBoolField(TEXT("enabled"), bEnabled);
+        Resp->SetBoolField(TEXT("set_ok"), true);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The solver already has that enabled state; nothing changed and nothing was saved."));
+    }
+
     const bool bSet = Controller->SetSolverEnabled(SolverIndex, bEnabled);
     // Read back to confirm (some APIs return false but succeed).
     const bool bActual = Controller->GetSolverEnabled(SolverIndex);
@@ -1010,11 +1137,9 @@ TSharedPtr<FJsonObject> HandleSetIKSolverEnabled(const TSharedPtr<FJsonObject>& 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
     Resp->SetBoolField(TEXT("enabled"), bActual);
     Resp->SetBoolField(TEXT("set_ok"), bSet);
+    Resp->SetBoolField(TEXT("changed"), bActual == bEnabled);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_solver_enabled"), SaveErr);
 }
 
@@ -1053,12 +1178,12 @@ TSharedPtr<FJsonObject> HandleGetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // set_ik_solver_bones
 // ---------------------------------------------------------------------------
-// MCP:set_ik_solver_bones - Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
+// MCP:set_ik_solver_bones - Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton, or a start or end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back, and nothing is stored for it. A bone the solver already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @param start_bone - Optional start bone name
 //   @param end_bone - Optional end bone name
-//   @returns { asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKSolverBones(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1078,22 +1203,42 @@ TSharedPtr<FJsonObject> HandleSetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
     UIKRigController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
 
-    bool bStartSet = true, bEndSet = true;
+    // A bone the solver already has is not set again: the controller's setters Modify() the rig even then.
+    const bool bValidIndex = SolverIndex >= 0 && SolverIndex < Controller->GetNumSolvers();
+    const FName PrevStart = bValidIndex ? Controller->GetStartBone(SolverIndex) : NAME_None;
+    const FName PrevEnd = bValidIndex ? Controller->GetEndBone(SolverIndex) : NAME_None;
+    const FInstancedStruct* SolverStruct = bValidIndex ? Controller->GetSolverStructAtIndex(SolverIndex) : nullptr;
+    const FIKRigSolverBase* Solver = (SolverStruct && SolverStruct->IsValid()) ? SolverStruct->GetPtr<FIKRigSolverBase>() : nullptr;
+
+    bool bStartSet = true, bEndSet = true, bChanged = false;
     if (!StartBoneStr.IsEmpty())
     {
-        bStartSet = Controller->SetStartBone(FName(*StartBoneStr), SolverIndex);
+        const FName StartFName(*StartBoneStr);
+        if (Solver && !Solver->UsesStartBone())
+        {
+            // SetStartBone calls Modify() and reports success for a solver type that has no start bone, but
+            // the solver stores nothing: answered here as not set, with the rig untouched.
+            bStartSet = false;
+        }
+        else if (!bValidIndex || StartFName.IsNone() || StartFName != PrevStart)
+        {
+            bStartSet = Controller->SetStartBone(StartFName, SolverIndex);
+            bChanged |= bStartSet;
+        }
     }
     if (!EndBoneStr.IsEmpty())
     {
-        bEndSet = Controller->SetEndBone(FName(*EndBoneStr), SolverIndex);
+        const FName EndFName(*EndBoneStr);
+        if (!bValidIndex || EndFName.IsNone() || EndFName != PrevEnd)
+        {
+            bEndSet = Controller->SetEndBone(EndFName, SolverIndex);
+            bChanged |= bEndSet;
+        }
     }
 
     // Read back
     const FName ActualStart = Controller->GetStartBone(SolverIndex);
     const FName ActualEnd = Controller->GetEndBone(SolverIndex);
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
@@ -1102,6 +1247,14 @@ TSharedPtr<FJsonObject> HandleSetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
     Resp->SetStringField(TEXT("end_bone"), ActualEnd.ToString());
     Resp->SetBoolField(TEXT("start_bone_set"), bStartSet);
     Resp->SetBoolField(TEXT("end_bone_set"), bEndSet);
+    Resp->SetBoolField(TEXT("changed"), bChanged);
+    if (!bChanged)
+    {
+        return IKRig_NoChangeReply(Resp, TEXT("Nothing changed (the solver already had those bones, or the controller refused them: see start_bone_set and end_bone_set); nothing was saved."));
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_solver_bones"), SaveErr);
 }
 
@@ -1172,10 +1325,10 @@ TSharedPtr<FJsonObject> HandleGetIKSolverDetails(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // remove_ik_retarget_chain
 // ---------------------------------------------------------------------------
-// MCP:remove_ik_retarget_chain - Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false. A failed save makes success false, with saved=false and save_error.
+// MCP:remove_ik_retarget_chain - Remove the retarget chain with that name from an IK Rig asset through the IK Rig controller (one undo transaction), then save the asset. A name no chain has is not an error but removed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param chain_name - Name of the retarget chain to remove
-//   @returns { asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string }
+//   @returns { asset_path: string, chain_name: string, removed: bool, chain_count: int, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveIKRetargetChain(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1187,14 +1340,24 @@ TSharedPtr<FJsonObject> HandleRemoveIKRetargetChain(const TSharedPtr<FJsonObject
     UIKRigController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
 
-    const bool bRemoved = Controller->RemoveRetargetChain(FName(*ChainName));
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+    Resp->SetStringField(TEXT("chain_name"), ChainName);
+
+    // RemoveRetargetChain calls Modify() before it looks for the chain, so an absent name is answered here.
+    const FName ChainFName(*ChainName);
+    if (!IKRig_HasRetargetChain(Controller, ChainFName))
+    {
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetNumberField(TEXT("chain_count"), Controller->GetRetargetChains().Num());
+        return IKRig_NoChangeReply(Resp, TEXT("The IK Rig has no retarget chain of that name; nothing changed and nothing was saved."));
+    }
+
+    const bool bRemoved = Controller->RemoveRetargetChain(ChainFName);
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("chain_name"), ChainName);
     Resp->SetBoolField(TEXT("removed"), bRemoved);
     Resp->SetNumberField(TEXT("chain_count"), Controller->GetRetargetChains().Num());
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_ik_retarget_chain"), SaveErr);
@@ -1203,11 +1366,11 @@ TSharedPtr<FJsonObject> HandleRemoveIKRetargetChain(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // rename_ik_retarget_chain
 // ---------------------------------------------------------------------------
-// MCP:rename_ik_retarget_chain - Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. A failed save makes success false, with saved=false and save_error.
+// MCP:rename_ik_retarget_chain - Rename a retarget chain of an IK Rig asset through the IK Rig controller (one undo transaction) and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero".
 //   @param chain_name - Current name of the retarget chain, as get_ik_rig_info lists it.
 //   @param new_name - Requested new name; the engine may add a suffix to keep it unique.
-//   @returns { asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, old_name: string, new_name: string, renamed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRenameIKRetargetChain(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1220,29 +1383,39 @@ TSharedPtr<FJsonObject> HandleRenameIKRetargetChain(const TSharedPtr<FJsonObject
     UIKRigController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
 
-    const FName ResultName = Controller->RenameRetargetChain(FName(*ChainName), FName(*NewName));
+    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
+    Resp->SetStringField(TEXT("old_name"), ChainName);
+
+    // The engine renames nothing for an unknown chain; it is answered here so the rig is not saved for it.
+    const FName ChainFName(*ChainName);
+    if (!IKRig_HasRetargetChain(Controller, ChainFName))
+    {
+        Resp->SetStringField(TEXT("new_name"), ChainName);
+        Resp->SetBoolField(TEXT("renamed"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The IK Rig has no retarget chain of that name; nothing was renamed and nothing was saved."));
+    }
+
+    const FName ResultName = Controller->RenameRetargetChain(ChainFName, FName(*NewName));
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("old_name"), ChainName);
     Resp->SetStringField(TEXT("new_name"), ResultName.ToString());
-    Resp->SetBoolField(TEXT("renamed"), !ResultName.IsNone() && ResultName != FName(*ChainName));
+    Resp->SetBoolField(TEXT("renamed"), !ResultName.IsNone() && ResultName != ChainFName);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("rename_ik_retarget_chain"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
 // set_ik_retarget_chain_bones
 // ---------------------------------------------------------------------------
-// MCP:set_ik_retarget_chain_bones - Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
+// MCP:set_ik_retarget_chain_bones - Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A value the chain already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param chain_name - Name of the retarget chain to mutate
 //   @param start_bone - Optional new start bone
 //   @param end_bone - Optional new end bone
 //   @param goal_name - Optional new associated IK goal, which must be a goal of the rig; None clears the goal of the chain.
-//   @returns { asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1262,27 +1435,49 @@ TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObje
     UIKRigController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
 
-    bool bStartOk = true, bEndOk = true, bGoalOk = true;
+    // A value the chain already has is not set again: the controller's setters Modify() the rig even then.
+    const FName ChainFName(*ChainName);
+    const bool bChainExists = IKRig_HasRetargetChain(Controller, ChainFName);
+    const FName PrevStart = bChainExists ? Controller->GetRetargetChainStartBone(ChainFName) : NAME_None;
+    const FName PrevEnd = bChainExists ? Controller->GetRetargetChainEndBone(ChainFName) : NAME_None;
+    const FName PrevGoal = bChainExists ? Controller->GetRetargetChainGoal(ChainFName) : NAME_None;
+
+    bool bStartOk = true, bEndOk = true, bGoalOk = true, bChanged = false;
     if (!StartBone.IsEmpty())
-        bStartOk = Controller->SetRetargetChainStartBone(FName(*ChainName), FName(*StartBone));
+    {
+        const FName StartFName(*StartBone);
+        if (!bChainExists || StartFName.IsNone() || StartFName != PrevStart)
+        {
+            bStartOk = Controller->SetRetargetChainStartBone(ChainFName, StartFName);
+            bChanged |= bStartOk;
+        }
+    }
     if (!EndBone.IsEmpty())
-        bEndOk = Controller->SetRetargetChainEndBone(FName(*ChainName), FName(*EndBone));
+    {
+        const FName EndFName(*EndBone);
+        if (!bChainExists || EndFName.IsNone() || EndFName != PrevEnd)
+        {
+            bEndOk = Controller->SetRetargetChainEndBone(ChainFName, EndFName);
+            bChanged |= bEndOk;
+        }
+    }
     if (!GoalName.IsEmpty())
     {
         // SetRetargetChainGoal stores None for a name the rig has no goal for and still returns true, so an
         // unknown goal is refused here; the literal None is the one way to clear the chain's goal on purpose.
         const FName GoalFName(*GoalName);
-        bGoalOk = (GoalFName.IsNone() || Controller->GetGoal(GoalFName) != nullptr)
-            && Controller->SetRetargetChainGoal(FName(*ChainName), GoalFName);
+        bGoalOk = GoalFName.IsNone() || Controller->GetGoal(GoalFName) != nullptr;
+        if (bGoalOk && (!bChainExists || GoalFName != PrevGoal))
+        {
+            bGoalOk = Controller->SetRetargetChainGoal(ChainFName, GoalFName);
+            bChanged |= bGoalOk;
+        }
     }
 
     // Read back
-    const FName ActualStart = Controller->GetRetargetChainStartBone(FName(*ChainName));
-    const FName ActualEnd = Controller->GetRetargetChainEndBone(FName(*ChainName));
-    const FName ActualGoal = Controller->GetRetargetChainGoal(FName(*ChainName));
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+    const FName ActualStart = Controller->GetRetargetChainStartBone(ChainFName);
+    const FName ActualEnd = Controller->GetRetargetChainEndBone(ChainFName);
+    const FName ActualGoal = Controller->GetRetargetChainGoal(ChainFName);
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
@@ -1293,6 +1488,14 @@ TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObje
     Resp->SetBoolField(TEXT("start_bone_set"), bStartOk);
     Resp->SetBoolField(TEXT("end_bone_set"), bEndOk);
     Resp->SetBoolField(TEXT("goal_set"), bGoalOk);
+    Resp->SetBoolField(TEXT("changed"), bChanged);
+    if (!bChanged)
+    {
+        return IKRig_NoChangeReply(Resp, TEXT("Nothing changed (the chain already had those values, or they were refused: see start_bone_set, end_bone_set and goal_set); nothing was saved."));
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_retarget_chain_bones"), SaveErr);
 }
 
@@ -1422,12 +1625,12 @@ TSharedPtr<FJsonObject> HandleRemoveRetargeterOp(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // set_retargeter_chain_mapping
 // ---------------------------------------------------------------------------
-// MCP:set_retargeter_chain_mapping - Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.
+// MCP:set_retargeter_chain_mapping - Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. When no op lists target_chain, or every one already maps it to source_chain, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.
 //   @param ik_retargeter_path - Path to the UIKRetargeter asset
 //   @param source_chain - Name of the source retarget chain
 //   @param target_chain - Name of the target retarget chain to map to
 //   @param op_name - Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated
-//   @returns { asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, saved: bool, save_error?: string }
+//   @returns { asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetRetargeterChainMapping(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1443,32 +1646,64 @@ TSharedPtr<FJsonObject> HandleSetRetargeterChainMapping(const TSharedPtr<FJsonOb
     UIKRetargeterController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRetargeterController(RetargeterPath, Retargeter, Controller)) { return Error; }
 
-    // SetSourceChain(InSourceChainName, InTargetChainName, InOpName)
-    const bool bSet = Controller->SetSourceChain(
-        FName(*SourceChain), FName(*TargetChain),
-        OpName.IsEmpty() ? NAME_None : FName(*OpName));
-
-    // Read back
-    const FName ActualSource = Controller->GetSourceChain(
-        FName(*TargetChain),
-        OpName.IsEmpty() ? NAME_None : FName(*OpName));
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
+    const FName SourceFName(*SourceChain);
+    const FName TargetFName(*TargetChain);
+    const FName OpFName = OpName.IsEmpty() ? NAME_None : FName(*OpName);
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), Retargeter->GetPathName());
     Resp->SetStringField(TEXT("source_chain"), SourceChain);
     Resp->SetStringField(TEXT("target_chain"), TargetChain);
+
+    // SetSourceChain calls Modify() before it looks at the ops, so the ops it would update are found here
+    // first, the same way it walks them: no op listing target_chain, or every such op already mapping it to
+    // source_chain, changes nothing.
+    bool bAnyOpListsTarget = false;
+    bool bAllAlreadyMapped = true;
+    for (int32 OpIndex = 0; OpIndex < Controller->GetNumRetargetOps(); ++OpIndex)
+    {
+        const FIKRetargetOpBase* Op = Controller->GetRetargetOpByIndex(OpIndex);
+        if (!Op || (!OpFName.IsNone() && Op->GetName() != OpFName))
+        {
+            continue;
+        }
+        const FRetargetChainMapping* Mapping = Op->GetChainMapping();
+        if (!Mapping || !Mapping->HasChain(TargetFName, ERetargetSourceOrTarget::Target))
+        {
+            continue;
+        }
+        bAnyOpListsTarget = true;
+        bAllAlreadyMapped &= Mapping->GetChainMappedTo(TargetFName, ERetargetSourceOrTarget::Target) == SourceFName;
+    }
+    if (!bAnyOpListsTarget || bAllAlreadyMapped)
+    {
+        Resp->SetStringField(TEXT("mapped_source"), Controller->GetSourceChain(TargetFName, OpFName).ToString());
+        Resp->SetBoolField(TEXT("set_ok"), bAnyOpListsTarget);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, bAnyOpListsTarget
+            ? TEXT("target_chain is already mapped to source_chain; nothing changed and nothing was saved.")
+            : TEXT("No op lists target_chain in its chain mapping; nothing changed and nothing was saved."));
+    }
+
+    // SetSourceChain(InSourceChainName, InTargetChainName, InOpName)
+    const bool bSet = Controller->SetSourceChain(SourceFName, TargetFName, OpFName);
+
+    // Read back
+    const FName ActualSource = Controller->GetSourceChain(TargetFName, OpFName);
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
+
     Resp->SetStringField(TEXT("mapped_source"), ActualSource.ToString());
     Resp->SetBoolField(TEXT("set_ok"), bSet);
+    Resp->SetBoolField(TEXT("changed"), bSet);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_retargeter_chain_mapping"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
 // set_retarget_pose_bone_rotation
 // ---------------------------------------------------------------------------
-// MCP:set_retarget_pose_bone_rotation - Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. A failed save makes success false, with saved=false and save_error.
+// MCP:set_retarget_pose_bone_rotation - Set a bone's rotation offset in the current retarget pose (euler degrees) of an IK Retargeter asset, as one undo transaction, then save the asset; the offset is read back as quat_x..quat_w. Creates a default pose if none is current. bone_name is stored as given, not checked against the skeleton. When the pose to edit is already current and already holds exactly that offset for the bone, changed is false, saved is false, a note says so and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_retargeter_path - Path to the UIKRetargeter asset
 //   @param bone_name - Name of the bone to update
 //   @param source_or_target - Optional "Source" or "Target" scope; defaults to "Target"
@@ -1481,7 +1716,7 @@ TSharedPtr<FJsonObject> HandleSetRetargeterChainMapping(const TSharedPtr<FJsonOb
 //   @param quat_w - Optional quaternion W
 //   @param rotation - Optional nested {x, y, z, w} quaternion object
 //   @param pose_name - Optional explicit retarget pose name; created if missing
-//   @returns { asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, saved: bool, save_error?: string }
+//   @returns { asset_path: string, bone_name: string, source_or_target: string, retarget_pose: string, quat_x: number, quat_y: number, quat_z: number, quat_w: number, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetRetargetPoseBoneRotation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1536,6 +1771,30 @@ TSharedPtr<FJsonObject> HandleSetRetargetPoseBoneRotation(const TSharedPtr<FJson
     UIKRetargeter* Retargeter = nullptr;
     UIKRetargeterController* Controller = nullptr;
     if (TSharedPtr<FJsonObject> Error = IKRig_LoadRetargeterController(RetargeterPath, Retargeter, Controller)) { return Error; }
+
+    // Nothing changes when the pose to edit is already the current one and already holds exactly this offset
+    // for the bone; answered before the transaction below, whose Modify() would dirty the asset.
+    {
+        const FName CurrentPose = Controller->GetCurrentRetargetPoseName(Mode);
+        const FName PoseToEdit = PoseNameStr.IsEmpty() ? CurrentPose : FName(*PoseNameStr);
+        const FIKRetargetPose* Pose = (!PoseToEdit.IsNone() && PoseToEdit == CurrentPose)
+            ? Controller->GetRetargetPoses(Mode).Find(PoseToEdit) : nullptr;
+        const FQuat* Existing = Pose ? Pose->GetAllDeltaRotations().Find(FName(*BoneName)) : nullptr;
+        if (Existing && *Existing == Rotation)
+        {
+            TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+            Resp->SetStringField(TEXT("asset_path"), Retargeter->GetPathName());
+            Resp->SetStringField(TEXT("bone_name"), BoneName);
+            Resp->SetStringField(TEXT("source_or_target"), SourceOrTargetStr);
+            Resp->SetStringField(TEXT("retarget_pose"), CurrentPose.ToString());
+            Resp->SetNumberField(TEXT("quat_x"), Existing->X);
+            Resp->SetNumberField(TEXT("quat_y"), Existing->Y);
+            Resp->SetNumberField(TEXT("quat_z"), Existing->Z);
+            Resp->SetNumberField(TEXT("quat_w"), Existing->W);
+            Resp->SetBoolField(TEXT("changed"), false);
+            return IKRig_NoChangeReply(Resp, TEXT("The bone already has that rotation offset in the current retarget pose; nothing changed and nothing was saved."));
+        }
+    }
 
     // One undo step for the whole call, the pose the controller may create included:
     // SetRotationOffsetForRetargetPoseBone neither opens a transaction nor calls Modify.
@@ -1592,6 +1851,7 @@ TSharedPtr<FJsonObject> HandleSetRetargetPoseBoneRotation(const TSharedPtr<FJson
     Resp->SetNumberField(TEXT("quat_y"), ActualRot.Y);
     Resp->SetNumberField(TEXT("quat_z"), ActualRot.Z);
     Resp->SetNumberField(TEXT("quat_w"), ActualRot.W);
+    Resp->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_retarget_pose_bone_rotation"), SaveErr);
 }
 
@@ -1665,11 +1925,11 @@ TSharedPtr<FJsonObject> HandleGetIKSolverSettings(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // set_ik_solver_settings
 // ---------------------------------------------------------------------------
-// MCP:set_ik_solver_settings - Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. A failed save makes success false, with saved=false and save_error.
+// MCP:set_ik_solver_settings - Set detailed solver-specific settings on a solver in an IK Rig, as one undo transaction, then save the asset.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Content path to the IK Rig asset.
 //   @param solver_index - Index of the solver in the rig's solver stack.
 //   @param settings - Object with solver-type-specific fields to set.
-//   @returns { ik_rig_path: string, solver_index: int, solver_type: string, success: bool, saved: bool, save_error?: string }
+//   @returns { ik_rig_path: string, solver_index: int, solver_type: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKSolverSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1693,49 +1953,56 @@ TSharedPtr<FJsonObject> HandleSetIKSolverSettings(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(TEXT("Solver struct is invalid"));
 
     const FString SolverType = DetectSolverTypeCanonical(SolverStruct);
-    bool bApplied = false;
 
-    // The settings are written straight into the solver stack, so each write runs in a transaction
-    // after Modify() to be undoable like the controller's own edits.
-    if (SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct())
-    {
-        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKSolverSettings", "Set IK Solver Settings"));
-        Rig->Modify();
-        FIKRigFullBodyIKSolver& Solver = SolverStruct->GetMutable<FIKRigFullBodyIKSolver>();
-        ApplyFBIKSolverJson(Solver, *SettingsObj);
-        bApplied = true;
-    }
-    else
-    {
-        // Non-FBIK: partial-merge the JSON onto the live settings struct generically,
-        // then enforce ClampMin/ClampMax metadata. Only fields present in the
-        // JSON are written, so re-running with the same args is idempotent.
-        FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
-        const UScriptStruct* SettingsType = Base.GetSolverSettingsType();
-        FIKRigSolverSettingsBase* Live = SettingsType ? Base.GetSolverSettings() : nullptr;
-        if (SettingsType && Live)
-        {
-            const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKSolverSettings", "Set IK Solver Settings"));
-            Rig->Modify();
-            MergeJsonIntoStructGeneric(SettingsType, Live, *SettingsObj);
-            bApplied = true;
-        }
-    }
-
-    if (!bApplied)
+    // The live settings struct and how the JSON applies to it: FBIK takes its curated snake_case keys,
+    // every other solver a partial merge of the JSON onto its settings struct followed by the
+    // ClampMin/ClampMax pass. Only fields present in the JSON are written, so re-running is idempotent.
+    FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
+    const UScriptStruct* SettingsType = Base.GetSolverSettingsType();
+    FIKRigSolverSettingsBase* Live = SettingsType ? Base.GetSolverSettings() : nullptr;
+    if (!SettingsType || !Live)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("set_ik_solver_settings: solver type '%s' exposes no editable settings struct."), *SolverType));
     }
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+    const bool bFBIK = SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct();
+    const auto ApplySettings = [&](void* Settings)
+    {
+        if (bFBIK)
+        {
+            ApplyFBIKSolverJson(*static_cast<FIKRigFBIKSettings*>(Settings), *SettingsObj);
+        }
+        else
+        {
+            MergeJsonIntoStructGeneric(SettingsType, Settings, *SettingsObj);
+        }
+    };
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
     Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
     Resp->SetStringField(TEXT("solver_type"), SolverType);
+
+    if (!IKRig_WouldChangeStruct(SettingsType, Live, ApplySettings))
+    {
+        Resp->SetBoolField(TEXT("success"), true);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The solver settings already have those values; nothing changed and nothing was saved."));
+    }
+
+    {
+        // The settings are written straight into the solver stack, so the write runs in a transaction
+        // after Modify() to be undoable like the controller's own edits.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKSolverSettings", "Set IK Solver Settings"));
+        Rig->Modify();
+        ApplySettings(Live);
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+
     Resp->SetBoolField(TEXT("success"), bSaved);
+    Resp->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_solver_settings"), SaveErr);
 }
 
@@ -1812,12 +2079,12 @@ TSharedPtr<FJsonObject> HandleGetIKGoalSettings(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_ik_goal_settings
 // ---------------------------------------------------------------------------
-// MCP:set_ik_goal_settings - Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. A failed save makes success false, with saved=false and save_error.
+// MCP:set_ik_goal_settings - Set goal-specific settings for a goal connected to a solver, as one undo transaction, then save the IK Rig asset.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error. Settings that already have those values give changed false, saved false and a note, with nothing saved. A failed save makes success false, with saved=false and save_error.
 //   @param ik_rig_path - Content path to the IK Rig asset.
 //   @param solver_index - Index of the solver.
 //   @param goal_name - Name of the goal to modify.
 //   @param settings - Object with goal-specific fields to set.
-//   @returns { ik_rig_path: string, solver_index: int, goal_name: string, success: bool, saved: bool, save_error?: string }
+//   @returns { ik_rig_path: string, solver_index: int, goal_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKGoalSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1839,63 +2106,69 @@ TSharedPtr<FJsonObject> HandleSetIKGoalSettings(const TSharedPtr<FJsonObject>& P
 
     FInstancedStruct* SolverStruct = Controller->GetSolverStructAtIndex(SolverIndex);
     const FString SolverType = DetectSolverTypeCanonical(SolverStruct);
-    bool bApplied = false;
-    bool bGoalNotConnected = false;
-
-    if (SolverStruct && SolverStruct->IsValid())
+    if (!SolverStruct || !SolverStruct->IsValid())
     {
-        FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
-        if (SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct())
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("set_ik_goal_settings: could not apply for solver type '%s'."), *SolverType));
+    }
+
+    // FBIK takes its curated snake_case keys; the other solver with per-goal settings (BodyMover) a partial
+    // merge + clamp of its live goal struct.
+    FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
+    const bool bFBIK = SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct();
+    if (!bFBIK && !Base.UsesCustomGoalSettings())
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("set_ik_goal_settings: solver type '%s' has no per-goal settings."), *SolverType));
+    }
+    const FName GoalFName(*GoalName);
+    FIKRigGoalSettingsBase* GoalBase = Base.GetGoalSettings(GoalFName);
+    const UScriptStruct* GoalType = Base.GetGoalSettingsType();
+    if (!GoalBase || !GoalType)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Goal '%s' is not connected to solver %d. Use connect_ik_goal_to_solver first."), *GoalName, SolverIndex));
+    }
+    const auto ApplySettings = [&](void* Settings)
+    {
+        if (bFBIK)
         {
-            FIKRigGoalSettingsBase* GoalBase = Base.GetGoalSettings(FName(*GoalName));
-            if (GoalBase)
-            {
-                // Written straight into the solver stack: Modify() inside a transaction makes it undoable.
-                const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKGoalSettings", "Set IK Goal Settings"));
-                Rig->Modify();
-                FIKRigFBIKGoalSettings* FBIKGoal = static_cast<FIKRigFBIKGoalSettings*>(GoalBase);
-                ApplyFBIKGoalJson(*FBIKGoal, *SettingsObj);
-                Base.SetGoalSettings(FName(*GoalName), FBIKGoal);
-                bApplied = true;
-            }
-            else bGoalNotConnected = true;
-        }
-        else if (Base.UsesCustomGoalSettings())
-        {
-            // Non-FBIK (BodyMover): partial-merge + clamp the live goal struct generically.
-            FIKRigGoalSettingsBase* GoalBase = Base.GetGoalSettings(FName(*GoalName));
-            const UScriptStruct* GoalType = Base.GetGoalSettingsType();
-            if (GoalBase && GoalType)
-            {
-                const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKGoalSettings", "Set IK Goal Settings"));
-                Rig->Modify();
-                MergeJsonIntoStructGeneric(GoalType, GoalBase, *SettingsObj);
-                bApplied = true;
-            }
-            else bGoalNotConnected = true;
+            ApplyFBIKGoalJson(*static_cast<FIKRigFBIKGoalSettings*>(Settings), *SettingsObj);
         }
         else
         {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("set_ik_goal_settings: solver type '%s' has no per-goal settings."), *SolverType));
+            MergeJsonIntoStructGeneric(GoalType, Settings, *SettingsObj);
         }
-    }
-
-    if (!bApplied)
-    {
-        return mcp_common::MakeErrorReply(bGoalNotConnected
-            ? FString::Printf(TEXT("Goal '%s' is not connected to solver %d. Use connect_ik_goal_to_solver first."), *GoalName, SolverIndex)
-            : FString::Printf(TEXT("set_ik_goal_settings: could not apply for solver type '%s'."), *SolverType));
-    }
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+    };
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
     Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
     Resp->SetStringField(TEXT("goal_name"), GoalName);
+
+    if (!IKRig_WouldChangeStruct(GoalType, GoalBase, ApplySettings))
+    {
+        Resp->SetBoolField(TEXT("success"), true);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The goal settings already have those values; nothing changed and nothing was saved."));
+    }
+
+    {
+        // Written straight into the solver stack: Modify() inside a transaction makes it undoable.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKGoalSettings", "Set IK Goal Settings"));
+        Rig->Modify();
+        ApplySettings(GoalBase);
+        if (bFBIK)
+        {
+            Base.SetGoalSettings(GoalFName, GoalBase);
+        }
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+
     Resp->SetBoolField(TEXT("success"), bSaved);
+    Resp->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_goal_settings"), SaveErr);
 }
 
@@ -1964,12 +2237,12 @@ TSharedPtr<FJsonObject> HandleGetIKBoneSettings(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_ik_bone_settings
 // ---------------------------------------------------------------------------
-// MCP:set_ik_bone_settings - Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
+// MCP:set_ik_bone_settings - Set bone-specific settings for a bone within a solver, as one undo transaction, then save the IK Rig asset; a failed save makes success false, with saved=false and save_error.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent (a bone the rig skeleton lacks is an error, with nothing changed), and existing settings that already have those values give changed false, saved false and a note, with nothing saved. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
 //   @param ik_rig_path - Content path to the IK Rig asset.
 //   @param solver_index - Index of the solver.
 //   @param bone_name - Name of the bone to modify.
 //   @param settings - Object with bone-specific fields to set.
-//   @returns { ik_rig_path: string, solver_index: int, bone_name: string, success: bool, saved: bool, save_error?: string }
+//   @returns { ik_rig_path: string, solver_index: int, bone_name: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetIKBoneSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1991,60 +2264,93 @@ TSharedPtr<FJsonObject> HandleSetIKBoneSettings(const TSharedPtr<FJsonObject>& P
 
     FInstancedStruct* SolverStruct = Controller->GetSolverStructAtIndex(SolverIndex);
     const FString SolverType = DetectSolverTypeCanonical(SolverStruct);
-    bool bApplied = false;
-    bool bUnsupported = false;
+    const FName BoneFName(*BoneName);
+    const auto CannotApplyReply = [&]()
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("set_ik_bone_settings: could not add/apply bone settings for bone '%s' on solver %d."), *BoneName, SolverIndex));
+    };
 
     FIKRigSolverBase* Base = (SolverStruct && SolverStruct->IsValid())
         ? &SolverStruct->GetMutable<FIKRigSolverBase>() : nullptr;
-    if (Base && !Base->UsesCustomBoneSettings())
+    if (!Base)
     {
-        bUnsupported = true;  // Limb/Pole/BodyMover/SetTransform have no per-bone settings.
+        return CannotApplyReply();
     }
-    else if (Base)
+    if (!Base->UsesCustomBoneSettings())
     {
-        // One undo step for the bone settings the controller may add and the fields written straight
-        // into them, which need Modify() inside a transaction to be undoable.
-        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKBoneSettings", "Set IK Bone Settings"));
-        Rig->Modify();
+        // Limb/Pole/BodyMover/SetTransform have no per-bone settings.
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("set_ik_bone_settings: solver type '%s' has no per-bone settings (only FullBodyIK and StretchLimb do)."), *SolverType));
+    }
+    const UScriptStruct* BoneType = Base->GetBoneSettingsType();
+    if (!BoneType)
+    {
+        return CannotApplyReply();
+    }
 
-        // Add/fetch the per-bone settings solver-agnostically via the controller, then
-        // apply the JSON by solver type (FBIK snake_case, else generic merge + clamp).
-        FIKRigBoneSettingsBase* BoneBase = Controller->GetSettingsForBone(FName(*BoneName), SolverIndex);
-        if (!BoneBase)
+    // Settings the bone does not have yet are added by the controller; the prerequisites are checked
+    // before the transaction below, so a refusal leaves the rig untouched.
+    FIKRigBoneSettingsBase* BoneBase = Controller->GetSettingsForBone(BoneFName, SolverIndex);
+    if (!BoneBase)
+    {
+        FText Reason;
+        if (!Controller->CanAddBoneSetting(BoneFName, SolverIndex, &Reason))
         {
-            Controller->AddBoneSetting(FName(*BoneName), SolverIndex);
-            BoneBase = Controller->GetSettingsForBone(FName(*BoneName), SolverIndex);
-        }
-        if (BoneBase)
-        {
-            if (SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct())
-            {
-                ApplyFBIKBoneJson(*static_cast<FIKRigFBIKBoneSettings*>(BoneBase), *SettingsObj);
-                bApplied = true;
-            }
-            else if (const UScriptStruct* BoneType = Base->GetBoneSettingsType())
-            {
-                MergeJsonIntoStructGeneric(BoneType, BoneBase, *SettingsObj);  // StretchLimb
-                bApplied = true;
-            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("set_ik_bone_settings: could not add bone settings for bone '%s' on solver %d: %s"),
+                *BoneName, SolverIndex, *Reason.ToString()));
         }
     }
 
-    if (!bApplied)
+    // FBIK takes its curated snake_case keys; StretchLimb a partial merge + clamp of its live bone struct.
+    const bool bFBIK = SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct();
+    const auto ApplySettings = [&](void* Settings)
     {
-        return mcp_common::MakeErrorReply(bUnsupported
-            ? FString::Printf(TEXT("set_ik_bone_settings: solver type '%s' has no per-bone settings (only FullBodyIK and StretchLimb do)."), *SolverType)
-            : FString::Printf(TEXT("set_ik_bone_settings: could not add/apply bone settings for bone '%s' on solver %d."), *BoneName, SolverIndex));
-    }
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+        if (bFBIK)
+        {
+            ApplyFBIKBoneJson(*static_cast<FIKRigFBIKBoneSettings*>(Settings), *SettingsObj);
+        }
+        else
+        {
+            MergeJsonIntoStructGeneric(BoneType, Settings, *SettingsObj);
+        }
+    };
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
     Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
     Resp->SetStringField(TEXT("bone_name"), BoneName);
+
+    if (BoneBase && !IKRig_WouldChangeStruct(BoneType, BoneBase, ApplySettings))
+    {
+        Resp->SetBoolField(TEXT("success"), true);
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, TEXT("The bone settings already have those values; nothing changed and nothing was saved."));
+    }
+
+    {
+        // One undo step for the bone settings the controller may add and the fields written straight
+        // into them, which need Modify() inside a transaction to be undoable.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetIKBoneSettings", "Set IK Bone Settings"));
+        Rig->Modify();
+        if (!BoneBase)
+        {
+            Controller->AddBoneSetting(BoneFName, SolverIndex);
+            BoneBase = Controller->GetSettingsForBone(BoneFName, SolverIndex);
+        }
+        if (!BoneBase)
+        {
+            return CannotApplyReply();
+        }
+        ApplySettings(BoneBase);
+    }
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
+
     Resp->SetBoolField(TEXT("success"), bSaved);
+    Resp->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_bone_settings"), SaveErr);
 }
 
@@ -2091,11 +2397,11 @@ TSharedPtr<FJsonObject> HandleCreateRetargetPose(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // remove_retarget_pose
 // ---------------------------------------------------------------------------
-// MCP:remove_retarget_pose - Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a no-op (removed:false, already_absent:true), and the asset is still saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.
+// MCP:remove_retarget_pose - Remove a retarget pose from an IK Retargeter by name through its controller, then save the asset.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent: removing a pose that isn't present is a success with removed:false, already_absent:true, saved:false and a note, and nothing is saved. The engine's built-in default pose cannot be removed (honest error). A failed save makes success false, with saved=false and save_error.
 //   @param ik_retargeter_path - Content path to the IK Retargeter asset.
 //   @param pose_name - Name of the retarget pose to remove
 //   @param source_or_target - Optional "Source" or "Target" scope; defaults to "Target"
-//   @returns { ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string }
+//   @returns { ik_retargeter_path: string, pose_name: string, source_or_target: string, removed: bool, already_absent: bool, success: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveRetargetPose(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2119,24 +2425,27 @@ TSharedPtr<FJsonObject> HandleRemoveRetargetPose(const TSharedPtr<FJsonObject>& 
 
     const bool bExisted = Controller->GetRetargetPoses(Mode).Contains(PoseFName);
 
-    bool bRemoved = false;
-    if (bExisted)
-    {
-        bRemoved = Controller->RemoveRetargetPose(PoseFName, Mode);
-        if (!bRemoved)
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("RemoveRetargetPose failed for '%s'"), *PoseName));
-    }
-
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
-
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("ik_retargeter_path"), Retargeter->GetPathName());
     Resp->SetStringField(TEXT("pose_name"), PoseName);
     Resp->SetStringField(TEXT("source_or_target"), SourceOrTargetStr);
-    Resp->SetBoolField(TEXT("removed"), bRemoved);
-    Resp->SetBoolField(TEXT("already_absent"), !bExisted);
+    if (!bExisted)
+    {
+        Resp->SetBoolField(TEXT("removed"), false);
+        Resp->SetBoolField(TEXT("already_absent"), true);
+        Resp->SetBoolField(TEXT("success"), true);
+        return IKRig_NoChangeReply(Resp, TEXT("The IK Retargeter has no retarget pose of that name on that side; nothing changed and nothing was saved."));
+    }
+
+    if (!Controller->RemoveRetargetPose(PoseFName, Mode))
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("RemoveRetargetPose failed for '%s'"), *PoseName));
+
+    FString SaveErr;
+    const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
+
+    Resp->SetBoolField(TEXT("removed"), true);
+    Resp->SetBoolField(TEXT("already_absent"), false);
     Resp->SetBoolField(TEXT("success"), bSaved);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_retarget_pose"), SaveErr);
 }
@@ -2355,12 +2664,12 @@ TSharedPtr<FJsonObject> HandleGetRetargeterOpInfo(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // set_retargeter_op_settings
 // ---------------------------------------------------------------------------
-// MCP:set_retargeter_op_settings - Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller (its own transaction). The payload echoes the read-back settings.
+// MCP:set_retargeter_op_settings - Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag, as one undo transaction, then save the asset.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller. The payload echoes the read-back settings. When neither is given, or the op already has those settings and that enabled state, changed is false, saved is false, a note says why and nothing is saved. An out-of-range op_index is an error. A failed save makes success false, with saved=false and save_error.
 //   @param ik_retargeter_path - Content path to the UIKRetargeter asset.
 //   @param op_index [int!] - 0-based index of the op in the retargeter's op stack.
 //   @param settings [object] - Partial settings object; only present fields are written (e.g. { lODThreshold: 5 }).
 //   @param enabled [bool] - Optional: enable/disable the op (applied via the controller).
-//   @returns { asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, saved: bool, save_error?: string }
+//   @returns { asset_path: string, op_index: int, op_name: string, op_type: string, enabled: bool, settings: object, changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetRetargeterOpSettings(const TSharedPtr<FJsonObject>& Params)
 {
     FString RetargeterPath;
@@ -2393,40 +2702,65 @@ TSharedPtr<FJsonObject> HandleSetRetargeterOpSettings(const TSharedPtr<FJsonObje
     // mutable pointer to the instance stored in the op, so writing through it mutates
     // the live op). Only fields present in the JSON are written -> idempotent. The
     // generic merge runs the ClampMin/ClampMax post-pass (generic helper).
-    if (bHasSettings)
+    const UScriptStruct* SettingsType = Op->GetSettingsType();
+    void* SettingsPtr = Op->GetSettings();
+    if (bHasSettings && (!SettingsType || !SettingsPtr))
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Op at index %d exposes no editable settings struct."), OpIndex));
+    const auto ApplySettings = [&](void* Settings) { MergeJsonIntoStructGeneric(SettingsType, Settings, *SettingsObj); };
+
+    // Settings that already have the given values and an enabled flag the op already has change nothing:
+    // they are answered before Modify() would dirty the asset.
+    const bool bSettingsChange = bHasSettings && IKRig_WouldChangeStruct(SettingsType, SettingsPtr, ApplySettings);
+    const bool bEnabledChange = bHasEnabled && Controller->GetRetargetOpEnabled(OpIndex) != bEnabled;
+
+    // Read-back the live settings + enabled state for an honest round-trip payload.
+    // Re-fetch the op pointer in case SetRetargetOpEnabled's reinit invalidated it.
+    const auto BuildResponse = [Retargeter, Controller, OpIndex]()
     {
-        const UScriptStruct* SettingsType = Op->GetSettingsType();
-        void* SettingsPtr = Op->GetSettings();
-        if (!SettingsType || !SettingsPtr)
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Op at index %d exposes no editable settings struct."), OpIndex));
-        Retargeter->Modify();
-        MergeJsonIntoStructGeneric(SettingsType, SettingsPtr, *SettingsObj);
+        FIKRetargetOpBase* ReadOp = Controller->GetRetargetOpByIndex(OpIndex);
+        const UScriptStruct* ReadType = ReadOp ? ReadOp->GetSettingsType() : nullptr;
+        const void* ReadPtr = ReadOp ? ReadOp->GetSettings() : nullptr;
+
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("asset_path"), Retargeter->GetPathName());
+        Resp->SetNumberField(TEXT("op_index"), OpIndex);
+        Resp->SetStringField(TEXT("op_name"), Controller->GetOpName(OpIndex).ToString());
+        Resp->SetStringField(TEXT("op_type"), ReadType ? ReadType->GetName() : TEXT(""));
+        Resp->SetBoolField(TEXT("enabled"), Controller->GetRetargetOpEnabled(OpIndex));
+        Resp->SetObjectField(TEXT("settings"), SerializeStructGeneric(ReadType, ReadPtr));
+        return Resp;
+    };
+
+    if (!bSettingsChange && !bEnabledChange)
+    {
+        TSharedPtr<FJsonObject> Resp = BuildResponse();
+        Resp->SetBoolField(TEXT("changed"), false);
+        return IKRig_NoChangeReply(Resp, (bHasSettings || bHasEnabled)
+            ? TEXT("The op already has those settings and that enabled state; nothing changed and nothing was saved.")
+            : TEXT("Neither settings nor enabled was given; nothing changed and nothing was saved."));
     }
 
-    // Apply the optional enabled toggle via the controller (it opens its own
-    // transaction + Modify + reinit). Setting the same value is idempotent.
-    if (bHasEnabled)
     {
-        Controller->SetRetargetOpEnabled(OpIndex, bEnabled);
+        // One undo step for the settings written straight into the op and the enabled toggle, which the
+        // controller applies in its own transaction (nested in this one) with Modify + reinit.
+        const FScopedTransaction Transaction(NSLOCTEXT("UEAgentIKRigCommands", "SetRetargeterOpSettings", "Set Retargeter Op Settings"));
+        Retargeter->Modify();
+        if (bSettingsChange)
+        {
+            ApplySettings(SettingsPtr);
+        }
+        if (bEnabledChange)
+        {
+            Controller->SetRetargetOpEnabled(OpIndex, bEnabled);
+        }
     }
 
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Retargeter->GetOutermost(), Retargeter, SaveErr);
 
-    // Read-back the live settings + enabled state for an honest round-trip payload.
-    // Re-fetch the op pointer in case SetRetargetOpEnabled's reinit invalidated it.
-    FIKRetargetOpBase* ReadOp = Controller->GetRetargetOpByIndex(OpIndex);
-    const UScriptStruct* ReadType = ReadOp ? ReadOp->GetSettingsType() : nullptr;
-    const void* ReadPtr = ReadOp ? ReadOp->GetSettings() : nullptr;
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Retargeter->GetPathName());
-    Resp->SetNumberField(TEXT("op_index"), OpIndex);
-    Resp->SetStringField(TEXT("op_name"), Controller->GetOpName(OpIndex).ToString());
-    Resp->SetStringField(TEXT("op_type"), ReadType ? ReadType->GetName() : TEXT(""));
-    Resp->SetBoolField(TEXT("enabled"), Controller->GetRetargetOpEnabled(OpIndex));
-    Resp->SetObjectField(TEXT("settings"), SerializeStructGeneric(ReadType, ReadPtr));
+    TSharedPtr<FJsonObject> Resp = BuildResponse();
+    Resp->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_retargeter_op_settings"), SaveErr);
 }
 

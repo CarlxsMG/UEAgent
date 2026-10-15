@@ -59,8 +59,8 @@ Append a new UMovieSceneCameraCutSection bound to the given camera binding GUID 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
 | `camera_binding_guid` | string | yes | GUID of the camera binding the cut switches to. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `start_frame` | number | no | Inclusive start frame (default 0). |
 | `end_frame` | number | no | Exclusive end frame (default = start_frame + 1). |
 
@@ -118,7 +118,7 @@ Append a new UMovieSceneEventSection to the existing UMovieSceneEventTrack on th
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `start_frame` | number | no | Inclusive start frame for the new event section (default 0). |
 | `end_frame` | number | no | Exclusive end frame for the new event section (default = start_frame + 1). |
 
@@ -249,7 +249,7 @@ Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot trac
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `shot_sequence_path` | string | no | Optional content path of the inner shot Level Sequence. If omitted, an inner shot Level Sequence is created and persisted. |
 | `start_frame` | number | no | Inclusive start frame for the shot section (default 0). |
 | `duration` | number | no | Section duration in tick frames (default 150). |
@@ -265,7 +265,7 @@ Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 
 **Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }`
 
@@ -329,12 +329,12 @@ Adds a component possessable as a child of an existing binding (possessable or s
 
 *Additive.*
 
-Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or &lt;target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.
+Nests one Level Sequence in another: finds the target's first root track of exactly the subsequence class (never a cinematic shot track or another subclass) or adds one, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or &lt;target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded, created or saved (a new one that fails to save stays in memory only), that is the target itself, or that already plays the target at any depth is an error and nothing is added. success is false, with save_error, when the save of the target fails. For cinematic shots use add_shot_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path (e.g. "/Game/MyGame/SUBSEQ_Example") OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `sub_sequence_path` | string | no | Optional content path of the sub Level Sequence to nest. If omitted, a sibling inner Level Sequence is created and persisted. |
 | `start_frame` | number | no | Inclusive start frame for the sub section (default 0). |
 | `duration` | number | no | Section duration in tick frames (default 150). |
@@ -457,11 +457,11 @@ Bind an editor-world actor's component to a Level Sequence (possessable, parente
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
 | `actor_name` | string | yes | Label (or name) of the actor in the current editor world. |
 | `component_name` | string | yes | Component object name, component class name, or "root". |
 | `property_name` | string | yes | Name of the property to animate. |
 | `property_type` | string | yes | One of "Float", "Bool", "Vector", "Color", "Visibility". |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `track_label` | string | no | Optional display label for the new track. |
 
 **Returns:** `{ sequence_path: string, actor_name: string, component_name: string, property_name: string, property_type: string, binding_guid: string, parented_to_actor: bool, track_class: string, section_class: string, saved: bool, save_error?: string }`
@@ -475,9 +475,9 @@ Adds a possessable binding for an actor's component to a Level Sequence.  Resolv
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
 | `actor_name` | string | yes | Label (or name) of the actor in the current editor world. |
 | `component_name` | string | yes | Component object name, component class name, or "root". |
+| `sequence_name` | string | no | Alias for sequence_path. |
 
 **Returns:** `{ sequence_path: string, actor_name: string, component_name: string, component_class: string, parent_binding_guid: string, binding_guid: string, display_name: string, possessable: bool, saved: bool, save_error?: string }`
 
@@ -706,7 +706,7 @@ Reads the tick resolution of a Level Sequence (found by asset name under /Game),
 
 *Read-only.*
 
-List the master tracks and binding tracks of a Level Sequence.  A track is a "master track" if it has no binding GUID (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack). Binding tracks have a non-empty FGuid. This command returns both lists with class, name, section_count, binding_guid fields.
+List the master tracks and binding tracks of a Level Sequence.  A master track belongs to no object binding (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack, and the camera cut track, which is listed too); a binding track belongs to an object binding, whose guid it carries. This command returns both lists with class, name, section_count, binding_guid fields (binding_guid empty on a master track); total_track_count is their sum.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -743,12 +743,12 @@ List all spawnables in a level sequence with GUID, name, template class.
 
 *Read-only.*
 
-Flat readback of the total/master/binding track counts and per-class breakdown.
+Flat readback of the total/master/binding track counts and per-class breakdown. master_track_count counts the root tracks, the camera cut track included; binding_track_count counts the tracks of every object binding; total_track_count is their sum, and class_breakdown and total_section_count cover both.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 
 **Returns:** `{ sequence_path: string, total_track_count: int, master_track_count: int, binding_track_count: int, total_section_count: int, distinct_class_count: int, class_breakdown: [{class, count}] }`
 
@@ -768,7 +768,7 @@ Lists the tracks of a Level Sequence, the first asset under /Game whose name mat
 
 *Read-only.*
 
-Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.
+Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts. master_track_count counts the root tracks, the camera cut track included, as get_sequence_tracks lists them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -959,8 +959,8 @@ Delete any track from a sequence by display name OR exact class name (optionally
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
 | `track_name` | string | yes | Display name OR class short name of the track to remove. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `track_class` | string | no | Optional exact class filter (e.g. "MovieSceneFadeTrack") to disambiguate. |
 
 **Returns:** `{ sequence_path: string, track_name: string, track_class: string, sections_removed: int, removed: bool, saved: bool, save_error?: string }`
@@ -1018,7 +1018,7 @@ Set the StartFrameOffset on an existing UMovieSceneAudioSection (skip-into-clip)
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
-| `sequence_name` | string | yes | Alias for sequence_path. |
+| `sequence_name` | string | no | Alias for sequence_path. |
 | `section_index` | number | no | Index of the audio section on the audio track (default 0). |
 | `start_offset_seconds` | number | no | Optional offset in seconds (converted via display rate). |
 | `start_offset_frames` | number | no | Optional raw frame offset (use for non-display-rate precision). |

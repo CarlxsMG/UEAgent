@@ -8,13 +8,13 @@
 
 *Destructive.*
 
-Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. A missing option_index is created, appending empty options up to it; a negative one is an error.
+Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
 | `generator_class` | string | yes | Generator class name (e.g. "ActorsOfClass", "SimpleGrid", "PathingGrid") or full path (e.g. "/Script/AIModule.EnvQueryGenerator_ActorsOfClass") |
-| `option_index` | number | no | Optional option index to target (default 0; created if missing) |
+| `option_index` | number | no | Optional option index to target (default 0); the current option count appends a new option, a larger index is refused |
 
 **Returns:** `{ query_path, option_index, generator_class, generator_name, replaced, saved }`
 
@@ -34,13 +34,13 @@ Appends a new empty option to a UEnvQuery and returns its index.
 
 *Additive, idempotent.*
 
-Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it; a negative one is an error. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
+Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
 | `test_class` | string | yes | Test class name (e.g. "Distance", "Trace", "Pathfinding", "Dot") or full path |
-| `option_index` | number | no | Optional option index to target (default 0; created if missing) |
+| `option_index` | number | no | Optional option index to target (default 0); the current option count appends a new option, a larger index is refused |
 
 **Returns:** `{ query_path, option_index, test_class, test_name, test_index, test_count, already_existed } — idempotent by test class within the option`
 

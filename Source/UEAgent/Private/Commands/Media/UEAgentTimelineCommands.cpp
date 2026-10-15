@@ -862,7 +862,7 @@ TSharedPtr<FJsonObject> HandleGetLevelSequenceStatusRuntime(const TSharedPtr<FJs
 // result describing why, never a fake success.
 // ---------------------------------------------------------------------------
 
-// MCP:get_timeline_info - Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.
+// MCP:get_timeline_info - Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts. master_track_count counts the root tracks, the camera cut track included, as get_sequence_tracks lists them.
 //   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
 //   @returns { sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int }
 TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Params)
@@ -887,6 +887,17 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     const FFrameNumber EndFrame = Range.GetUpperBoundValue();
     const double TicksPerSecond = TickResolution.AsDecimal();
 
+    // Root tracks counted as get_sequence_tracks lists them: the tracks of GetTracks() plus the camera cut
+    // track, which the movie scene keeps apart from GetTracks().
+    int32 RootTrackCount = (Scene->GetCameraCutTrack() != nullptr) ? 1 : 0;
+    for (const UMovieSceneTrack* Track : Scene->GetTracks())
+    {
+        if (Track != nullptr)
+        {
+            ++RootTrackCount;
+        }
+    }
+
     TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
     Report->SetStringField(TEXT("asset_path"), Target.Sequence->GetPathName());
     Report->SetNumberField(TEXT("start_frame"), StartFrame.Value);
@@ -896,7 +907,7 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     Report->SetNumberField(TEXT("display_rate"), DisplayRate.AsDecimal());
     Report->SetNumberField(TEXT("display_rate_numerator"), DisplayRate.Numerator);
     Report->SetNumberField(TEXT("display_rate_denominator"), DisplayRate.Denominator);
-    Report->SetNumberField(TEXT("master_track_count"), Scene->GetTracks().Num());
+    Report->SetNumberField(TEXT("master_track_count"), RootTrackCount);
     Report->SetNumberField(TEXT("binding_count"), Scene->GetBindings().Num());
     Report->SetNumberField(TEXT("possessable_count"), Scene->GetPossessableCount());
     Report->SetNumberField(TEXT("spawnable_count"), Scene->GetSpawnableCount());

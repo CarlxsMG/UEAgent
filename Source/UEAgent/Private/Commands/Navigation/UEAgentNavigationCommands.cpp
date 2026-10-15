@@ -728,18 +728,44 @@ namespace
         return (V != INDEX_NONE) ? static_cast<TEnum>(V) : Default;
     }
 
-    /** The error reply for a negative option_index, which names no option and cannot be created; null otherwise. */
-    TSharedPtr<FJsonObject> NavEqs_RefuseNegativeOption(int32 OptionIndex)
+    /**
+     * The optional "option_index" param of a command that may create the option, into OutOptionIndex (0 when
+     * absent); null on success, else the error reply. It is read as a double so a number past int32 is refused
+     * instead of failing the int32 read and silently naming option 0.
+     */
+    TSharedPtr<FJsonObject> NavEqs_ReadNewOptionIndex(const TSharedPtr<FJsonObject>& Params, double& OutOptionIndex)
     {
-        if (OptionIndex < 0)
+        OutOptionIndex = 0.0;
+        Params->TryGetNumberField(TEXT("option_index"), OutOptionIndex);
+        if (OutOptionIndex < 0.0)
         {
             return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("option_index must be 0 or greater (got %d); nothing was changed"), OptionIndex));
+                TEXT("option_index must be 0 or greater (got %g); nothing was changed"), OutOptionIndex));
         }
         return nullptr;
     }
 
-    /** The option at OptionIndex, appending empty options to Query until it exists; null for a negative OptionIndex. */
+    /**
+     * The error reply when OptionIndex is past the end of Query's options; null when it names an existing option or
+     * the next new one. NavEqs_EnsureOption appends an empty option for every missing index up to it, so a far index
+     * would append that many (a huge one hangs the editor or runs it out of memory).
+     */
+    TSharedPtr<FJsonObject> NavEqs_RefuseOptionPastEnd(const UEnvQuery* Query, double OptionIndex)
+    {
+        const int32 NumOptions = Query->GetOptions().Num();
+        if (OptionIndex > NumOptions)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("option_index %g is past the end: the query has %d options, so it can name one of them or be %d to append a new one; nothing was changed"),
+                OptionIndex, NumOptions, NumOptions));
+        }
+        return nullptr;
+    }
+
+    /**
+     * The option at OptionIndex, appending empty options to Query until it exists; null for a negative OptionIndex.
+     * Callers refuse an index past the option count first (NavEqs_RefuseOptionPastEnd), so at most one is appended.
+     */
     UEnvQueryOption* NavEqs_EnsureOption(UEnvQuery* Query, int32 OptionIndex)
     {
         if (OptionIndex < 0)
@@ -756,10 +782,10 @@ namespace
     }
 }
 
-// MCP:add_eqs_generator - Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. A missing option_index is created, appending empty options up to it; a negative one is an error.
+// MCP:add_eqs_generator - Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param generator_class - Generator class name (e.g. "ActorsOfClass", "SimpleGrid", "PathingGrid") or full path (e.g. "/Script/AIModule.EnvQueryGenerator_ActorsOfClass")
-//   @param option_index - Optional option index to target (default 0; created if missing)
+//   @param option_index - Optional option index to target (default 0); the current option count appends a new option, a larger index is refused
 //   @returns { query_path, option_index, generator_class, generator_name, replaced, saved }
 TSharedPtr<FJsonObject> HandleAddEQSGenerator(const TSharedPtr<FJsonObject>& Params)
 {
@@ -769,9 +795,8 @@ TSharedPtr<FJsonObject> HandleAddEQSGenerator(const TSharedPtr<FJsonObject>& Par
     FString GenClassName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("generator_class"), GenClassName)) { return Missing; }
 
-    int32 OptionIndex = 0;
-    Params->TryGetNumberField(TEXT("option_index"), OptionIndex);
-    if (TSharedPtr<FJsonObject> Refused = NavEqs_RefuseNegativeOption(OptionIndex))
+    double OptionIndexD = 0.0;
+    if (TSharedPtr<FJsonObject> Refused = NavEqs_ReadNewOptionIndex(Params, OptionIndexD))
     {
         return Refused;
     }
@@ -781,6 +806,11 @@ TSharedPtr<FJsonObject> HandleAddEQSGenerator(const TSharedPtr<FJsonObject>& Par
     {
         return Failure;
     }
+    if (TSharedPtr<FJsonObject> Refused = NavEqs_RefuseOptionPastEnd(Query, OptionIndexD))
+    {
+        return Refused;
+    }
+    const int32 OptionIndex = static_cast<int32>(OptionIndexD);
 
     FString ClassErr;
     UClass* GenClass = ResolveEQSNodeClass(GenClassName, TEXT("EnvQueryGenerator_"), ClassErr);
@@ -817,10 +847,10 @@ TSharedPtr<FJsonObject> HandleAddEQSGenerator(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_eqs_test - Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it; a negative one is an error. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
+// MCP:add_eqs_test - Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. option_index names an existing option, or equals the option count to append one new empty option; a negative option_index, or one past the option count, is an error checked before anything changes. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param test_class - Test class name (e.g. "Distance", "Trace", "Pathfinding", "Dot") or full path
-//   @param option_index - Optional option index to target (default 0; created if missing)
+//   @param option_index - Optional option index to target (default 0); the current option count appends a new option, a larger index is refused
 //   @returns { query_path, option_index, test_class, test_name, test_index, test_count, already_existed } — idempotent by test class within the option
 TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
 {
@@ -830,9 +860,8 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
     FString TestClassName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("test_class"), TestClassName)) { return Missing; }
 
-    int32 OptionIndex = 0;
-    Params->TryGetNumberField(TEXT("option_index"), OptionIndex);
-    if (TSharedPtr<FJsonObject> Refused = NavEqs_RefuseNegativeOption(OptionIndex))
+    double OptionIndexD = 0.0;
+    if (TSharedPtr<FJsonObject> Refused = NavEqs_ReadNewOptionIndex(Params, OptionIndexD))
     {
         return Refused;
     }
@@ -842,6 +871,11 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
     {
         return Failure;
     }
+    if (TSharedPtr<FJsonObject> Refused = NavEqs_RefuseOptionPastEnd(Query, OptionIndexD))
+    {
+        return Refused;
+    }
+    const int32 OptionIndex = static_cast<int32>(OptionIndexD);
 
     FString ClassErr;
     UClass* TestClass = ResolveEQSNodeClass(TestClassName, TEXT("EnvQueryTest_"), ClassErr);
@@ -874,7 +908,7 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
     }
 
     // Same FScopedTransaction pattern as add_eqs_generator: open before mutating and Modify() each object
-    // before it is mutated -- the query before NavEqs_EnsureOption may append options, the option before
+    // before it is mutated -- the query before NavEqs_EnsureOption may append an option, the option before
     // its Tests array grows -- so one undo removes the test and any option this call created.
     const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddEQSTest", "Add EQS Test (MCP)"));
     Query->Modify();

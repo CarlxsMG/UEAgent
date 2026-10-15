@@ -279,13 +279,13 @@ Get detail and a UPROPERTY dump for one UNiagaraDataInterface user-parameter bin
 
 *Read-only.*
 
-List all UNiagaraDataInterface user-parameter bindings on a Niagara system.
+List all UNiagaraDataInterface user-parameter bindings on a Niagara system. parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `system_path` | string | yes | Asset path of the Niagara System. |
 
-**Returns:** `{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, data_interface_class, data_interface_class_path, path_name }] }`
+**Returns:** `{ system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name }] }`
 
 ## `get_niagara_effect_type`
 

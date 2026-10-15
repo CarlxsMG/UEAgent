@@ -20,15 +20,15 @@ Empty the geometry of one section, or drop every section, of a UProceduralMeshCo
 
 ## `create_procedural_box_mesh`
 
-*Additive.*
+*Destructive.*
 
-Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section. A negative section_index is an error.
+Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section: section_index replaces an existing section, or equals the section count to append a new one. A negative section_index, or one past the section count, is an error checked before anything changes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
-| `section_index` | number | no | Optional target section index (>= 0); defaults to 0 |
+| `section_index` | number | no | Optional target section index, 0 to the current section count (which appends a new section); defaults to 0 |
 | `box_radius` | array | no | Optional [x, y, z] half-extents; defaults to (50, 50, 50) |
 | `create_collision` | boolean | no | Optional bool; defaults to false |
 
@@ -38,15 +38,15 @@ Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push i
 
 *Destructive.*
 
-Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component, or a negative section_index, is an error. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
+Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists, or appending a new one when section_index equals the section count. A missing actor or component, or a section_index that is negative or past the section count, is an error checked before anything changes. num_x * num_y is capped at 1,000,000 vertices (1000 x 1000) because each grid vertex costs about 300 bytes across the generated arrays, the section copy and the render buffers, so one call stays near 300 MB with every index far inside int32; a larger grid, or a count outside int32, is an error too. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
-| `section_index` | number | no | Optional target section index; defaults to 0 |
-| `num_x` | number | no | Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10 |
-| `num_y` | number | no | Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10 |
+| `section_index` | number | no | Optional target section index, 0 to the current section count (which appends a new section); defaults to 0 |
+| `num_x` | number | no | Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000 |
+| `num_y` | number | no | Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10; num_x * num_y at most 1000000 |
 | `grid_spacing` | number | no | Optional grid cell size in world units; defaults to 16.0 |
 | `create_collision` | boolean | no | Optional bool; defaults to false |
 
@@ -122,15 +122,15 @@ Destroy the UProceduralMeshComponent on a named actor in the editor world (inver
 
 *Destructive, idempotent.*
 
-Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.
+Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material. element_index may name a slot the component has (one per section, or an existing override) or the next one past them; a negative one, or one further past, is an error checked before anything changes. A slot that already holds the material succeeds with material_set false and a note, touching nothing; otherwise material_set is read back from the slot and the call fails when it is false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label or object name of the actor; the first actor matching either is used |
 | `material_path` | string | yes | Material or material instance asset path, e.g. "/Game/Materials/M_Rock" |
-| `element_index` | number | no | Material slot index, usually the section index; default 0 (not range-checked) |
+| `element_index` | number | no | Material slot index, usually the section index; default 0; from 0 up to the larger of the section count and the override count |
 
-**Returns:** `{ actor_label, material_path, element_index, material_set, previous_material_path? }`
+**Returns:** `{ actor_label, material_path, element_index, material_set, previous_material_path?, note? }`
 
 ## `set_procedural_mesh_section_visible`
 
