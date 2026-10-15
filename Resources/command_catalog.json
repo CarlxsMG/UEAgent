@@ -3725,7 +3725,7 @@
               "description": "Asset path of the UPoseSearchSchema (required)."
             }
           ],
-          "returns": "{ schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate,"
+          "returns": "{ schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate, permutations_time_offset, add_data_padding: bool, inject_additional_debug_channels: bool, draw_inject_additional_debug_channels: bool, roled_skeletons: [{ role_name, skeleton_path, mirror_table_path }], roled_skeleton_count, is_finalized: bool, channel_count, finalized_channels: [{ class, channel_name, weight }], note?: string } -- note only when is_finalized is false."
         },
         {
           "name": "is_skeleton_shared",
@@ -10562,7 +10562,7 @@
               "description": "Full path to the USoundfieldSubmix (required)."
             }
           ],
-          "returns": "{ submix_path, soundfield_encoding_format, resolved_format, encoding_settings{class,path},"
+          "returns": "{ submix_path, soundfield_encoding_format, resolved_format, encoding_settings_class, encoding_settings: { class, path }, effect_chain: [{ index, class, path, settings_class, settings_path }], chain_length, note? }"
         },
         {
           "name": "get_submix_effect_chain",
@@ -10989,7 +10989,7 @@
               "description": "Zero-based index into SoundfieldEffectChain (required)."
             }
           ],
-          "returns": "{ submix_path, effect_index, removed_effect_class, removed_effect_path,"
+          "returns": "{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched."
         },
         {
           "name": "remove_subtitle_cue",
@@ -12074,7 +12074,7 @@
               "description": "Optional cap on how many actors get their properties reflected into the report; 0 (the default) means UNLIMITED, and negative values are clamped to 0. Actors past the cap are still COUNTED (cheap) but not reflected (the expensive part), so total_matching_actors and truncated are exact, not estimated."
             }
           ],
-          "returns": "{ path: string, truncated: bool, summary: { actor_count: int, actors_seen: int,"
+          "returns": "{ path: string, truncated: bool, summary: { actor_count: int, actors_seen: int, total_matching_actors: int, max_actors: int, truncated: bool, class_filter: [string], replicated_property_count: int, savegame_property_count: int, savegame_filter_status: \"active\"|\"dead_in_this_run\" }, report_size_bytes: int, verification: {...}, verification_checks: [...] } -- class_filter lists the resolved class paths; success is false when the report is missing or empty on disk."
         },
         {
           "name": "read_mcp_audit_file",
@@ -14978,7 +14978,7 @@
               "description": "Name of the interface or overridable function (e.g. \"CanInteract\", \"GetInteractText\")."
             }
           ],
-          "returns": "{ blueprint_name, function_name, graph_name, kind, already_existed[, node_id] }"
+          "returns": "{ blueprint_name, function_name, graph_name, kind: \"function\"|\"event\", already_existed: bool, node_id? } -- kind \"function\": graph_name is an editable function graph, ready to wire with get_graph_nodes / connect_pins; kind \"event\": the member returns nothing, so an event OVERRIDE node was created (or reused) in the event graph that graph_name names, and node_id is that node, to wire with connect_pins."
         },
         {
           "name": "lint_blueprint_graph",
@@ -15147,7 +15147,7 @@
               "description": "Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins."
             }
           ],
-          "returns": "{ kind, created, was_already_overridden, graph_name[, node_id] }"
+          "returns": "{ kind: \"event\"|\"function\", created: bool, was_already_overridden: bool, graph_name, node_id? } -- kind \"event\": an event OVERRIDE node was created or reused in the event graph that graph_name names, and node_id is that node; kind \"function\": graph_name is an editable function-override graph, ready to wire."
         },
         {
           "name": "recombine_blueprint_pin",
@@ -19598,7 +19598,7 @@
               "description": "If true, skip ConsolidateAssets entirely and only report what would happen, default false"
             }
           ],
-          "returns": "dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }"
+          "returns": "dry_run=true: { target_asset_path, target_class, dry_run: true, would_consolidate: [string], skipped_incompatible: [{path,class}], compatible_count: int, incompatible_count: int }; dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }"
         },
         {
           "name": "copy_actors",
@@ -20233,7 +20233,7 @@
               "description": "Optional bool (default false). True creates the Level Blueprint if the level has none -- a mutation that dirties the map, so save_level afterwards."
             }
           ],
-          "returns": "{ exists: bool, created: bool, blueprint_path: string, blueprint_name: string, event_graph: \"EventGraph\", level_name: string, success: bool }"
+          "returns": "{ exists: true, created: bool, blueprint_path: string, blueprint_name: string, event_graph: \"EventGraph\", level_name: string, success: true }, or, when no blueprint exists and create=false: { exists: false, success: true, level_name: string, note: string }"
         },
         {
           "name": "get_media_info",
@@ -21138,7 +21138,7 @@
               "description": "\"persistent\" for the persistent level, or the SHORT name of a loaded, visible streaming sub-level (not a /Game path)."
             }
           ],
-          "returns": "{ current_level: string, changed: bool, already_current: bool, success: bool }"
+          "returns": "{ current_level: string, changed: bool, already_current: bool, success: true } -- current_level is the level current after the call; a level that is not found, or not loaded and visible, is an error instead."
         },
         {
           "name": "set_cvar",
@@ -27640,7 +27640,7 @@
               "description": "Destination UV channel index (required, auto-grown if >= NumUVSets)"
             }
           ],
-          "returns": "{ actor_name: string, source_channel: int, dest_channel: int,"
+          "returns": "{ actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel."
         },
         {
           "name": "copy_static_mesh_to_dynamic_mesh",
@@ -28586,7 +28586,7 @@
               "description": "V coordinate of the point the scaling is centred on (default 0)."
             }
           ],
-          "returns": "{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number,"
+          "returns": "{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }"
         },
         {
           "name": "select_mesh_triangles",
@@ -29032,7 +29032,7 @@
               "description": "Desired count (>= 0; <= 8 in practice) (required)"
             }
           ],
-          "returns": "{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int,"
+          "returns": "{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped."
         },
         {
           "name": "set_polygroup_material_id",
@@ -39543,7 +39543,7 @@
           "name": "frame_timing",
           "description": "Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bottleneck verdict with an actionable hint.",
           "params": [],
-          "returns": "{"
+          "returns": "{ frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: \"GPU-bound\"|\"CPU-bound (game thread)\"|\"CPU-bound (render thread)\"|\"VSync/present bound\"|\"balanced\"|\"no-data\", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict \"no-data\" when they all do) and note warns of it; otherwise note is empty."
         },
         {
           "name": "get_fps_info",
@@ -39580,7 +39580,7 @@
           "name": "get_trace_status",
           "description": "Report whether Unreal Insights tracing is compiled in, currently connected, and to what destination.",
           "params": [],
-          "returns": "{"
+          "returns": "{ system_status: \"not_available\"|\"available\"|\"tracing_to_file\"|\"tracing_to_server\"|\"tracing_to_secure_network\"|\"tracing_to_custom_relay\"|\"unknown\", compile_time_enabled: bool, connected: bool, destination: string, elapsed_s: float } -- compile_time_enabled is false only when system_status is not_available (tracing compiled out, as in Shipping); destination is empty and elapsed_s 0 when not connected, and elapsed_s is also 0 for a trace start_trace did not start."
         },
         {
           "name": "list_active_regions",
@@ -39592,7 +39592,7 @@
           "name": "list_traces",
           "description": "Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time.",
           "params": [],
-          "returns": "{"
+          "returns": "{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders."
         },
         {
           "name": "region_end",
@@ -39687,7 +39687,7 @@
           "name": "stop_trace",
           "description": "Stop the active Unreal Insights trace and return its destination, duration and file size. Idempotent — calling stop_trace when no trace is active returns was_tracing:false with a note instead of failing.",
           "params": [],
-          "returns": "{"
+          "returns": "{ stopped: bool, was_tracing: bool, destination?: string, duration_s?: float, size_bytes?: int, note: string } -- with no trace running only stopped:false, was_tracing:false and note; when the engine's Stop() refuses because the trace is already stopping, stopped is false and size_bytes is absent; after a stop, note says to open the .utrace in Unreal Insights. duration_s is 0 for a trace start_trace did not start."
         },
         {
           "name": "unassign_rvt_from_landscape",
@@ -49768,7 +49768,7 @@
               "description": "Default TRUE: resets the actor scale to (1,1,1) after building the brush, so the world bounds equal the requested `extent`. It matters because some actor factories stamp a default scale during placement -- APCGVolume is spawned at (25, 25, 10) -- and since brush polys are authored in LOCAL space that scale MULTIPLIES your extent. Set it false only if you deliberately want the factory's scale; `spawn_scale` always reports what it was. Be aware that with normalize_scale=false and a factory scale != 1 the real bounds are NOT the requested extent, so `extent_matches_request` and therefore `success` come back FALSE -- that is the honest answer, not a bug, and `actor_scale` says why they differ."
             }
           ],
-          "returns": "{ actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ,"
+          "returns": "{ actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ, GetActorBounds -- kept for compatibility), bounds_extent_actual: [x,y,z] (RE-READ from the BRUSH component's world bounds; this is the volume itself, with no stray editor sprite in the box), bounds_origin_actual: [x,y,z], actor_scale: [x,y,z] (RE-READ, after normalization), spawn_scale: [x,y,z] (RE-READ, as the actor factory left it), scale_normalized: bool (true only when a correction was actually needed), extent_matches_request: bool, bounds_tolerance_uu: number, has_brush_geometry, brush_built, is_spatially_loaded (RE-READ), spatial_flag_applied, success, requested: { volume_class, location, extent, actor_label, is_spatially_loaded, normalize_scale } }"
         }
       ]
     },
@@ -52114,7 +52114,7 @@
               "description": "Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier."
             }
           ],
-          "returns": "{ name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool,"
+          "returns": "{ name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool, parent_path: string, children_count: number, applied_schemas: [string], variant_sets: [string], is_a: { Xform, Mesh, Cube, Scope, Camera, DistantLight, SphereLight, RectLight, MeshLight: bool } }, or { prim_path, is_valid: false, note } when the prim does not exist"
         },
         {
           "name": "get_usd_prim_metadata",
@@ -52895,7 +52895,7 @@
               "description": "UV channel index to inspect (default 0)"
             }
           ],
-          "returns": "{ mesh_path, lod_index, uv_channel, vertex_count, triangle_count,"
+          "returns": "{ mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0."
         },
         {
           "name": "list_uv_channels",

@@ -464,14 +464,7 @@ TSharedPtr<FJsonObject> HandleGetVolumeInfo(const TSharedPtr<FJsonObject>& Param
 //   @param actor_label [string] - Optional editor label for the spawned actor
 //   @param is_spatially_loaded [bool] - World Partition spatial-loading flag (default true; only applied when the actor allows changing it). Reported RE-READ from the actor.
 //   @param normalize_scale [bool] - Default TRUE: resets the actor scale to (1,1,1) after building the brush, so the world bounds equal the requested `extent`. It matters because some actor factories stamp a default scale during placement -- APCGVolume is spawned at (25, 25, 10) -- and since brush polys are authored in LOCAL space that scale MULTIPLIES your extent. Set it false only if you deliberately want the factory's scale; `spawn_scale` always reports what it was. Be aware that with normalize_scale=false and a factory scale != 1 the real bounds are NOT the requested extent, so `extent_matches_request` and therefore `success` come back FALSE -- that is the honest answer, not a bug, and `actor_scale` says why they differ.
-//   @returns { actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ,
-//     GetActorBounds -- kept for compatibility), bounds_extent_actual: [x,y,z] (RE-READ from the BRUSH
-//     component's world bounds; this is the volume itself, with no stray editor sprite in the box),
-//     bounds_origin_actual: [x,y,z], actor_scale: [x,y,z] (RE-READ, after normalization),
-//     spawn_scale: [x,y,z] (RE-READ, as the actor factory left it), scale_normalized: bool (true only
-//     when a correction was actually needed), extent_matches_request: bool, bounds_tolerance_uu: number,
-//     has_brush_geometry, brush_built, is_spatially_loaded (RE-READ), spatial_flag_applied, success,
-//     requested: { volume_class, location, extent, actor_label, is_spatially_loaded, normalize_scale } }
+//   @returns { actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ, GetActorBounds -- kept for compatibility), bounds_extent_actual: [x,y,z] (RE-READ from the BRUSH component's world bounds; this is the volume itself, with no stray editor sprite in the box), bounds_origin_actual: [x,y,z], actor_scale: [x,y,z] (RE-READ, after normalization), spawn_scale: [x,y,z] (RE-READ, as the actor factory left it), scale_normalized: bool (true only when a correction was actually needed), extent_matches_request: bool, bounds_tolerance_uu: number, has_brush_geometry, brush_built, is_spatially_loaded (RE-READ), spatial_flag_applied, success, requested: { volume_class, location, extent, actor_label, is_spatially_loaded, normalize_scale } }
 //   NOTE (impl): the brush is built with UCubeBuilder in C++. The `extent` hint is written `[array!]`
 //   because the catalog's annotation regex cannot parse `[x, y, z]` as a type hint, and that line is
 //   where a caller looks for the half-vs-full answer. The factory scale comes from

@@ -37,6 +37,10 @@ change has to pass. How a call travels through the editor is in
    //   @returns { thing_path: string, done: bool }
    ```
 
+   The description, each `@param` and the `@returns` are one line each, and a command has one
+   `@returns`: the generator reads one line, and `--check` fails on text that goes on below. Notes for
+   whoever maintains the handler go under the `@returns` line, at its indentation.
+
 3. Add its row to the family's `FRegistrar`: `{ TEXT("do_thing"), &HandleDoThing },`
 4. Regenerate, in this order (the tables read the catalog):
 

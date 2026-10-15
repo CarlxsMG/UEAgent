@@ -61,7 +61,7 @@ Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bott
 
 No parameters.
 
-**Returns:** `{`
+**Returns:** `{ frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced"|"no-data", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict "no-data" when they all do) and note warns of it; otherwise note is empty.`
 
 ## `get_fps_info`
 
@@ -103,7 +103,7 @@ Report whether Unreal Insights tracing is compiled in, currently connected, and 
 
 No parameters.
 
-**Returns:** `{`
+**Returns:** `{ system_status: "not_available"|"available"|"tracing_to_file"|"tracing_to_server"|"tracing_to_secure_network"|"tracing_to_custom_relay"|"unknown", compile_time_enabled: bool, connected: bool, destination: string, elapsed_s: float } -- compile_time_enabled is false only when system_status is not_available (tracing compiled out, as in Shipping); destination is empty and elapsed_s 0 when not connected, and elapsed_s is also 0 for a trace start_trace did not start.`
 
 ## `list_active_regions`
 
@@ -119,7 +119,7 @@ Enumerate .utrace files in &lt;ProjectDir>/Saved/Profiling/, returning their pat
 
 No parameters.
 
-**Returns:** `{`
+**Returns:** `{ directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.`
 
 ## `region_end`
 
@@ -181,7 +181,7 @@ Stop the active Unreal Insights trace and return its destination, duration and f
 
 No parameters.
 
-**Returns:** `{`
+**Returns:** `{ stopped: bool, was_tracing: bool, destination?: string, duration_s?: float, size_bytes?: int, note: string } -- with no trace running only stopped:false, was_tracing:false and note; when the engine's Stop() refuses because the trace is already stopping, stopped is false and size_bytes is absent; after a stop, note says to open the .utrace in Unreal Insights. duration_s is 0 for a trace start_trace did not start.`
 
 ## `unassign_rvt_from_landscape`
 

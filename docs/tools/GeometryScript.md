@@ -191,7 +191,7 @@ Copy UV data from one UV channel to another on the same mesh.
 | `source_channel` | number | yes | Source UV channel index (required) |
 | `dest_channel` | number | yes | Destination UV channel index (required, auto-grown if >= NumUVSets) |
 
-**Returns:** `{ actor_name: string, source_channel: int, dest_channel: int,`
+**Returns:** `{ actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.`
 
 ## `copy_static_mesh_to_dynamic_mesh`
 
@@ -662,7 +662,7 @@ Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the ed
 | `scale_origin_u` | number | no | U coordinate of the point the scaling is centred on (default 0). |
 | `scale_origin_v` | number | no | V coordinate of the point the scaling is centred on (default 0). |
 
-**Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number,`
+**Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }`
 
 ## `select_mesh_triangles`
 
@@ -799,7 +799,7 @@ Set the number of UV channels on a dynamic mesh.
 | `actor_name` | string | yes | DynamicMeshActor name (required) |
 | `num_uv_channels` | number | yes | Desired count (>= 0; &lt;= 8 in practice) (required) |
 
-**Returns:** `{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int,`
+**Returns:** `{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped.`
 
 ## `set_polygroup_material_id`
 

@@ -353,17 +353,8 @@ TSharedPtr<FJsonObject> HandleGetMemoryUsage(const TSharedPtr<FJsonObject>& Para
 // =========================================================================
 
 // MCP:frame_timing - Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bottleneck verdict with an actionable hint.
-//   @returns {
-//     frame_ms: float,                                  // FApp::GetDeltaTime() * 1000
-//     game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float,
-//     game_thread_wait_ms: float, render_thread_wait_ms: float,
-//     gpu_ms: float,                                     // RHIGetGPUFrameCycles converted to ms
-//     cpu_busy_ms: float,                                // game + render + rhi
-//     verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced",
-//     hint: string,                                      // human-readable next step
-//     null_rhi: bool,                                    // true if running with -nullrhi / commandlet
-//     note: string                                       // empty or warning if null_rhi
-//   }
+//   @returns { frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced"|"no-data", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict "no-data" when they all do) and note warns of it; otherwise note is empty.
+//   NOTE (impl): frame_ms is FApp::GetDeltaTime() * 1000, and gpu_ms is RHIGetGPUFrameCycles converted to ms.
 TSharedPtr<FJsonObject> HandleFrameTiming(const TSharedPtr<FJsonObject>& Params)
 {
     const bool bNullRHI = (GUsingNullRHI || IsRunningCommandlet());
@@ -516,11 +507,7 @@ TSharedPtr<FJsonObject> HandleStartTrace(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:stop_trace - Stop the active Unreal Insights trace and return its destination, duration and file size. Idempotent — calling stop_trace when no trace is active returns was_tracing:false with a note instead of failing.
-//   @returns {
-//     stopped: bool, was_tracing: bool,
-//     destination: string, duration_s: float, size_bytes: int,
-//     note: string       // "Open this .utrace in UnrealInsights for analysis."
-//   }
+//   @returns { stopped: bool, was_tracing: bool, destination?: string, duration_s?: float, size_bytes?: int, note: string } -- with no trace running only stopped:false, was_tracing:false and note; when the engine's Stop() refuses because the trace is already stopping, stopped is false and size_bytes is absent; after a stop, note says to open the .utrace in Unreal Insights. duration_s is 0 for a trace start_trace did not start.
 TSharedPtr<FJsonObject> HandleStopTrace(const TSharedPtr<FJsonObject>& Params)
 {
     if (!FTraceAuxiliary::IsConnected())
@@ -570,13 +557,8 @@ TSharedPtr<FJsonObject> HandleStopTrace(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:get_trace_status - Report whether Unreal Insights tracing is compiled in, currently connected, and to what destination.
-//   @returns {
-//     system_status: "not_available"|"available"|"tracing_to_file"|"tracing_to_server"|"tracing_to_secure_network"|"tracing_to_custom_relay"|"unknown",
-//     compile_time_enabled: bool,        // false in Shipping builds (UE_TRACE_MINIMAL_ENABLED == 0)
-//     connected: bool,                   // FTraceAuxiliary::IsConnected()
-//     destination: string,               // empty if not connected
-//     elapsed_s: float                   // 0 if not connected or if start_trace wasn't called via this bridge
-//   }
+//   @returns { system_status: "not_available"|"available"|"tracing_to_file"|"tracing_to_server"|"tracing_to_secure_network"|"tracing_to_custom_relay"|"unknown", compile_time_enabled: bool, connected: bool, destination: string, elapsed_s: float } -- compile_time_enabled is false only when system_status is not_available (tracing compiled out, as in Shipping); destination is empty and elapsed_s 0 when not connected, and elapsed_s is also 0 for a trace start_trace did not start.
+//   NOTE (impl): connected is FTraceAuxiliary::IsConnected().
 TSharedPtr<FJsonObject> HandleGetTraceStatus(const TSharedPtr<FJsonObject>& Params)
 {
     const FTraceAuxiliary::ETraceSystemStatus Status    = FTraceAuxiliary::GetTraceSystemStatus();
@@ -706,11 +688,7 @@ TSharedPtr<FJsonObject> HandleRegionEnd(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:list_traces - Enumerate .utrace files in <ProjectDir>/Saved/Profiling/, returning their path, size and modification time.
-//   @returns {
-//     directory: string,   // resolved ProfilingDir
-//     count: int,
-//     traces: [{ path, name, size_bytes, modified_iso }]
-//   }
+//   @returns { directory: string, count: int, traces: [{ path, name, size_bytes, modified_iso }] } -- directory is the resolved profiling folder; only its own files are listed, not subfolders.
 TSharedPtr<FJsonObject> HandleListTraces(const TSharedPtr<FJsonObject>& Params)
 {
     const FString    ProfilingDir = FPaths::ProfilingDir();

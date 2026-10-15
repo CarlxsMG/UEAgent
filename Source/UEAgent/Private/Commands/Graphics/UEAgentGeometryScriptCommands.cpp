@@ -2169,8 +2169,7 @@ TSharedPtr<FJsonObject> HandleIsPointInsideMesh(
 // MCP:set_num_uv_channels - Set the number of UV channels on a dynamic mesh.
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param num_uv_channels [number!] - Desired count (>= 0; <= 8 in practice) (required)
-//   @returns { actor_name: string, num_uv_channels: int, previous_num_uv_channels: int,
-//             changed: bool, note?: string }
+//   @returns { actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped.
 TSharedPtr<FJsonObject> HandleSetNumUVChannels(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2272,8 +2271,7 @@ TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
 //   @param scale_v [number!] - Scale factor along V; must be non-zero (1 keeps V unchanged).
 //   @param scale_origin_u [number] - U coordinate of the point the scaling is centred on (default 0).
 //   @param scale_origin_v [number] - V coordinate of the point the scaling is centred on (default 0).
-//   @returns { actor_name: string, uv_channel: int, scale_u: number, scale_v: number,
-//             scale_origin: {u, v}, scaled: bool }
+//   @returns { actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }
 TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2333,8 +2331,7 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
 //   @param actor_name [string!] - DynamicMeshActor name (required)
 //   @param source_channel [number!] - Source UV channel index (required)
 //   @param dest_channel [number!] - Destination UV channel index (required, auto-grown if >= NumUVSets)
-//   @returns { actor_name: string, source_channel: int, dest_channel: int,
-//             copied: bool, num_uv_channels_after: int, note?: string }
+//   @returns { actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.
 TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
     const TSharedPtr<FJsonObject>& Params)
 {

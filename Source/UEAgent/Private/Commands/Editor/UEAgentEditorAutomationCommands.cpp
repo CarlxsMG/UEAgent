@@ -1263,8 +1263,7 @@ TSharedPtr<FJsonObject> HandleMigrateAssets(
 //   @param target_asset_path - The asset to keep, all references point here
 //   @param source_asset_paths - Assets to consolidate into the target
 //   @param dry_run - If true, skip ConsolidateAssets entirely and only report what would happen, default false
-//   @returns dry_run=true: { target_asset_path, target_class, dry_run: true, would_consolidate: [string], skipped_incompatible: [{path,class}], compatible_count: int, incompatible_count: int }
-//   @returns dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }
+//   @returns dry_run=true: { target_asset_path, target_class, dry_run: true, would_consolidate: [string], skipped_incompatible: [{path,class}], compatible_count: int, incompatible_count: int }; dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }
 TSharedPtr<FJsonObject> HandleConsolidateAssets(
 	const TSharedPtr<FJsonObject>& Params)
 {

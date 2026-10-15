@@ -1400,7 +1400,7 @@ Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An em
 |---|---|---|---|
 | `schema_path` | string | yes | Asset path of the UPoseSearchSchema (required). |
 
-**Returns:** `{ schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate,`
+**Returns:** `{ schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate, permutations_time_offset, add_data_padding: bool, inject_additional_debug_channels: bool, draw_inject_additional_debug_channels: bool, roled_skeletons: [{ role_name, skeleton_path, mirror_table_path }], roled_skeleton_count, is_finalized: bool, channel_count, finalized_channels: [{ class, channel_name, weight }], note?: string } -- note only when is_finalized is false.`
 
 ## `is_skeleton_shared`
 

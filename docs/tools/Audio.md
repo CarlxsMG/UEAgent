@@ -650,7 +650,7 @@ Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_form
 |---|---|---|---|
 | `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
 
-**Returns:** `{ submix_path, soundfield_encoding_format, resolved_format, encoding_settings{class,path},`
+**Returns:** `{ submix_path, soundfield_encoding_format, resolved_format, encoding_settings_class, encoding_settings: { class, path }, effect_chain: [{ index, class, path, settings_class, settings_path }], chain_length, note? }`
 
 ## `get_submix_effect_chain`
 
@@ -870,7 +870,7 @@ Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoabl
 | `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
 | `effect_index` | number | yes | Zero-based index into SoundfieldEffectChain (required). |
 
-**Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path,`
+**Returns:** `{ submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.`
 
 ## `remove_subtitle_cue`
 

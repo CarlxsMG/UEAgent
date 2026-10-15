@@ -202,7 +202,7 @@ Redirect every reference to the source assets onto the target with UEditorAssetS
 | `source_asset_paths` | array | yes | Assets to consolidate into the target |
 | `dry_run` | boolean | no | If true, skip ConsolidateAssets entirely and only report what would happen, default false |
 
-**Returns:** `dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }`
+**Returns:** `dry_run=true: { target_asset_path, target_class, dry_run: true, would_consolidate: [string], skipped_incompatible: [{path,class}], compatible_count: int, incompatible_count: int }; dry_run=false (default): { target_asset_path, target_class, dry_run: false, consolidated_count: int, source_count: int, success: bool, skipped_incompatible: [{path,class}], incompatible_count: int }`
 
 ## `copy_actors`
 
@@ -556,7 +556,7 @@ Get (or, with create=true, bring into being) the current level's Level Blueprint
 |---|---|---|---|
 | `create` | boolean | no | Optional bool (default false). True creates the Level Blueprint if the level has none -- a mutation that dirties the map, so save_level afterwards. |
 
-**Returns:** `{ exists: bool, created: bool, blueprint_path: string, blueprint_name: string, event_graph: "EventGraph", level_name: string, success: bool }`
+**Returns:** `{ exists: true, created: bool, blueprint_path: string, blueprint_name: string, event_graph: "EventGraph", level_name: string, success: true }, or, when no blueprint exists and create=false: { exists: false, success: true, level_name: string, note: string }`
 
 ## `get_media_info`
 
@@ -1112,7 +1112,7 @@ Choose which sub-level of the editor world is CURRENT, i.e. where newly spawned 
 |---|---|---|---|
 | `level_name` | string | yes | "persistent" for the persistent level, or the SHORT name of a loaded, visible streaming sub-level (not a /Game path). |
 
-**Returns:** `{ current_level: string, changed: bool, already_current: bool, success: bool }`
+**Returns:** `{ current_level: string, changed: bool, already_current: bool, success: true } -- current_level is the level current after the call; a level that is not found, or not loaded and visible, is an error instead.`
 
 ## `set_cvar`
 
