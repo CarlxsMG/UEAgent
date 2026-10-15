@@ -8,6 +8,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   (`/plugin install ueagent --marketplace CarlxsMG/UEAgent`): `skill-builder` turns an editor
   workflow into a new skill, and `blueprint-actor`, `project-audit` and `level-lighting` are skills
   made with it.
+- `Tools/catalog_server.py` serves the tool list over stdio without the editor, the same list the
+  editor serves, so that MCP directories such as Glama can list the tools.
 
 ## 1.1.0 - 2026-10-14
 

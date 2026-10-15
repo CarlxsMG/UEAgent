@@ -18,7 +18,7 @@ change has to pass. How a call travels through the editor is in
 | `Source/UEAgent/Private/Commands/<Area>/UEAgent<Family>Commands.cpp` | One command family per file. Its handlers are functions of the family's namespace, and a `McpCommandFamilies::FRegistrar` at the end of the file lists every command string with the function that runs it. |
 | `Source/UEAgent/Private/Commands/Common/McpCommonUtils.*` | The helpers every family shares (`mcp_common`). |
 | `Source/UEAgent/Private/Mcp/` | The HTTP server, the tool catalog with its compact meta-tools, and the contract around each call (preconditions and readback). |
-| `Tools/` | Python scripts that derive the catalog and the generated tables from the C++, and the audits. |
+| `Tools/` | Python scripts that derive the catalog and the generated tables from the C++, the audits, and `catalog_server.py`, which lists the tools without the editor for MCP directories. |
 | `Resources/command_catalog.json` | The tool catalog the server publishes (generated). |
 | `Resources/ContractTests/` | The contract's test vectors. |
 | `docs/tools/` | The tool reference (generated). |
@@ -60,6 +60,8 @@ A new family is a new `.cpp` with its namespace, a `// MCP-DOMAIN: <Domain>` mar
   `ruff check Tools`.
 - `python Tools/smoke_test.py --launch <a throwaway .uproject> --engine <UE root>` passes: it starts a
   headless editor and checks the server end to end over HTTP.
+- A change to how `McpToolCatalog.cpp` builds a schema is made in `Tools/catalog_server.py` too:
+  with the editor open, `python Tools/catalog_server.py --compare` must find no difference.
 - The contract self-tests pass in the editor: `mcp.contract.selftest` on each vector file in
   `Resources/ContractTests`, and the automation test `Automation RunTests UEAgent.ClaudeCode`.
 - A change of behavior says how it was measured: the call before and after, in a headless editor
