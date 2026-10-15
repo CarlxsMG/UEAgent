@@ -9,31 +9,50 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - Calls that killed the editor are refused before they touch anything: a negative `section_index` on
   the procedural mesh tools, `remap_material_ids` with `compact: true` on a mesh whose material IDs
   reach past its material list, a negative `option_index` on `add_eqs_test` and `add_eqs_generator`,
-  `add_spring_arm` with the name of an existing component (it now takes a free name), and
-  `add_skeletal_mesh_socket` copying to the skeleton of a mesh without one.
+  `add_spring_arm` and `add_camera_component` with the name of an existing component (they now take
+  a free name), `set_anim_frame_rate` with an fps that rounds to 0, `move_ik_solver_in_stack` with
+  `to_index` equal to the solver count, and `add_skeletal_mesh_socket` copying to the skeleton of a
+  mesh without one.
+- A failed save fails the call, with `save_error`, in the Sequencer tools that save a sequence, the
+  animation sequence tools (`set_anim_frame_rate`, `set_anim_number_of_frames`,
+  `duplicate_anim_sequence`, the remove and curve tools), the IK rig and retargeter tools, the
+  Gameplay Cameras tools and the Chooser tools.
 - Tools that answered success for nothing now say what happened. `set_anim_curve_keys` on a transform
   curve wrote nothing; `add_anim_bone_track` with an unknown bone replaced the root track;
   `generate_mesh_uvs` deleted every UV channel above the one it wrote; `apply_uniform_remesh` could
   not use `uv_preserving` smoothing and ignored `preserve_sharp_edges` and `auto_compact` set to
   false; the dynamic mesh boolean, normals, UV, material ID and transform tools and the render target
   draws measure what they did (an identity transform succeeds with `applied: false`);
-  `add_metasound_graph_output` with an existing name reset its default; `add_mass_trait`,
-  `add_widget_to_blueprint` and `remove_string_table_entry` said added, saved or removed for nothing;
-  `set_mid_scalar_param` and `copy_mid_params_from_source` accepted unknown parameters;
-  `set_actor_material` accepted any slot; and the IK rig, retargeter, geometry collection, camera rig,
-  animation sequence and Interchange pipeline tools report a failed save.
+  `add_metasound_graph_output` with an existing name reset its default and
+  `add_metasound_graph_input` dropped it; `add_mass_trait`, `add_widget_to_blueprint` and
+  `remove_string_table_entry` said added, saved or removed for nothing; `set_mid_scalar_param`,
+  `set_mid_vector_param`, `set_mid_texture_param` and `copy_mid_params_from_source` accepted unknown
+  parameters; `set_actor_material` accepted any slot; `set_anim_frame_rate` and
+  `set_anim_number_of_frames` read back the wrong value and accepted a rate the engine refused;
+  `set_anim_bone_track_keys` wrote an unknown bone's keys to the root track; `copy_mesh_uv_channel`,
+  `repack_mesh_uvs`, `clear_render_target`, `export_render_target` and the behavior tree, level
+  sequence and widget animation stop tools measure what they did; `add_niagara_data_interface` added
+  a second parameter next to one of another class, and `remove_niagara_data_interface` also removed
+  user parameters that are not data interfaces; `set_usd_prim_specifier` applied an unknown value as
+  Def; and the geometry collection and Interchange pipeline tools report a failed save.
+- Documented no-ops that answered failure now succeed: `remove_marked_frame`, `clear_marked_frames`,
+  `add_sequence_folder`, `remove_sequence_folder` and `add_notify_track` on what is already there.
 - Edits that were lost or half written: the Niagara data interface tools never dirtied or saved the
   system; the `set_game_mode_*` setters never dirtied a Blueprint GameMode; the gameplay effect and
   cue setters edited the class defaults and then had the save refused during Play-in-Editor (they
   refuse first); `create_level_sequence` shifted the keys of an existing sequence and accepted a rate
   below 1; `create_audio_bus` and `create_sound_source_bus` reset an existing asset's settings.
-- Undoable now: the smart object slot tools, `add_eqs_test`, `add_spring_arm` and
-  `set_control_bus_mix_stage_value`.
+- Undoable now: the smart object slot tools, `add_eqs_test`, `add_spring_arm`,
+  `add_camera_component`, `set_camera_asset_director`, `add_camera_node_child`,
+  `set_control_bus_mix_stage_value`, `remove_niagara_data_interface`, `remove_anim_sync_marker`, the IK
+  solver, goal, bone and retarget pose setters, and the Chooser tools. `remove_chooser_row` now saves,
+  as `remove_chooser_column` does.
 - Also fixed: `setup_foot_ik` binds the legs, `add_subsequence_track` refuses a sequence that would
   contain itself, `remove_widget` reaches the widgets `create_widget` makes in Play-in-Editor (new
   optional `target_world`), `add_chooser_column_to_table` adds a second column of the same type,
   `create_editable_skeletal_mesh` takes `/Game` and plugin paths, `define_usd_prim` refuses an unknown
-  specifier, and a new audio bus is Stereo as documented.
+  specifier, `get_sequence_tracks` lists the camera cut track, `create_sound_source_bus` refuses a
+  negative duration, and a new audio bus is Stereo as documented.
 - Schemas: `interp_mode` of `set_anim_curve_interp_mode` and `rotation` of `rotate_dynamic_mesh` are
   required, as the tools already demanded; `duration_seconds` of `set_gameplay_effect_duration` is
   optional (only `HasDuration` needs it); the six tag lists of
