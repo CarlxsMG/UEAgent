@@ -1735,12 +1735,12 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInputDefault(
 //   The Configuration struct is per-subclass — for example ArrayGet's config has
 //   NumOutputs, Index pin references, etc. We round-trip via FJsonObjectConverter.
 // ---------------------------------------------------------------------------
-// MCP:set_meta_sound_node_property - Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves, and the reply succeeds even when the save fails: check saved.
+// MCP:set_meta_sound_node_property - Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).
 //   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
 //   @param value [any!] - New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true").
-//   @returns { metasound_path, node_id, property, set, value_changed, saved }
+//   @returns { metasound_path, node_id, property, set, value_changed, new_value?, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1819,7 +1819,8 @@ TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	// save the package so the in-memory mutation sticks; the next build pass will
 	// pick it up. (UE 5.8 has no public "compile" API.)
 	Source->MarkPackageDirty();
-	const bool bSaved = mcp_common::SaveAssetPackage(Source->GetPackage(), Source);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Source->GetPackage(), Source, SaveError);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
@@ -1827,9 +1828,8 @@ TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	Data->SetStringField(TEXT("property"),      PropName);
 	Data->SetBoolField  (TEXT("set"),           true);
 	Data->SetBoolField  (TEXT("value_changed"), bValueChanged);
-	Data->SetBoolField  (TEXT("saved"),         bSaved);
 	if (NewValue.IsValid()) { Data->SetField(TEXT("new_value"), NewValue); }
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_meta_sound_node_property"), SaveError);
 }
 
 // MCP:get_meta_sound_node_property - Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_meta_sound_node_property.

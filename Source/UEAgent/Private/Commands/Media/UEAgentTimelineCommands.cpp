@@ -12,6 +12,7 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
+#include "HAL/FileManager.h"             // IFileManager::FileExists (delete_level_sequence: is the file still on disk)
 // Level sequence asset model: the movie scene, its tracks and its object bindings
 #include "MovieScene.h"
 #include "MovieSceneTrack.h"
@@ -404,9 +405,9 @@ TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:delete_level_sequence - Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Reports success even when the delete did not happen: check actually_deleted, true only when the delete reported success and the asset is gone.
+// MCP:delete_level_sequence - Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Succeeds only when actually_deleted: the delete reported success, the asset is no longer registered and its file is gone from disk (a read-only file, or one another process holds open, stays behind and fails the call).
 //   @param sequence_name - Asset name of the Level Sequence to delete, not its path (e.g. "LS_Intro")
-//   @returns { sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, actually_deleted: bool }
+//   @returns { sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, file_still_exists: bool, actually_deleted: bool }
 TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;
@@ -425,17 +426,30 @@ TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>&
     }
 
     // Delete through the editor asset library, then ask again whether the asset exists:
-    // only a delete that reported success AND left nothing behind is actually_deleted.
+    // only a delete that reported success AND left nothing behind is actually_deleted. The
+    // registry forgets the asset even when its file could not be removed, so the file on disk
+    // is checked too: a file left behind brings the sequence back when the editor restarts. It is
+    // asked of the file system, not of FPackageName::DoesPackageExist, which answers from the
+    // registry first and can still list a package whose file was just deleted.
     const FString AssetPath = Target.Sequence->GetPathName();
+    FString PackageFile;
+    mcp_common::FindPackageFileOnDisk(Target.Sequence->GetPackage()->GetName(), PackageFile);
     const bool bDeleteReported = UEditorAssetLibrary::DeleteAsset(AssetPath);
     const bool bStillThere = UEditorAssetLibrary::DoesAssetExist(AssetPath);
+    const bool bFileStillThere = !PackageFile.IsEmpty() && IFileManager::Get().FileExists(*PackageFile);
+    const bool bActuallyDeleted = bDeleteReported && !bStillThere && !bFileStillThere;
 
     TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
     Report->SetStringField(TEXT("asset_path"), AssetPath);
     Report->SetBoolField(TEXT("delete_attempted"), bDeleteReported);
     Report->SetBoolField(TEXT("asset_still_exists"), bStillThere);
-    Report->SetBoolField(TEXT("actually_deleted"), bDeleteReported && !bStillThere);
-    return mcp_common::MakeOkReply(Report);
+    Report->SetBoolField(TEXT("file_still_exists"), bFileStillThere);
+    Report->SetBoolField(TEXT("actually_deleted"), bActuallyDeleted);
+    return mcp_common::MakeOutcomeReply(Report, bActuallyDeleted, bActuallyDeleted ? FString() : FString::Printf(
+        TEXT("delete_level_sequence: '%s' was not deleted: %s."), *AssetPath,
+        bFileStillThere ? TEXT("its file is still on disk (read-only, or held open by another process)")
+            : bStillThere ? TEXT("the asset is still registered (it may be open in an editor)")
+            : TEXT("the delete reported failure")));
 }
 
 // --- Playback length and frame rate stored in an asset ------------------------------

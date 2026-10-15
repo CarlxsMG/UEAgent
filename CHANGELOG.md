@@ -45,6 +45,29 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - In an alias chain, the catalog keeps `required` on the first spelling the annotation documents. The
   `data_table` alias of three DataTable tools is documented, and `set_attach_section_rules` requires
   `sequence_name`, its documented spelling, instead of `sequence_path`.
+- 27 tools whose reply did not match what the call did now answer with what happened. Failures that
+  answered success: `delete_asset` and `delete_level_sequence` fail when the file stays on disk (it
+  brings the asset back on restart); the Chaos cut, fracture and cluster tools fail when they add
+  nothing, and count the pieces they add (they reported the index of the first one); the tools that
+  save fail when the save fails (`create_geometry_collection`, `fracture_geometry_collection`,
+  `cluster_geometry_collection`, `map_input_action`, `add_mapping_to_context`,
+  `set_meta_sound_node_property`); `configure_plugin_setting`, `set_soundfield_effect_settings` and the
+  two Interchange resets fail when nothing was written; `export_assets` and `migrate_assets` measure
+  what they wrote, asset by asset. Calls that find the work already done now succeed instead of
+  failing: removing a bus or input that is not there, and mapping a key that is already mapped (which
+  no longer appends a duplicate). The GAS `create_*` tools say `created: false` for a Blueprint that
+  already existed and refuse one of another class at that path.
+- 15 more Input and Soundfield tools stop answering success for a failure or a no-op: the Enhanced
+  Input tools that edit an InputAction or a mapping context fail when the save fails (the two creates
+  also answered with no `success` at all), `remove_input_trigger` and `remove_input_modifier` now
+  save (they only marked the context dirty), `set_input_action_flags` with no flag is an error,
+  removing a mapping that is not there succeeds without saving, and the runtime key remaps fail when
+  the engine refuses them. `create_soundfield_submix`, `add_soundfield_effect_to_submix` and
+  `remove_soundfield_effect` state their outcome, and fail when no soundfield effect class is loaded.
+- `add_input_trigger` on the InputAction itself is reachable from the tool list: its schema required
+  a context and a key, which that form takes neither of. Its `trigger_type`, and the `modifier_type`
+  of `add_input_modifier`, are required in the schema instead of being refused by the handler, and a
+  key with no context is refused rather than read as the action.
 
 ## 1.1.0 - 2026-10-14
 

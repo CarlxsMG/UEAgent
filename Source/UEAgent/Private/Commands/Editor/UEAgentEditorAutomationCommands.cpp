@@ -4,6 +4,8 @@
 // IAssetTools / FAssetToolsModule (AssetTools developer module)
 #include "IAssetTools.h"
 #include "AssetToolsModule.h"
+#include "PackageMigrationContext.h"                          // migrate_assets: the packages the migration wrote, and where
+#include "HAL/IConsoleManager.h"                              // migrate_assets: AssetTools.UseNewPackageMigration
 
 // UEditorAssetSubsystem (UnrealEd editor subsystem)
 #include "Subsystems/EditorAssetSubsystem.h"
@@ -43,8 +45,11 @@
  *                                 FDependencyQuery), filter zero-referencers, then annotate
  *                                 the survivors with keep_reasons (protect_paths /
  *                                 Config/Default*.ini / opt-in base-library lineage).
- *   - export_assets            -> IAssetTools::ExportAssets (string-path overload).
- *   - migrate_assets           -> IAssetTools::MigratePackages with FMigrationOptions.
+ *   - export_assets            -> IAssetTools::ExportAssets (string-path overload); what it
+ *                                 wrote is measured per asset on disk.
+ *   - migrate_assets           -> IAssetTools::MigratePackages with FMigrationOptions; what it
+ *                                 wrote is measured from the migration's own package list
+ *                                 (GetOnPackageMigration) against the disk.
  *   - consolidate_assets       -> UEditorAssetSubsystem::ConsolidateAssets, partitioned
  *                                 by class compatibility, with an optional dry_run preview.
  *   - find_duplicate_assets    -> IAssetRegistry::GetAssetsByPath, grouped by AssetName;
@@ -992,10 +997,10 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 // ---------------------------------------------------------------------------
 // 5. export_assets
 // ---------------------------------------------------------------------------
-// MCP:export_assets - Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), written under export_path mirroring the package path; unloadable or unexportable ones are skipped. exported_count counts only new files directly in export_path, so it usually reads 0: check the folder.
+// MCP:export_assets - Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), each written to export_path/<package path without its leading slash>.<extension>, e.g. D:/Exports/Game/Meshes/SM_Rock.FBX. What was written is measured per asset on disk: exported lists each asset with its file, and not_exported the ones that did not load, have no exporter or failed to write. Succeeds only when every requested asset was written.
 //   @param asset_paths - Asset object or package paths to export (e.g. ["/Game/Meshes/SM_Rock"]); empty strings are ignored.
 //   @param export_path - Destination directory on disk (e.g. "D:/Exports"), created if missing; each file lands in subfolders named after its package path.
-//   @returns { exported_count: int, failed_count: int, requested_count: int, export_path: string }
+//   @returns { exported_count: int, failed_count: int, requested_count: int, export_path: string, exported: [{ asset_path: string, file: string }], not_exported: [string] }
 TSharedPtr<FJsonObject> HandleExportAssets(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1023,51 +1028,98 @@ TSharedPtr<FJsonObject> HandleExportAssets(
 		}
 	}
 
+	if (AssetPaths.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(TEXT("asset_paths holds no non-empty path"));
+	}
+
 	// Ensure the export directory exists
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 	PlatformFile.CreateDirectoryTree(*ExportPath);
 
-	// ExportAssets is void; it logs failures internally. We count successes by
-	// checking which files exist after the call.
-	int32 PreFileCount = 0;
-	TArray<FString> PreFiles;
-	// Snapshot existing files in the export dir to detect new ones
-	if (PlatformFile.DirectoryExists(*ExportPath))
+	// ExportAssets returns nothing and skips, with only a log line, an asset that does not load
+	// or has no exporter. It writes each asset to <export_path>/<package path without its leading
+	// slash>.<extension the exporter picks>, so what it wrote is measured there, per asset: a file
+	// named after the package whose timestamp moved during the call (a re-export rewrites it).
+	struct FExportTarget
 	{
-		PlatformFile.FindFiles(PreFiles, *ExportPath, nullptr);
-		PreFileCount = PreFiles.Num();
+		FString AssetPath;
+		FString Folder;
+		FString Pattern;
+		TMap<FString, FDateTime> Before;
+	};
+	IFileManager& Files = IFileManager::Get();
+	auto Stamps = [&Files](const FExportTarget& Target)
+	{
+		TArray<FString> Names;
+		Files.FindFiles(Names, *(Target.Folder / Target.Pattern), /*Files=*/true, /*Directories=*/false);
+		TMap<FString, FDateTime> Found;
+		for (const FString& Name : Names)
+		{
+			Found.Add(Name, Files.GetTimeStamp(*(Target.Folder / Name)));
+		}
+		return Found;
+	};
+	TArray<FExportTarget> Targets;
+	for (const FString& AssetPath : AssetPaths)
+	{
+		FString Relative = FPackageName::ObjectPathToPackageName(AssetPath);
+		Relative.RemoveFromStart(TEXT("/"));
+		FExportTarget& Target = Targets.AddDefaulted_GetRef();
+		Target.AssetPath = AssetPath;
+		Target.Folder = FPaths::Combine(ExportPath, FPaths::GetPath(Relative));
+		Target.Pattern = FPaths::GetCleanFilename(Relative) + TEXT(".*");
+		Target.Before = Stamps(Target);
 	}
 
 	AssetTools.ExportAssets(AssetPaths, ExportPath);
 
-	// Count new files
-	TArray<FString> PostFiles;
-	int32 PostFileCount = 0;
-	if (PlatformFile.DirectoryExists(*ExportPath))
+	TArray<TSharedPtr<FJsonValue>> Exported;
+	TArray<TSharedPtr<FJsonValue>> NotExported;
+	for (const FExportTarget& Target : Targets)
 	{
-		PlatformFile.FindFiles(PostFiles, *ExportPath, nullptr);
-		PostFileCount = PostFiles.Num();
+		FString Written;
+		for (const TPair<FString, FDateTime>& File : Stamps(Target))
+		{
+			const FDateTime* Before = Target.Before.Find(File.Key);
+			if (!Before || *Before != File.Value)
+			{
+				Written = Target.Folder / File.Key;
+				break;
+			}
+		}
+		if (Written.IsEmpty())
+		{
+			NotExported.Add(MakeShared<FJsonValueString>(Target.AssetPath));
+			continue;
+		}
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("asset_path"), Target.AssetPath);
+		Entry->SetStringField(TEXT("file"), Written);
+		Exported.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
-	int32 ExportedCount = FMath::Max(0, PostFileCount - PreFileCount);
-	int32 FailedCount = AssetPaths.Num() - ExportedCount;
-
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("exported_count"), ExportedCount);
-	Data->SetNumberField(TEXT("failed_count"), FailedCount);
+	Data->SetNumberField(TEXT("exported_count"), Exported.Num());
+	Data->SetNumberField(TEXT("failed_count"), NotExported.Num());
 	Data->SetNumberField(TEXT("requested_count"), AssetPaths.Num());
 	Data->SetStringField(TEXT("export_path"), ExportPath);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetArrayField(TEXT("exported"), Exported);
+	Data->SetArrayField(TEXT("not_exported"), NotExported);
+	const bool bAllExported = NotExported.IsEmpty();
+	return mcp_common::MakeOutcomeReply(Data, bAllExported, bAllExported ? FString() : FString::Printf(
+		TEXT("export_assets wrote %d of %d assets: the ones in not_exported did not load, have no exporter, or failed to write (the editor log says which)."),
+		Exported.Num(), AssetPaths.Num()));
 }
 
 // ---------------------------------------------------------------------------
 // 6. migrate_assets
 // ---------------------------------------------------------------------------
-// MCP:migrate_assets - Copy assets, and their dependencies unless ignore_dependencies, into another project Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. migrated_count is a new-file count that falls back to the requested count when nothing new appears, so verify the destination.
+// MCP:migrate_assets - Copy assets, and their dependencies unless ignore_dependencies, into another project's Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. The engine first saves every dirty package of this editor, and migrates nothing if one of them fails to save. What was copied is measured from the migration's own package list against the disk: migrated lists each package written (dependencies included), skipped_existing the requested ones the destination already had, failed the requested ones neither written nor skipped. Succeeds when nothing requested failed. destination_path must be a Content folder with a .uproject (or one .uplugin) next to it, or the engine migrates nothing and the call fails.
 //   @param asset_paths - Asset object or package paths to migrate (e.g. ["/Game/Props/SM_Crate"]); each is reduced to its package name.
 //   @param destination_path - Target content folder, e.g. D:/OtherProject/Content
 //   @param ignore_dependencies - When true only the listed packages are copied, without their dependencies (default false).
-//   @returns { migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool }
+//   @returns { migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool, migrated: [{ package: string, file: string }], skipped_existing: [string], failed: [string], note: string? }
 TSharedPtr<FJsonObject> HandleMigrateAssets(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1104,41 +1156,104 @@ TSharedPtr<FJsonObject> HandleMigrateAssets(
 	Options.bIgnoreDependencies = bIgnoreDeps;
 	Options.AssetConflict = EAssetMigrationConflict::Skip;
 
-	// Snapshot destination to count pre-existing files
-	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-	TArray<FString> PreFiles;
-	if (PlatformFile.DirectoryExists(*DestinationPath))
+	if (PackageNames.IsEmpty())
 	{
-		PlatformFile.FindFilesRecursively(PreFiles, *DestinationPath, nullptr);
+		return mcp_common::MakeErrorReply(TEXT("asset_paths holds no non-empty path"));
 	}
-	int32 PreFileCount = PreFiles.Num();
 
-	// Perform migration
+	// MigratePackages returns nothing. The package migration the engine uses by default
+	// (AssetTools.UseNewPackageMigration) announces each step on GetOnPackageMigration, and once
+	// the packages are saved its context lists every package it migrates -- the requested ones
+	// and their dependencies -- with the file it was to write and whether it was to write it at
+	// all (false for one the destination already has). That list, read against the disk, is what
+	// this call wrote: a file is the call's when its timestamp is newer than the call.
+	using UE::AssetTools::FPackageMigrationContext;
+	struct FMigrationEntry
+	{
+		FString PackageName;
+		FString Filename;
+		bool bToWrite = false;
+	};
+	TArray<FMigrationEntry> Entries;
+	bool bMigrationRan = false;
+	const FDelegateHandle Listener = AssetTools.GetOnPackageMigration().AddLambda(
+		[&Entries, &bMigrationRan](FPackageMigrationContext& Context)
+		{
+			bMigrationRan = true;
+			if (Context.GetCurrentStep() == FPackageMigrationContext::EPackageMigrationStep::InstancedPackagesSaved)
+			{
+				for (const FPackageMigrationContext::FMigrationPackageData& Package : Context.GetMigrationPackagesData())
+				{
+					Entries.Add({ Package.GetOriginalPackageName(), Package.GetDestinationFilename(), Package.bNeedToBeSaveMigrated });
+				}
+			}
+		});
+	// The slack covers file systems that keep timestamps to the second or two.
+	const FDateTime CallStart = FDateTime::UtcNow() - FTimespan::FromSeconds(2.0);
 	AssetTools.MigratePackages(PackageNames, DestinationPath, Options);
+	AssetTools.GetOnPackageMigration().Remove(Listener);
 
-	// Count new files
-	TArray<FString> PostFiles;
-	if (PlatformFile.DirectoryExists(*DestinationPath))
+	IFileManager& Files = IFileManager::Get();
+	TArray<TSharedPtr<FJsonValue>> Migrated;
+	TSet<FString> Written;
+	TSet<FString> AlreadyThere;
+	for (const FMigrationEntry& Entry : Entries)
 	{
-		PlatformFile.FindFilesRecursively(PostFiles, *DestinationPath, nullptr);
+		if (Entry.bToWrite && Files.GetTimeStamp(*Entry.Filename) >= CallStart)
+		{
+			Written.Add(Entry.PackageName);
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetStringField(TEXT("package"), Entry.PackageName);
+			Row->SetStringField(TEXT("file"), Entry.Filename);
+			Migrated.Add(MakeShared<FJsonValueObject>(Row));
+		}
+		else if (!Entry.bToWrite && Files.FileExists(*Entry.Filename))
+		{
+			AlreadyThere.Add(Entry.PackageName);
+		}
 	}
-	int32 PostFileCount = PostFiles.Num();
-
-	int32 MigratedCount = FMath::Max(0, PostFileCount - PreFileCount);
-	// If no new files detected (maybe destination was empty or same), use requested count
-	// as a best-effort indicator
-	if (MigratedCount == 0 && PackageNames.Num() > 0)
+	TArray<TSharedPtr<FJsonValue>> SkippedExisting;
+	TArray<TSharedPtr<FJsonValue>> Failed;
+	for (const FName& Requested : PackageNames)
 	{
-		MigratedCount = PackageNames.Num();
+		const FString Name = Requested.ToString();
+		if (!Written.Contains(Name))
+		{
+			(AlreadyThere.Contains(Name) ? SkippedExisting : Failed).Add(MakeShared<FJsonValueString>(Name));
+		}
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("migrated_count"), MigratedCount);
-	Data->SetNumberField(TEXT("failed_count"), FMath::Max(0, PackageNames.Num() - MigratedCount));
+	Data->SetNumberField(TEXT("migrated_count"), Migrated.Num());
+	Data->SetNumberField(TEXT("failed_count"), Failed.Num());
 	Data->SetNumberField(TEXT("requested_count"), PackageNames.Num());
 	Data->SetStringField(TEXT("destination_path"), DestinationPath);
 	Data->SetBoolField(TEXT("ignore_dependencies"), bIgnoreDeps);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetArrayField(TEXT("migrated"), Migrated);
+	Data->SetArrayField(TEXT("skipped_existing"), SkippedExisting);
+	Data->SetArrayField(TEXT("failed"), Failed);
+
+	if (!bMigrationRan)
+	{
+		const IConsoleVariable* NewMigration = IConsoleManager::Get().FindConsoleVariable(TEXT("AssetTools.UseNewPackageMigration"));
+		if (NewMigration && !NewMigration->GetBool())
+		{
+			// The legacy migration announces nothing, so what it copied cannot be measured here.
+			Data->SetStringField(TEXT("note"), TEXT("AssetTools.UseNewPackageMigration is 0: the legacy migration ran and reports nothing per package, so what it copied was not measured; check destination_path."));
+			return mcp_common::MakeVerifiedReply(Data, true, mcp_common::EMcpVerification::NotVerifiable,
+				TEXT("legacy package migration"), TEXT("the legacy migration exposes no per-package result"));
+		}
+		Data->SetStringField(TEXT("note"), TEXT("The engine did not start the migration (see the editor log)."));
+		return mcp_common::MakeOutcomeReply(Data, false, TEXT("migrate_assets: the engine did not start the migration, so nothing was copied. ")
+			TEXT("destination_path must be a Content folder with a .uproject, or exactly one .uplugin, next to it, and writable; ")
+			TEXT("the engine first saves every dirty package and stops if one fails to save; and it waits, without migrating, ")
+			TEXT("while the asset registry is still scanning."));
+	}
+	const bool bNothingFailed = Failed.IsEmpty();
+	return mcp_common::MakeOutcomeReply(Data, bNothingFailed, bNothingFailed ? FString() : FString::Printf(
+		TEXT("migrate_assets: %d of %d requested packages were neither written nor already at the destination (see failed): ")
+		TEXT("a path that names no package, or a load or save that failed (the editor log says which)."),
+		Failed.Num(), PackageNames.Num()));
 }
 
 // ---------------------------------------------------------------------------

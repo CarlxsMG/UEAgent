@@ -188,12 +188,13 @@ CLAIM_FIELD_RE = re.compile(
 # Any field of the response, to cross-check against the input params (echo).
 RESP_FIELD_RE = re.compile(r'Set\w+Field\s*\(\s*TEXT\("([^"]+)"\)')
 
-# One-line forward to a helper in the SAME file:
+# One-line forward to a helper in the SAME file, by its bare or namespace-qualified name:
 #   return HandleRemoveTypedAnimAsset<UAnimBlueprint>(Params, TEXT("..."));
+#   return Impl::MapKeyOnce(Context, Action, Key, Reply, TEXT("..."));
 # The body located by `parse_file` then holds NO outcome signal (the helper emits it).
 # Without following it, such commands fall into `no_outcome_signal` -- a bucket that
 # hides honest and lying handlers alike.
-FORWARD_RE = re.compile(r'\breturn\s+([A-Za-z_]\w*)\s*(?:<[^;{}()\n]*>)?\s*\(')
+FORWARD_RE = re.compile(r'\breturn\s+(?:[A-Za-z_]\w*::)*([A-Za-z_]\w*)\s*(?:<[^;{}()\n]*>)?\s*\(')
 _MAX_HELPER_BODY = 40000   # bound: an unbalanced brace must not swallow half the file
 
 

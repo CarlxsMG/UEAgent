@@ -48,7 +48,7 @@ Audit a fork subtree for references that still point at the SOURCE tree it was c
 
 ## `configure_plugin_setting`
 
-Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. An unknown plugin gives configuration_success:false, not an error. For versioned settings use set_project_settings_value.
+Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -61,13 +61,13 @@ Write one key=value under a plugin config section through GConfig into GEngineIn
 
 ## `delete_asset`
 
-Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Returns delete_success, asset_verified_deleted and file_still_exists; a failed delete still reports status success, so read delete_success.
+Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box") |
 
-**Returns:** `{ asset_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool?, deletion_timestamp: string? }`
+**Returns:** `{ asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }`
 
 ## `duplicate_asset`
 

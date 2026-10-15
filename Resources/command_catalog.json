@@ -9499,7 +9499,7 @@
         },
         {
           "name": "add_soundfield_effect_to_submix",
-          "description": "Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.",
+          "description": "Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; an addition succeeds only when the submix reaches disk. A class already in the chain is skipped (added false, already_present true, not saved). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes and the call fails, with added false and a note.",
           "params": [
             {
               "name": "submix_path",
@@ -10129,7 +10129,7 @@
         },
         {
           "name": "create_soundfield_submix",
-          "description": "Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.",
+          "description": "Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; a new one succeeds only when it reaches disk. An existing one there is returned unchanged and not re-saved (already_existed true, saved false). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.",
           "params": [
             {
               "name": "submix_path",
@@ -10877,7 +10877,7 @@
         },
         {
           "name": "remove_bus_from_mix",
-          "description": "Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix. When the bus is not in the mix nothing is saved and the call reports failure, with already_absent true in its data. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.",
+          "description": "Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix; a removal succeeds only when the mix reaches disk. A bus that is not in the mix is already the state asked for: the call succeeds with removed false and already_absent true, and saves nothing. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.",
           "params": [
             {
               "name": "mix_path",
@@ -10953,7 +10953,7 @@
         },
         {
           "name": "remove_modulation_input_from_patch",
-          "description": "Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch. When no input matches nothing is saved and the call reports failure, with already_removed true in its data. Returns patch_path, bus_path, removed, already_removed, input_count, saved.",
+          "description": "Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.",
           "params": [
             {
               "name": "patch_path",
@@ -10972,7 +10972,7 @@
         },
         {
           "name": "remove_soundfield_effect",
-          "description": "Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.",
+          "description": "Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.",
           "params": [
             {
               "name": "submix_path",
@@ -11142,7 +11142,7 @@
         },
         {
           "name": "set_meta_sound_node_property",
-          "description": "Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves, and the reply succeeds even when the save fails: check saved.",
+          "description": "Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).",
           "params": [
             {
               "name": "metasound_path",
@@ -11169,7 +11169,7 @@
               "description": "New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings (\"0.5\", \"true\")."
             }
           ],
-          "returns": "{ metasound_path, node_id, property, set, value_changed, saved }"
+          "returns": "{ metasound_path, node_id, property, set, value_changed, new_value?, saved, save_error? }"
         },
         {
           "name": "set_metasound_preset_parameter",
@@ -11693,7 +11693,7 @@
         },
         {
           "name": "set_soundfield_effect_settings",
-          "description": "Validate a soundfield effect slot but never write its settings (always a no-op): USoundfieldEffectBase::GetSettingsClass is protected, so the settings class cannot be found. An out-of-range effect_index is an error; otherwise returns applied_count:0, saved:false and a note.",
+          "description": "Cannot write soundfield effect settings in this engine version, so every call fails and nothing is changed: USoundfieldEffectBase::GetSettingsClass is protected, so the settings class an effect needs cannot be found. The submix and the effect slot are still checked first (a missing submix or an out-of-range effect_index gets its own error); a valid slot fails with applied_count 0 and a note.",
           "params": [
             {
               "name": "submix_path",
@@ -11711,10 +11711,10 @@
               "name": "settings",
               "jsonType": "object",
               "required": true,
-              "description": "JSON object {property_name: value, ...}; currently ignored, since no setting is ever written"
+              "description": "JSON object {property_name: value, ...}; validated as an object but never written"
             }
           ],
-          "returns": "{ submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note? }"
+          "returns": "{ success: false, error, data: { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note } }"
         },
         {
           "name": "set_submix_effect_settings",
@@ -19954,7 +19954,7 @@
         },
         {
           "name": "export_assets",
-          "description": "Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), written under export_path mirroring the package path; unloadable or unexportable ones are skipped. exported_count counts only new files directly in export_path, so it usually reads 0: check the folder.",
+          "description": "Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), each written to export_path/<package path without its leading slash>.<extension>, e.g. D:/Exports/Game/Meshes/SM_Rock.FBX. What was written is measured per asset on disk: exported lists each asset with its file, and not_exported the ones that did not load, have no exporter or failed to write. Succeeds only when every requested asset was written.",
           "params": [
             {
               "name": "asset_paths",
@@ -19969,7 +19969,7 @@
               "description": "Destination directory on disk (e.g. \"D:/Exports\"), created if missing; each file lands in subfolders named after its package path."
             }
           ],
-          "returns": "{ exported_count: int, failed_count: int, requested_count: int, export_path: string }"
+          "returns": "{ exported_count: int, failed_count: int, requested_count: int, export_path: string, exported: [{ asset_path: string, file: string }], not_exported: [string] }"
         },
         {
           "name": "find_actors_by_name",
@@ -20598,7 +20598,7 @@
         },
         {
           "name": "migrate_assets",
-          "description": "Copy assets, and their dependencies unless ignore_dependencies, into another project Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. migrated_count is a new-file count that falls back to the requested count when nothing new appears, so verify the destination.",
+          "description": "Copy assets, and their dependencies unless ignore_dependencies, into another project's Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. The engine first saves every dirty package of this editor, and migrates nothing if one of them fails to save. What was copied is measured from the migration's own package list against the disk: migrated lists each package written (dependencies included), skipped_existing the requested ones the destination already had, failed the requested ones neither written nor skipped. Succeeds when nothing requested failed. destination_path must be a Content folder with a .uproject (or one .uplugin) next to it, or the engine migrates nothing and the call fails.",
           "params": [
             {
               "name": "asset_paths",
@@ -20619,7 +20619,7 @@
               "description": "When true only the listed packages are copied, without their dependencies (default false)."
             }
           ],
-          "returns": "{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool }"
+          "returns": "{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool, migrated: [{ package: string, file: string }], skipped_existing: [string], failed: [string], note: string? }"
         },
         {
           "name": "move_actors_to_level",
@@ -25149,7 +25149,7 @@
         },
         {
           "name": "create_attribute_set_asset",
-          "description": "Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.",
+          "description": "Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25174,7 +25174,7 @@
         },
         {
           "name": "create_attribute_set_blueprint",
-          "description": "Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An asset already there is returned untouched with already_existed=true. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.",
+          "description": "Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An AttributeSet Blueprint already there is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25193,7 +25193,7 @@
         },
         {
           "name": "create_gameplay_ability_blueprint",
-          "description": "Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.",
+          "description": "Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. A GameplayAbility Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25212,7 +25212,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_actor",
-          "description": "Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
+          "description": "Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25237,7 +25237,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_burst",
-          "description": "Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify)",
+          "description": "Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.",
           "params": [
             {
               "name": "name",
@@ -25262,7 +25262,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_looping",
-          "description": "Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify)",
+          "description": "Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.",
           "params": [
             {
               "name": "name",
@@ -25287,7 +25287,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_static",
-          "description": "Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
+          "description": "Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25312,7 +25312,7 @@
         },
         {
           "name": "create_gameplay_effect_blueprint",
-          "description": "Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.",
+          "description": "Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. A GameplayEffect Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -25362,7 +25362,7 @@
         },
         {
           "name": "create_gameplay_mod_magnitude_calculation_blueprint",
-          "description": "Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers)",
+          "description": "Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers), compile and save it. A Blueprint of that class already at the path is returned untouched (created false, already_existed true); one of another class there is an error.",
           "params": [
             {
               "name": "name",
@@ -29612,7 +29612,7 @@
       "commands": [
         {
           "name": "add_input_modifier",
-          "description": "Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index.",
+          "description": "Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index. The context is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "context_name",
@@ -29635,7 +29635,7 @@
             {
               "name": "modifier_type",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "One of \"Negate\", \"Swizzle\", \"DeadZone\", \"Scalar\"."
             },
             {
@@ -29657,18 +29657,12 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count }"
+          "returns": "{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count, saved, save_error? }"
         },
         {
           "name": "add_input_trigger",
-          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
+          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
           "params": [
-            {
-              "name": "context_name",
-              "jsonType": "string",
-              "required": true,
-              "description": "Short asset name of the InputMappingContext."
-            },
             {
               "name": "action_name",
               "jsonType": "string",
@@ -29676,22 +29670,28 @@
               "description": "Short asset name of the InputAction."
             },
             {
-              "name": "key",
-              "jsonType": "string",
-              "required": true,
-              "description": "Key name of the mapping the trigger is attached to."
-            },
-            {
               "name": "trigger_type",
               "jsonType": "string",
-              "required": false,
+              "required": true,
               "description": "One of \"Down\", \"Pressed\", \"Released\", \"Hold\", \"Tap\", \"Pulse\", \"ChordAction\"."
+            },
+            {
+              "name": "context_name",
+              "jsonType": "string",
+              "required": false,
+              "description": "Short asset name of the InputMappingContext. Omit it (and context_path) to append the trigger to the InputAction asset's own Triggers array instead of one of its key mappings."
+            },
+            {
+              "name": "key",
+              "jsonType": "string",
+              "required": false,
+              "description": "Key name of the mapping the trigger is attached to: required with a context, and refused when there is no context."
             },
             {
               "name": "context_path",
               "jsonType": "string",
               "required": false,
-              "description": "Asset path of the Input Mapping Context. When omitted (with no key), the trigger is appended to the InputAction asset's own Triggers array instead of a context mapping."
+              "description": "Asset path of the Input Mapping Context, instead of context_name."
             },
             {
               "name": "action_path",
@@ -29706,11 +29706,11 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count }"
+          "returns": "Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count, saved, save_error? }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count, saved, save_error? }"
         },
         {
           "name": "add_mapping_to_context",
-          "description": "Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the new mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. Verify the key is free first (find_free_input_key): duplicate bindings are silent.",
+          "description": "Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. A context that already maps that key to that action keeps its mapping (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key first.",
           "params": [
             {
               "name": "context_name",
@@ -29749,7 +29749,7 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "{ context_name, context_path, action_name, key, index, mapping_count }"
+          "returns": "{ context_name, context_path, action_name, key, index, mapping_count, added, already_mapped, saved, save_error? }"
         },
         {
           "name": "create_force_feedback_effect",
@@ -29772,7 +29772,7 @@
         },
         {
           "name": "create_input_action",
-          "description": "Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags.",
+          "description": "Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags. The asset is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "action_name",
@@ -29799,11 +29799,11 @@
               "description": "Value type Bool (default), Axis1D, Axis2D, or Axis3D."
             }
           ],
-          "returns": "{ action_name, action_path, value_type }"
+          "returns": "{ action_name, action_path, value_type, saved, save_error? }"
         },
         {
           "name": "create_input_mapping_context",
-          "description": "Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key.",
+          "description": "Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key. The asset is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "context_name",
@@ -29824,7 +29824,7 @@
               "description": "Fallback for package_path when package_path is absent."
             }
           ],
-          "returns": "{ context_name, context_path }"
+          "returns": "{ context_name, context_path, saved, save_error? }"
         },
         {
           "name": "discover_input_types",
@@ -30022,7 +30022,7 @@
         },
         {
           "name": "map_input_action",
-          "description": "Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. Each call appends a mapping, even a duplicate, and reports success even if the save failed; check the key with find_free_input_key or list_all_input_mappings first.",
+          "description": "Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. A context that already maps that key to that action is left as it is (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key or list_all_input_mappings first.",
           "params": [
             {
               "name": "context_path",
@@ -30055,11 +30055,11 @@
               "description": "Fallback for action_path when action_path is absent."
             }
           ],
-          "returns": "{ context_path, action_path, key_name, mapping_count, success, message }"
+          "returns": "{ context_path, action_path, key_name, index, mapping_count, added, already_mapped, saved, save_error? }"
         },
         {
           "name": "register_input_key_mapping",
-          "description": "Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot.",
+          "description": "Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot. The call fails when the engine refuses the remap, with its reasons in failure_tags.",
           "params": [
             {
               "name": "mapping_name",
@@ -30096,7 +30096,7 @@
         },
         {
           "name": "remove_input_modifier",
-          "description": "Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way. Indices shift after a removal, so work from the highest down, and read remaining_count as the oracle. add_input_modifier is the inverse.",
+          "description": "Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way -- and save the context; the call succeeds only when the context reaches disk. Indices shift after a removal, so work from the highest down. add_input_modifier is the inverse.",
           "params": [
             {
               "name": "ctx_path",
@@ -30117,11 +30117,11 @@
               "description": "0-based index of the modifier within Mapping.Modifiers"
             }
           ],
-          "returns": "{ applied, removed_class_name, remaining_count }"
+          "returns": "{ applied, removed_class_name, remaining_count, saved, save_error? }"
         },
         {
           "name": "remove_input_trigger",
-          "description": "Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down. Check remaining_count rather than applied.",
+          "description": "Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again -- and save the context; the call succeeds only when the context reaches disk. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down.",
           "params": [
             {
               "name": "ctx_path",
@@ -30142,11 +30142,11 @@
               "description": "0-based index of the trigger within Mapping.Triggers"
             }
           ],
-          "returns": "{ applied, removed_class_name, remaining_count }"
+          "returns": "{ applied, removed_class_name, remaining_count, saved, save_error? }"
         },
         {
           "name": "remove_mapping_from_context",
-          "description": "Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only that one mapping goes; the assets themselves survive. Confirm with the returned mapping_count or a re-read of get_input_mapping_context.",
+          "description": "Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only the first mapping of that action to that key goes; the assets themselves survive. The engine moves the context's last mapping into the freed slot, so mapping indexes (add_input_trigger, list_input_triggers) can change. The context is saved, and a removal succeeds only when it reaches disk; a mapping that is not there succeeds with removed false and already_absent true, and saves nothing.",
           "params": [
             {
               "name": "context_name",
@@ -30185,11 +30185,11 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "{ context_name, action_name, key, removed, mapping_count }"
+          "returns": "{ context_name, action_name, key, removed, already_absent, mapping_count, saved, save_error? }"
         },
         {
           "name": "set_input_action_flags",
-          "description": "Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change; verify with get_input_action.",
+          "description": "Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change, and a call that passes none is an error; the action is saved, and the call succeeds only when it reaches disk. Verify with get_input_action.",
           "params": [
             {
               "name": "action_name",
@@ -30246,11 +30246,11 @@
               "description": "When set, updates the action's ActionDescription (FText) shown in the editor."
             }
           ],
-          "returns": "{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set }"
+          "returns": "{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set, saved, save_error? }"
         },
         {
           "name": "set_input_action_trigger_behavior",
-          "description": "Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long \"hold E to interact\" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; add the trigger first with add_input_trigger and re-read with get_input_action.",
+          "description": "Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long \"hold E to interact\" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; the action is saved, and the call succeeds only when it reaches disk. Add the trigger first with add_input_trigger and re-read with get_input_action.",
           "params": [
             {
               "name": "action_path",
@@ -30307,11 +30307,11 @@
               "description": "When set, UInputTriggerTimedBase::bAffectedByTimeDilation (bool). Timed triggers only."
             }
           ],
-          "returns": "{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger }"
+          "returns": "{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger, saved, save_error? }"
         },
         {
           "name": "set_input_action_value_type",
-          "description": "Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers.",
+          "description": "Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers. The action is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "action_path",
@@ -30332,7 +30332,7 @@
               "description": "Fallback for action_path when action_path is absent."
             }
           ],
-          "returns": "{ action_name, action_path, value_type, value_type_set }"
+          "returns": "{ action_name, action_path, value_type, value_type_set, saved, save_error? }"
         },
         {
           "name": "trigger_input_action",
@@ -30385,7 +30385,7 @@
         },
         {
           "name": "unregister_input_key_mapping",
-          "description": "Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row).",
+          "description": "Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row). The call fails when the engine refuses it, with its reasons in failure_tags.",
           "params": [
             {
               "name": "mapping_name",
@@ -30651,7 +30651,7 @@
         },
         {
           "name": "interchange_reset_level_asset",
-          "description": "Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing. It does not save. Returns reset, can_reset, cvar_enabled and a note.",
+          "description": "Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing and the call fails (reset false, with the reason in note). It does not save. Returns reset, can_reset, cvar_enabled and a note.",
           "params": [
             {
               "name": "world_path",
@@ -30660,11 +30660,11 @@
               "description": "World asset path (e.g. \"/Game/Maps/MyMap\") or fully-qualified object path. Empty = current editor world."
             }
           ],
-          "returns": "{ world_path: string, reset: bool, note: string }"
+          "returns": "{ world_path: string, resolved_world_path: string, reset: bool, can_reset: bool, cvar_enabled: bool, note: string }"
         },
         {
           "name": "interchange_reset_scene_import_asset",
-          "description": "Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. reset is always true: read cvar_enabled, since the library does nothing while the Interchange.FeatureFlags.InterchangeReset CVar is 0. Use interchange_reset_level_asset for a level.",
+          "description": "Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use interchange_reset_level_asset for a level.",
           "params": [
             {
               "name": "asset_path",
@@ -30673,7 +30673,7 @@
               "description": "Asset path of the UInterchangeSceneImportAsset (e.g. \"/Game/Imports/MyScene.MyScene\")"
             }
           ],
-          "returns": "{ asset_path: string, reset: bool, note: string }"
+          "returns": "{ asset_path: string, reset: bool, cvar_enabled: bool, note: string }"
         },
         {
           "name": "interchange_save_pipeline",
@@ -35081,7 +35081,7 @@
         },
         {
           "name": "configure_plugin_setting",
-          "description": "Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. An unknown plugin gives configuration_success:false, not an error. For versioned settings use set_project_settings_value.",
+          "description": "Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.",
           "params": [
             {
               "name": "plugin_name",
@@ -35112,7 +35112,7 @@
         },
         {
           "name": "delete_asset",
-          "description": "Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Returns delete_success, asset_verified_deleted and file_still_exists; a failed delete still reports status success, so read delete_success.",
+          "description": "Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.",
           "params": [
             {
               "name": "asset_path",
@@ -35121,7 +35121,7 @@
               "description": "Asset to delete, as an object path (\"/Game/Props/SM_Box.SM_Box\") or a bare package path (\"/Game/Props/SM_Box\")"
             }
           ],
-          "returns": "{ asset_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool?, deletion_timestamp: string? }"
+          "returns": "{ asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }"
         },
         {
           "name": "duplicate_asset",
@@ -40001,7 +40001,7 @@
         },
         {
           "name": "cluster_geometry_collection",
-          "description": "Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters (\"Small\" doubles it, \"Large\" halves it, any other method keeps it) with connectivity enforced, then saves it (save result unchecked). Returns the cluster count used and the transform counts before and after.",
+          "description": "Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters (\"Small\" doubles it, \"Large\" halves it, any other method keeps it) with connectivity enforced, then saves it. Returns the cluster count used and the transform counts before and after; the call fails when no cluster was added (a collection that is not fractured into several pieces has nothing to group) or when the save fails.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -40022,7 +40022,7 @@
               "description": "Target cluster count before cluster_size_method scales it, minimum 1, default 10"
             }
           ],
-          "returns": "{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool }"
+          "returns": "{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool, saved: bool, save_error: string? }"
         },
         {
           "name": "compute_gc_proximity",
@@ -40058,7 +40058,7 @@
         },
         {
           "name": "create_geometry_collection",
-          "description": "Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; rebuilt true); an unloadable source_mesh_path is silently skipped. created is always true and the save result is not checked.",
+          "description": "Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; created false, rebuilt true). A source_mesh_path that does not load as a StaticMesh is an error, checked before anything is touched. Succeeds only when the package reaches disk; a failed save leaves the collection in memory only (saved false, save_error).",
           "params": [
             {
               "name": "package_path",
@@ -40079,7 +40079,7 @@
               "description": "Optional StaticMesh to convert and append, e.g. /Engine/BasicShapes/Cube"
             }
           ],
-          "returns": "{ asset_path: string, geometry_collection_name: string, num_materials: int, created: bool, rebuilt: bool }"
+          "returns": "{ asset_path: string, geometry_collection_name: string, num_materials: int, num_transforms: int, created: bool, rebuilt: bool, saved: bool, save_error: string? }"
         },
         {
           "name": "create_physical_material",
@@ -40145,7 +40145,7 @@
         },
         {
           "name": "fracture_geometry_collection",
-          "description": "Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it (save result unchecked). Fails when no fracture is made. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.",
+          "description": "Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it. num_fractures is the number of new pieces, measured as the transforms the fracture added; the call fails when it added none (an empty collection, or a chance_to_fracture that skipped every piece) or when the save fails. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -40184,7 +40184,7 @@
               "description": "Optional, split resulting islands, default false"
             }
           ],
-          "returns": "{ geometry_collection_path: string, num_fractures: int, num_sites: int, random_seed: int, success: bool }"
+          "returns": "{ geometry_collection_path: string, num_fractures: int, transform_count: int, num_sites: int, random_seed: int, success: bool, saved: bool, save_error: string? }"
         },
         {
           "name": "get_actor_bounds",
@@ -40409,7 +40409,7 @@
         },
         {
           "name": "plane_cut_fracture",
-          "description": "Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. success needs the save AND a transform count that did not shrink, so it is also true when nothing was cut: check new_fracture_count.",
+          "description": "Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -40442,7 +40442,7 @@
               "description": "Optional, split resulting islands, default true"
             }
           ],
-          "returns": "{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }"
+          "returns": "{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }"
         },
         {
           "name": "raycast_scene",
@@ -41444,7 +41444,7 @@
         },
         {
           "name": "slice_fracture",
-          "description": "Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. success needs the save and a transform count that did not shrink; check new_fracture_count.",
+          "description": "Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.",
           "params": [
             {
               "name": "geometry_collection_path",
@@ -41483,7 +41483,7 @@
               "description": "Width of the gap left between cut pieces, in cm (default 0)"
             }
           ],
-          "returns": "{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }"
+          "returns": "{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }"
         },
         {
           "name": "spawn_field_system_actor",
@@ -47006,7 +47006,7 @@
         },
         {
           "name": "delete_level_sequence",
-          "description": "Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Reports success even when the delete did not happen: check actually_deleted, true only when the delete reported success and the asset is gone.",
+          "description": "Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Succeeds only when actually_deleted: the delete reported success, the asset is no longer registered and its file is gone from disk (a read-only file, or one another process holds open, stays behind and fails the call).",
           "params": [
             {
               "name": "sequence_name",
@@ -47015,7 +47015,7 @@
               "description": "Asset name of the Level Sequence to delete, not its path (e.g. \"LS_Intro\")"
             }
           ],
-          "returns": "{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, actually_deleted: bool }"
+          "returns": "{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, file_still_exists: bool, actually_deleted: bool }"
         },
         {
           "name": "duplicate_keyframe",

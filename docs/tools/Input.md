@@ -6,39 +6,39 @@
 
 ## `add_input_modifier`
 
-Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index.
+Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index. The context is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `context_name` | string | yes | Short asset name of the InputMappingContext. |
 | `action_name` | string | yes | Short asset name of the InputAction. |
 | `key` | string | yes | Key name of the mapping the modifier is attached to. |
-| `modifier_type` | string | no | One of "Negate", "Swizzle", "DeadZone", "Scalar". |
+| `modifier_type` | string | yes | One of "Negate", "Swizzle", "DeadZone", "Scalar". |
 | `context_path` | string | no | Asset path of the Input Mapping Context |
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
-**Returns:** `{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count }`
+**Returns:** `{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count, saved, save_error? }`
 
 ## `add_input_trigger`
 
-Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
+Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `context_name` | string | yes | Short asset name of the InputMappingContext. |
 | `action_name` | string | yes | Short asset name of the InputAction. |
-| `key` | string | yes | Key name of the mapping the trigger is attached to. |
-| `trigger_type` | string | no | One of "Down", "Pressed", "Released", "Hold", "Tap", "Pulse", "ChordAction". |
-| `context_path` | string | no | Asset path of the Input Mapping Context. When omitted (with no key), the trigger is appended to the InputAction asset's own Triggers array instead of a context mapping. |
+| `trigger_type` | string | yes | One of "Down", "Pressed", "Released", "Hold", "Tap", "Pulse", "ChordAction". |
+| `context_name` | string | no | Short asset name of the InputMappingContext. Omit it (and context_path) to append the trigger to the InputAction asset's own Triggers array instead of one of its key mappings. |
+| `key` | string | no | Key name of the mapping the trigger is attached to: required with a context, and refused when there is no context. |
+| `context_path` | string | no | Asset path of the Input Mapping Context, instead of context_name. |
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
-**Returns:** `Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count }`
+**Returns:** `Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count, saved, save_error? }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count, saved, save_error? }`
 
 ## `add_mapping_to_context`
 
-Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the new mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. Verify the key is free first (find_free_input_key): duplicate bindings are silent.
+Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. A context that already maps that key to that action keeps its mapping (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -49,7 +49,7 @@ Bind a key to an InputAction in a saved Enhanced Input mapping context, addressi
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
-**Returns:** `{ context_name, context_path, action_name, key, index, mapping_count }`
+**Returns:** `{ context_name, context_path, action_name, key, index, mapping_count, added, already_mapped, saved, save_error? }`
 
 ## `create_force_feedback_effect`
 
@@ -64,7 +64,7 @@ Create a UForceFeedbackEffect data asset (NewObject + save).  Seeds the effect w
 
 ## `create_input_action`
 
-Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags.
+Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags. The asset is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -73,11 +73,11 @@ Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding 
 | `path` | string | no | Fallback for package_path when package_path is absent. |
 | `value_type` | string | no | Value type Bool (default), Axis1D, Axis2D, or Axis3D. |
 
-**Returns:** `{ action_name, action_path, value_type }`
+**Returns:** `{ action_name, action_path, value_type, saved, save_error? }`
 
 ## `create_input_mapping_context`
 
-Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key.
+Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key. The asset is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -85,7 +85,7 @@ Create an Enhanced Input mapping context asset (IMC_): the container that binds 
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Input). |
 | `path` | string | no | Fallback for package_path when package_path is absent. |
 
-**Returns:** `{ context_name, context_path }`
+**Returns:** `{ context_name, context_path, saved, save_error? }`
 
 ## `discover_input_types`
 
@@ -226,7 +226,7 @@ List the triggers attached to ONE key mapping inside an Enhanced Input mapping c
 
 ## `map_input_action`
 
-Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. Each call appends a mapping, even a duplicate, and reports success even if the save failed; check the key with find_free_input_key or list_all_input_mappings first.
+Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. A context that already maps that key to that action is left as it is (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key or list_all_input_mappings first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -236,11 +236,11 @@ Bind a key to an InputAction in an Enhanced Input mapping context, both by full 
 | `key` | string | no | Alias of key_name, read only when key_name is absent (same FKey names). |
 | `input_action_path` | string | no | Fallback for action_path when action_path is absent. |
 
-**Returns:** `{ context_path, action_path, key_name, mapping_count, success, message }`
+**Returns:** `{ context_path, action_path, key_name, index, mapping_count, added, already_mapped, saved, save_error? }`
 
 ## `register_input_key_mapping`
 
-Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot.
+Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot. The call fails when the engine refuses the remap, with its reasons in failure_tags.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -254,7 +254,7 @@ Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSett
 
 ## `remove_input_modifier`
 
-Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way. Indices shift after a removal, so work from the highest down, and read remaining_count as the oracle. add_input_modifier is the inverse.
+Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way -- and save the context; the call succeeds only when the context reaches disk. Indices shift after a removal, so work from the highest down. add_input_modifier is the inverse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -262,11 +262,11 @@ Delete one modifier from a key mapping in an Enhanced Input mapping context, by 
 | `mapping_index` | number | yes | 0-based index of the FEnhancedActionKeyMapping |
 | `modifier_index` | number | yes | 0-based index of the modifier within Mapping.Modifiers |
 
-**Returns:** `{ applied, removed_class_name, remaining_count }`
+**Returns:** `{ applied, removed_class_name, remaining_count, saved, save_error? }`
 
 ## `remove_input_trigger`
 
-Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down. Check remaining_count rather than applied.
+Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again -- and save the context; the call succeeds only when the context reaches disk. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -274,11 +274,11 @@ Delete one trigger from a key mapping in an Enhanced Input mapping context, by m
 | `mapping_index` | number | yes | 0-based index of the FEnhancedActionKeyMapping |
 | `trigger_index` | number | yes | 0-based index of the trigger within Mapping.Triggers |
 
-**Returns:** `{ applied, removed_class_name, remaining_count }`
+**Returns:** `{ applied, removed_class_name, remaining_count, saved, save_error? }`
 
 ## `remove_mapping_from_context`
 
-Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only that one mapping goes; the assets themselves survive. Confirm with the returned mapping_count or a re-read of get_input_mapping_context.
+Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only the first mapping of that action to that key goes; the assets themselves survive. The engine moves the context's last mapping into the freed slot, so mapping indexes (add_input_trigger, list_input_triggers) can change. The context is saved, and a removal succeeds only when it reaches disk; a mapping that is not there succeeds with removed false and already_absent true, and saves nothing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -289,11 +289,11 @@ Unbind a key from an InputAction in a saved Enhanced Input mapping context -- ho
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
-**Returns:** `{ context_name, action_name, key, removed, mapping_count }`
+**Returns:** `{ context_name, action_name, key, removed, already_absent, mapping_count, saved, save_error? }`
 
 ## `set_input_action_flags`
 
-Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change; verify with get_input_action.
+Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change, and a call that passes none is an error; the action is saved, and the call succeeds only when it reaches disk. Verify with get_input_action.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -307,11 +307,11 @@ Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consum
 | `accumulation_behavior` | string | no | When set, one of "TakeHighestAbsoluteValue" or "Cumulative". |
 | `action_description` | string | no | When set, updates the action's ActionDescription (FText) shown in the editor. |
 
-**Returns:** `{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set }`
+**Returns:** `{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set, saved, save_error? }`
 
 ## `set_input_action_trigger_behavior`
 
-Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long "hold E to interact" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; add the trigger first with add_input_trigger and re-read with get_input_action.
+Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long "hold E to interact" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; the action is saved, and the call succeeds only when it reaches disk. Add the trigger first with add_input_trigger and re-read with get_input_action.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -325,11 +325,11 @@ Tune HOW an input trigger fires on an InputAction: actuation threshold, hold tim
 | `tap_release_time` | string | no | When set, UInputTriggerTap::TapReleaseTimeThreshold (float). Tap triggers only. |
 | `affected_by_time_dilation` | string | no | When set, UInputTriggerTimedBase::bAffectedByTimeDilation (bool). Timed triggers only. |
 
-**Returns:** `{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger }`
+**Returns:** `{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger, saved, save_error? }`
 
 ## `set_input_action_value_type`
 
-Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers.
+Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers. The action is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -337,7 +337,7 @@ Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D
 | `value_type` | string | yes | One of "Bool", "Float", "Int", "Vector2D", "Vector", "Rotator", "String", etc. |
 | `action_name` | string | no | Fallback for action_path when action_path is absent. |
 
-**Returns:** `{ action_name, action_path, value_type, value_type_set }`
+**Returns:** `{ action_name, action_path, value_type, value_type_set, saved, save_error? }`
 
 ## `trigger_input_action`
 
@@ -357,7 +357,7 @@ Inject a value for an Enhanced Input action into a local player's UEnhancedInput
 
 ## `unregister_input_key_mapping`
 
-Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row).
+Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row). The call fails when the engine refuses it, with its reasons in failure_tags.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

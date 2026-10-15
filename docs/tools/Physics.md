@@ -123,7 +123,7 @@ Wipe ALL instances from an InstancedStaticMeshComponent in one call (the compone
 
 ## `cluster_geometry_collection`
 
-Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it (save result unchecked). Returns the cluster count used and the transform counts before and after.
+Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it. Returns the cluster count used and the transform counts before and after; the call fails when no cluster was added (a collection that is not fractured into several pieces has nothing to group) or when the save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -131,7 +131,7 @@ Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting
 | `cluster_size_method` | string | no | Small, Medium, or Large, default Medium |
 | `site_count` | number | no | Target cluster count before cluster_size_method scales it, minimum 1, default 10 |
 
-**Returns:** `{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool }`
+**Returns:** `{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool, saved: bool, save_error: string? }`
 
 ## `compute_gc_proximity`
 
@@ -156,7 +156,7 @@ Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset 
 
 ## `create_geometry_collection`
 
-Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; rebuilt true); an unloadable source_mesh_path is silently skipped. created is always true and the save result is not checked.
+Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; created false, rebuilt true). A source_mesh_path that does not load as a StaticMesh is an error, checked before anything is touched. Succeeds only when the package reaches disk; a failed save leaves the collection in memory only (saved false, save_error).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -164,7 +164,7 @@ Creates a UGeometryCollection asset at package_path/name, optionally filled from
 | `name` | string | yes | Name of the geometry collection asset, e.g. GC_Wall |
 | `source_mesh_path` | string | no | Optional StaticMesh to convert and append, e.g. /Engine/BasicShapes/Cube |
 
-**Returns:** `{ asset_path: string, geometry_collection_name: string, num_materials: int, created: bool, rebuilt: bool }`
+**Returns:** `{ asset_path: string, geometry_collection_name: string, num_materials: int, num_transforms: int, created: bool, rebuilt: bool, saved: bool, save_error: string? }`
 
 ## `create_physical_material`
 
@@ -194,7 +194,7 @@ Creates a UPhysicsAsset at package_path/name, generating bodies and constraints 
 
 ## `fracture_geometry_collection`
 
-Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it (save result unchecked). Fails when no fracture is made. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
+Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it. num_fractures is the number of new pieces, measured as the transforms the fracture added; the call fails when it added none (an empty collection, or a chance_to_fracture that skipped every piece) or when the save fails. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -205,7 +205,7 @@ Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, usi
 | `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 | `split_islands` | boolean | no | Optional, split resulting islands, default false |
 
-**Returns:** `{ geometry_collection_path: string, num_fractures: int, num_sites: int, random_seed: int, success: bool }`
+**Returns:** `{ geometry_collection_path: string, num_fractures: int, transform_count: int, num_sites: int, random_seed: int, success: bool, saved: bool, save_error: string? }`
 
 ## `get_actor_bounds`
 
@@ -339,7 +339,7 @@ Sphere / box / capsule overlap query against the world: "what is inside this vol
 
 ## `plane_cut_fracture`
 
-Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. success needs the save AND a transform count that did not shrink, so it is also true when nothing was cut: check new_fracture_count.
+Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -349,7 +349,7 @@ Cuts all transforms of a UGeometryCollection asset with num_planes random planes
 | `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 | `split_islands` | boolean | no | Optional, split resulting islands, default true |
 
-**Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }`
+**Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
 ## `raycast_scene`
 
@@ -676,7 +676,7 @@ Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups arr
 
 ## `slice_fracture`
 
-Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. success needs the save and a transform count that did not shrink; check new_fracture_count.
+Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -687,7 +687,7 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 | `random_seed` | number | no | Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little |
 | `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 
-**Returns:** `{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }`
+**Returns:** `{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
 ## `spawn_field_system_actor`
 
