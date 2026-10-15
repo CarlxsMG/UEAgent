@@ -41,3 +41,7 @@ after.
 UEAgent is open source under the [MIT License](https://github.com/CarlxsMG/UEAgent/blob/main/LICENSE).
 Questions go to [Discussions](https://github.com/CarlxsMG/UEAgent/discussions), and the code is on
 [GitHub](https://github.com/CarlxsMG/UEAgent).
+
+It is also listed on [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the MCP server directory:
+
+<a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent MCP server on Glama"></a>

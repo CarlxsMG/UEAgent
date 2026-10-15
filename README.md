@@ -17,6 +17,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CarlxsMG/UEAgent/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://carlxsmg.github.io/UEAgent/"><img alt="Docs" src="https://img.shields.io/badge/docs-carlxsmg.github.io%2FUEAgent-6E56CF"></a>
+  <a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img alt="UEAgent MCP server on Glama" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/score.svg"></a>
 </p>
 
 <p align="center"><b>English</b> · <a href="README.es.md">Español</a></p>
@@ -96,6 +97,10 @@ More in [Examples](docs/examples.md).
 With `?tools=compact` at the end of the URL, the server lists three tools that search, describe and
 run the rest, for clients that cap how many tools a server may list: see
 [compact tool list](docs/clients.md#compact-tool-list).
+
+UEAgent is listed on [Glama](https://glama.ai/mcp/servers/CarlxsMG/UEAgent), the MCP server directory:
+
+<a href="https://glama.ai/mcp/servers/CarlxsMG/UEAgent"><img width="380" height="200" src="https://glama.ai/mcp/servers/CarlxsMG/UEAgent/badges/card.svg" alt="UEAgent MCP server on Glama"></a>
 
 ## Claude Code skills
 
