@@ -543,9 +543,7 @@ TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params
 // MCP:get_usd_prim_info - Read one prim of a registered USD stage: name, type_name, active, parent_path, direct children_count, applied_schemas, variant_sets and an is_a map for nine common types (Xform, Mesh, Cube, Scope, Camera, four lights). A missing prim returns is_valid=false with a note, not an error. Read-only.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of the prim to read, e.g. "/World/Cube".
-//   @returns { name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool,
-//             parent_path: string, children_count: number, applied_schemas: [string],
-//             variant_sets: [string], is_a: object<string,bool> }
+//   @returns { name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool, parent_path: string, children_count: number, applied_schemas: [string], variant_sets: [string], is_a: { Xform, Mesh, Cube, Scope, Camera, DistantLight, SphereLight, RectLight, MeshLight: bool } }, or { prim_path, is_valid: false, note } when the prim does not exist
 TSharedPtr<FJsonObject> HandleGetUsdPrimInfo(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;

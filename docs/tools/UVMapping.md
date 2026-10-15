@@ -25,7 +25,7 @@ Read-only diagnostic summary for one UV channel on a static mesh: counts, lightm
 | `lod_index` | number | no | LOD index to inspect (default 0) |
 | `uv_channel` | number | no | UV channel index to inspect (default 0) |
 
-**Returns:** `{ mesh_path, lod_index, uv_channel, vertex_count, triangle_count,`
+**Returns:** `{ mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0.`
 
 ## `list_uv_channels`
 

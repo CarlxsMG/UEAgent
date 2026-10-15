@@ -184,10 +184,7 @@ TSharedPtr<FJsonObject> HandleListUVChannels(const TSharedPtr<FJsonObject>& Para
 //   @param mesh_path - Static mesh path (e.g. /Game/Meshes/Cube)
 //   @param lod_index - LOD index to inspect (default 0)
 //   @param uv_channel - UV channel index to inspect (default 0)
-//   @returns { mesh_path, lod_index, uv_channel, vertex_count, triangle_count,
-//             lightmap_coordinate_index, no_lightmap_configured, is_lightmap_hard_failing,
-//             approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands,
-//             per_triangle_iteration_error?: string }
+//   @returns { mesh_path, lod_index, uv_channel, vertex_count, triangle_count, lightmap_coordinate_index, no_lightmap_configured: bool, is_lightmap_hard_failing: bool, approx_overlap_count, in_unit_square_triangle_ratio, approx_unique_islands, per_triangle_iteration_error?: string } -- approx_unique_islands counts distinct UV positions (rounded to 4 decimals), not islands; when per_triangle_iteration_error is set the per-triangle counters stay 0.
 //
 // Per-vertex UV iteration goes through the BAKED
 // FStaticMeshVertexBuffer — same data the GPU rasterizer reads. The path is:

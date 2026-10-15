@@ -74,6 +74,14 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   with only `data_table` was refused with "missing required parameter 'table_path'". That covers 81
   required parameters of 53 tools: the schema no longer lists them as required, and a call with no
   spelling of one is refused naming all of them.
+- `codegen_command_catalog.py --check` fails on any difference between the catalog and what `--write`
+  would write: it compared only the parameters' names, types, `required` and `aliasOf`, so a
+  description or `@returns` edited without `--write` passed with the old text, and the tool reference
+  rendered from it passed too. It also fails on a `@returns` that goes on below its line or is given
+  twice, because the parser keeps one line and the last `@returns`. Nineteen tools had lost part of
+  their returns that way, among them `frame_timing`, `stop_trace`, `capture_pie_state`,
+  `spawn_box_volume` and the dry run of `consolidate_assets`; their returns are whole again and match
+  the code.
 
 ## 1.1.0 - 2026-10-14
 

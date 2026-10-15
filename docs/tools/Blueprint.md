@@ -873,7 +873,7 @@ Create or resolve the graph that IMPLEMENTS an interface member (or a parent vir
 | `blueprint_name` | string | yes | Blueprint asset name or path (must already implement the interface / inherit the virtual; implement_interface first). |
 | `function_name` | string | yes | Name of the interface or overridable function (e.g. "CanInteract", "GetInteractText"). |
 
-**Returns:** `{ blueprint_name, function_name, graph_name, kind, already_existed[, node_id] }`
+**Returns:** `{ blueprint_name, function_name, graph_name, kind: "function"|"event", already_existed: bool, node_id? } -- kind "function": graph_name is an editable function graph, ready to wire with get_graph_nodes / connect_pins; kind "event": the member returns nothing, so an event OVERRIDE node was created (or reused) in the event graph that graph_name names, and node_id is that node, to wire with connect_pins.`
 
 ## `lint_blueprint_graph`
 
@@ -956,7 +956,7 @@ Override a Blueprint interface member or parent virtual by name: an event overri
 | `position_x` | number | no | Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins. |
 | `position_y` | number | no | Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins. |
 
-**Returns:** `{ kind, created, was_already_overridden, graph_name[, node_id] }`
+**Returns:** `{ kind: "event"|"function", created: bool, was_already_overridden: bool, graph_name, node_id? } -- kind "event": an event OVERRIDE node was created or reused in the event graph that graph_name names, and node_id is that node; kind "function": graph_name is an editable function-override graph, ready to wire.`
 
 ## `recombine_blueprint_pin`
 

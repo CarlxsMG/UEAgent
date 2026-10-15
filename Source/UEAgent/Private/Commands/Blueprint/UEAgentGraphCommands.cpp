@@ -2343,10 +2343,7 @@ TSharedPtr<FJsonObject> HandleReparentBlueprint(const TSharedPtr<FJsonObject>& P
 // MCP:implement_interface_function - Create or resolve the graph that IMPLEMENTS an interface member (or a parent virtual) and return a graph_name you can immediately wire with get_graph_nodes / connect_pins / set_pin_default_value. It picks the right shape by itself: a member WITH a return value gets a real FUNCTION graph in ImplementedInterfaces[].Graphs -- where add_blueprint_function refuses it ("Function already exists") and an event node would be a useless return-less stub -- while an event-shape member (no return value) gets a genuine event OVERRIDE node in the event graph, with its node_id returned. Idempotent in both branches. override_interface_member is the same logic under a friendlier name/response.
 //   @param blueprint_name - Blueprint asset name or path (must already implement the interface / inherit the virtual; implement_interface first).
 //   @param function_name - Name of the interface or overridable function (e.g. "CanInteract", "GetInteractText").
-//   @returns { blueprint_name, function_name, graph_name, kind, already_existed[, node_id] }
-//     kind="function": an editable function graph ready to wire (get_graph_nodes / connect_pins on graph_name).
-//     kind="event": the function is event-shape (no return value) -> a real event OVERRIDE node was created (or
-//     reused) in the event graph; wire it via connect_pins using the returned node_id.
+//   @returns { blueprint_name, function_name, graph_name, kind: "function"|"event", already_existed: bool, node_id? } -- kind "function": graph_name is an editable function graph, ready to wire with get_graph_nodes / connect_pins; kind "event": the member returns nothing, so an event OVERRIDE node was created (or reused) in the event graph that graph_name names, and node_id is that node, to wire with connect_pins.
 TSharedPtr<FJsonObject> HandleImplementInterfaceFunction(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, FunctionName;
@@ -2440,9 +2437,7 @@ TSharedPtr<FJsonObject> HandleImplementInterfaceFunction(const TSharedPtr<FJsonO
 //   @param node_position - Optional [x, y] canvas position applied to a freshly created event-override node.
 //   @param position_x - Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins.
 //   @param position_y - Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins.
-//   @returns { kind, created, was_already_overridden, graph_name[, node_id] }
-//     kind="event": an event OVERRIDE node was created/reused in the event graph (node_id returned).
-//     kind="function": an editable function-override graph is ready to wire (use graph_name).
+//   @returns { kind: "event"|"function", created: bool, was_already_overridden: bool, graph_name, node_id? } -- kind "event": an event OVERRIDE node was created or reused in the event graph that graph_name names, and node_id is that node; kind "function": graph_name is an editable function-override graph, ready to wire.
 TSharedPtr<FJsonObject> HandleOverrideInterfaceMember(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintName, MemberName;
@@ -4705,6 +4700,7 @@ TSharedPtr<FJsonObject> HandleGetFunctionPins(const TSharedPtr<FJsonObject>& Par
 //   @param blueprint_name - Name (or full object path) of the Blueprint to analyze.
 //   @param graph_name - Optional single graph to analyze; when omitted, scans ALL ubergraph (event) pages + function graphs + macro graphs owned by this Blueprint. Interface-override graphs are NOT in that default set -- name one explicitly to lint it.
 //   @returns { findings: [ { kind, node_id, node_title, graph_name, why, fix_hint, pin? } ] } -- kind is one of eclipsed_interface_event, custom_event_shadowing_override, unreachable_exec_node, function_exit_without_return (this one also reports the offending exec pin in "pin"); "why" carries a best-effort pointer at the likely upstream break. No counters and no coverage flags: an empty array only means these four rules found nothing.
+//   NOTE (impl): what each rule detects, and why it is shaped the way it is:
 //     kind="eclipsed_interface_event": a non-override event node whose name matches an overridable
 //     inherited/interface function -- it is dead/eclipsed by the real override. Fix via override_interface_member.
 //     kind="custom_event_shadowing_override": a Custom Event whose name matches an overridable inherited

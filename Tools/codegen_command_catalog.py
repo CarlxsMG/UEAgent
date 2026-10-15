@@ -19,7 +19,7 @@ The script:
 Usage:
   python Tools/codegen_command_catalog.py            # report only (default)
   python Tools/codegen_command_catalog.py --write    # regenerate the JSON
-  python Tools/codegen_command_catalog.py --check    # fail if the catalog drifted from the C++
+  python Tools/codegen_command_catalog.py --check    # fail if the catalog differs from the C++ in anything
   python Tools/codegen_command_catalog.py --strict   # fail on naming drift
 """
 
@@ -266,8 +266,19 @@ ANNOTATION_OTHER_RE   = re.compile(r'^//')
 # is sourced from the C++, not from a hand-maintained table).
 ANNOTATION_DOMAIN_RE  = re.compile(r'^//\s*MCP-DOMAIN:\s*(\S+)\s*$', re.M)
 
+def _comment_indent(line: str) -> int:
+    """How many spaces separate a comment line's `//` from its text."""
+    body = line[2:]
+    return len(body) - len(body.lstrip(" "))
+
+
+def _unclosed_shape(text: str) -> bool:
+    """Whether `text` leaves a `{ ... }` or `[ ... ]` open: the shape goes on below."""
+    return text.count("{") != text.count("}") or text.count("[") != text.count("]")
+
+
 def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
-    """Find annotations whose continuation the parser silently DISCARDS.
+    """Find annotation text that does not reach the catalog in full.
 
     `description`, `@param` and `@returns` are ONE line each (all three regexes end
     in `(.+)$`). Any following `//` line that matches none of them is swallowed by
@@ -275,14 +286,19 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
     stays at 0, because there IS a description -- just cut off mid-sentence. What is
     lost is often the discriminating part ("use this one and not connect_pins because...").
 
-    Only `description` and `@param` are reported: by convention, implementation notes
-    are parked BELOW the `@returns` line, where the parser ignores them on purpose and
-    harmlessly. Reporting @returns would flag those deliberate notes as errors.
+    `description` and `@param` are reported whenever the next line goes on. `@returns`
+    is reported only when it is cut for certain, because implementation notes are parked
+    BELOW it by convention, at the tag's indentation, where the parser ignores them on
+    purpose. It is cut when its braces or brackets do not close on its line, or when the
+    next line is indented deeper than the tag (a continuation aligned under the text).
+    A second `@returns` in the same block is reported too: the parser keeps the last one,
+    so the first never reaches the catalog.
 
-    Returns: [(cmd, kind, lineno_1based, preview_of_what_is_lost)]
+    Returns: [(cmd, kind, lineno_1based, how_it_is_lost)]
     """
     out: list[tuple[str, str, int, str]] = []
     lines = text.splitlines()
+    discarded = "continues on the next line, which the parser DISCARDS -> lost"
 
     def is_continuation(nxt: str) -> bool:
         if not ANNOTATION_OTHER_RE.match(nxt):
@@ -299,6 +315,7 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
             i += 1
             continue
         cmd = m.group(1)
+        returns_at: int | None = None
         j = i
         while j < len(lines) and ANNOTATION_OTHER_RE.match(lines[j]):
             if j > i and ANNOTATION_MARKER_RE.match(lines[j]):
@@ -307,7 +324,21 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
                     else "@param" if ANNOTATION_PARAM_RE.match(lines[j]) else None)
             nxt = lines[j + 1] if j + 1 < len(lines) else ""
             if kind and is_continuation(nxt):
-                out.append((cmd, kind, j + 1, nxt.strip()[:70]))
+                out.append((cmd, kind, j + 1, f'{discarded}: "{nxt.strip()[:70]}"'))
+            rm = ANNOTATION_RETURNS_RE.match(lines[j])
+            if rm:
+                if returns_at is not None:
+                    out.append((cmd, "@returns", returns_at + 1,
+                                f"is replaced by the @returns at line {j + 1}, because the parser keeps "
+                                f'the last one -> lost: "{lines[returns_at].strip()[:70]}"'))
+                returns_at = j
+                goes_on = is_continuation(nxt)
+                if goes_on and (_unclosed_shape(rm.group(1))
+                                or _comment_indent(nxt) > _comment_indent(lines[j])):
+                    out.append((cmd, "@returns", j + 1, f'{discarded}: "{nxt.strip()[:70]}"'))
+                elif _unclosed_shape(rm.group(1)):
+                    out.append((cmd, "@returns", j + 1,
+                                "leaves a brace or bracket open, and nothing below closes it"))
             j += 1
         i = j
     return out
@@ -753,6 +784,52 @@ def load_existing_catalog(path: str) -> dict[str, dict]:
     return by_name
 
 # ---------------------------------------------------------------------------
+# Check-mode report
+# ---------------------------------------------------------------------------
+def describe_drift(want: dict, have_text: str | None) -> list[str]:
+    """Say, command by command, how the catalog on disk differs from the generated one.
+
+    Only the report: --check fails on any difference in the text, these lines just
+    tell which commands and which of their fields to look at."""
+    if have_text is None:
+        return [f"{_paths.plugin_relative(OUT_JSON)} does not exist"]
+    try:
+        have = json.loads(have_text)
+    except ValueError as e:
+        return [f"{_paths.plugin_relative(OUT_JSON)} is not valid JSON ({e})"]
+
+    def by_name(cat: dict) -> dict[str, tuple[str, dict]]:
+        return {c.get("name"): (d.get("domain"), c)
+                for d in cat.get("domains", []) for c in d.get("commands", [])}
+
+    def shape(params: list) -> list:
+        # Everything but the prose: name, jsonType, required, aliasOf and any field added later.
+        return [{k: v for k, v in p.items() if k != "description"} if isinstance(p, dict) else p
+                for p in params]
+
+    new, old = by_name(want), by_name(have)
+    groups: dict[str, list[str]] = defaultdict(list)
+    groups["missing in catalog"] = sorted(new.keys() - old.keys())
+    groups["stale in catalog"] = sorted(old.keys() - new.keys(), key=str)
+    for name in sorted(new.keys() & old.keys()):
+        (new_domain, new_cmd), (old_domain, old_cmd) = new[name], old[name]
+        if new_domain != old_domain:
+            groups["domain differs"].append(name)
+        for field in sorted(new_cmd.keys() | old_cmd.keys()):
+            a, b = new_cmd.get(field), old_cmd.get(field)
+            if a == b:
+                continue
+            if field == "params" and isinstance(a, list) and isinstance(b, list) and shape(a) == shape(b):
+                groups["param descriptions differ"].append(name)
+            elif field == "params":
+                groups["params differ (name, type, required or aliasOf)"].append(name)
+            else:
+                groups[f"{field} differs"].append(name)
+    lines = [f"{label} ({len(names)}): {', '.join(map(str, names[:10]))}{' ...' if len(names) > 10 else ''}"
+             for label, names in groups.items() if names]
+    return lines or ["every command matches; the header, the order or the formatting differs (edited by hand?)"]
+
+# ---------------------------------------------------------------------------
 # Main build
 # ---------------------------------------------------------------------------
 def build(args) -> int:
@@ -768,8 +845,8 @@ def build(args) -> int:
     annotation_source: dict[str, str] = {}            # cmd -> first file with annotation
     annotation_dup_count: dict[str, int] = {}
     needs_annotation: list[tuple[str, str, str]] = []  # (cmd, group, class) for final report
-    # Annotations whose continuation the parser silently discards; they are added to
-    # all_warnings further down, which does not exist yet at this point of the build.
+    # Annotation text the parser silently discards; it is added to all_warnings
+    # further down, which does not exist yet at this point of the build.
     truncation_warnings: list[str] = []
     for h in handler_files:
         if any(seg in h.split(os.sep) for seg in SKIP_GROUPS):
@@ -781,10 +858,9 @@ def build(args) -> int:
         group, fname = parts[0], parts[-1]
         class_name = fname.replace(".cpp", "")
         cmds, params, annotations, annotation_dups, truncated_anns = parse_handler_cpp(h)
-        for _cmd, _kind, _ln, _lost in truncated_anns:
+        for _cmd, _kind, _ln, _how in truncated_anns:
             truncation_warnings.append(
-                f"TRUNCATED ANNOTATION: `{_cmd}` {_kind} at {os.path.basename(h)}:{_ln} "
-                f"continues on the next line, which the parser DISCARDS -> lost: \"{_lost}\""
+                f"TRUNCATED ANNOTATION: `{_cmd}` {_kind} at {os.path.basename(h)}:{_ln} {_how}"
             )
         handler_cpp_index[class_name] = (group, h, cmds, params)
         for cmd in cmds:
@@ -908,9 +984,10 @@ def build(args) -> int:
     trunc_warns = [w for w in all_warnings if w.startswith("TRUNCATED ANNOTATION")]
     if trunc_warns:
         print(f"--- TRUNCATED ANNOTATIONS ({len(trunc_warns)}) ---")
-        print("  The continuation of these annotations does NOT reach the catalog: the parser")
-        print("  keeps ONE line. Fold the text into the marker / @param line.")
-        print("  (Implementation notes go BELOW the @returns line, where they are ignored harmlessly.)")
+        print("  This text does NOT reach the catalog: the parser keeps ONE line per description,")
+        print("  @param and @returns, and one @returns per command. Fold the text into that line.")
+        print("  (Implementation notes go BELOW the @returns line, at its indentation, where they are")
+        print("  ignored harmlessly.)")
         for w in trunc_warns:
             print(f"  {w}")
         print()
@@ -926,7 +1003,7 @@ def build(args) -> int:
         print("STRICT mode: failing because of naming warnings.")
         return 2
     if trunc_warns and (args.check or args.strict):
-        print(f"FAIL: {len(trunc_warns)} annotations silently lose their continuation.")
+        print(f"FAIL: {len(trunc_warns)} annotations silently lose part of their text.")
         return 2
 
     domains_list = [
@@ -942,37 +1019,25 @@ def build(args) -> int:
         "domains": domains_list,
     }
 
-    # 5b) Check mode: compare the STRUCTURAL surface (commands + params
-    # names/types/required/aliasOf) against the on-disk catalog. Descriptions are
-    # prose, so they're ignored. Non-zero exit on drift.
+    # 5b) Check mode: the catalog on disk must be exactly what --write writes, prose
+    # included. The descriptions, @param and @returns ARE the catalog for the agent that
+    # reads it, and docs/tools is rendered from this file, so a reworded annotation that
+    # was never regenerated would keep publishing the old text with every check green.
+    text = json.dumps(out, indent=2, ensure_ascii=False)
     if getattr(args, "check", False):
-        def surface(cat):
-            return {
-                c["name"]: [(p["name"], p.get("jsonType"), bool(p.get("required")), p.get("aliasOf"))
-                            for p in c.get("params", [])]
-                for d in cat.get("domains", []) for c in d.get("commands", [])
-            }
-        on_disk = json.load(open(OUT_JSON, encoding="utf-8")) if os.path.exists(OUT_JSON) else {}
-        want, have = surface(out), surface(on_disk)
-        if want != have:
-            only_new = sorted(set(want) - set(have))
-            only_old = sorted(set(have) - set(want))
-            changed = sorted(k for k in want.keys() & have.keys() if want[k] != have[k])
+        have = open(OUT_JSON, encoding="utf-8").read() if os.path.exists(OUT_JSON) else None  # any line ending
+        if have != text:
             print("CATALOG DRIFT vs C++ — re-run with --write")
-            if only_new:
-                print(f"  missing in catalog: {only_new[:10]}")
-            if only_old:
-                print(f"  stale in catalog:   {only_old[:10]}")
-            if changed:
-                print(f"  param mismatch:     {changed[:10]}")
+            for line in describe_drift(out, have):
+                print(f"  {line}")
             return 1
-        print("  catalog structurally in sync with the C++ bridge")
+        print("  catalog in sync with the C++ bridge, prose included")
         return 0
 
     # 6) Write
     if args.write:
         with open(OUT_JSON, "w", encoding="utf-8") as f:
-            json.dump(out, f, indent=2, ensure_ascii=False)
+            f.write(text)
         print(f"WROTE   : {OUT_JSON}  (the plugin's MCP server reads it at startup; mcp.http.restart reloads it)")
         # Diff report
         with open(DIFF_TXT, "w", encoding="utf-8") as f:
@@ -996,7 +1061,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--write", action="store_true", help="regenerate command_catalog.json")
     p.add_argument("--check", action="store_true",
-                   help="exit non-zero if the catalog's command/param surface drifts from the C++")
+                   help="exit non-zero if the catalog differs in anything, prose included, from what "
+                        "--write would write, or if an annotation loses part of its text")
     p.add_argument("--strict", action="store_true", help="fail on naming drift")
     a = p.parse_args()
     return build(a)

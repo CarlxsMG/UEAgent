@@ -2616,8 +2616,7 @@ namespace
 
 // MCP:get_level_blueprint - Get (or, with create=true, bring into being) the current level's Level Blueprint and return the blueprint_path that the graph tools need -- its event graph is always called "EventGraph", so add_graph_node / connect_pins can target it directly with graph_name="EventGraph". This is the entry point for level-specific scripting that does not belong in any actor. Read-only by default: with create=false and no blueprint present it answers exists:false + success:true rather than failing.
 //   @param create - Optional bool (default false). True creates the Level Blueprint if the level has none -- a mutation that dirties the map, so save_level afterwards.
-//   @returns { exists: bool, created: bool, blueprint_path: string, blueprint_name: string, event_graph: "EventGraph", level_name: string, success: bool }
-//            or, when no blueprint exists and create=false: { exists: false, success: true, note: string, level_name: string }
+//   @returns { exists: true, created: bool, blueprint_path: string, blueprint_name: string, event_graph: "EventGraph", level_name: string, success: true }, or, when no blueprint exists and create=false: { exists: false, success: true, level_name: string, note: string }
 
 TSharedPtr<FJsonObject> HandleGetLevelBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2683,8 +2682,7 @@ TSharedPtr<FJsonObject> HandleGetLevelBlueprint(const TSharedPtr<FJsonObject>& P
 
 // MCP:set_current_level - Choose which sub-level of the editor world is CURRENT, i.e. where newly spawned or pasted actors will land. Set it before spawn_actor / paste_actors when a map is split into streaming sub-levels, otherwise everything piles into whichever level happens to be active. Errors honestly if the named streaming level is not loaded/visible; already_current:true when it was already the one. Use move_actors_to_level to relocate actors that ended up in the wrong one.
 //   @param level_name - "persistent" for the persistent level, or the SHORT name of a loaded, visible streaming sub-level (not a /Game path).
-//   @returns { current_level: string, changed: bool, already_current: bool, success: bool }
-//            (honest error if the named streaming level is not loaded/visible or not found)
+//   @returns { current_level: string, changed: bool, already_current: bool, success: true } -- current_level is the level current after the call; a level that is not found, or not loaded and visible, is an error instead.
 
 TSharedPtr<FJsonObject> HandleSetCurrentLevel(const TSharedPtr<FJsonObject>& Params)
 {

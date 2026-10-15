@@ -925,10 +925,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimationAssetFromPoseSearchDatabase(const T
 
 // MCP:inspect_pose_search_schema - Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An empty finalized_channels / is_finalized:false is NOT a bug in this tool: the schema only gets finalized by AddDefaultChannels() or by a PostEditChange() on it, so a freshly authored schema reports none until something triggers that.
 //   @param schema_path - Asset path of the UPoseSearchSchema (required).
-//   @returns { schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate,
-//             permutations_time_offset, add_data_padding, inject_additional_debug_channels,
-//             draw_inject_additional_debug_channels, roled_skeletons[], channel_count, finalized_channels[],
-//             is_finalized: bool, note?: string }
+//   @returns { schema_path, sample_rate, schema_cardinality, number_of_permutations, permutations_sample_rate, permutations_time_offset, add_data_padding: bool, inject_additional_debug_channels: bool, draw_inject_additional_debug_channels: bool, roled_skeletons: [{ role_name, skeleton_path, mirror_table_path }], roled_skeleton_count, is_finalized: bool, channel_count, finalized_channels: [{ class, channel_name, weight }], note?: string } -- note only when is_finalized is false.
 //   NOTE (impl): Finalize() itself is private — external callers must go through PostEditChange (PoseSearchSchema.cpp).
 TSharedPtr<FJsonObject> HandleInspectPoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {

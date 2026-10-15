@@ -389,9 +389,7 @@ TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJson
 // ---------------------------------------------------------------------------
 // MCP:get_soundfield_submix_info - Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_format and resolved_format, encoding_settings {class, path}, and effect_chain entries {index, class, path, settings_class, settings_path} with chain_length. Adds a note when no concrete soundfield effect class is loaded.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
-//   @returns { submix_path, soundfield_encoding_format, resolved_format, encoding_settings{class,path},
-//             effect_chain[ {index,class,path,settings_class,settings_path} ],
-//             chain_length, note? }
+//   @returns { submix_path, soundfield_encoding_format, resolved_format, encoding_settings_class, encoding_settings: { class, path }, effect_chain: [{ index, class, path, settings_class, settings_path }], chain_length, note? }
 // ---------------------------------------------------------------------------
 // 4. get_soundfield_submix_info — Reader: format, encoding_settings path/class, effect_chain[]
 //    with per-effect class + path + (when present) settings class. Always headless.
@@ -452,8 +450,7 @@ TSharedPtr<FJsonObject> HandleGetSoundfieldSubmixInfo(const TSharedPtr<FJsonObje
 // MCP:remove_soundfield_effect - Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
-//   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path,
-//             chain_length, removed, already_absent?, saved, save_error?, note? }
+//   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path, removed: true, already_absent: false, chain_length, saved, save_error? } -- success only when saved; with no concrete effect class loaded the call fails with { submix_path, effect_index, removed: false, saved: false, note } and the chain is not touched.
 // ---------------------------------------------------------------------------
 // 5. remove_soundfield_effect — RemoveAt on SoundfieldEffectChain[effect_index] (soft remove:
 //    only detaches from chain, leaves the asset on disk for reversibility). Honest-gated
