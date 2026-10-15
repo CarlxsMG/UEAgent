@@ -181,7 +181,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// MCP:create_soundfield_submix - Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
+// MCP:create_soundfield_submix - Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; a new one succeeds only when it reaches disk. An existing one there is returned unchanged and not re-saved (already_existed true, saved false). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
 //   @param submix_path - Full asset path like "/Game/Audio/MySFSubmix" (required).
 //   @returns { submix_path, asset_path, soundfield_encoding_format, encoding_settings_class, created, already_existed, saved }
 // ---------------------------------------------------------------------------
@@ -201,9 +201,9 @@ TSharedPtr<FJsonObject> HandleCreateSoundfieldSubmix(const TSharedPtr<FJsonObjec
             Existing->EncodingSettings ? Existing->EncodingSettings->GetClass()->GetName() : TEXT(""));
         ResultObj->SetBoolField(TEXT("created"), false);
         ResultObj->SetBoolField(TEXT("already_existed"), true);
-        ResultObj->SetBoolField(TEXT("saved"), true);
+        ResultObj->SetBoolField(TEXT("saved"), false);
         ResultObj->SetNumberField(TEXT("effect_chain_length"), Existing->SoundfieldEffectChain.Num());
-        return ResultObj;
+        return mcp_common::MakeOkReply(ResultObj);
     }
 
     // Create package + asset
@@ -228,10 +228,6 @@ TSharedPtr<FJsonObject> HandleCreateSoundfieldSubmix(const TSharedPtr<FJsonObjec
     // Save
     FString SaveError;
     const bool bSaved = mcp_common::SaveAssetPackage(NewSubmix->GetOutermost(), NewSubmix, SaveError);
-    if (!bSaved)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[MCP] create_soundfield_submix: SavePackage failed: %s"), *SaveError);
-    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("submix_path"), NewSubmix->GetPathName());
@@ -239,13 +235,12 @@ TSharedPtr<FJsonObject> HandleCreateSoundfieldSubmix(const TSharedPtr<FJsonObjec
     ResultObj->SetStringField(TEXT("encoding_settings_class"), TEXT(""));
     ResultObj->SetBoolField(TEXT("created"), true);
     ResultObj->SetBoolField(TEXT("already_existed"), false);
-    mcp_common::AddSaveOutcome(ResultObj, bSaved, SaveError);
     ResultObj->SetNumberField(TEXT("effect_chain_length"), NewSubmix->SoundfieldEffectChain.Num());
-    return ResultObj;
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_soundfield_submix"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
-// MCP:add_soundfield_effect_to_submix - Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.
+// MCP:add_soundfield_effect_to_submix - Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; an addition succeeds only when the submix reaches disk. A class already in the chain is skipped (added false, already_present true, not saved). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes and the call fails, with added false and a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_class_name - Full class path of a concrete USoundfieldEffectBase subclass, e.g. "/Script/MyAudioPlugin.MySoundfieldEffect"; it is looked up with no outer, so a bare class name does not resolve
 //   @returns { submix_path, effect_path, effect_class, chain_length, added, already_present, saved, note? }
@@ -271,7 +266,8 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
         ResultObj->SetBoolField(TEXT("already_present"), false);
         ResultObj->SetBoolField(TEXT("saved"), false);
         ResultObj->SetStringField(TEXT("note"), SoundfieldHonestGateNote());
-        return ResultObj;
+        return mcp_common::MakeOutcomeReply(ResultObj, false,
+            TEXT("add_soundfield_effect_to_submix: no concrete soundfield effect class is loaded, so nothing was added (see note)."));
     }
 
     USoundfieldSubmix* Submix = nullptr;
@@ -305,7 +301,7 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
         ResultObj->SetBoolField(TEXT("already_present"), true);
         ResultObj->SetBoolField(TEXT("saved"), false);
         ResultObj->SetNumberField(TEXT("chain_length"), Submix->SoundfieldEffectChain.Num());
-        return ResultObj;
+        return mcp_common::MakeOkReply(ResultObj);
     }
 
     // Create the effect asset inside the submix's package so it lives with the submix.
@@ -333,9 +329,8 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
     ResultObj->SetStringField(TEXT("effect_class"), EffectClass->GetName());
     ResultObj->SetBoolField(TEXT("added"), true);
     ResultObj->SetBoolField(TEXT("already_present"), false);
-    mcp_common::AddSaveOutcome(ResultObj, bSaved, SaveError);
     ResultObj->SetNumberField(TEXT("chain_length"), Submix->SoundfieldEffectChain.Num());
-    return ResultObj;
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_soundfield_effect_to_submix"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -454,11 +449,11 @@ TSharedPtr<FJsonObject> HandleGetSoundfieldSubmixInfo(const TSharedPtr<FJsonObje
 }
 
 // ---------------------------------------------------------------------------
-// MCP:remove_soundfield_effect - Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.
+// MCP:remove_soundfield_effect - Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
 //   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path,
-//             chain_length, removed, already_absent, saved, note? }
+//             chain_length, removed, already_absent?, saved, save_error?, note? }
 // ---------------------------------------------------------------------------
 // 5. remove_soundfield_effect — RemoveAt on SoundfieldEffectChain[effect_index] (soft remove:
 //    only detaches from chain, leaves the asset on disk for reversibility). Honest-gated
@@ -475,10 +470,10 @@ TSharedPtr<FJsonObject> HandleRemoveSoundfieldEffect(const TSharedPtr<FJsonObjec
         ResultObj->SetStringField(TEXT("submix_path"), SubmixPath);
         ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
         ResultObj->SetBoolField(TEXT("removed"), false);
-        ResultObj->SetBoolField(TEXT("already_absent"), true);
         ResultObj->SetBoolField(TEXT("saved"), false);
         ResultObj->SetStringField(TEXT("note"), SoundfieldHonestGateNote());
-        return ResultObj;
+        return mcp_common::MakeOutcomeReply(ResultObj, false,
+            TEXT("remove_soundfield_effect: no concrete soundfield effect class is loaded, so the chain was not touched (see note)."));
     }
 
     USoundfieldSubmix* Submix = nullptr;
@@ -509,9 +504,8 @@ TSharedPtr<FJsonObject> HandleRemoveSoundfieldEffect(const TSharedPtr<FJsonObjec
     ResultObj->SetStringField(TEXT("removed_effect_path"), RemovedPath);
     ResultObj->SetBoolField(TEXT("removed"), true);
     ResultObj->SetBoolField(TEXT("already_absent"), false);
-    mcp_common::AddSaveOutcome(ResultObj, bSaved, SaveError);
     ResultObj->SetNumberField(TEXT("chain_length"), Submix->SoundfieldEffectChain.Num());
-    return ResultObj;
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_soundfield_effect"), SaveError);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

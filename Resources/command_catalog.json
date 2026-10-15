@@ -9499,7 +9499,7 @@
         },
         {
           "name": "add_soundfield_effect_to_submix",
-          "description": "Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.",
+          "description": "Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; an addition succeeds only when the submix reaches disk. A class already in the chain is skipped (added false, already_present true, not saved). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes and the call fails, with added false and a note.",
           "params": [
             {
               "name": "submix_path",
@@ -10129,7 +10129,7 @@
         },
         {
           "name": "create_soundfield_submix",
-          "description": "Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.",
+          "description": "Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; a new one succeeds only when it reaches disk. An existing one there is returned unchanged and not re-saved (already_existed true, saved false). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.",
           "params": [
             {
               "name": "submix_path",
@@ -10972,7 +10972,7 @@
         },
         {
           "name": "remove_soundfield_effect",
-          "description": "Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.",
+          "description": "Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.",
           "params": [
             {
               "name": "submix_path",
@@ -29612,7 +29612,7 @@
       "commands": [
         {
           "name": "add_input_modifier",
-          "description": "Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index.",
+          "description": "Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index. The context is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "context_name",
@@ -29657,11 +29657,11 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count }"
+          "returns": "{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count, saved, save_error? }"
         },
         {
           "name": "add_input_trigger",
-          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
+          "description": "Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.",
           "params": [
             {
               "name": "context_name",
@@ -29706,7 +29706,7 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count }"
+          "returns": "Context target: { context_name, action_name, key, trigger_type, trigger_class, index, trigger_count, saved, save_error? }; Action target: { action_name, action_path, trigger_type, trigger_class, index, trigger_count, saved, save_error? }"
         },
         {
           "name": "add_mapping_to_context",
@@ -29772,7 +29772,7 @@
         },
         {
           "name": "create_input_action",
-          "description": "Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags.",
+          "description": "Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags. The asset is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "action_name",
@@ -29799,11 +29799,11 @@
               "description": "Value type Bool (default), Axis1D, Axis2D, or Axis3D."
             }
           ],
-          "returns": "{ action_name, action_path, value_type }"
+          "returns": "{ action_name, action_path, value_type, saved, save_error? }"
         },
         {
           "name": "create_input_mapping_context",
-          "description": "Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key.",
+          "description": "Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key. The asset is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "context_name",
@@ -29824,7 +29824,7 @@
               "description": "Fallback for package_path when package_path is absent."
             }
           ],
-          "returns": "{ context_name, context_path }"
+          "returns": "{ context_name, context_path, saved, save_error? }"
         },
         {
           "name": "discover_input_types",
@@ -30059,7 +30059,7 @@
         },
         {
           "name": "register_input_key_mapping",
-          "description": "Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot.",
+          "description": "Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot. The call fails when the engine refuses the remap, with its reasons in failure_tags.",
           "params": [
             {
               "name": "mapping_name",
@@ -30096,7 +30096,7 @@
         },
         {
           "name": "remove_input_modifier",
-          "description": "Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way. Indices shift after a removal, so work from the highest down, and read remaining_count as the oracle. add_input_modifier is the inverse.",
+          "description": "Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way -- and save the context; the call succeeds only when the context reaches disk. Indices shift after a removal, so work from the highest down. add_input_modifier is the inverse.",
           "params": [
             {
               "name": "ctx_path",
@@ -30117,11 +30117,11 @@
               "description": "0-based index of the modifier within Mapping.Modifiers"
             }
           ],
-          "returns": "{ applied, removed_class_name, remaining_count }"
+          "returns": "{ applied, removed_class_name, remaining_count, saved, save_error? }"
         },
         {
           "name": "remove_input_trigger",
-          "description": "Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down. Check remaining_count rather than applied.",
+          "description": "Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again -- and save the context; the call succeeds only when the context reaches disk. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down.",
           "params": [
             {
               "name": "ctx_path",
@@ -30142,11 +30142,11 @@
               "description": "0-based index of the trigger within Mapping.Triggers"
             }
           ],
-          "returns": "{ applied, removed_class_name, remaining_count }"
+          "returns": "{ applied, removed_class_name, remaining_count, saved, save_error? }"
         },
         {
           "name": "remove_mapping_from_context",
-          "description": "Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only that one mapping goes; the assets themselves survive. Confirm with the returned mapping_count or a re-read of get_input_mapping_context.",
+          "description": "Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only the first mapping of that action to that key goes; the assets themselves survive. The engine moves the context's last mapping into the freed slot, so mapping indexes (add_input_trigger, list_input_triggers) can change. The context is saved, and a removal succeeds only when it reaches disk; a mapping that is not there succeeds with removed false and already_absent true, and saves nothing.",
           "params": [
             {
               "name": "context_name",
@@ -30185,11 +30185,11 @@
               "description": "Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)"
             }
           ],
-          "returns": "{ context_name, action_name, key, removed, mapping_count }"
+          "returns": "{ context_name, action_name, key, removed, already_absent, mapping_count, saved, save_error? }"
         },
         {
           "name": "set_input_action_flags",
-          "description": "Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change; verify with get_input_action.",
+          "description": "Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change, and a call that passes none is an error; the action is saved, and the call succeeds only when it reaches disk. Verify with get_input_action.",
           "params": [
             {
               "name": "action_name",
@@ -30246,11 +30246,11 @@
               "description": "When set, updates the action's ActionDescription (FText) shown in the editor."
             }
           ],
-          "returns": "{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set }"
+          "returns": "{ action_name, action_path, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, accumulation_behavior, action_description, flags_set, saved, save_error? }"
         },
         {
           "name": "set_input_action_trigger_behavior",
-          "description": "Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long \"hold E to interact\" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; add the trigger first with add_input_trigger and re-read with get_input_action.",
+          "description": "Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long \"hold E to interact\" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; the action is saved, and the call succeeds only when it reaches disk. Add the trigger first with add_input_trigger and re-read with get_input_action.",
           "params": [
             {
               "name": "action_path",
@@ -30307,11 +30307,11 @@
               "description": "When set, UInputTriggerTimedBase::bAffectedByTimeDilation (bool). Timed triggers only."
             }
           ],
-          "returns": "{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger }"
+          "returns": "{ action_path, action_name, trigger_index, trigger_class, properties_set, trigger, saved, save_error? }"
         },
         {
           "name": "set_input_action_value_type",
-          "description": "Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers.",
+          "description": "Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers. The action is saved, and the call succeeds only when it reaches disk.",
           "params": [
             {
               "name": "action_path",
@@ -30332,7 +30332,7 @@
               "description": "Fallback for action_path when action_path is absent."
             }
           ],
-          "returns": "{ action_name, action_path, value_type, value_type_set }"
+          "returns": "{ action_name, action_path, value_type, value_type_set, saved, save_error? }"
         },
         {
           "name": "trigger_input_action",
@@ -30385,7 +30385,7 @@
         },
         {
           "name": "unregister_input_key_mapping",
-          "description": "Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row).",
+          "description": "Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row). The call fails when the engine refuses it, with its reasons in failure_tags.",
           "params": [
             {
               "name": "mapping_name",

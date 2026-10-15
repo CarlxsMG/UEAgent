@@ -70,7 +70,7 @@ Construct a USoundNode inside a Sound Cue and return its node_id
 
 ## `add_soundfield_effect_to_submix`
 
-Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.
+Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; an addition succeeds only when the submix reaches disk. A class already in the chain is skipped (added false, already_present true, not saved). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes and the call fails, with added false and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -363,7 +363,7 @@ Create an empty USoundSubmix asset at package_path/name, or load the one already
 
 ## `create_soundfield_submix`
 
-Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
+Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; a new one succeeds only when it reaches disk. An existing one there is returned unchanged and not re-saved (already_existed true, saved false). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -863,7 +863,7 @@ Removes every input of a USoundModulationPatch asset whose bus has the same asse
 
 ## `remove_soundfield_effect`
 
-Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.
+Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package, an out-of-range index is an error, and a removal succeeds only when the submix reaches disk. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes and the call fails, with removed false and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
