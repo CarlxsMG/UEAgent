@@ -339,15 +339,15 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
 }
 
 // ---------------------------------------------------------------------------
-// MCP:set_soundfield_effect_settings - Validate a soundfield effect slot but never write its settings (always a no-op): USoundfieldEffectBase::GetSettingsClass is protected, so the settings class cannot be found. An out-of-range effect_index is an error; otherwise returns applied_count:0, saved:false and a note.
+// MCP:set_soundfield_effect_settings - Cannot write soundfield effect settings in this engine version, so every call fails and nothing is changed: USoundfieldEffectBase::GetSettingsClass is protected, so the settings class an effect needs cannot be found. The submix and the effect slot are still checked first (a missing submix or an out-of-range effect_index gets its own error); a valid slot fails with applied_count 0 and a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
-//   @param settings - JSON object {property_name: value, ...}; currently ignored, since no setting is ever written
-//   @returns { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note? }
+//   @param settings - JSON object {property_name: value, ...}; validated as an object but never written
+//   @returns { success: false, error, data: { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note } }
 // ---------------------------------------------------------------------------
-// 3. set_soundfield_effect_settings — Resolve concrete Settings class via Effect->GetSettingsClass()
-//    (PURE_VIRTUAL; requires concrete effect). NewObject, reflection-write via FProperty
-//    matching by name, assign to Effect->Settings, save. Honest-gated.
+// 3. set_soundfield_effect_settings — would resolve the concrete Settings class via
+//    Effect->GetSettingsClass() (protected), NewObject it, reflection-write the fields and save.
+//    Until that class can be found, the command validates the slot and fails.
 TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJsonObject>& Params)
 {
     FString SubmixPath;
@@ -359,17 +359,23 @@ TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJson
         return mcp_common::MakeErrorReply(
             TEXT("Missing or invalid 'settings' object (must be {property_name: value, ...})"));
     }
-    const TSharedPtr<FJsonObject>& SettingsObj = *SettingsObjPtr;
 
-    // Honest-gate: requires USoundfieldEffectBase::GetSettingsClass() to discover the concrete
-    // Settings class for the effect at chain[effect_index]. That method is PROTECTED in
-    // ISoundfieldFormat.h, with no UFUNCTION() wrapper, so we cannot call it from outside
-    // the class hierarchy. Even if a concrete subclass exists (third-party plugin), we have
-    // no way to know which Settings class to instantiate.
-    //
-    // This command stays honest-gated until UE exposes GetSettingsClass publicly
-    // (or moves it to UFUNCTION()). Wire shape is preserved so callers see a structured
-    // response with submix_path + effect_index + applied_count=0 + a clear `note`.
+    // The submix must resolve and effect_index must be in range: a wrong slot gets its own error
+    // rather than the API gate below.
+    USoundfieldSubmix* Submix = nullptr;
+    if (TSharedPtr<FJsonObject> Error = Soundfield_LoadSubmix(SubmixPath, Submix)) { return Error; }
+    if (!Submix->SoundfieldEffectChain.IsValidIndex(EffectIndex))
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("effect_index %d out of range (chain length %d)"),
+                EffectIndex, Submix->SoundfieldEffectChain.Num()));
+    }
+
+    // The gate: writing the settings needs USoundfieldEffectBase::GetSettingsClass() to find the
+    // concrete Settings class of the effect at chain[effect_index]. That method is PROTECTED in
+    // ISoundfieldFormat.h, with no UFUNCTION() wrapper, so it cannot be called from outside the
+    // class hierarchy, and nothing else says which Settings class to instantiate. Nothing is
+    // written, so the call fails; the payload keeps the shape a working setter would answer with.
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("submix_path"), SubmixPath);
     ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
@@ -378,24 +384,11 @@ TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJson
     ResultObj->SetArrayField(TEXT("applied_fields"), EmptyArr);
     ResultObj->SetBoolField(TEXT("saved"), false);
     ResultObj->SetStringField(TEXT("settings_class"), TEXT(""));
-    // Validate params shape: at minimum, submix must resolve and effect_index must be in range.
-    // This gives the caller a meaningful error if the index itself is wrong (vs the API gate).
-    USoundfieldSubmix* Submix = mcp_common::ResolveAsset<USoundfieldSubmix>(SubmixPath);
-    if (Submix)
-    {
-        if (!Submix->SoundfieldEffectChain.IsValidIndex(EffectIndex))
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("effect_index %d out of range (chain length %d)"),
-                    EffectIndex, Submix->SoundfieldEffectChain.Num()));
-        }
-    }
     ResultObj->SetStringField(TEXT("note"),
-        TEXT("set_soundfield_effect_settings is honest-gated: USoundfieldEffectBase::GetSettingsClass ")
-        TEXT("is protected (ISoundfieldFormat.h) with no public accessor and no UFUNCTION wrapper. ")
-        TEXT("Until the engine exposes a public path to discover the Settings class for a concrete effect, ")
-        TEXT("this cmd cannot apply settings. Wire-level callers should treat this response as a no-op with explanation."));
-    return ResultObj;
+        TEXT("USoundfieldEffectBase::GetSettingsClass is protected (ISoundfieldFormat.h), with no public accessor ")
+        TEXT("and no UFUNCTION wrapper, so the Settings class of the effect cannot be found and no setting is written."));
+    return mcp_common::MakeOutcomeReply(ResultObj, false,
+        TEXT("set_soundfield_effect_settings cannot write soundfield effect settings in this engine version; nothing was changed (see note)."));
 }
 
 // ---------------------------------------------------------------------------

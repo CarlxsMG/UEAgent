@@ -871,9 +871,9 @@ TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
     return Report;
 }
 
-// MCP:delete_asset - Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Returns delete_success, asset_verified_deleted and file_still_exists; a failed delete still reports status success, so read delete_success.
+// MCP:delete_asset - Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.
 //   @param asset_path - Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box")
-//   @returns { asset_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool?, deletion_timestamp: string? }
+//   @returns { asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }
 
 TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -962,19 +962,35 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
     {
         Report->SetStringField(TEXT("delete_message"), TEXT("Failed to delete asset (ForceDeleteObjects returned 0)"));
         Report->SetBoolField(TEXT("asset_verified_deleted"), false);
-        Report->SetBoolField(TEXT("file_still_exists"), true);
-        return Report;
+        Report->SetBoolField(TEXT("file_still_exists"), FPackageName::DoesPackageExist(PackageName));
+        return mcp_common::MakeOutcomeReply(Report, false, FString::Printf(
+            TEXT("delete_asset: the engine deleted nothing (ForceDeleteObjects returned 0), so '%s' is still there."), *AssetPath));
     }
 
     // Verified without the registry: the package file must be gone, and the object must no
-    // longer be findable in memory.
+    // longer be findable in memory. ForceDeleteObjects counts the purged objects whether or not
+    // the file could be removed, so either one left behind is a failed delete: the file brings
+    // the asset back when the editor restarts, and a loaded object can be saved back to disk.
     const bool bFileStillExists = FPackageName::DoesPackageExist(PackageName);
     const bool bObjectStillLoaded = StaticFindObject(UObject::StaticClass(), nullptr, *ResolvedObjectPath) != nullptr;
-    Report->SetStringField(TEXT("delete_message"), TEXT("Asset deletion completed successfully"));
+    FString Failure;
+    if (bFileStillExists)
+    {
+        Failure = FString::Printf(TEXT("delete_asset: the object was purged but its file is still on disk (read-only, or held open by another ")
+            TEXT("process), so '%s' comes back when the editor restarts. Free the file and delete it again."), *AssetPath);
+    }
+    else if (bObjectStillLoaded)
+    {
+        Failure = FString::Printf(TEXT("delete_asset: the file is gone but the object is still loaded (something keeps it alive, such as an ")
+            TEXT("open asset editor), so a later save can write '%s' back."), *AssetPath);
+    }
+    Report->SetStringField(TEXT("delete_message"), Failure.IsEmpty()
+        ? TEXT("Asset deleted: its file is gone and the object is no longer loaded")
+        : TEXT("Asset only partly deleted"));
     Report->SetBoolField(TEXT("asset_verified_deleted"), !bObjectStillLoaded);
     Report->SetBoolField(TEXT("file_still_exists"), bFileStillExists);
     Report->SetStringField(TEXT("deletion_timestamp"), FDateTime::Now().ToString());
-    return Report;
+    return mcp_common::MakeOutcomeReply(Report, Failure.IsEmpty(), Failure);
 }
 
 // Plugin status and settings
@@ -1025,7 +1041,7 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
     return Status;
 }
 
-// MCP:configure_plugin_setting - Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. An unknown plugin gives configuration_success:false, not an error. For versioned settings use set_project_settings_value.
+// MCP:configure_plugin_setting - Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.
 //   @param plugin_name - Name of the plugin to configure
 //   @param setting_name - Name of the plugin setting to configure
 //   @param setting_value - Value to set for the plugin setting
@@ -1049,12 +1065,12 @@ TSharedPtr<FJsonObject> HandleConfigurePluginSetting(const TSharedPtr<FJsonObjec
     const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginId);
     if (!Plugin.IsValid())
     {
-        // Reported in the payload, not as an error.
         Outcome->SetBoolField(TEXT("configuration_success"), false);
         Outcome->SetStringField(TEXT("configuration_message"), TEXT("Plugin not found"));
         Outcome->SetStringField(TEXT("plugin_path"), TEXT("N/A"));
         Outcome->SetStringField(TEXT("plugin_status"), TEXT("Not Found"));
-        return Outcome;
+        return mcp_common::MakeOutcomeReply(Outcome, false, FString::Printf(
+            TEXT("configure_plugin_setting: no plugin named '%s' is known to the plugin manager; nothing was written."), *PluginId));
     }
     UEAgentManagementCommandsImpl::AddPluginIdentity(Outcome, *Plugin);
 
@@ -1101,7 +1117,8 @@ TSharedPtr<FJsonObject> HandleConfigurePluginSetting(const TSharedPtr<FJsonObjec
         : TEXT("Failed to configure plugin setting"));
     Outcome->SetStringField(TEXT("config_file_used"), ConfigFileUsed);
     Outcome->SetStringField(TEXT("configuration_timestamp"), FDateTime::Now().ToString());
-    return Outcome;
+    return mcp_common::MakeOutcomeReply(Outcome, bApplied,
+        bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("configure_plugin_setting"), TEXT("configuration_success")));
 }
 
 // ==========================================================================

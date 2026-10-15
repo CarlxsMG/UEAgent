@@ -454,13 +454,13 @@ Create a new Level Sequence asset with a specified duration and frame rate
 
 ## `delete_level_sequence`
 
-Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Reports success even when the delete did not happen: check actually_deleted, true only when the delete reported success and the asset is gone.
+Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Succeeds only when actually_deleted: the delete reported success, the asset is no longer registered and its file is gone from disk (a read-only file, or one another process holds open, stays behind and fails the call).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Asset name of the Level Sequence to delete, not its path (e.g. "LS_Intro") |
 
-**Returns:** `{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, actually_deleted: bool }`
+**Returns:** `{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, file_still_exists: bool, actually_deleted: bool }`
 
 ## `duplicate_keyframe`
 

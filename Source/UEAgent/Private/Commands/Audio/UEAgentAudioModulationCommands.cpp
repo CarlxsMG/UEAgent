@@ -537,7 +537,7 @@ TSharedPtr<FJsonObject> HandleSetControlBusMixStageValue(
 // ---------------------------------------------------------------------------
 // remove_bus_from_mix
 // ---------------------------------------------------------------------------
-// MCP:remove_bus_from_mix - Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix. When the bus is not in the mix nothing is saved and the call reports failure, with already_absent true in its data. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
+// MCP:remove_bus_from_mix - Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix; a removal succeeds only when the mix reaches disk. A bus that is not in the mix is already the state asked for: the call succeeds with removed false and already_absent true, and saves nothing. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @param bus_path - Asset path to the USoundControlBus to remove from the mix
 //   @returns { mix_path, bus_path, removed, already_absent, stage_count, saved }
@@ -562,20 +562,21 @@ TSharedPtr<FJsonObject> HandleRemoveBusFromMix(
 	const int32 Removed = Mix->MixStages.RemoveAll(
 		[&](const FSoundControlBusMixStage& Stage) { return Stage.Bus == Bus; });
 
-	// Idempotency: a bus that was never in the mix is reported as already-absent
-	// without re-saving (nothing changed).
-	bool bSaved = false;
-	if (Removed > 0)
-	{
-		bSaved = mcp_common::SaveAssetPackage(Mix->GetPackage(), Mix);
-	}
-
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("mix_path"), Mix->GetPathName());
 	Data->SetStringField(TEXT("bus_path"), Bus->GetPathName());
 	Data->SetBoolField(TEXT("removed"), Removed > 0);
 	Data->SetBoolField(TEXT("already_absent"), Removed == 0);
 	Data->SetNumberField(TEXT("stage_count"), Mix->MixStages.Num());
+
+	// Idempotency: a bus that was never in the mix is already the state asked for, so nothing
+	// changed and nothing is saved.
+	if (Removed == 0)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+	const bool bSaved = mcp_common::SaveAssetPackage(Mix->GetPackage(), Mix);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_bus_from_mix"));
 }
 
@@ -709,7 +710,7 @@ TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 // ---------------------------------------------------------------------------
 // remove_modulation_input_from_patch
 // ---------------------------------------------------------------------------
-// MCP:remove_modulation_input_from_patch - Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch. When no input matches nothing is saved and the call reports failure, with already_removed true in its data. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
+// MCP:remove_modulation_input_from_patch - Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param bus_path - Asset path to the USoundControlBus whose input is removed
 //   @returns { patch_path, bus_path, removed, already_removed, input_count, saved }
@@ -737,18 +738,21 @@ TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 			return In.Bus && In.Bus->GetFName() == BusName;
 		});
 
-	bool bSaved = false;
-	if (Removed > 0)
-	{
-		bSaved = AudioMod_ModifyDirtyAndSave(Patch);
-	}
-
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("patch_path"), Patch->GetPathName());
 	Data->SetStringField(TEXT("bus_path"), Bus->GetPathName());
 	Data->SetBoolField(TEXT("removed"), Removed > 0);
 	Data->SetBoolField(TEXT("already_removed"), Removed == 0);
 	Data->SetNumberField(TEXT("input_count"), Patch->PatchSettings.Inputs.Num());
+
+	// Idempotency: no input on that bus is already the state asked for, so nothing changed and
+	// nothing is saved.
+	if (Removed == 0)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+	const bool bSaved = AudioMod_ModifyDirtyAndSave(Patch);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_modulation_input_from_patch"));
 }
 

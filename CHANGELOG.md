@@ -45,6 +45,18 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 - In an alias chain, the catalog keeps `required` on the first spelling the annotation documents. The
   `data_table` alias of three DataTable tools is documented, and `set_attach_section_rules` requires
   `sequence_name`, its documented spelling, instead of `sequence_path`.
+- 27 tools whose reply did not match what the call did now answer with what happened. Failures that
+  answered success: `delete_asset` and `delete_level_sequence` fail when the file stays on disk (it
+  brings the asset back on restart); the Chaos cut, fracture and cluster tools fail when they add
+  nothing, and count the pieces they add (they reported the index of the first one); the tools that
+  save fail when the save fails (`create_geometry_collection`, `fracture_geometry_collection`,
+  `cluster_geometry_collection`, `map_input_action`, `add_mapping_to_context`,
+  `set_meta_sound_node_property`); `configure_plugin_setting`, `set_soundfield_effect_settings` and the
+  two Interchange resets fail when nothing was written; `export_assets` and `migrate_assets` measure
+  what they wrote, asset by asset. Calls that find the work already done now succeed instead of
+  failing: removing a bus or input that is not there, and mapping a key that is already mapped (which
+  no longer appends a duplicate). The GAS `create_*` tools say `created: false` for a Blueprint that
+  already existed and refuse one of another class at that path.
 
 ## 1.1.0 - 2026-10-14
 

@@ -38,7 +38,7 @@ Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released 
 
 ## `add_mapping_to_context`
 
-Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the new mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. Verify the key is free first (find_free_input_key): duplicate bindings are silent.
+Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. A context that already maps that key to that action keeps its mapping (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -49,7 +49,7 @@ Bind a key to an InputAction in a saved Enhanced Input mapping context, addressi
 | `action_path` | string | no | Asset path of the Input Action |
 | `key_name` | string | no | Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom) |
 
-**Returns:** `{ context_name, context_path, action_name, key, index, mapping_count }`
+**Returns:** `{ context_name, context_path, action_name, key, index, mapping_count, added, already_mapped, saved, save_error? }`
 
 ## `create_force_feedback_effect`
 
@@ -226,7 +226,7 @@ List the triggers attached to ONE key mapping inside an Enhanced Input mapping c
 
 ## `map_input_action`
 
-Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. Each call appends a mapping, even a duplicate, and reports success even if the save failed; check the key with find_free_input_key or list_all_input_mappings first.
+Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. A context that already maps that key to that action is left as it is (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key or list_all_input_mappings first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -236,7 +236,7 @@ Bind a key to an InputAction in an Enhanced Input mapping context, both by full 
 | `key` | string | no | Alias of key_name, read only when key_name is absent (same FKey names). |
 | `input_action_path` | string | no | Fallback for action_path when action_path is absent. |
 
-**Returns:** `{ context_path, action_path, key_name, mapping_count, success, message }`
+**Returns:** `{ context_path, action_path, key_name, index, mapping_count, added, already_mapped, saved, save_error? }`
 
 ## `register_input_key_mapping`
 

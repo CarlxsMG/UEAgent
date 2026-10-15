@@ -808,7 +808,7 @@ Plays a sound asset at a specific world location without requiring an audio comp
 
 ## `remove_bus_from_mix`
 
-Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix. When the bus is not in the mix nothing is saved and the call reports failure, with already_absent true in its data. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
+Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix; a removal succeeds only when the mix reaches disk. A bus that is not in the mix is already the state asked for: the call succeeds with removed false and already_absent true, and saves nothing. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -852,7 +852,7 @@ Removes a node from a MetaSound Source graph by its node_id GUID (inverse of met
 
 ## `remove_modulation_input_from_patch`
 
-Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch. When no input matches nothing is saved and the call reports failure, with already_removed true in its data. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
+Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch; a removal succeeds only when the patch reaches disk. When no input matches, the patch is already the state asked for: the call succeeds with removed false and already_removed true, and saves nothing. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -954,7 +954,7 @@ Pushes a runtime value into a USoundControlBus through a global bus mix of the e
 
 ## `set_meta_sound_node_property`
 
-Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves, and the reply succeeds even when the save fails: check saved.
+Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves. Succeeds only when the asset reaches disk; a failed save leaves the value in memory only (saved false, save_error).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -963,7 +963,7 @@ Write one field of a MetaSound Source node's Configuration struct by reflection,
 | `property` | string | yes | FProperty name on the Configuration struct. |
 | `value` | any | yes | New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true"). |
 
-**Returns:** `{ metasound_path, node_id, property, set, value_changed, saved }`
+**Returns:** `{ metasound_path, node_id, property, set, value_changed, new_value?, saved, save_error? }`
 
 ## `set_metasound_preset_parameter`
 
@@ -1179,15 +1179,15 @@ Author USoundWave tunables on an imported sound wave via reflection (partial mer
 
 ## `set_soundfield_effect_settings`
 
-Validate a soundfield effect slot but never write its settings (always a no-op): USoundfieldEffectBase::GetSettingsClass is protected, so the settings class cannot be found. An out-of-range effect_index is an error; otherwise returns applied_count:0, saved:false and a note.
+Cannot write soundfield effect settings in this engine version, so every call fails and nothing is changed: USoundfieldEffectBase::GetSettingsClass is protected, so the settings class an effect needs cannot be found. The submix and the effect slot are still checked first (a missing submix or an out-of-range effect_index gets its own error); a valid slot fails with applied_count 0 and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
 | `effect_index` | number | yes | Zero-based index into SoundfieldEffectChain (required). |
-| `settings` | object | yes | JSON object {property_name: value, ...}; currently ignored, since no setting is ever written |
+| `settings` | object | yes | JSON object {property_name: value, ...}; validated as an object but never written |
 
-**Returns:** `{ submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note? }`
+**Returns:** `{ success: false, error, data: { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note } }`
 
 ## `set_submix_effect_settings`
 

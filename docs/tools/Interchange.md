@@ -166,23 +166,23 @@ Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the e
 
 ## `interchange_reset_level_asset`
 
-Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing. It does not save. Returns reset, can_reset, cvar_enabled and a note.
+Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing and the call fails (reset false, with the reason in note). It does not save. Returns reset, can_reset, cvar_enabled and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `world_path` | string | no | World asset path (e.g. "/Game/Maps/MyMap") or fully-qualified object path. Empty = current editor world. |
 
-**Returns:** `{ world_path: string, reset: bool, note: string }`
+**Returns:** `{ world_path: string, resolved_world_path: string, reset: bool, can_reset: bool, cvar_enabled: bool, note: string }`
 
 ## `interchange_reset_scene_import_asset`
 
-Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. reset is always true: read cvar_enabled, since the library does nothing while the Interchange.FeatureFlags.InterchangeReset CVar is 0. Use interchange_reset_level_asset for a level.
+Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use interchange_reset_level_asset for a level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset path of the UInterchangeSceneImportAsset (e.g. "/Game/Imports/MyScene.MyScene") |
 
-**Returns:** `{ asset_path: string, reset: bool, note: string }`
+**Returns:** `{ asset_path: string, reset: bool, cvar_enabled: bool, note: string }`
 
 ## `interchange_save_pipeline`
 

@@ -92,7 +92,9 @@ namespace
     };
 
     // Reads name and package_path, then creates a UBlueprint of ParentClass at PackagePath/Name, compiles
-    // and saves it. Idempotent: an asset already at that path is loaded instead. The error reply on failure.
+    // and saves it. Idempotent: a Blueprint of ParentClass already at that path is loaded instead
+    // (bAlreadyExisted). One of another class is an error, before anything touches it: the caller asked
+    // for a ParentClass Blueprint and none exists there. The error reply on failure.
     TSharedPtr<FJsonObject> GASAuthoring_CreateBlueprint(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass,
                                                          FGASAuthoringCreatedBlueprint& Out)
     {
@@ -109,6 +111,16 @@ namespace
         if (!Out.Blueprint)
         {
             return mcp_common::MakeErrorReply(Error);
+        }
+        const UClass* GeneratedClass = Out.Blueprint->GeneratedClass;
+        if (Out.bAlreadyExisted && !(GeneratedClass && GeneratedClass->IsChildOf(ParentClass)))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("A Blueprint already at %s/%s is not a %s (its class: %s, parent: %s); nothing was created or changed. ")
+                TEXT("Pick another name, or delete that asset first."),
+                *Out.PackagePath, *Out.Name, *ParentClass->GetName(),
+                GeneratedClass ? *GeneratedClass->GetName() : TEXT("none, it has no generated class"),
+                Out.Blueprint->ParentClass ? *Out.Blueprint->ParentClass->GetName() : TEXT("none")));
         }
         return nullptr;
     }
@@ -689,7 +701,7 @@ namespace
 
 // Blueprint creation
 
-// MCP:create_gameplay_ability_blueprint - Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
+// MCP:create_gameplay_ability_blueprint - Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. A GameplayAbility Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GA_Fireball".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Abilities"; defaults to /Game/Blueprints.
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_ability: bool, already_existed: bool, created: bool }
@@ -703,11 +715,11 @@ TSharedPtr<FJsonObject> HandleCreateGameplayAbilityBlueprint(const TSharedPtr<FJ
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayAbility"), TEXT("is_gameplay_ability"));
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_effect_blueprint - Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
+// MCP:create_gameplay_effect_blueprint - Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. A GameplayEffect Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GE_Damage".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Effects"; defaults to /Game/Blueprints.
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_effect: bool, already_existed: bool, created: bool }
@@ -721,11 +733,11 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectBlueprint(const TSharedPtr<FJs
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayEffect"), TEXT("is_gameplay_effect"));
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_attribute_set_blueprint - Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An asset already there is returned untouched with already_existed=true. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
+// MCP:create_attribute_set_blueprint - Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An AttributeSet Blueprint already there is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "AS_Character".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, created: bool }
@@ -739,7 +751,7 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJson
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("AttributeSet"), TEXT("is_attribute_set"));
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
@@ -747,7 +759,7 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJson
 // append one such member to an existing AttributeSet Blueprint. FBlueprintEditorUtils::AddMemberVariable is
 // the canonical Blueprint variable creator (BlueprintEditorUtils.h).
 
-// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
+// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "AS_Character".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
 //   @param attributes - Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored.
@@ -827,7 +839,7 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
     Result->SetArrayField(TEXT("failed_attribute_names"), FailedNames);
     const bool bApplied = FailedNames.Num() == 0;
     Result->SetBoolField(TEXT("attributes_applied"), bApplied);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOutcomeReply(Result, bApplied,
         bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_attribute_set_asset"), TEXT("attributes_applied")));
 }
@@ -1481,7 +1493,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_mod_magnitude_calculation_blueprint - Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers)
+// MCP:create_gameplay_mod_magnitude_calculation_blueprint - Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers), compile and save it. A Blueprint of that class already at the path is returned untouched (created false, already_existed true); one of another class there is an error.
 //   @param name - Asset name, e.g. MMC_Damage
 //   @param package_path - Target content path, defaults to /Game/Blueprints
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_mod_magnitude_calculation: bool, already_existed: bool, created: bool }
@@ -1498,7 +1510,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayModMagnitudeCalculationBlueprint(con
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayModMagnitudeCalculation"), TEXT("is_mod_magnitude_calculation"));
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
@@ -2226,7 +2238,7 @@ namespace
 
 // GameplayCueNotify authoring
 
-// MCP:create_gameplay_cue_notify_static - Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+// MCP:create_gameplay_cue_notify_static - Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GCN_Hit".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
 //   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Hit"; an unregistered tag is skipped (cue_tag_set=false), not an error.
@@ -2245,11 +2257,11 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyStatic(const TSharedPtr<FJs
         return Error;
     }
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_cue_notify_actor - Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+// MCP:create_gameplay_cue_notify_actor - Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GCN_Beam".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
 //   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Beam"; an unregistered tag is skipped (cue_tag_set=false), not an error.
@@ -2268,11 +2280,11 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyActor(const TSharedPtr<FJso
         return Error;
     }
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_cue_notify_burst - Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify)
+// MCP:create_gameplay_cue_notify_burst - Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
 //   @param name - Asset name, e.g. GCN_Hit
 //   @param package_path - Target content path, defaults to /Game/Blueprints
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
@@ -2291,7 +2303,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyBurst(const TSharedPtr<FJso
         return Error;
     }
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 
@@ -2302,7 +2314,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyBurst(const TSharedPtr<FJso
 //     IsOverride, bUniqueInstancePerInstigator/SourceObject, bAllowMultipleOnActive/WhileActiveEvents,
 //     NumPreallocatedInstances  (GameplayCueNotify_Actor.h, all public data members -> no reflection)
 
-// MCP:create_gameplay_cue_notify_looping - Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify)
+// MCP:create_gameplay_cue_notify_looping - Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
 //   @param name - Asset name, e.g. GCN_Aura
 //   @param package_path - Target content path, defaults to /Game/Blueprints
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
@@ -2321,7 +2333,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyLooping(const TSharedPtr<FJ
         return Error;
     }
     Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
     return mcp_common::MakeOkReply(Result);
 }
 

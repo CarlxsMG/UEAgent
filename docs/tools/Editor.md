@@ -415,14 +415,14 @@ Execute a Python (.py) file inside the running Unreal Editor. PIE TRAP: same hol
 
 ## `export_assets`
 
-Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), written under export_path mirroring the package path; unloadable or unexportable ones are skipped. exported_count counts only new files directly in export_path, so it usually reads 0: check the folder.
+Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), each written to export_path/&lt;package path without its leading slash>.&lt;extension>, e.g. D:/Exports/Game/Meshes/SM_Rock.FBX. What was written is measured per asset on disk: exported lists each asset with its file, and not_exported the ones that did not load, have no exporter or failed to write. Succeeds only when every requested asset was written.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_paths` | array | yes | Asset object or package paths to export (e.g. ["/Game/Meshes/SM_Rock"]); empty strings are ignored. |
 | `export_path` | string | yes | Destination directory on disk (e.g. "D:/Exports"), created if missing; each file lands in subfolders named after its package path. |
 
-**Returns:** `{ exported_count: int, failed_count: int, requested_count: int, export_path: string }`
+**Returns:** `{ exported_count: int, failed_count: int, requested_count: int, export_path: string, exported: [{ asset_path: string, file: string }], not_exported: [string] }`
 
 ## `find_actors_by_name`
 
@@ -803,7 +803,7 @@ Open a map in the editor (by /Game path or disk .umap), replacing the current wo
 
 ## `migrate_assets`
 
-Copy assets, and their dependencies unless ignore_dependencies, into another project Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. migrated_count is a new-file count that falls back to the requested count when nothing new appears, so verify the destination.
+Copy assets, and their dependencies unless ignore_dependencies, into another project's Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. The engine first saves every dirty package of this editor, and migrates nothing if one of them fails to save. What was copied is measured from the migration's own package list against the disk: migrated lists each package written (dependencies included), skipped_existing the requested ones the destination already had, failed the requested ones neither written nor skipped. Succeeds when nothing requested failed. destination_path must be a Content folder with a .uproject (or one .uplugin) next to it, or the engine migrates nothing and the call fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -811,7 +811,7 @@ Copy assets, and their dependencies unless ignore_dependencies, into another pro
 | `destination_path` | string | yes | Target content folder, e.g. D:/OtherProject/Content |
 | `ignore_dependencies` | boolean | no | When true only the listed packages are copied, without their dependencies (default false). |
 
-**Returns:** `{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool }`
+**Returns:** `{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool, migrated: [{ package: string, file: string }], skipped_existing: [string], failed: [string], note: string? }`
 
 ## `move_actors_to_level`
 

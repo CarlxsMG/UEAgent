@@ -112,7 +112,7 @@ Set a GameplayAbility CDO's asset tags from a list of tag strings
 
 ## `create_attribute_set_asset`
 
-Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
+Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -124,7 +124,7 @@ Create (or reuse) an AttributeSet Blueprint at package_path/name like create_att
 
 ## `create_attribute_set_blueprint`
 
-Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An asset already there is returned untouched with already_existed=true. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
+Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An AttributeSet Blueprint already there is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -135,7 +135,7 @@ Create an empty Blueprint parented to UAttributeSet at package_path/name, compil
 
 ## `create_gameplay_ability_blueprint`
 
-Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
+Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. A GameplayAbility Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -146,7 +146,7 @@ Create a Blueprint parented to UGameplayAbility at package_path/name, compile an
 
 ## `create_gameplay_cue_notify_actor`
 
-Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -158,7 +158,7 @@ Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cu
 
 ## `create_gameplay_cue_notify_burst`
 
-Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify)
+Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -170,7 +170,7 @@ Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced on
 
 ## `create_gameplay_cue_notify_looping`
 
-Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify)
+Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -182,7 +182,7 @@ Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced loop
 
 ## `create_gameplay_cue_notify_static`
 
-Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -194,7 +194,7 @@ Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-sho
 
 ## `create_gameplay_effect_blueprint`
 
-Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
+Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. A GameplayEffect Blueprint already at that path is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -218,7 +218,7 @@ Create and save a native UGameplayEffect asset (despite the name, not a containe
 
 ## `create_gameplay_mod_magnitude_calculation_blueprint`
 
-Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers)
+Create a Blueprint parented to UGameplayModMagnitudeCalculation (a custom magnitude calc class for GE modifiers), compile and save it. A Blueprint of that class already at the path is returned untouched (created false, already_existed true); one of another class there is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

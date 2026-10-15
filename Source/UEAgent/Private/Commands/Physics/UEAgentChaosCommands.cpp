@@ -204,6 +204,26 @@ namespace
         return Reply;
     }
 
+    /**
+     * The reply of a command that cuts or clusters a collection and then saves it. The engine calls
+     * return nothing that counts what they made (the cutters return the index of the first new piece),
+     * so what was made is measured: the transforms added, one per new piece or cluster. Success needs
+     * at least one AND the package on disk; Result's own "success" carries the same verdict.
+     * NothingMade says why a call that added nothing changed nothing.
+     */
+    TSharedPtr<FJsonObject> Chaos_EditReply(const TSharedPtr<FJsonObject>& Result, int32 TransformsAdded, bool bSaved,
+        const FString& SaveError, const TCHAR* Command, const FString& NothingMade)
+    {
+        const bool bMadeSomething = TransformsAdded > 0;
+        Result->SetBoolField(TEXT("success"), bMadeSomething && bSaved);
+        mcp_common::AddSaveOutcome(Result, bSaved, SaveError);
+        if (!bMadeSomething)
+        {
+            return mcp_common::MakeOutcomeReply(Result, false, FString::Printf(TEXT("%s: %s"), Command, *NothingMade));
+        }
+        return mcp_common::MakeSavedReply(Result, bSaved, Command);
+    }
+
     /** "Rigid", "Clustered" or "None": the simulation type of transform Index ("None" also for an index out of range). */
     FString Chaos_SimulationTypeName(const TManagedArray<int32>& SimTypes, int32 Index)
     {
@@ -226,11 +246,11 @@ namespace
 // ---------------------------------------------------------------------------
 // 1. create_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:create_geometry_collection - Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; rebuilt true); an unloadable source_mesh_path is silently skipped. created is always true and the save result is not checked.
+// MCP:create_geometry_collection - Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; created false, rebuilt true). A source_mesh_path that does not load as a StaticMesh is an error, checked before anything is touched. Succeeds only when the package reaches disk; a failed save leaves the collection in memory only (saved false, save_error).
 //   @param package_path - Content folder for the asset, e.g. /Game/Chaos/Collections; a path without a leading slash is placed under /Game/
 //   @param name - Name of the geometry collection asset, e.g. GC_Wall
 //   @param source_mesh_path - Optional StaticMesh to convert and append, e.g. /Engine/BasicShapes/Cube
-//   @returns { asset_path: string, geometry_collection_name: string, num_materials: int, created: bool, rebuilt: bool }
+//   @returns { asset_path: string, geometry_collection_name: string, num_materials: int, num_transforms: int, created: bool, rebuilt: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -251,6 +271,20 @@ TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObj
 
     const FString FullPath = PackagePath + TEXT("/") + Name;
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
+
+    // The optional source mesh is loaded before anything is touched: a path that does not load would
+    // otherwise leave an empty collection behind, and reset an existing one for nothing.
+    FString SourceMeshPath;
+    UStaticMesh* SourceMesh = nullptr;
+    if (Params->TryGetStringField(TEXT("source_mesh_path"), SourceMeshPath) && !SourceMeshPath.IsEmpty())
+    {
+        SourceMesh = LoadObject<UStaticMesh>(nullptr, *SourceMeshPath);
+        if (!SourceMesh)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("source_mesh_path does not load as a StaticMesh: %s (nothing was created or reset)"), *SourceMeshPath));
+        }
+    }
 
     // Check if the asset already exists.
     UGeometryCollection* Existing = LoadObject<UGeometryCollection>(nullptr, *FullPath);
@@ -293,33 +327,28 @@ TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObj
         Package = GC->GetOutermost();
     }
 
-    // Optionally append a source static mesh.
-    FString SourceMeshPath;
-    if (Params->TryGetStringField(TEXT("source_mesh_path"), SourceMeshPath) && !SourceMeshPath.IsEmpty())
+    // Optionally append the source static mesh.
+    if (SourceMesh)
     {
-        UStaticMesh* SourceMesh = LoadObject<UStaticMesh>(nullptr, *SourceMeshPath);
-        if (SourceMesh)
+        // Build a materials array from the static mesh.
+        TArray<UMaterialInterface*> MeshMaterials;
+        const TArray<FStaticMaterial>& StaticMats = SourceMesh->GetStaticMaterials();
+        for (int32 i = 0; i < StaticMats.Num(); ++i)
         {
-            // Build a materials array from the static mesh.
-            TArray<UMaterialInterface*> MeshMaterials;
-            const TArray<FStaticMaterial>& StaticMats = SourceMesh->GetStaticMaterials();
-            for (int32 i = 0; i < StaticMats.Num(); ++i)
-            {
-                MeshMaterials.Add(StaticMats[i].MaterialInterface);
-            }
-
-            FGeometryCollectionEngineConversion::AppendStaticMesh(
-                SourceMesh, MeshMaterials, FTransform::Identity, GC,
-                /*bReindexMaterials=*/true, /*bAddInternalMaterials=*/true,
-                /*bSplitComponents=*/false, /*bSetInternalFromMaterialIndex=*/false);
-
-            // Also record the source in the editor-only GeometrySource array.
-            FGeometryCollectionSource Src;
-            Src.SourceGeometryObject = FSoftObjectPath(SourceMeshPath);
-            Src.LocalTransform = FTransform::Identity;
-            Src.SourceMaterial = MeshMaterials;
-            GC->GeometrySource.Add(Src);
+            MeshMaterials.Add(StaticMats[i].MaterialInterface);
         }
+
+        FGeometryCollectionEngineConversion::AppendStaticMesh(
+            SourceMesh, MeshMaterials, FTransform::Identity, GC,
+            /*bReindexMaterials=*/true, /*bAddInternalMaterials=*/true,
+            /*bSplitComponents=*/false, /*bSetInternalFromMaterialIndex=*/false);
+
+        // Also record the source in the editor-only GeometrySource array.
+        FGeometryCollectionSource Src;
+        Src.SourceGeometryObject = FSoftObjectPath(SourceMeshPath);
+        Src.LocalTransform = FTransform::Identity;
+        Src.SourceMaterial = MeshMaterials;
+        GC->GeometrySource.Add(Src);
     }
 
     // Register the asset in the asset registry (only for a brand-new asset;
@@ -334,16 +363,18 @@ TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObj
     // harvests an unmapped "RootIndex" attribute name (non-deterministic-serialize LinkerSave ensure).
     GC->InvalidateCollection();
 
-    // Save to disk.
-    mcp_common::SaveAssetPackage(Package, GC);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(Package, GC, SaveError);
 
+    const TSharedPtr<FGeometryCollection, ESPMode::ThreadSafe> Collection = GC->GetGeometryCollection();
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("asset_path"), FullPath);
     Result->SetStringField(TEXT("geometry_collection_name"), Name);
     Result->SetNumberField(TEXT("num_materials"), GC->Materials.Num());
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetNumberField(TEXT("num_transforms"), Collection.IsValid() ? Collection->NumElements(FGeometryCollection::TransformGroup) : 0);
+    Result->SetBoolField(TEXT("created"), !bRebuilt);
     Result->SetBoolField(TEXT("rebuilt"), bRebuilt);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_geometry_collection"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,14 +433,14 @@ TSharedPtr<FJsonObject> HandleGetGeometryCollectionInfo(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 3. fracture_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:fracture_geometry_collection - Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it (save result unchecked). Fails when no fracture is made. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
+// MCP:fracture_geometry_collection - Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it. num_fractures is the number of new pieces, measured as the transforms the fracture added; the call fails when it added none (an empty collection, or a chance_to_fracture that skipped every piece) or when the save fails. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param num_sites - Number of random Voronoi sites to generate, minimum 1, default 20
 //   @param random_seed - Seed for the random site positions and the per-transform fracture chance, default 0
 //   @param chance_to_fracture - Chance from 0 to 1 that each selected transform is fractured, default 1
 //   @param grout - Width of the gap left between cut pieces, in cm (default 0)
 //   @param split_islands - Optional, split resulting islands, default false
-//   @returns { geometry_collection_path: string, num_fractures: int, num_sites: int, random_seed: int, success: bool }
+//   @returns { geometry_collection_path: string, num_fractures: int, transform_count: int, num_sites: int, random_seed: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleFractureGeometryCollection(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -462,8 +493,10 @@ TSharedPtr<FJsonObject> HandleFractureGeometryCollection(const TSharedPtr<FJsonO
     FDataflowTransformSelection TransformSelection;
     TransformSelection.InitializeFromCollection(*FGC, true);
 
+    const int32 NumTransformsBefore = FGC->NumElements(FGeometryCollection::TransformGroup);
+
     // Call VoronoiFracture with default noise parameters.
-    const int32 NumFractures = FFractureEngineFracturing::VoronoiFracture(
+    FFractureEngineFracturing::VoronoiFracture(
         *FGC,
         TransformSelection,
         Sites,
@@ -485,26 +518,28 @@ TSharedPtr<FJsonObject> HandleFractureGeometryCollection(const TSharedPtr<FJsonO
     GC->InvalidateCollection();
 
     // Save the modified asset.
-    mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
+    const int32 NumTransformsAfter = FGC->NumElements(FGeometryCollection::TransformGroup);
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
-    Result->SetNumberField(TEXT("num_fractures"), NumFractures);
+    Result->SetNumberField(TEXT("num_fractures"), NumTransformsAfter - NumTransformsBefore);
+    Result->SetNumberField(TEXT("transform_count"), NumTransformsAfter);
     Result->SetNumberField(TEXT("num_sites"), NumSites);
     Result->SetNumberField(TEXT("random_seed"), RandomSeed);
-    Result->SetBoolField(TEXT("success"), NumFractures > 0);
-    // The verdict measured above is the verdict EMITTED.
-    return mcp_common::MakeOutcomeReply(Result, NumFractures > 0,
-        NumFractures > 0 ? FString() : mcp_common::MeasuredOutcomeError(TEXT("fracture_geometry_collection"), TEXT("NumFractures > 0")));
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("fracture_geometry_collection"),
+        FString::Printf(TEXT("no fracture was made (the collection kept its %d transforms): an empty collection, or a ")
+            TEXT("chance_to_fracture that skipped every piece, fractures nothing."), NumTransformsBefore));
 }
 
 // ---------------------------------------------------------------------------
 // 4. cluster_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:cluster_geometry_collection - Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it (save result unchecked). Returns the cluster count used and the transform counts before and after.
+// MCP:cluster_geometry_collection - Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it. Returns the cluster count used and the transform counts before and after; the call fails when no cluster was added (a collection that is not fractured into several pieces has nothing to group) or when the save fails.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param cluster_size_method - Small, Medium, or Large, default Medium
 //   @param site_count - Target cluster count before cluster_size_method scales it, minimum 1, default 10
-//   @returns { geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool }
+//   @returns { geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -576,8 +611,10 @@ TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonOb
     GC->InvalidateCollection();
 
     // Save the modified asset.
-    mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
+    // AutoCluster returns nothing; every cluster it makes is a new transform.
     const int32 NumTransformsAfter = FGC->NumElements(FGeometryCollection::TransformGroup);
 
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
@@ -585,8 +622,9 @@ TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonOb
     Result->SetNumberField(TEXT("site_count"), EffectiveSiteCount);
     Result->SetNumberField(TEXT("num_transforms_before"), NumTransforms);
     Result->SetNumberField(TEXT("num_transforms_after"), NumTransformsAfter);
-    Result->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeOkReply(Result);
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransforms, bSaved, SaveError, TEXT("cluster_geometry_collection"),
+        FString::Printf(TEXT("no cluster was added (the collection kept its %d transforms): auto-clustering groups the pieces of ")
+            TEXT("a fractured collection, so fracture it first."), NumTransforms));
 }
 
 // ---------------------------------------------------------------------------
@@ -888,13 +926,13 @@ TSharedPtr<FJsonObject> HandleRemoveGeometryCollectionSource(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // plane_cut_fracture
 // ---------------------------------------------------------------------------
-// MCP:plane_cut_fracture - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. success needs the save AND a transform count that did not shrink, so it is also true when nothing was cut: check new_fracture_count.
+// MCP:plane_cut_fracture - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param num_planes - Number of random cutting planes to generate, minimum 1, default 3
 //   @param random_seed - Optional seed for plane generation, default 1337
 //   @param grout - Width of the gap left between cut pieces, in cm (default 0)
 //   @param split_islands - Optional, split resulting islands, default true
-//   @returns { geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }
+//   @returns { geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -932,7 +970,7 @@ TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Pa
     FDataflowTransformSelection TransformSelection;
     TransformSelection.InitializeFromCollection(*FGC, true);
 
-    const int32 NumFractures = FFractureEngineFracturing::PlaneCutter(
+    FFractureEngineFracturing::PlaneCutter(
         *FGC,
         TransformSelection,
         BBox,
@@ -953,35 +991,31 @@ TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Pa
 
     GC->InvalidateCollection();
 
-    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
     const int32 NumTransformsAfter = FGC->NumElements(FGeometryCollection::TransformGroup);
 
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
     Result->SetNumberField(TEXT("num_planes"), NumPlanes);
-    Result->SetNumberField(TEXT("new_fracture_count"), NumFractures);
+    Result->SetNumberField(TEXT("new_fracture_count"), NumTransformsAfter - NumTransformsBefore);
     Result->SetNumberField(TEXT("transform_count"), NumTransformsAfter);
-    Result->SetBoolField(TEXT("success"), NumTransformsAfter >= NumTransformsBefore);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    // The verdict measured above is the verdict EMITTED. The verdict is BOTH things: the operation
-    // succeeded AND it persisted. If the save fails (e.g. a read-only file) the change stays only
-    // in memory, and that is not a success.
-    const bool bSucceeded = (NumTransformsAfter >= NumTransformsBefore) && bSaved;
-    return mcp_common::MakeOutcomeReply(Result, bSucceeded,
-        bSucceeded ? FString() : mcp_common::SavedOutcomeError(TEXT("plane_cut_fracture")));
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("plane_cut_fracture"),
+        FString::Printf(TEXT("nothing was cut (the collection kept its %d transforms): an empty collection, or planes that ")
+            TEXT("miss every piece, cut nothing."), NumTransformsBefore));
 }
 
 // ---------------------------------------------------------------------------
 // slice_fracture
 // ---------------------------------------------------------------------------
-// MCP:slice_fracture - Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. success needs the save and a transform count that did not shrink; check new_fracture_count.
+// MCP:slice_fracture - Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param slices_x - Number of evenly spaced X slices, default 2
 //   @param slices_y - Number of evenly spaced Y slices, default 2
 //   @param slices_z - Number of evenly spaced Z slices, default 1
 //   @param random_seed - Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little
 //   @param grout - Width of the gap left between cut pieces, in cm (default 0)
-//   @returns { geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }
+//   @returns { geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -1024,7 +1058,7 @@ TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Param
     FDataflowTransformSelection TransformSelection;
     TransformSelection.InitializeFromCollection(*FGC, true);
 
-    const int32 NumFractures = FFractureEngineFracturing::SliceCutter(
+    FFractureEngineFracturing::SliceCutter(
         *FGC,
         TransformSelection,
         BBox,
@@ -1048,7 +1082,8 @@ TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Param
 
     GC->InvalidateCollection();
 
-    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
     const int32 NumTransformsAfter = FGC->NumElements(FGeometryCollection::TransformGroup);
 
@@ -1056,16 +1091,11 @@ TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Param
     Result->SetNumberField(TEXT("slices_x"), SlicesX);
     Result->SetNumberField(TEXT("slices_y"), SlicesY);
     Result->SetNumberField(TEXT("slices_z"), SlicesZ);
-    Result->SetNumberField(TEXT("new_fracture_count"), NumFractures);
+    Result->SetNumberField(TEXT("new_fracture_count"), NumTransformsAfter - NumTransformsBefore);
     Result->SetNumberField(TEXT("transform_count"), NumTransformsAfter);
-    Result->SetBoolField(TEXT("success"), NumTransformsAfter >= NumTransformsBefore);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    // The verdict measured above is the verdict EMITTED. The verdict is BOTH things: the operation
-    // succeeded AND it persisted. If the save fails (e.g. a read-only file) the change stays only
-    // in memory, and that is not a success.
-    const bool bSucceeded = (NumTransformsAfter >= NumTransformsBefore) && bSaved;
-    return mcp_common::MakeOutcomeReply(Result, bSucceeded,
-        bSucceeded ? FString() : mcp_common::SavedOutcomeError(TEXT("slice_fracture")));
+    return Chaos_EditReply(Result, NumTransformsAfter - NumTransformsBefore, bSaved, SaveError, TEXT("slice_fracture"),
+        FString::Printf(TEXT("nothing was sliced (the collection kept its %d transforms): an empty collection, or slices_x, ")
+            TEXT("slices_y and slices_z all 0, cut nothing."), NumTransformsBefore));
 }
 
 // ---------------------------------------------------------------------------

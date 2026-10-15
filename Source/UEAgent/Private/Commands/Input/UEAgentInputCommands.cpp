@@ -240,6 +240,62 @@ namespace UEAgentInputCommandsImpl
         return nullptr;
     }
 
+    /** Index of the first mapping of Action to Key in Context, or INDEX_NONE. */
+    int32 FindMappingIndex(const UInputMappingContext* Context, const UInputAction* Action, const FKey& Key)
+    {
+        if (!Context)
+        {
+            return INDEX_NONE;
+        }
+        const TArray<FEnhancedActionKeyMapping>& Mappings = Context->GetMappings();
+        for (int32 i = 0; i < Mappings.Num(); ++i)
+        {
+            if (Mappings[i].Action == Action && Mappings[i].Key == Key)
+            {
+                return i;
+            }
+        }
+        return INDEX_NONE;
+    }
+
+    /**
+     * The reply of map_input_action and add_mapping_to_context: binds Key to Action in Context and saves the
+     * context, unless the context already maps that key to that action -- UInputMappingContext::MapKey appends
+     * a mapping on every call, duplicates included. Fills Reply with index, mapping_count, added and
+     * already_mapped; success needs the mapping in the context and, when one was added, the context on disk.
+     */
+    TSharedPtr<FJsonObject> MapKeyOnce(UInputMappingContext* Context, const UInputAction* Action, const FKey& Key,
+        const TSharedPtr<FJsonObject>& Reply, const TCHAR* Command)
+    {
+        const int32 Existing = FindMappingIndex(Context, Action, Key);
+        if (Existing != INDEX_NONE)
+        {
+            Reply->SetNumberField(TEXT("index"), Existing);
+            Reply->SetNumberField(TEXT("mapping_count"), Context->GetMappings().Num());
+            Reply->SetBoolField(TEXT("added"), false);
+            Reply->SetBoolField(TEXT("already_mapped"), true);
+            Reply->SetBoolField(TEXT("saved"), false);
+            return mcp_common::MakeOkReply(Reply);
+        }
+
+        Context->Modify();
+        Context->MapKey(Action, Key);
+        const int32 Index = FindMappingIndex(Context, Action, Key);
+        Reply->SetNumberField(TEXT("index"), Index);
+        Reply->SetNumberField(TEXT("mapping_count"), Context->GetMappings().Num());
+        Reply->SetBoolField(TEXT("added"), Index != INDEX_NONE);
+        Reply->SetBoolField(TEXT("already_mapped"), false);
+        if (Index == INDEX_NONE)
+        {
+            Reply->SetBoolField(TEXT("saved"), false);
+            return mcp_common::MakeOutcomeReply(Reply, false, FString::Printf(
+                TEXT("%s: MapKey left no mapping of that key to that action in the context; nothing was saved."), Command));
+        }
+        FString SaveError;
+        const bool bSaved = mcp_common::SaveAssetPackage(Context->GetPackage(), Context, SaveError);
+        return mcp_common::MakeSavedReply(Reply, bSaved, Command, SaveError);
+    }
+
     /**
      * A new AssetType named AssetName, in a package of its own at AssetPath so it can be saved to disk; the
      * error reply when an asset is already there or the package or the object cannot be created. TypeName
@@ -541,13 +597,13 @@ TSharedPtr<FJsonObject> HandleCreateInputMappingContext(const TSharedPtr<FJsonOb
     return Created;
 }
 
-// MCP:map_input_action - Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. Each call appends a mapping, even a duplicate, and reports success even if the save failed; check the key with find_free_input_key or list_all_input_mappings first.
+// MCP:map_input_action - Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. A context that already maps that key to that action is left as it is (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key or list_all_input_mappings first.
 //   @param context_path - Full path to the InputMappingContext asset.
 //   @param action_path - Full path to the InputAction asset.
 //   @param key_name - Key name to map (e.g., "SpaceBar", "LeftMouseButton").
 //   @param key - Alias of key_name, read only when key_name is absent (same FKey names).
 //   @param input_action_path - Fallback for action_path when action_path is absent.
-//   @returns { context_path, action_path, key_name, mapping_count, success, message }
+//   @returns { context_path, action_path, key_name, index, mapping_count, added, already_mapped, saved, save_error? }
 TSharedPtr<FJsonObject> HandleMapInputAction(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentInputCommandsImpl;
@@ -593,21 +649,12 @@ TSharedPtr<FJsonObject> HandleMapInputAction(const TSharedPtr<FJsonObject>& Para
         return Failure;
     }
 
-    // The mapping array itself is protected, so the binding goes through the public MapKey API;
-    // the context is then saved so the change persists on disk.
-    Imc->Modify();
-    Imc->MapKey(Action, Key);
-    Imc->MarkPackageDirty();
-    UEditorAssetLibrary::SaveLoadedAsset(Imc);
-
+    // The mapping array itself is protected, so the binding goes through the public MapKey API.
     TSharedPtr<FJsonObject> Mapped = MakeShared<FJsonObject>();
     Mapped->SetStringField(TEXT("context_path"), ContextAsset);
     Mapped->SetStringField(TEXT("action_path"), ActionAsset);
     Mapped->SetStringField(TEXT("key_name"), KeyText);
-    Mapped->SetNumberField(TEXT("mapping_count"), Imc->GetMappings().Num());
-    Mapped->SetBoolField(TEXT("success"), true);
-    Mapped->SetStringField(TEXT("message"), TEXT("Input action mapped successfully"));
-    return mcp_common::MakeOkReply(Mapped);
+    return Impl::MapKeyOnce(Imc, Action, Key, Mapped, TEXT("map_input_action"));
 }
 
 // ============================================================================
@@ -645,24 +692,6 @@ namespace
             return Direct;
         }
         return Cast<UInputMappingContext>(UEAgentInputCommandsImpl::FindRegisteredAsset(UInputMappingContext::StaticClass(), PathOrName));
-    }
-
-    /** Find the index of a mapping (Action+Key) in the context's default mappings, or INDEX_NONE. */
-    int32 FindMappingIndex(UInputMappingContext* Context, const UInputAction* Action, const FKey& Key)
-    {
-        if (!Context)
-        {
-            return INDEX_NONE;
-        }
-        const TArray<FEnhancedActionKeyMapping>& Mappings = Context->GetMappings();
-        for (int32 i = 0; i < Mappings.Num(); ++i)
-        {
-            if (Mappings[i].Action == Action && Mappings[i].Key == Key)
-            {
-                return i;
-            }
-        }
-        return INDEX_NONE;
     }
 
     /** Resolve a trigger type string to the concrete UInputTrigger subclass. */
@@ -1199,14 +1228,14 @@ TSharedPtr<FJsonObject> HandleSetInputActionTriggerBehavior(const TSharedPtr<FJs
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:add_mapping_to_context - Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the new mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. Verify the key is free first (find_free_input_key): duplicate bindings are silent.
+// MCP:add_mapping_to_context - Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. A context that already maps that key to that action keeps its mapping (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key first.
 //   @param context_name - Short asset name of the InputMappingContext (e.g. IMC_Example).
 //   @param action_name - Short asset name of the InputAction (e.g. IA_Example).
 //   @param key - Key name to map (e.g. "SpaceBar", "W", "Gamepad_FaceButton_Bottom").
 //   @param context_path - Asset path of the Input Mapping Context
 //   @param action_path - Asset path of the Input Action
 //   @param key_name - Input key name (e.g. SpaceBar, Gamepad_FaceButton_Bottom)
-//   @returns { context_name, context_path, action_name, key, index, mapping_count }
+//   @returns { context_name, context_path, action_name, key, index, mapping_count, added, already_mapped, saved, save_error? }
 TSharedPtr<FJsonObject> HandleAddMappingToContext(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentInputCommandsImpl;
@@ -1245,21 +1274,12 @@ TSharedPtr<FJsonObject> HandleAddMappingToContext(const TSharedPtr<FJsonObject>&
         return Failure;
     }
 
-    Context->Modify();
-    Context->MapKey(Action, Key);
-    Context->MarkPackageDirty();
-    UEditorAssetLibrary::SaveLoadedAsset(Context, /*bOnlyIfIsDirty=*/false);
-
-    const int32 Index = FindMappingIndex(Context, Action, Key);
-
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("context_name"), Context->GetName());
     ResultObj->SetStringField(TEXT("context_path"), Context->GetPathName());
     ResultObj->SetStringField(TEXT("action_name"), Action->GetName());
     ResultObj->SetStringField(TEXT("key"), KeyName);
-    ResultObj->SetNumberField(TEXT("index"), Index);
-    ResultObj->SetNumberField(TEXT("mapping_count"), Context->GetMappings().Num());
-    return mcp_common::MakeOkReply(ResultObj);
+    return Impl::MapKeyOnce(Context, Action, Key, ResultObj, TEXT("add_mapping_to_context"));
 }
 
 // MCP:add_input_trigger - Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
@@ -1504,7 +1524,7 @@ TSharedPtr<FJsonObject> HandleRemoveMappingFromContext(const TSharedPtr<FJsonObj
     }
 
     const int32 CountBefore = Context->GetMappings().Num();
-    const bool bExisted = FindMappingIndex(Context, Action, Key) != INDEX_NONE;
+    const bool bExisted = Impl::FindMappingIndex(Context, Action, Key) != INDEX_NONE;
 
     Context->Modify();
     Context->UnmapKey(Action, Key);

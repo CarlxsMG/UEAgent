@@ -261,9 +261,9 @@ TSharedPtr<FJsonObject> HandleInterchangeResetActors(const TSharedPtr<FJsonObjec
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_reset_scene_import_asset - Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. reset is always true: read cvar_enabled, since the library does nothing while the Interchange.FeatureFlags.InterchangeReset CVar is 0. Use interchange_reset_level_asset for a level.
+// MCP:interchange_reset_scene_import_asset - Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use interchange_reset_level_asset for a level.
 //   @param asset_path [string!] - Asset path of the UInterchangeSceneImportAsset (e.g. "/Game/Imports/MyScene.MyScene")
-//   @returns { asset_path: string, reset: bool, note: string }
+//   @returns { asset_path: string, reset: bool, cvar_enabled: bool, note: string }
 TSharedPtr<FJsonObject> HandleInterchangeResetSceneImportAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetPath;
@@ -286,28 +286,30 @@ TSharedPtr<FJsonObject> HandleInterchangeResetSceneImportAsset(const TSharedPtr<
                 Asset->GetClass() ? *Asset->GetClass()->GetName() : TEXT("<null>")));
     }
 
-    // Honest gate: ResetSceneImportAsset is a void return that silently
-    // no-ops when the CVar is off. Surface that fact to the caller rather
-    // than pretending success. We still call through (the library does
-    // its own gating) but report the CVar state so the test can assert.
+    // ResetSceneImportAsset returns nothing and silently does nothing while the CVar is off, so
+    // the CVar decides whether the reset runs at all: with it off the call changed nothing and fails.
     const bool bCVarEnabled = IsInterchangeResetCVarEnabled();
-    UInterchangeEditorScriptLibrary::ResetSceneImportAsset(SceneAsset);
+    if (bCVarEnabled)
+    {
+        UInterchangeEditorScriptLibrary::ResetSceneImportAsset(SceneAsset);
+    }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("asset_path"), AssetPath);
-    Data->SetBoolField(TEXT("reset"), true);
+    Data->SetBoolField(TEXT("reset"), bCVarEnabled);
     Data->SetBoolField(TEXT("cvar_enabled"), bCVarEnabled);
     Data->SetStringField(TEXT("note"),
         bCVarEnabled
-            ? TEXT("ResetSceneImportAsset invoked; CVar enabled so the reset ran")
-            : TEXT("ResetSceneImportAsset invoked but CVar 'Interchange.FeatureFlags.InterchangeReset' is 0; library silently no-ops. Set the CVar to 1 to enable."));
-    return mcp_common::MakeOkReply(Data);
+            ? TEXT("ResetSceneImportAsset ran; it returns nothing, so what it changed is not reported")
+            : TEXT("CVar 'Interchange.FeatureFlags.InterchangeReset' is 0, so the engine resets nothing; set it to 1 and call again."));
+    return mcp_common::MakeOutcomeReply(Data, bCVarEnabled, bCVarEnabled ? FString() :
+        FString(TEXT("interchange_reset_scene_import_asset did nothing: the Interchange.FeatureFlags.InterchangeReset CVar is 0. Set it to 1 (execute_console_command) and call again.")));
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_reset_level_asset - Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing. It does not save. Returns reset, can_reset, cvar_enabled and a note.
+// MCP:interchange_reset_level_asset - Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing and the call fails (reset false, with the reason in note). It does not save. Returns reset, can_reset, cvar_enabled and a note.
 //   @param world_path [string] - World asset path (e.g. "/Game/Maps/MyMap") or fully-qualified object path. Empty = current editor world.
-//   @returns { world_path: string, reset: bool, note: string }
+//   @returns { world_path: string, resolved_world_path: string, reset: bool, can_reset: bool, cvar_enabled: bool, note: string }
 TSharedPtr<FJsonObject> HandleInterchangeResetLevelAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString WorldPath;
@@ -338,7 +340,9 @@ TSharedPtr<FJsonObject> HandleInterchangeResetLevelAsset(const TSharedPtr<FJsonO
             : !bCanReset
                 ? TEXT("World is not bound to a UInterchangeSceneImportAsset; ResetLevelAsset would be a no-op. Skipped.")
                 : TEXT("ResetLevelAsset invoked on bound world"));
-    return mcp_common::MakeOkReply(Data);
+    const bool bReset = bCVarEnabled && bCanReset;
+    return mcp_common::MakeOutcomeReply(Data, bReset, bReset ? FString() : FString::Printf(
+        TEXT("interchange_reset_level_asset did nothing: %s"), *Data->GetStringField(TEXT("note"))));
 }
 
 const McpCommandFamilies::FRegistrar Registration =
