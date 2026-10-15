@@ -6,17 +6,17 @@
 
 ## `add_chooser_column_to_table`
 
-*Additive, idempotent.*
+*Additive.*
 
-Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table (save failures are not reported). Columns are matched by type, not name: when one of that type exists its index comes back with already_existed=true and nothing changes, so the call is idempotent and a second column of one type cannot be added. The new column has no row cells, so add columns before add_chooser_row. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_type` | string | yes | Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
-| `column_name` | string | yes | Label echoed back in the reply only: it is not stored on the column and plays no part in duplicate detection, which goes by column_type. |
+| `column_name` | string | yes | Label echoed back in the reply only; it is not stored on the column. |
 
-**Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool }`
+**Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }`
 
 ## `add_chooser_row`
 

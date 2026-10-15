@@ -110,6 +110,25 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * Why the Blueprint BP already at PackagePath/AssetName cannot be returned for a request for a subclass of
+	 * ParentClass, or empty when it can: a re-run returns that Blueprint only when its parent is ParentClass or
+	 * derives from it. Anything else is another asset, which the caller leaves untouched.
+	 */
+	FString ExistingBlueprintParentMismatch(const UBlueprint* BP, const UClass* ParentClass,
+		const FString& PackagePath, const FString& AssetName)
+	{
+		if (BP->ParentClass && BP->ParentClass->IsChildOf(ParentClass))
+		{
+			return FString();
+		}
+		return FString::Printf(
+			TEXT("A Blueprint already at %s/%s has parent %s, which does not derive from parent_class %s; ")
+			TEXT("nothing was created or changed. Pick another asset_name, or delete that asset first."),
+			*PackagePath, *AssetName,
+			BP->ParentClass ? *BP->ParentClass->GetName() : TEXT("none"), *ParentClass->GetName());
+	}
+
 	/** Find AWorldSettings in the editor world. */
 	AWorldSettings* GetWorldSettings()
 	{
@@ -118,26 +137,68 @@ namespace
 	}
 
 	/**
+	 * Whether the package holding CDO can be saved: true for a Blueprint class, whose CDO lives in its
+	 * Blueprint package; false for a native class, whose CDO lives in a compiled-in script package.
+	 */
+	bool IsCDOPackageSavable(const UObject* CDO)
+	{
+		return CDO && !CDO->GetOutermost()->HasAnyPackageFlags(PKG_CompiledIn);
+	}
+
+	/** The TSubclassOf<...> UPROPERTY PropName of CDO, or null when CDO has no such object property. */
+	FObjectPropertyBase* FindClassPropertyOnCDO(const UObject* CDO, FName PropName)
+	{
+		return CDO ? CastField<FObjectPropertyBase>(CDO->GetClass()->FindPropertyByName(PropName)) : nullptr;
+	}
+
+	/**
 	 * Set a TSubclassOf<...> UPROPERTY on a CDO by FName.
 	 * Used for DefaultPawnClass / HUDClass / PlayerStateClass / GameStateClass /
-	 * SpectatorClass / PlayerControllerClass on AGameModeBase.
+	 * SpectatorClass / PlayerControllerClass on AGameModeBase. A CDO in a savable package (a Blueprint
+	 * GameMode) is Modify()'d before the write and its package marked dirty after it, so save_asset or the
+	 * editor's save prompt persists the value; a native class's CDO is written in memory only, since its
+	 * script package is never saved.
 	 */
 	bool SetClassPropertyOnCDO(UObject* CDO, FName PropName, UClass* NewValue)
 	{
-		if (!CDO) { return false; }
-		FProperty* Prop = CDO->GetClass()->FindPropertyByName(PropName);
-		if (!Prop) { return false; }
-		FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Prop);
+		FObjectPropertyBase* ObjProp = FindClassPropertyOnCDO(CDO, PropName);
 		if (!ObjProp) { return false; }
+		const bool bSavable = IsCDOPackageSavable(CDO);
+		if (bSavable)
+		{
+			CDO->Modify();
+		}
 		ObjProp->SetObjectPropertyValue_InContainer(CDO, NewValue);
+		if (bSavable)
+		{
+			CDO->MarkPackageDirty();
+		}
 		return true;
+	}
+
+	/** The path of the class held by the TSubclassOf<...> UPROPERTY PropName of CDO, read back; empty when unset. */
+	FString ReadClassPropertyOnCDO(const UObject* CDO, FName PropName)
+	{
+		const FObjectPropertyBase* ObjProp = FindClassPropertyOnCDO(CDO, PropName);
+		const UObject* Value = ObjProp ? ObjProp->GetObjectPropertyValue_InContainer(CDO) : nullptr;
+		return Value ? Value->GetPathName() : FString();
+	}
+
+	/** The reply of a GameMode class-slot setter: game_mode_class, the slot read back under SlotField, persistable. */
+	TSharedPtr<FJsonObject> GameModeSlotReply(const FString& GameModeClass, const UObject* CDO, FName PropName, const TCHAR* SlotField)
+	{
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("game_mode_class"), GameModeClass);
+		Data->SetStringField(SlotField, ReadClassPropertyOnCDO(CDO, PropName));
+		Data->SetBoolField(TEXT("persistable"), IsCDOPackageSavable(CDO));
+		return Data;
 	}
 }
 
 // ---------------------------------------------------------------------------
 // create_game_mode_class_bp
 // ---------------------------------------------------------------------------
-// MCP:create_game_mode_class_bp - Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on re-run).
+// MCP:create_game_mode_class_bp - Create an AGameModeBase-derivative Blueprint asset at package_path/asset_name, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class and is_multiplayer are read off the Blueprint.
 //   @param asset_name - Name for the new Blueprint asset
 //   @param parent_class - Parent class name (must derive from AGameModeBase; AGameMode also accepted for multiplayer)
 //   @param package_path - Target content folder; defaults to /Game/MCP
@@ -171,7 +232,15 @@ TSharedPtr<FJsonObject> HandleCreateGameModeClassBp(
 	// Blueprint. Return the existing asset idempotently instead of crashing.
 	UBlueprint* BP = FindObject<UBlueprint>(Package, *Request.AssetName);
 	const bool bAlreadyExists = (BP != nullptr);
-	if (!BP)
+	if (BP)
+	{
+		const FString Mismatch = ExistingBlueprintParentMismatch(BP, Request.ParentClass, Request.PackagePath, Request.AssetName);
+		if (!Mismatch.IsEmpty())
+		{
+			return mcp_common::MakeErrorReply(Mismatch);
+		}
+	}
+	else
 	{
 		BP = Cast<UBlueprint>(
 			FKismetEditorUtilities::CreateBlueprint(
@@ -192,8 +261,10 @@ TSharedPtr<FJsonObject> HandleCreateGameModeClassBp(
 	Data->SetStringField(TEXT("package_path"), Request.PackagePath);
 	Data->SetStringField(TEXT("package_class"),
 		BP->GeneratedClass ? BP->GeneratedClass->GetPathName() : FString());
-	Data->SetStringField(TEXT("parent_class"), Request.ParentClass->GetName());
-	Data->SetBoolField(TEXT("is_multiplayer"), Request.ParentClass->IsChildOf(AGameMode::StaticClass()));
+	// Read off the asset, so a Blueprint that already existed reports the parent it really has.
+	const UClass* ActualParent = BP->ParentClass;
+	Data->SetStringField(TEXT("parent_class"), ActualParent ? ActualParent->GetName() : FString());
+	Data->SetBoolField(TEXT("is_multiplayer"), ActualParent && ActualParent->IsChildOf(AGameMode::StaticClass()));
 	Data->SetBoolField(TEXT("already_exists"), bAlreadyExists);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -222,6 +293,7 @@ TSharedPtr<FJsonObject> HandleSetGameModeOverride(
 		return mcp_common::MakeErrorReply(
 			TEXT("No WorldSettings in current editor world"));
 	}
+	WS->Modify();
 	WS->DefaultGameMode = Cls;
 	WS->MarkPackageDirty();
 
@@ -235,11 +307,11 @@ TSharedPtr<FJsonObject> HandleSetGameModeOverride(
 // ---------------------------------------------------------------------------
 // set_game_mode_default_pawn  (AGameModeBase CDO :: DefaultPawnClass)
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_default_pawn - Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. Memory only: no transaction, no dirty flag, no save, so GameModes spawned later (the next PIE) use it, and it is lost when the editor closes unless a Blueprint GameMode's package is saved with save_asset. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
+// MCP:set_game_mode_default_pawn - Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. GameModes spawned later (the next PIE) use it. A Blueprint GameMode's CDO is modified and its package marked dirty but not saved: persist it with save_asset (persistable true). A native GameMode class has no savable package, so its value lasts only until the editor closes (persistable false). default_pawn_class is read back from the CDO. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param pawn_class - APawn-derivative class name
-//   @returns { game_mode_class: string, default_pawn_class: string }
+//   @returns { game_mode_class: string, default_pawn_class: string, persistable: bool }
 
 TSharedPtr<FJsonObject> HandleSetGameModeDefaultPawn(
 	const TSharedPtr<FJsonObject>& Params)
@@ -259,25 +331,23 @@ TSharedPtr<FJsonObject> HandleSetGameModeDefaultPawn(
 			FString::Printf(TEXT("Pawn class not found or not an APawn: %s"), *PawnClassName));
 	}
 	UObject* CDO = Cls->GetDefaultObject();
-	if (!SetClassPropertyOnCDO(CDO, GET_MEMBER_NAME_CHECKED(AGameModeBase, DefaultPawnClass), PawnCls))
+	const FName Slot = GET_MEMBER_NAME_CHECKED(AGameModeBase, DefaultPawnClass);
+	if (!SetClassPropertyOnCDO(CDO, Slot, PawnCls))
 	{
 		return mcp_common::MakeErrorReply(
 			TEXT("Failed to set DefaultPawnClass (CDO write)"));
 	}
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("game_mode_class"), Chosen);
-	Data->SetStringField(TEXT("default_pawn_class"), PawnCls->GetPathName());
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOkReply(GameModeSlotReply(Chosen, CDO, Slot, TEXT("default_pawn_class")));
 }
 
 // ---------------------------------------------------------------------------
 // set_game_mode_hud_class  (AGameModeBase CDO :: HUDClass)
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_hud_class - Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO.
+// MCP:set_game_mode_hud_class - Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). hud_class is read back from the CDO.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param hud_class - AHUD-derivative class name
-//   @returns { game_mode_class: string, hud_class: string }
+//   @returns { game_mode_class: string, hud_class: string, persistable: bool }
 
 TSharedPtr<FJsonObject> HandleSetGameModeHudClass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -297,25 +367,23 @@ TSharedPtr<FJsonObject> HandleSetGameModeHudClass(
 			FString::Printf(TEXT("HUD class not found or not an AHUD: %s"), *HudClassName));
 	}
 	UObject* CDO = Cls->GetDefaultObject();
-	if (!SetClassPropertyOnCDO(CDO, GET_MEMBER_NAME_CHECKED(AGameModeBase, HUDClass), HudCls))
+	const FName Slot = GET_MEMBER_NAME_CHECKED(AGameModeBase, HUDClass);
+	if (!SetClassPropertyOnCDO(CDO, Slot, HudCls))
 	{
 		return mcp_common::MakeErrorReply(
 			TEXT("Failed to set HUDClass (CDO write)"));
 	}
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("game_mode_class"), Chosen);
-	Data->SetStringField(TEXT("hud_class"), HudCls->GetPathName());
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOkReply(GameModeSlotReply(Chosen, CDO, Slot, TEXT("hud_class")));
 }
 
 // ---------------------------------------------------------------------------
 // set_game_mode_player_state_class
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_player_state_class - Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO.
+// MCP:set_game_mode_player_state_class - Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). player_state_class is read back from the CDO.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param player_state_class - APlayerState-derivative class name
-//   @returns { game_mode_class: string, player_state_class: string }
+//   @returns { game_mode_class: string, player_state_class: string, persistable: bool }
 
 TSharedPtr<FJsonObject> HandleSetGameModePlayerStateClass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -335,25 +403,23 @@ TSharedPtr<FJsonObject> HandleSetGameModePlayerStateClass(
 			FString::Printf(TEXT("PlayerState class not found or not an APlayerState: %s"), *PsClassName));
 	}
 	UObject* CDO = Cls->GetDefaultObject();
-	if (!SetClassPropertyOnCDO(CDO, GET_MEMBER_NAME_CHECKED(AGameModeBase, PlayerStateClass), PsCls))
+	const FName Slot = GET_MEMBER_NAME_CHECKED(AGameModeBase, PlayerStateClass);
+	if (!SetClassPropertyOnCDO(CDO, Slot, PsCls))
 	{
 		return mcp_common::MakeErrorReply(
 			TEXT("Failed to set PlayerStateClass (CDO write)"));
 	}
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("game_mode_class"), Chosen);
-	Data->SetStringField(TEXT("player_state_class"), PsCls->GetPathName());
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOkReply(GameModeSlotReply(Chosen, CDO, Slot, TEXT("player_state_class")));
 }
 
 // ---------------------------------------------------------------------------
 // set_game_mode_game_state_class  (AGameModeBase CDO :: GameStateClass)
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_game_state_class - Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO.
+// MCP:set_game_mode_game_state_class - Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). game_state_class is read back from the CDO.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param game_state_class - AGameStateBase-derivative class name (NoClear: empty/None rejected)
-//   @returns { game_mode_class: string, game_state_class: string, already_set: bool }
+//   @returns { game_mode_class: string, game_state_class: string, already_set: bool, persistable: bool }
 
 TSharedPtr<FJsonObject> HandleSetGameModeGameStateClass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -386,17 +452,16 @@ TSharedPtr<FJsonObject> HandleSetGameModeGameStateClass(
 		*Chosen,
 		CDO->GameStateClass ? *CDO->GameStateClass->GetPathName() : TEXT("<null>"),
 		*GsCls->GetPathName(), bAlreadySet ? 1 : 0);
+	const FName Slot = GET_MEMBER_NAME_CHECKED(AGameModeBase, GameStateClass);
 	if (!bAlreadySet)
 	{
-		if (!SetClassPropertyOnCDO(CDO, GET_MEMBER_NAME_CHECKED(AGameModeBase, GameStateClass), GsCls))
+		if (!SetClassPropertyOnCDO(CDO, Slot, GsCls))
 		{
 			return mcp_common::MakeErrorReply(
 				TEXT("Failed to set GameStateClass (CDO write)"));
 		}
 	}
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("game_mode_class"), Chosen);
-	Data->SetStringField(TEXT("game_state_class"), GsCls->GetPathName());
+	TSharedPtr<FJsonObject> Data = GameModeSlotReply(Chosen, CDO, Slot, TEXT("game_state_class"));
 	Data->SetBoolField(TEXT("already_set"), bAlreadySet);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -404,11 +469,11 @@ TSharedPtr<FJsonObject> HandleSetGameModeGameStateClass(
 // ---------------------------------------------------------------------------
 // set_game_mode_spectator_class  (AGameModeBase CDO :: SpectatorClass)
 // ---------------------------------------------------------------------------
-// MCP:set_game_mode_spectator_class - Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO.
+// MCP:set_game_mode_spectator_class - Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). spectator_class is read back from the CDO.
 //   @param game_mode_class - Optional AGameModeBase class name (short or /Script/ path)
 //   @param game_mode_class_path - Optional long /Script/Engine.GameModeBase path (takes precedence)
 //   @param spectator_class - ASpectatorPawn-derivative class name (NoClear: empty/None rejected)
-//   @returns { game_mode_class: string, spectator_class: string, already_set: bool }
+//   @returns { game_mode_class: string, spectator_class: string, already_set: bool, persistable: bool }
 
 TSharedPtr<FJsonObject> HandleSetGameModeSpectatorClass(
 	const TSharedPtr<FJsonObject>& Params)
@@ -441,17 +506,16 @@ TSharedPtr<FJsonObject> HandleSetGameModeSpectatorClass(
 		*Chosen,
 		CDO->SpectatorClass ? *CDO->SpectatorClass->GetPathName() : TEXT("<null>"),
 		*SpCls->GetPathName(), bAlreadySet ? 1 : 0);
+	const FName Slot = GET_MEMBER_NAME_CHECKED(AGameModeBase, SpectatorClass);
 	if (!bAlreadySet)
 	{
-		if (!SetClassPropertyOnCDO(CDO, GET_MEMBER_NAME_CHECKED(AGameModeBase, SpectatorClass), SpCls))
+		if (!SetClassPropertyOnCDO(CDO, Slot, SpCls))
 		{
 			return mcp_common::MakeErrorReply(
 				TEXT("Failed to set SpectatorClass (CDO write)"));
 		}
 	}
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("game_mode_class"), Chosen);
-	Data->SetStringField(TEXT("spectator_class"), SpCls->GetPathName());
+	TSharedPtr<FJsonObject> Data = GameModeSlotReply(Chosen, CDO, Slot, TEXT("spectator_class"));
 	Data->SetBoolField(TEXT("already_set"), bAlreadySet);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -580,6 +644,11 @@ namespace
         UBlueprint* BP = FindObject<UBlueprint>(Package, *AssetName);
         if (BP)
         {
+            OutError = ExistingBlueprintParentMismatch(BP, ParentClass, PackagePath, AssetName);
+            if (!OutError.IsEmpty())
+            {
+                return nullptr;
+            }
             bOutAlreadyExisted = true;
             return BP;
         }
@@ -594,21 +663,22 @@ namespace
         return BP;
     }
 
-    // Helper for create_*_class_bp responses.
-    TSharedPtr<FJsonObject> ClassBpPayload(UBlueprint* BP, UClass* ParentClass, bool bAlreadyExisted)
+    // Helper for create_*_class_bp responses. parent_class is the Blueprint's own parent, read off the asset,
+    // so a Blueprint that already existed reports the parent it really has.
+    TSharedPtr<FJsonObject> ClassBpPayload(UBlueprint* BP, bool bAlreadyExisted)
     {
         TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
         Data->SetStringField(TEXT("asset_name"), BP->GetName());
         Data->SetStringField(TEXT("asset_path"), BP->GetPathName());
         Data->SetStringField(TEXT("package_class"),
             BP->GeneratedClass ? BP->GeneratedClass->GetPathName() : FString());
-        Data->SetStringField(TEXT("parent_class"), ParentClass->GetName());
+        Data->SetStringField(TEXT("parent_class"), BP->ParentClass ? BP->ParentClass->GetName() : FString());
         Data->SetBoolField(TEXT("already_exists"), bAlreadyExisted);
         return Data;
     }
 }
 
-// MCP:create_game_state_class_bp - Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path is returned as is with already_exists=true, without checking its parent (parent_class echoes the request). A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
+// MCP:create_game_state_class_bp - Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned as is with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint. A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from AGameStateBase.
 //   @param package_path - Target content folder; defaults to /Game/MCP.
@@ -626,11 +696,11 @@ TSharedPtr<FJsonObject> HandleCreateGameStateClassBp(
     UBlueprint* BP = CreateClassBlueprint(Request, AGameStateBase::StaticClass(), bAlreadyExisted, Err);
     if (!BP) { return mcp_common::MakeErrorReply(Err); }
 
-    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, Request.ParentClass, bAlreadyExisted);
+    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, bAlreadyExisted);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:create_player_controller_class_bp - Create a Blueprint subclass of APlayerController. Idempotent on re-run.
+// MCP:create_player_controller_class_bp - Create a Blueprint subclass of APlayerController, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from APlayerController.
 //   @param package_path - Target content folder; defaults to /Game/MCP.
@@ -648,11 +718,11 @@ TSharedPtr<FJsonObject> HandleCreatePlayerControllerClassBp(
     UBlueprint* BP = CreateClassBlueprint(Request, APlayerController::StaticClass(), bAlreadyExisted, Err);
     if (!BP) { return mcp_common::MakeErrorReply(Err); }
 
-    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, Request.ParentClass, bAlreadyExisted);
+    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, bAlreadyExisted);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:create_player_state_class_bp - Create a Blueprint subclass of APlayerState. Idempotent on re-run.
+// MCP:create_player_state_class_bp - Create a Blueprint subclass of APlayerState, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from APlayerState.
 //   @param package_path - Target content folder; defaults to /Game/MCP.
@@ -670,11 +740,11 @@ TSharedPtr<FJsonObject> HandleCreatePlayerStateClassBp(
     UBlueprint* BP = CreateClassBlueprint(Request, APlayerState::StaticClass(), bAlreadyExisted, Err);
     if (!BP) { return mcp_common::MakeErrorReply(Err); }
 
-    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, Request.ParentClass, bAlreadyExisted);
+    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, bAlreadyExisted);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:create_game_instance_class_bp - Create a Blueprint subclass of UGameInstance. Idempotent on re-run.
+// MCP:create_game_instance_class_bp - Create a Blueprint subclass of UGameInstance, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from UGameInstance.
 //   @param package_path - Target content folder; defaults to /Game/MCP.
@@ -692,11 +762,11 @@ TSharedPtr<FJsonObject> HandleCreateGameInstanceClassBp(
     UBlueprint* BP = CreateClassBlueprint(Request, UGameInstance::StaticClass(), bAlreadyExisted, Err);
     if (!BP) { return mcp_common::MakeErrorReply(Err); }
 
-    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, Request.ParentClass, bAlreadyExisted);
+    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, bAlreadyExisted);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:create_hud_class_bp - Create a Blueprint subclass of AHUD. Idempotent on re-run.
+// MCP:create_hud_class_bp - Create a Blueprint subclass of AHUD, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 //   @param asset_name - Name for the new Blueprint asset.
 //   @param parent_class - Parent class name; must derive from AHUD.
 //   @param package_path - Target content folder; defaults to /Game/MCP.
@@ -714,7 +784,7 @@ TSharedPtr<FJsonObject> HandleCreateHudClassBp(
     UBlueprint* BP = CreateClassBlueprint(Request, AHUD::StaticClass(), bAlreadyExisted, Err);
     if (!BP) { return mcp_common::MakeErrorReply(Err); }
 
-    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, Request.ParentClass, bAlreadyExisted);
+    TSharedPtr<FJsonObject> Data = ClassBpPayload(BP, bAlreadyExisted);
     return mcp_common::MakeOkReply(Data);
 }
 

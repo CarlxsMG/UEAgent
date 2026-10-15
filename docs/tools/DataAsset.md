@@ -635,14 +635,14 @@ Remove a DataTable source from a UDataRegistry asset (the true inverse of add_da
 
 *Destructive, idempotent.*
 
-Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that was not in the table is not an error -- existed comes back false while removed (the key is absent afterwards) is still true, and the table is saved anyway. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.
+Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that is not in the table is already the state asked for, so the call succeeds with removed false and already_absent true and changes and saves nothing. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `string_table_path` | string | yes | Full asset path to the UStringTable |
 | `key` | string | yes | Entry key to remove |
 
-**Returns:** `{ string_table_path: string, key: string, removed: bool, existed: bool, verified: bool, namespace: string, entry_count: int, saved: bool }`
+**Returns:** `{ string_table_path: string, key: string, removed: bool, existed: bool, already_absent: bool, verified: bool, namespace: string, entry_count: int, saved: bool }`
 
 ## `remove_string_table_metadata`
 

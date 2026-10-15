@@ -17,6 +17,8 @@
 #include "Engine/Texture.h"
 #include "SceneTypes.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"            // FProperty import/export (set_material_node_param)
+#include "Misc/StringOutputDevice.h"       // captures ImportText_Direct's own error text
 #include "RenderingThread.h"   // FlushRenderingCommands — serialize material recompile vs render thread
 
 // Material functions / post-process materials
@@ -87,6 +89,85 @@ namespace
         if (P == TEXT("pixeldepthoffset")) { Out = MP_PixelDepthOffset; return true; }
         if (P == TEXT("subsurfacecolor") || P == TEXT("subsurface")) { Out = MP_SubsurfaceColor; return true; }
         return false;
+    }
+
+    // Defined further down, next to set_material_instance_param, its first user.
+    bool ParseLinearColorForMaterialInstanceParam(
+        const FString& In, FLinearColor& Out, FString& OutFormat, FString& OutError);
+
+    // Writes Text into Property of Expression, all or nothing: the text is parsed into a scratch
+    // copy of the current value, and only a value that parsed is copied onto the node.
+    //  - FLinearColor (the main value of Constant3Vector, Constant4Vector and VectorParameter)
+    //    goes through ParseLinearColorForMaterialInstanceParam, which refuses what it cannot
+    //    read; FLinearColor::InitFromString would turn that into black without a word.
+    //  - Numbers go through LexTryParseString: ImportText_Direct cannot fail on a float
+    //    property ("abc" imports as 0 and returns a non-null cursor).
+    //  - Every other type goes through ImportText_Direct, whose null return means rejected.
+    bool ImportExpressionProperty(UMaterialExpression* Expression, FProperty* Property, const FString& Text, FString& OutError)
+    {
+        void* Dest = Property->ContainerPtrToValuePtr<void>(Expression);
+        void* Scratch = Property->AllocateAndInitializeValue();
+        Property->CopyCompleteValue(Scratch, Dest);
+
+        bool bParsed = false;
+        const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
+        const FNumericProperty* NumericProperty = CastField<FNumericProperty>(Property);
+        if (StructProperty && StructProperty->Struct == TBaseStructure<FLinearColor>::Get())
+        {
+            FLinearColor Color;
+            FString Format;
+            bParsed = ParseLinearColorForMaterialInstanceParam(Text, Color, Format, OutError);
+            if (bParsed)
+            {
+                *static_cast<FLinearColor*>(Scratch) = Color;
+            }
+        }
+        else if (NumericProperty && !NumericProperty->IsEnum())
+        {
+            const FString Trimmed = Text.TrimStartAndEnd();
+            if (NumericProperty->IsFloatingPoint())
+            {
+                double Number = 0.0;
+                bParsed = LexTryParseString(Number, *Trimmed);
+                if (bParsed)
+                {
+                    NumericProperty->SetFloatingPointPropertyValue(Scratch, Number);
+                }
+            }
+            else
+            {
+                int64 Number = 0;
+                bParsed = LexTryParseString(Number, *Trimmed);
+                if (bParsed)
+                {
+                    NumericProperty->SetIntPropertyValue(Scratch, Number);
+                }
+            }
+            if (!bParsed)
+            {
+                OutError = FString::Printf(TEXT("'%s' is not a number (property %s is %s)"),
+                    *Text, *Property->GetName(), *Property->GetCPPType());
+            }
+        }
+        else
+        {
+            FStringOutputDevice ImportErrors;
+            bParsed = Property->ImportText_Direct(*Text, Scratch, Expression, PPF_None, &ImportErrors) != nullptr;
+            if (!bParsed)
+            {
+                OutError = ImportErrors.IsEmpty()
+                    ? FString::Printf(TEXT("'%s' is not a valid value for property %s (%s)"), *Text, *Property->GetName(), *Property->GetCPPType())
+                    : FString::Printf(TEXT("'%s' rejected by property %s (%s): %s"), *Text, *Property->GetName(), *Property->GetCPPType(), *ImportErrors);
+            }
+        }
+
+        if (bParsed)
+        {
+            Expression->Modify();
+            Property->CopyCompleteValue(Dest, Scratch);
+        }
+        Property->DestroyAndFreeValue(Scratch);
+        return bParsed;
     }
 }
 
@@ -186,12 +267,12 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:set_material_node_param - Write one value on an expression node of a UMaterial asset (not an instance), found by its object name node_id. ParameterName renames a node that has a parameter name; otherwise Constant, ScalarParameter, Constant3Vector, Constant4Vector and VectorParameter nodes ignore param_name and take value as their main value (R, DefaultValue or Constant); other node types set the named property by reflection. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). An unknown node or property is an error, an unparsable value is not. Instances: set_material_instance_param.
+// MCP:set_material_node_param - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_param.
 //   @param material_path - Material asset path
 //   @param node_id - Id of the target expression in the material
 //   @param param_name - Name of the property to set (e.g. "ParameterName", "R", "DefaultValue")
-//   @param value - Text to write: a number for Constant and ScalarParameter, "(R=1,G=0.5,B=0,A=1)" for the vector nodes (unparsable text gives black), the new name for ParameterName, else UE import text for the property; omitted means empty text.
-//   @returns { material: string, node_id: string, param_name: string, value: string }
+//   @param value - Text to write: a number for a numeric property, "(R=1,G=0.5,B=0,A=1)", "[1,0.5,0,1]" or "1,0.5,0" for a linear color, the new name for ParameterName, else UE import text for the property; omitted means empty text.
+//   @returns { material: string, node_id: string, param_name: string, value: string, value_after: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>& Params)
 {
@@ -208,50 +289,36 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
     if (!Expr)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Expression not found: %s"), *NodeId));
 
-    Material->Modify();
-    Expr->Modify();
-    bool bHandled = false;
-
+    FString ValueAfter;
     if (ParamName.Equals(TEXT("ParameterName"), ESearchCase::IgnoreCase) && Expr->HasAParameterName())
     {
-        Expr->SetParameterName(FName(*Value));
-        bHandled = true;
-    }
-    else if (UMaterialExpressionConstant* C = Cast<UMaterialExpressionConstant>(Expr))
-    {
-        C->R = FCString::Atof(*Value);
-        bHandled = true;
-    }
-    else if (UMaterialExpressionScalarParameter* S = Cast<UMaterialExpressionScalarParameter>(Expr))
-    {
-        S->DefaultValue = FCString::Atof(*Value);
-        bHandled = true;
-    }
-    else if (UMaterialExpressionConstant3Vector* C3 = Cast<UMaterialExpressionConstant3Vector>(Expr))
-    {
-        FLinearColor LC; LC.InitFromString(Value); C3->Constant = LC; bHandled = true;
-    }
-    else if (UMaterialExpressionConstant4Vector* C4 = Cast<UMaterialExpressionConstant4Vector>(Expr))
-    {
-        FLinearColor LC; LC.InitFromString(Value); C4->Constant = LC; bHandled = true;
-    }
-    else if (UMaterialExpressionVectorParameter* V = Cast<UMaterialExpressionVectorParameter>(Expr))
-    {
-        FLinearColor LC; LC.InitFromString(Value); V->DefaultValue = LC; bHandled = true;
+        // SetParameterName is the node's own way to rename its parameter. An empty name would
+        // leave the parameter named None.
+        const FString NewName = Value.TrimStartAndEnd();
+        if (NewName.IsEmpty())
+            return mcp_common::MakeErrorReply(TEXT("value must be the new parameter name; an empty name is refused"));
+        Material->Modify();
+        Expr->Modify();
+        Expr->SetParameterName(FName(*NewName));
+        ValueAfter = Expr->GetParameterName().ToString();
     }
     else
     {
-        // Reflection fallback: set a named FProperty on the expression by import text.
-        if (FProperty* Property = FindFProperty<FProperty>(Expr->GetClass(), FName(*ParamName)))
-        {
-            void* Addr = Property->ContainerPtrToValuePtr<void>(Expr);
-            Property->ImportText_Direct(*Value, Addr, Expr, PPF_None);
-            bHandled = true;
-        }
-    }
+        // Every other name is a property of the node, found by reflection, so param_name always
+        // decides what is written.
+        FProperty* Property = FindFProperty<FProperty>(Expr->GetClass(), FName(*ParamName));
+        if (!Property)
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Expression %s (%s) has no property '%s'"),
+                *NodeId, *Expr->GetClass()->GetName(), *ParamName));
 
-    if (!bHandled)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not set '%s' on expression of type %s"), *ParamName, *Expr->GetClass()->GetName()));
+        // Parse first, write after: a value the property rejects leaves the node untouched.
+        FString ImportError;
+        if (!ImportExpressionProperty(Expr, Property, Value, ImportError))
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not set '%s' on expression %s: %s"),
+                *ParamName, *NodeId, *ImportError));
+        Material->Modify();
+        Property->ExportText_Direct(ValueAfter, Property->ContainerPtrToValuePtr<void>(Expr), nullptr, Expr, PPF_None);
+    }
 
     Expr->PostEditChange();
     Material->PostEditChange();
@@ -262,6 +329,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
     Result->SetStringField(TEXT("node_id"), NodeId);
     Result->SetStringField(TEXT("param_name"), ParamName);
     Result->SetStringField(TEXT("value"), Value);
+    Result->SetStringField(TEXT("value_after"), ValueAfter);
     return Result;
 }
 

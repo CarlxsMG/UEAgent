@@ -8,7 +8,7 @@
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of UGameInstance. Idempotent on re-run.
+Create a Blueprint subclass of UGameInstance, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -22,7 +22,7 @@ Create a Blueprint subclass of UGameInstance. Idempotent on re-run.
 
 *Additive, idempotent.*
 
-Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on re-run).
+Create an AGameModeBase-derivative Blueprint asset at package_path/asset_name, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class and is_multiplayer are read off the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -36,7 +36,7 @@ Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path is returned as is with already_exists=true, without checking its parent (parent_class echoes the request). A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
+Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, registered and marked dirty but NOT saved -- persist it with save_asset. Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned as is with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint. A parent_class that does not resolve or derive from AGameStateBase, or a name taken by another asset class, is an error. Refused during PIE unless force. Siblings: create_game_mode_class_bp, create_player_state_class_bp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -50,7 +50,7 @@ Create a Blueprint subclass of AGameStateBase (or AGameState) at package_path/as
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of AHUD. Idempotent on re-run.
+Create a Blueprint subclass of AHUD, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Create a Blueprint subclass of AHUD. Idempotent on re-run.
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of APlayerController. Idempotent on re-run.
+Create a Blueprint subclass of APlayerController, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -78,7 +78,7 @@ Create a Blueprint subclass of APlayerController. Idempotent on re-run.
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of APlayerState. Idempotent on re-run.
+Create a Blueprint subclass of APlayerState, registered and marked dirty but not saved (persist it with save_asset). Idempotent on re-run: a Blueprint already at that path whose parent derives from parent_class is returned with already_exists=true; one with another parent is an error and is left untouched. parent_class is read off the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -143,7 +143,7 @@ No parameters.
 
 *Destructive, idempotent.*
 
-Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. Memory only: no transaction, no dirty flag, no save, so GameModes spawned later (the next PIE) use it, and it is lost when the editor closes unless a Blueprint GameMode's package is saved with save_asset. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
+Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase subclass, picked by game_mode_class_path or else game_mode_class (one is required), to pawn_class, which must derive from APawn; a class that does not resolve or derive is an error. GameModes spawned later (the next PIE) use it. A Blueprint GameMode's CDO is modified and its package marked dirty but not saved: persist it with save_asset (persistable true). A native GameMode class has no savable package, so its value lasts only until the editor closes (persistable false). default_pawn_class is read back from the CDO. Read the slots with get_game_mode_info; set_game_mode_override picks the GameMode of the level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -151,13 +151,13 @@ Write DefaultPawnClass on the class default object (CDO) of an AGameModeBase sub
 | `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
 | `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
 
-**Returns:** `{ game_mode_class: string, default_pawn_class: string }`
+**Returns:** `{ game_mode_class: string, default_pawn_class: string, persistable: bool }`
 
 ## `set_game_mode_game_state_class`
 
 *Destructive, idempotent.*
 
-Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO.
+Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). game_state_class is read back from the CDO.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -165,13 +165,13 @@ Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO.
 | `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
 | `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
 
-**Returns:** `{ game_mode_class: string, game_state_class: string, already_set: bool }`
+**Returns:** `{ game_mode_class: string, game_state_class: string, already_set: bool, persistable: bool }`
 
 ## `set_game_mode_hud_class`
 
 *Destructive, idempotent.*
 
-Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO.
+Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). hud_class is read back from the CDO.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -179,7 +179,7 @@ Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO.
 | `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
 | `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
 
-**Returns:** `{ game_mode_class: string, hud_class: string }`
+**Returns:** `{ game_mode_class: string, hud_class: string, persistable: bool }`
 
 ## `set_game_mode_override`
 
@@ -197,7 +197,7 @@ Set the AWorldSettings::DefaultGameMode override on the current editor world.
 
 *Destructive, idempotent.*
 
-Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO.
+Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). player_state_class is read back from the CDO.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -205,13 +205,13 @@ Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO.
 | `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
 | `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
 
-**Returns:** `{ game_mode_class: string, player_state_class: string }`
+**Returns:** `{ game_mode_class: string, player_state_class: string, persistable: bool }`
 
 ## `set_game_mode_spectator_class`
 
 *Destructive, idempotent.*
 
-Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO.
+Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO. A Blueprint GameMode's package is marked dirty but not saved (persist it with save_asset); a native class's value lasts only until the editor closes (persistable false). spectator_class is read back from the CDO.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -219,4 +219,4 @@ Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO.
 | `game_mode_class` | string | no | Optional AGameModeBase class name (short or /Script/ path) |
 | `game_mode_class_path` | string | no | Optional long /Script/Engine.GameModeBase path (takes precedence) |
 
-**Returns:** `{ game_mode_class: string, spectator_class: string, already_set: bool }`
+**Returns:** `{ game_mode_class: string, spectator_class: string, already_set: bool, persistable: bool }`

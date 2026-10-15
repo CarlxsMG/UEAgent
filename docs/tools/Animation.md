@@ -8,15 +8,15 @@
 
 *Destructive, idempotent.*
 
-Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). An empty or unknown bone_name silently falls back to the root bone, so read bone_name in the reply; a missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `bone_name` | string | no | Name of the skeleton bone |
+| `bone_name` | string | no | Name of a bone of the skeleton of the sequence; omitted or empty means the root bone. |
 | `num_keys` | number | no | Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence. |
 
-**Returns:** `{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, message }`
+**Returns:** `{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, save_error, message }`
 
 ## `add_anim_composite_segment`
 
@@ -498,7 +498,7 @@ Add a null (space) to a Control Rig's hierarchy.
 
 *Destructive.*
 
-Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. The Blueprint is then compiled and saved, even when the link fails, which is an error (pins missing, incompatible or already linked). Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -540,23 +540,23 @@ Append a new LOD entry to a skeletal mesh (clone of LOD 0 build settings).
 
 *Additive.*
 
-Add a socket on a named bone of a skeletal mesh asset and save the mesh; a failed save is an error. The engine also adds a copy to the mesh's skeleton (unless it has a socket of that name), leaving the skeleton modified but unsaved. Errors when the mesh does not load or the bone is not in its reference skeleton. A socket_name the mesh already has is silently not added while the call still succeeds, so check socket_count. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
+Add a socket on a named bone of a skeletal mesh asset (undoable) and save the mesh. A copy also goes to the mesh's skeleton, which is then saved too; when the skeleton already has a socket of that name, the mesh has no skeleton, or the skeleton is engine content or under a read-only root, no copy is made (added_to_skeleton false) and skeleton_note says why. Errors, writing nothing, when the mesh does not load, the mesh already has a socket of that name, or the bone is missing from the mesh or its skeleton. success is false when a changed package fails to save. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `socket_name` | string | yes | Name for the new socket |
-| `bone_name` | string | yes | Name of the bone to attach the socket to |
+| `socket_name` | string | yes | Name for the new socket; leading and trailing spaces are trimmed, and a name the mesh already has is an error. |
+| `bone_name` | string | yes | Name of the bone to attach the socket to; it must exist in the mesh and, when the copy goes to the skeleton, in the skeleton too. |
 | `location` | array | no | Optional [x, y, z] relative location |
 | `rotation` | array | no | Optional [pitch, yaw, roll] relative rotation |
 
-**Returns:** `{ socket_name: string, bone_name: string, socket_count: int, location_x: float, location_y: float, location_z: float }`
+**Returns:** `{ socket_name: string, bone_name: string, socket_count: int, location_x: float, location_y: float, location_z: float, added_to_skeleton: bool, skeleton_path: string, skeleton_note: string?, saved: bool, save_error: string?, skeleton_saved: bool?, skeleton_save_error: string? }`
 
 ## `add_socket_to_skeleton_asset`
 
 *Additive.*
 
-Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save still returns success, so check saved. Mesh-only sockets: add_skeletal_mesh_socket.
+Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save makes success false, with saved=false and save_error. A socket on a skeletal mesh asset (copied to its skeleton when that skeleton is project content): add_skeletal_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -566,7 +566,7 @@ Add a socket to a USkeleton asset on a bone (the root by default) at a bone-rela
 | `location` | array | no | Socket location relative to its bone as [x, y, z] (default 0,0,0) |
 | `rotation` | array | no | Socket rotation relative to its bone as [pitch, yaw, roll] (default 0,0,0) |
 
-**Returns:** `{ asset_path: string, socket_name: string, bone_name: string, socket_count: int, added: bool, already_existed: bool, saved: bool }`
+**Returns:** `{ asset_path: string, socket_name: string, bone_name: string, socket_count: int, added: bool, already_existed: bool, saved: bool, save_error: string? }`
 
 ## `add_virtual_bone`
 
@@ -846,7 +846,7 @@ Create and save an empty-but-valid UAnimMontage asset under /Game
 
 *Additive, idempotent.*
 
-Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save still answers success, with saved=false. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
+Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save makes success false, with saved=false and save_error, and the new asset stays in memory only. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -856,7 +856,7 @@ Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skele
 | `frame_rate` | number | no | Sampling frame rate in fps (default 30) |
 | `skeleton_path` | string | no | Asset path of the target Skeleton |
 
-**Returns:** `{ anim_sequence_path, anim_name, skeleton, play_length, frame_rate, num_frames, success, saved, already_existed, message }`
+**Returns:** `{ anim_sequence_path, anim_name, skeleton, play_length, frame_rate, num_frames, success, saved, save_error, already_existed, message }`
 
 ## `create_blend_space`
 
@@ -893,11 +893,11 @@ Create a Control Rig Blueprint (non-modular) at package_path/name with UControlR
 
 *Additive, idempotent.*
 
-Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name under /Game so it can be edited, creating the folder if needed; /Game/ is prepended to a package_path that lacks it. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. duplicate_asset copies other asset types.
+Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name in the project's content so it can be edited, creating the folder if needed. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. A source_mesh that is not a skeletal mesh is an error, and so is a destination that is engine content, under a read-only root or under no mounted root. duplicate_asset copies other asset types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | Destination package path (e.g. /Game/MyGame) |
+| `package_path` | string | yes | Destination folder: a long package path used as given (/Game, /Game/MyGame or a project plugin mount), or a relative folder taken under /Game. |
 | `skeletal_mesh_name` | string | yes | Name for the new skeletal mesh asset |
 | `source_mesh` | string | no | Content path to source mesh to duplicate (default /Engine/EngineMeshes/SkeletalCube) |
 
@@ -1349,13 +1349,13 @@ Read the global structure of an IK Retargeter via its controller: source/target 
 
 *Read-only.*
 
-Read solver/goal/retarget-chain info from an IK Rig.
+Read an IK Rig asset: its skeletal mesh, the number of solvers, and every goal and retarget chain. Read-only; solvers are counted, not listed: get_ik_solver_details reads one by index.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
 
-**Returns:** `{ asset_path: string, solver_count: int, goal_count: int, chain_count: int, solvers?: [{ index, type, name, enabled, start_bone, end_bone }], goals?: [{ name, bone_name }], retarget_chains?: [{ name, start_bone, end_bone, goal_name }], skeletal_mesh: string }`
+**Returns:** `{ asset_path: string, solver_count: int, goal_count: int, retarget_chain_count: int, skeletal_mesh: string, goals: [{ goal_name, bone_name }], chains: [{ chain_name, start_bone, end_bone, goal_name }] }`
 
 ## `get_ik_solver_bones`
 
@@ -2227,7 +2227,7 @@ Remove one element (by name and type) from a Control Rig Blueprint hierarchy wit
 
 *Destructive.*
 
-Remove a node from a Control Rig's RigVM solver graph
+Remove a node from a Control Rig's RigVM solver graph, then compile and save the rig. A node that is not found, or that the controller fails to remove, is an error and nothing is compiled or saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2572,25 +2572,25 @@ Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float 
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
 | `curve_name` | string | yes | Name of the curve |
-| `interp_mode` | string | no | One of "linear\|editable\|metadata\|drive_track\|disabled" |
+| `interp_mode` | string | yes | One of "linear\|editable\|metadata\|drive_track\|disabled" |
 | `curve_type` | string | no | Curve type to target: float (default) or transform |
 
-**Returns:** `{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved }`
+**Returns:** `{ anim_sequence_path, curve_name, interp_mode, old_flags, new_flags, applied, saved, save_error }`
 
 ## `set_anim_curve_keys`
 
 *Destructive, idempotent.*
 
-Replace every key of an existing curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first), keys needs at least one valid pair, and a curve_type other than float or transform is an error. Only float curves take keys: on a transform curve nothing changes, yet applied is true. A failed save makes success false.
+Replace every key of an existing float curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first) and keys needs at least one valid pair. A transform curve is refused, since its keys are transforms, not [time, value] pairs: rekey it with add_anim_transform_curve. Any other curve_type is an error, and so is a rekey the data controller rejects, with nothing saved. A failed save makes success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
 | `curve_name` | string | yes | Name of the float curve (e.g. "MyCurve") |
 | `keys` | array | no | JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given. |
-| `curve_type` | string | no | Curve type to target: float (default) or transform |
+| `curve_type` | string | no | Curve type to target: float (default) or transform; transform is refused with an error pointing at add_anim_transform_curve. |
 
-**Returns:** `{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved }`
+**Returns:** `{ anim_sequence_path, curve_name, curve_type, num_keys, applied, saved, save_error }`
 
 ## `set_anim_frame_rate`
 
@@ -2906,7 +2906,7 @@ Set goal-specific settings for a goal connected to a solver.  Partial update (id
 
 *Destructive, idempotent.*
 
-Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain or a bone not in the rig skeleton is not an error but start_bone_set, end_bone_set or goal_set false; an unknown goal_name sets the goal to "None" with goal_set true, so check goal_name. The save result is not reported. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
+Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain, a bone not in the rig skeleton or a goal_name the rig has no goal for is not an error but start_bone_set, end_bone_set or goal_set false, and that field is left unchanged. A failed save makes success false, with saved=false and save_error. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2914,15 +2914,15 @@ Change the start bone, end bone and/or IK goal of an existing retarget chain in 
 | `chain_name` | string | yes | Name of the retarget chain to mutate |
 | `start_bone` | string | no | Optional new start bone |
 | `end_bone` | string | no | Optional new end bone |
-| `goal_name` | string | no | Optional new associated IK goal |
+| `goal_name` | string | no | Optional new associated IK goal, which must be a goal of the rig; None clears the goal of the chain. |
 
-**Returns:** `{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool }`
+**Returns:** `{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool, saved: bool, save_error?: string }`
 
 ## `set_ik_solver_bones`
 
 *Destructive, idempotent.*
 
-Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. The save result is not reported. get_ik_solver_bones reads them.
+Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2931,7 +2931,7 @@ Set the start bone and/or end bone of one solver in an IK Rig asset (0-based sta
 | `start_bone` | string | no | Optional start bone name |
 | `end_bone` | string | no | Optional end bone name |
 
-**Returns:** `{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool }`
+**Returns:** `{ asset_path: string, solver_index: int, start_bone: string, end_bone: string, start_bone_set: bool, end_bone_set: bool, saved: bool, save_error?: string }`
 
 ## `set_ik_solver_enabled`
 
@@ -3260,7 +3260,7 @@ Set a bone's rotation offset in the current retarget pose (euler degrees). Creat
 
 *Destructive, idempotent.*
 
-Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. The save result is not reported. get_ik_retargeter_info shows the per-op mappings.
+Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. A failed save makes success false, with saved=false and save_error. get_ik_retargeter_info shows the per-op mappings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3269,7 +3269,7 @@ Make source_chain drive target_chain in an IK Retargeter asset, overwriting the 
 | `target_chain` | string | yes | Name of the target retarget chain to map to |
 | `op_name` | string | no | Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated |
 
-**Returns:** `{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool }`
+**Returns:** `{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool, saved: bool, save_error?: string }`
 
 ## `set_retargeter_op_settings`
 
@@ -3586,15 +3586,15 @@ Set the local transform (relative to parent bone) of a socket on a skeletal mesh
 
 *Destructive, idempotent.*
 
-Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, then mark the blueprint structurally modified and save it without compiling. The foot bones are NOT bound: the node has no LeftFootBone or RightFootBone property (its legs live in LegsDefinition), so left_foot_bone and right_foot_bone are only echoed back, and the node is left unwired. Configure it with set_anim_graph_node_property and connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
+Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Path to the UAnimBlueprint asset. |
-| `left_foot_bone` | string | yes | Name of the left foot bone; required and echoed back, but not written to the node and not checked against the skeleton. |
-| `right_foot_bone` | string | yes | Name of the right foot bone; required and echoed back, but not written to the node and not checked against the skeleton. |
+| `left_foot_bone` | string | yes | Left foot bone, written as the FK foot bone of leg 0; checked against the target skeleton when the blueprint has one. |
+| `right_foot_bone` | string | yes | Right foot bone, written as the FK foot bone of leg 1; checked against the target skeleton when the blueprint has one. |
 
-**Returns:** `{ anim_blueprint_path, left_foot_bone, right_foot_bone, ik_node_count, already_existed, saved }`
+**Returns:** `{ anim_blueprint_path, node_id, left_foot_bone, right_foot_bone, legs: [{ fk_foot_bone, ik_foot_bone, num_bones_in_limb }], bones_checked_against, ik_node_count, already_existed, saved, save_error }`
 
 ## `sort_montage_segments`
 

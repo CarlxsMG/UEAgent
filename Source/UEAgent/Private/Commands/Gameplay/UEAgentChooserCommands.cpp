@@ -485,12 +485,18 @@ namespace
 		return &Col;
 	}
 
-	/** Compiles the table and saves its package; a failed save is logged, not reported. */
-	void Chooser_CompileAndSave(UChooserTable* Table)
+	/** Compiles the table and saves its package; true when the package reached disk, else OutSaveError says why. */
+	bool Chooser_CompileAndSave(UChooserTable* Table, FString& OutSaveError)
 	{
 		Table->Compile(true);
+		return mcp_common::SaveAssetPackage(Table->GetOutermost(), Table, OutSaveError);
+	}
+
+	/** Chooser_CompileAndSave for a command whose reply does not carry the save outcome: a failed save is logged. */
+	void Chooser_CompileAndSave(UChooserTable* Table)
+	{
 		FString SaveError;
-		if (!mcp_common::SaveAssetPackage(Table->GetOutermost(), Table, SaveError))
+		if (!Chooser_CompileAndSave(Table, SaveError))
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("[Chooser] SaveAssetPackage returned: %s"), *SaveError);
 		}
@@ -618,11 +624,11 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:add_chooser_column_to_table - Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table (save failures are not reported). Columns are matched by type, not name: when one of that type exists its index comes back with already_existed=true and nothing changes, so the call is idempotent and a second column of one type cannot be added. The new column has no row cells, so add columns before add_chooser_row. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+// MCP:add_chooser_column_to_table - Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_type - Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
-//   @param column_name - Label echoed back in the reply only: it is not stored on the column and plays no part in duplicate detection, which goes by column_type.
-//   @returns { table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool }
+//   @param column_name - Label echoed back in the reply only; it is not stored on the column.
+//   @returns { table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
@@ -654,7 +660,6 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		return LoadError;
 	}
 
-	// Idempotency check: if a column already exists with this script struct, return already_existed.
 	UScriptStruct* ColumnStruct = ResolveChooserColumnStruct(ColumnType);
 	if (!ColumnStruct)
 	{
@@ -662,31 +667,50 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 			FString::Printf(TEXT("add_chooser_column_to_table: could not resolve script struct for column_type '%s'"), *ColumnType));
 	}
 
-	for (int32 i = 0; i < Table->ColumnsStructs.Num(); ++i)
+	// A table holds any number of columns of one type (each bound to its own input), so a new column is
+	// always appended. The exception is Randomize: a table has at most one, as the Chooser editor's own
+	// AddColumn enforces, so an existing one is returned instead (already_existed=true).
+	if (ColumnStruct == FRandomizeColumn::StaticStruct())
 	{
-		if (Table->ColumnsStructs[i].GetScriptStruct() == ColumnStruct)
+		for (int32 i = 0; i < Table->ColumnsStructs.Num(); ++i)
 		{
-			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-			Data->SetStringField(TEXT("table_path"), Table->GetPathName());
-			Data->SetNumberField(TEXT("column_index"), i);
-			Data->SetStringField(TEXT("column_name"), ColumnName);
-			Data->SetStringField(TEXT("column_type"), ColumnType);
-			Data->SetBoolField(TEXT("already_existed"), true);
-			return mcp_common::MakeOkReply(Data);
+			if (Table->ColumnsStructs[i].GetScriptStruct() == ColumnStruct)
+			{
+				TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+				Data->SetStringField(TEXT("table_path"), Table->GetPathName());
+				Data->SetNumberField(TEXT("column_index"), i);
+				Data->SetStringField(TEXT("column_name"), ColumnName);
+				Data->SetStringField(TEXT("column_type"), ColumnType);
+				Data->SetBoolField(TEXT("already_existed"), true);
+				return mcp_common::MakeOkReply(Data);
+			}
 		}
 	}
 
 	// Append a fresh InstancedStruct, initialized as the requested column type, with
-	// matching default-constructed InputValue where applicable.
+	// matching default-constructed InputValue where applicable. Its row array gets one
+	// DefaultRowValue cell per existing row (ResultsStructs, as the Chooser editor sizes
+	// columns), so the new column stays in step with the rows already in the table.
+	const int32 RowCount = Table->ResultsStructs.Num();
 	FInstancedStruct NewCol;
 	NewCol.InitializeAs(ColumnStruct);
-	if (UScriptStruct* InputStruct = Chooser_DefaultInputStruct(NewCol.GetScriptStruct()))
+	UScriptStruct* InputStruct = Chooser_DefaultInputStruct(NewCol.GetScriptStruct());
+	Chooser_VisitColumn(NewCol, [InputStruct, RowCount](auto& Column)
 	{
-		Chooser_VisitColumn(NewCol, [InputStruct](auto& Column) { Column.InputValue.InitializeAs(InputStruct); });
-	}
+		if (InputStruct)
+		{
+			Column.InputValue.InitializeAs(InputStruct);
+		}
+		auto& Rows = Chooser_RowArray(Column);
+		while (Rows.Num() < RowCount)
+		{
+			Rows.Add(Column.DefaultRowValue);
+		}
+	});
 
 	const int32 NewIndex = Table->ColumnsStructs.Add(MoveTemp(NewCol));
-	Chooser_CompileAndSave(Table);
+	FString SaveError;
+	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("table_path"), Table->GetPathName());
@@ -694,7 +718,10 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 	Data->SetStringField(TEXT("column_name"), ColumnName);
 	Data->SetStringField(TEXT("column_type"), ColumnType);
 	Data->SetBoolField(TEXT("already_existed"), false);
-	return mcp_common::MakeOkReply(Data);
+	int32 ColumnRowCount = 0;
+	Chooser_VisitColumn(Table->ColumnsStructs[NewIndex], [&ColumnRowCount](const auto& Column) { ColumnRowCount = Chooser_RowArray(Column).Num(); });
+	Data->SetNumberField(TEXT("row_count"), ColumnRowCount);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_column_to_table"), SaveError);
 }
 
 // MCP:add_chooser_row - Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one.

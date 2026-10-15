@@ -96,18 +96,18 @@ Add a Float property track on ACineCameraActor::ManualFocusDistance to a Level S
 
 *Additive.*
 
-Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame); without it, it only adds a section spanning the playback range when the track has none. An unknown binding_guid is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
+Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame) and reads the key back: success requires it, and a key the engine would skip (locked section, read-only sequence) is refused before anything is written; without it, it only adds a section spanning the playback range when the track has none. The slot index is not checked against the bound component, which is not resolved. An unknown binding_guid or a material_index that is not a whole number >= 0 is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence |
 | `binding_guid` | string | yes | GUID of the actor/component object binding to attach the material track to |
-| `material_index` | number | no | Optional indexed material slot the track animates (default 0) |
+| `material_index` | number | no | Optional indexed material slot the track animates, a whole number >= 0 (default 0) |
 | `parameter_name` | string | no | Optional scalar material parameter name to key |
 | `value` | number | no | Optional scalar value for the keyed parameter (default 0.0) |
 | `frame` | number | no | Optional frame number for the key (default 0) |
 
-**Returns:** `{ sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool, section_added: bool, scalar_channel_count: int, section_count: int, saved: bool }`
+**Returns:** `{ sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool (read back from the track), section_added: bool (the track gained a section, keying included), scalar_channel_count: int, section_count: int, saved: bool }`
 
 ## `add_event_track_section`
 
@@ -244,7 +244,7 @@ Create a Sequencer outliner folder on a Level Sequence's movie scene (root folde
 
 *Additive.*
 
-Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet.
+Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet. An inner shot sequence that is the target itself or already plays it at any depth is an error and nothing is added.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -254,7 +254,7 @@ Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot trac
 | `start_frame` | number | no | Inclusive start frame for the shot section (default 0). |
 | `duration` | number | no | Section duration in tick frames (default 150). |
 
-**Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool }`
+**Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool }`
 
 ## `add_shot_track`
 
@@ -314,7 +314,7 @@ Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
 
 *Additive.*
 
-Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID or an unresolvable class is an error.
+Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID, an unresolvable class, or a class that is not an ActorComponent is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -329,7 +329,7 @@ Adds a component possessable as a child of an existing binding (possessable or s
 
 *Additive.*
 
-Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or &lt;target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset. Each call adds another section. If no inner sequence resolves, the track is still saved and section_added is false. For cinematic shots use add_shot_track.
+Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or &lt;target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded or created, that is the target itself, or that already plays the target at any depth is an error and nothing is added. For cinematic shots use add_shot_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -339,7 +339,7 @@ Nests one Level Sequence in another: finds or adds the target's root subsequence
 | `start_frame` | number | no | Inclusive start frame for the sub section (default 0). |
 | `duration` | number | no | Section duration in tick frames (default 150). |
 
-**Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, inner_sequence_error?: string (why the inner sequence could not be created), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }`
+**Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }`
 
 ## `add_transform_keyframe`
 
@@ -511,16 +511,16 @@ Creates a spawnable CineCameraActor binding, keys its transform, and binds a cam
 
 *Destructive.*
 
-Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate. If that asset already exists it is loaded and those settings are overwritten without migrating its keys, which can shift them in time; sequence_created is true either way. Not undoable; another asset class at the path is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
+Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the new sequence to create |
 | `package_path` | string | no | Target content path, defaults to /Game/Sequences |
 | `duration` | number | no | Playback duration in seconds, above 0 and at most 3600, default 10 |
-| `frame_rate` | number | no | Frame rate in fps, above 0 and at most 120, truncated to whole fps, default 30 |
+| `frame_rate` | number | no | Frame rate in fps, at least 1 and at most 120, truncated to whole fps, default 30 |
 
-**Returns:** `{ sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool, saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }`
+**Returns:** `{ sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool (false when the asset already existed), saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }`
 
 ## `delete_level_sequence`
 
@@ -756,7 +756,7 @@ Flat readback of the total/master/binding track counts and per-class breakdown.
 
 *Read-only.*
 
-Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count adds root tracks and bindings, not the tracks inside bindings. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
+Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1391,7 +1391,7 @@ Sets the playback range of a Level Sequence found by asset name under /Game, in 
 
 *Destructive, idempotent.*
 
-Set the editor view range of a Level Sequence (in seconds).  The view range controls the visible timeline window in the Sequencer editor (does NOT affect playback or asset playback range). Backed by UMovieScene::SetViewRange(double, double) -- MOVIESCENE_API.
+Sets the editor view range of a Level Sequence (path or bare asset name), in seconds: the visible window of the Sequencer timeline. Editor UI state only, it changes neither playback nor the playback range. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false); a Sequencer showing the sequence follows it on its next tick. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the scrollable bounds use set_sequence_working_range; for what plays use set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1400,13 +1400,13 @@ Set the editor view range of a Level Sequence (in seconds).  The view range cont
 | `end_seconds` | number | yes | End of the view range, in seconds. Must be > start_seconds. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
-**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }`
+**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }`
 
 ## `set_sequence_working_range`
 
 *Destructive, idempotent.*
 
-Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so although the package is saved the value is not written: after a reload the working range is recomputed from the playback range. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
+Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false): after a reload the working range is recomputed from the playback range. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1415,7 +1415,7 @@ Sets the working range of a Level Sequence (path or bare asset name): the scroll
 | `end_seconds` | number | yes | End of the working range, in seconds. Must be > start_seconds. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
-**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }`
+**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }`
 
 ## `set_skeletal_animation_section_params`
 

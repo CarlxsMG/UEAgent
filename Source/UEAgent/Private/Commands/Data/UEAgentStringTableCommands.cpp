@@ -298,10 +298,10 @@ TSharedPtr<FJsonObject> HandleSetStringTableEntry(const TSharedPtr<FJsonObject>&
 // --------------------------------------------------------------------------- //
 // remove_string_table_entry
 // --------------------------------------------------------------------------- //
-// MCP:remove_string_table_entry - Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that was not in the table is not an error -- existed comes back false while removed (the key is absent afterwards) is still true, and the table is saved anyway. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.
+// MCP:remove_string_table_entry - Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that is not in the table is already the state asked for, so the call succeeds with removed false and already_absent true and changes and saves nothing. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.
 //   @param string_table_path - Full asset path to the UStringTable
 //   @param key - Entry key to remove
-//   @returns { string_table_path: string, key: string, removed: bool, existed: bool, verified: bool, namespace: string, entry_count: int, saved: bool }
+//   @returns { string_table_path: string, key: string, removed: bool, existed: bool, already_absent: bool, verified: bool, namespace: string, entry_count: int, saved: bool }
 TSharedPtr<FJsonObject> HandleRemoveStringTableEntry(const TSharedPtr<FJsonObject>& Params)
 {
     FString TablePath;
@@ -316,11 +316,25 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableEntry(const TSharedPtr<FJsonObjec
         return StringTable_NotFound(TablePath);
     }
 
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveStringTableEntry", "Remove String Table Entry"));
-    Table->Modify();
-
     FString PreviousValue;
     const bool bExistedBefore = Table->GetStringTable()->GetSourceString(Key, PreviousValue);
+    if (!bExistedBefore)
+    {
+        // The key is already absent, the state the call asks for: nothing changes, so the table
+        // is neither dirtied nor saved and no undo entry is recorded.
+        TSharedPtr<FJsonObject> ResultObj = StringTable_EntryReply(TablePath, Key);
+        ResultObj->SetBoolField(TEXT("removed"), false);
+        ResultObj->SetBoolField(TEXT("existed"), false);
+        ResultObj->SetBoolField(TEXT("already_absent"), true);
+        ResultObj->SetBoolField(TEXT("verified"), true);
+        ResultObj->SetStringField(TEXT("namespace"), Table->GetStringTable()->GetNamespace());
+        ResultObj->SetNumberField(TEXT("entry_count"), CountSourceStrings(Table));
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveStringTableEntry", "Remove String Table Entry"));
+    Table->Modify();
 
     Table->GetMutableStringTable()->RemoveSourceString(Key);
 
@@ -336,7 +350,8 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableEntry(const TSharedPtr<FJsonObjec
 
     TSharedPtr<FJsonObject> ResultObj = StringTable_EntryReply(TablePath, Key);
     ResultObj->SetBoolField(TEXT("removed"), bRemoved);
-    ResultObj->SetBoolField(TEXT("existed"), bExistedBefore);
+    ResultObj->SetBoolField(TEXT("existed"), true);
+    ResultObj->SetBoolField(TEXT("already_absent"), false);
     ResultObj->SetBoolField(TEXT("verified"), bRemoved);
     ResultObj->SetStringField(TEXT("namespace"), Table->GetStringTable()->GetNamespace());
     ResultObj->SetNumberField(TEXT("entry_count"), CountSourceStrings(Table));

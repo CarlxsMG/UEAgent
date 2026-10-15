@@ -209,10 +209,10 @@ TSharedPtr<FJsonObject> HandleDetachActor(const TSharedPtr<FJsonObject>& Params)
     return Result;
 }
 
-// MCP:set_actor_material - Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. slot_index is not range-checked: past the mesh's slots it has no visible effect, and a negative one does nothing. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
+// MCP:set_actor_material - Set a component-level override material on one slot of an editor-world actor (found by name or label): on its first StaticMeshComponent, else its first other mesh component. The mesh asset and other slots are untouched. Errors when the actor, a mesh component or the material is missing. One undo step; the level is marked dirty, not saved. A slot_index outside the component's material slots is refused. For the mesh asset use set_static_mesh_material_slot; for a tweakable runtime copy, create_dynamic_material_on_actor.
 //   @param actor_name - Name or label of the target actor
 //   @param material_path - Full asset path of the UMaterialInterface
-//   @param slot_index - Material slot index, default 0
+//   @param slot_index - Material slot index, from 0 to the component's slot count minus 1, default 0
 //   @returns { actor_name: string, material: string, slot_index: int }
 TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -239,6 +239,13 @@ TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Pa
     UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
     if (!Material)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+
+    // SetMaterial grows the override array for an index past the slots (an override no slot
+    // renders) and ignores a negative one, so both are refused before the transaction opens.
+    const int32 NumSlots = MeshComp->GetNumMaterials();
+    if (SlotIndex < 0 || SlotIndex >= NumSlots)
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("slot_index %d out of range (component %s has %d material slots)"),
+            SlotIndex, *MeshComp->GetName(), NumSlots));
 
     const FScopedTransaction Transaction(LOCTEXT("SetActorMaterial", "MCP: Set Actor Material"));
     MeshComp->Modify();

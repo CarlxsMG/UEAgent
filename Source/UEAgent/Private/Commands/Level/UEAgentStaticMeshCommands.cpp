@@ -99,6 +99,37 @@ namespace
 		return Data;
 	}
 
+	/**
+	 * Null when the optional location, rotation and scale params are absent or well formed; otherwise the error
+	 * reply naming the first bad one. Well formed is a list of at least three numbers, or for rotation also a
+	 * {pitch, yaw, roll} object: the readers turn anything else into 0,0,0, which as a scale collapses the socket.
+	 */
+	TSharedPtr<FJsonObject> StaticMesh_CheckSocketTransform(const TSharedPtr<FJsonObject>& Params)
+	{
+		static const TCHAR* const TransformFields[] = { TEXT("location"), TEXT("rotation"), TEXT("scale") };
+		for (const TCHAR* Field : TransformFields)
+		{
+			if (!Params->HasField(Field))
+			{
+				continue;
+			}
+			const bool bRotation = FCString::Strcmp(Field, TEXT("rotation")) == 0;
+			if (bRotation && Params->HasTypedField<EJson::Object>(Field))
+			{
+				continue;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+			const bool bThreeNumbers = Params->TryGetArrayField(Field, Items) && Items != nullptr && Items->Num() >= 3
+				&& (*Items)[0]->Type == EJson::Number && (*Items)[1]->Type == EJson::Number && (*Items)[2]->Type == EJson::Number;
+			if (!bThreeNumbers)
+			{
+				return mcp_common::MakeErrorReply(FString::Printf(TEXT("'%s' must be a list of three numbers %s"), Field,
+					bRotation ? TEXT("[pitch, yaw, roll] or a {pitch, yaw, roll} object") : TEXT("[x, y, z]")));
+			}
+		}
+		return nullptr;
+	}
+
 	/** Writes the optional location, rotation and scale params onto the socket's relative transform. */
 	void StaticMesh_ReadSocketTransform(const TSharedPtr<FJsonObject>& Params, UStaticMeshSocket* Socket)
 	{
@@ -329,7 +360,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 // ---------------------------------------------------------------------------
 // add_static_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_static_mesh_socket - Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. Names are not checked, so repeating a socket_name adds a second socket of that name. location and scale take [x, y, z] arrays: any other value given reads as 0,0,0. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
+// MCP:add_static_mesh_socket - Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. A socket_name the mesh already has is an error, and so is a location, rotation or scale that is not three numbers; both are checked before the mesh is touched. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param socket_name - Name for the new socket.
 //   @param location - Socket relative location as [x, y, z] (optional)
@@ -346,8 +377,19 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 	FString SocketName;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("socket_name"), SocketName)) { return Missing; }
 
+	// Everything is checked before the mesh is touched: a malformed transform field, and a name another socket
+	// already has (FindSocket would only ever return the first of two same-named sockets).
+	if (TSharedPtr<FJsonObject> Malformed = StaticMesh_CheckSocketTransform(Params)) { return Malformed; }
+
 	UStaticMesh* Mesh = nullptr;
 	if (TSharedPtr<FJsonObject> Error = StaticMesh_Load(MeshPath, Mesh)) { return Error; }
+
+	if (Mesh->FindSocket(FName(*SocketName)) != nullptr)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("A socket named '%s' already exists on %s; move it with set_static_mesh_socket_transform or pick another name"),
+			*SocketName, *MeshPath));
+	}
 
 	Mesh->Modify();
 
@@ -463,7 +505,7 @@ TSharedPtr<FJsonObject> HandleGetStaticMeshSockets(
 // ---------------------------------------------------------------------------
 // set_static_mesh_socket_transform
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_socket_transform - Update the relative transform of an existing static mesh socket (only the provided fields).
+// MCP:set_static_mesh_socket_transform - Update the relative transform of an existing static mesh socket (only the provided fields). A location, rotation or scale that is not three numbers is an error.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param socket_name - Name of the socket to update.
 //   @param location - Socket relative location as [x, y, z] (optional).
@@ -481,6 +523,9 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshSocketTransform(
 
 	UStaticMesh* Mesh = nullptr;
 	if (TSharedPtr<FJsonObject> Error = StaticMesh_Load(MeshPath, Mesh)) { return Error; }
+
+	// A malformed transform field would be written as 0,0,0; refused before the mesh is touched.
+	if (TSharedPtr<FJsonObject> Malformed = StaticMesh_CheckSocketTransform(Params)) { return Malformed; }
 
 	UStaticMeshSocket* Socket = Mesh->FindSocket(FName(*SocketName));
 	if (!Socket)

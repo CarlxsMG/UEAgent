@@ -4657,7 +4657,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("water_body_label"), TEXT("water_zone_label"),
     nullptr,
     TEXT("remove_widget"),
-        TEXT("widget_name"),
+        TEXT("target_world"), TEXT("widget_name"),
     nullptr,
     TEXT("remove_widget_animation"),
         TEXT("animation_name"), TEXT("widget_bp_path"),
@@ -6846,7 +6846,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 2097;
-static constexpr int32 GNumParamNames = 6430;
+static constexpr int32 GNumParamNames = 6431;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

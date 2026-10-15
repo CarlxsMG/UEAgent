@@ -22,6 +22,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/App.h"                                       // FApp::CanEverRender (DrawMaterialToRenderTarget's own gate)
 #include "HAL/FileManager.h"                                // IFileManager
 
 /**
@@ -156,6 +157,17 @@ namespace
         DrawOnCanvas(*Canvas, CanvasSize);
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(World, DrawContext);
         return nullptr;
+    }
+
+    // The reply of a draw command: success is bDrawn, whether the engine drew the item. UCanvas and
+    // DrawMaterialToRenderTarget skip what they cannot draw (a zero size, an empty text, a zero-length line, a
+    // process that cannot render) without telling the caller, so each handler tests the same conditions the
+    // engine does, and Reason says which one held.
+    TSharedPtr<FJsonObject> RenderTarget_DrawReply(const TSharedPtr<FJsonObject>& Data, bool bDrawn, const TCHAR* Command,
+        const TCHAR* Reason)
+    {
+        return mcp_common::MakeOutcomeReply(Data, bDrawn, bDrawn ? FString()
+            : FString::Printf(TEXT("%s: drawn is false, nothing was drawn: %s"), Command, Reason));
     }
 
     // Reads the required "render_target_path" and "material_path", resolves both, and gets the editor world to
@@ -391,7 +403,7 @@ TSharedPtr<FJsonObject> HandleClearRenderTarget(const TSharedPtr<FJsonObject>& P
 // UKismetRenderingLibrary::DrawMaterialToRenderTarget(World, RT, Material).
 // Renders a full-screen quad with the material into the render target.
 // ---------------------------------------------------------------------------
-// MCP:draw_material_to_render_target - Render a material full-screen quad into a render target
+// MCP:draw_material_to_render_target - Render a material full-screen quad into a render target. drawn is false, and the call fails, when the engine skips the draw: a process that cannot render (-nullrhi, a commandlet) or a render target without a resource.
 //   @param render_target_path - Asset path of the destination render target
 //   @param material_path - Asset path of the UMaterialInterface to draw
 //   @returns { render_target_path: string, material_path: string, drawn: bool }
@@ -405,13 +417,17 @@ TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTarget(const TSharedPtr<FJsonO
         return Error;
     }
 
+    // With the world, render target and material resolved, these are the only conditions under which
+    // DrawMaterialToRenderTarget returns without drawing.
+    const bool bDrawn = FApp::CanEverRender() && RT->GetResource() != nullptr;
     UKismetRenderingLibrary::DrawMaterialToRenderTarget(World, RT, Material);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetStringField(TEXT("material_path"), Material->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), true);
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_material_to_render_target"),
+        TEXT("this process cannot render (-nullrhi or a commandlet) or the render target has no resource"));
 }
 
 // ---------------------------------------------------------------------------
@@ -486,7 +502,7 @@ TSharedPtr<FJsonObject> HandleExportRenderTarget(const TSharedPtr<FJsonObject>& 
 // Fills the whole render target with a solid color via the canvas (the point of
 // this group is exercising the UCanvas batch API, not ClearRenderTarget2D).
 // ---------------------------------------------------------------------------
-// MCP:clear_and_fill_render_target - Fill an entire render target with a solid color via the canvas
+// MCP:clear_and_fill_render_target - Fill an entire render target with a solid color via the canvas. drawn is false, and the call fails, when the canvas draws nothing (no white texture or a zero size).
 //   @param render_target_path - Asset path of the destination render target, e.g. /Game/MyGame/RT_Example
 //   @param color - Optional [r, g, b, a] fill color, defaults to opaque white
 //   @returns { render_target_path: string, drawn: bool, canvas_width: number, canvas_height: number, fill_color: [number] }
@@ -502,6 +518,7 @@ TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObj
     const FLinearColor Color = ParseLinearColorWithDefault(Params, TEXT("color"), FLinearColor::White);
 
     FVector2D CanvasSize(0.0f, 0.0f);
+    bool bDrawn = false;
     auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D& DrawSize)
     {
         CanvasSize = DrawSize;
@@ -509,6 +526,8 @@ TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObj
         // DrawColor is applied to DrawTile, so set it to the requested fill color.
         Canvas.SetLinearDrawColor(Color);
         UTexture* WhiteTex = Canvas.DefaultTexture; // engine default white texture
+        // UCanvas::DrawTile draws nothing without a texture or with a zero-sized tile.
+        bDrawn = WhiteTex != nullptr && DrawSize.X > 0.0 && DrawSize.Y > 0.0 && Canvas.Canvas != nullptr;
         Canvas.DrawTile(
             WhiteTex,
             0.0f, 0.0f,                           // X, Y
@@ -523,11 +542,12 @@ TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObj
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), true);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
     Data->SetNumberField(TEXT("canvas_width"), CanvasSize.X);
     Data->SetNumberField(TEXT("canvas_height"), CanvasSize.Y);
     Data->SetArrayField(TEXT("fill_color"), mcp_common::ColorToJsonArray(Color));
-    return mcp_common::MakeOkReply(Data);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("clear_and_fill_render_target"),
+        TEXT("the canvas has no white texture or a zero size"));
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +555,7 @@ TSharedPtr<FJsonObject> HandleClearAndFillRenderTarget(const TSharedPtr<FJsonObj
 // Begin -> Canvas->K2_DrawText(font, text, position, scale, color, ...) -> End.
 // Font defaults to GEngine->GetMediumFont() (falls back to GetTinyFont()).
 // ---------------------------------------------------------------------------
-// MCP:draw_text_to_render_target - Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is always true (an empty text draws nothing) and font_resolved says a font was found. Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
+// MCP:draw_text_to_render_target - Draw a string onto a UTextureRenderTarget2D asset in one canvas pass in the editor world, in the engine's medium font (no font choice), tinted by color and scaled by scale, with position the text's top-left in render-target pixels. The text blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target is an error; drawn is false, and the call fails, when nothing was drawn (an empty text, or no engine font: font_resolved says whether one was found). Related: draw_texture_to_render_target, draw_line_to_render_target, clear_and_fill_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param text - Text to draw
 //   @param position - Optional [x, y] text position, default [0,0]
@@ -580,9 +600,11 @@ TSharedPtr<FJsonObject> HandleDrawTextToRenderTarget(const TSharedPtr<FJsonObjec
 
     // K2_DrawText(RenderFont, RenderText, ScreenPosition, Scale, RenderColor, Kerning,
     //   ShadowColor, ShadowOffset, bCentreX, bCentreY, bOutlined, OutlineColor).
-    // A null RenderFont causes K2_DrawText to use a default engine font internally.
+    // K2_DrawText skips an empty text, and the text item draws nothing without a font.
+    bool bDrawn = false;
     auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
     {
+        bDrawn = !Text.IsEmpty() && Font != nullptr && Canvas.Canvas != nullptr;
         Canvas.K2_DrawText(
             Font,
             Text,
@@ -598,17 +620,18 @@ TSharedPtr<FJsonObject> HandleDrawTextToRenderTarget(const TSharedPtr<FJsonObjec
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetStringField(TEXT("text"), Text);
-    Data->SetBoolField(TEXT("drawn"), true);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
     Data->SetBoolField(TEXT("font_resolved"), Font != nullptr);
     Data->SetArrayField(TEXT("position"), mcp_common::Vector2DToJsonArray(Position));
-    return mcp_common::MakeOkReply(Data);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_text_to_render_target"),
+        Text.IsEmpty() ? TEXT("the text is empty") : TEXT("no engine font was found"));
 }
 
 // ---------------------------------------------------------------------------
 // draw_line_to_render_target
 // Begin -> Canvas->K2_DrawLine(start, end, thickness, color) -> End.
 // ---------------------------------------------------------------------------
-// MCP:draw_line_to_render_target - Draw a line into a render target via the canvas
+// MCP:draw_line_to_render_target - Draw a line into a render target via the canvas. drawn is false, and the call fails, when start and end are the same point (the canvas skips a zero-length line).
 //   @param render_target_path - Asset path of the destination render target
 //   @param start [string!] - Line start position [x, y] in screen-space pixels
 //   @param end [string!] - Line end position [x, y] in screen-space pixels
@@ -635,9 +658,11 @@ TSharedPtr<FJsonObject> HandleDrawLineToRenderTarget(const TSharedPtr<FJsonObjec
         Thickness = (float)ThicknessTmp;
     }
 
-    // K2_DrawLine(ScreenPositionA, ScreenPositionB, Thickness, RenderColor).
+    // K2_DrawLine(ScreenPositionA, ScreenPositionB, Thickness, RenderColor). It skips a zero-length line.
+    bool bDrawn = false;
     auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
     {
+        bDrawn = FVector2D::DistSquared(Start, End) > 0.0 && Canvas.Canvas != nullptr;
         Canvas.K2_DrawLine(Start, End, Thickness, Color);
     };
     if (TSharedPtr<FJsonObject> Error = RenderTarget_DrawCanvas(World, RT, DrawOnCanvas))
@@ -647,18 +672,18 @@ TSharedPtr<FJsonObject> HandleDrawLineToRenderTarget(const TSharedPtr<FJsonObjec
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), true);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
     Data->SetNumberField(TEXT("thickness"), Thickness);
     Data->SetArrayField(TEXT("start"), mcp_common::Vector2DToJsonArray(Start));
     Data->SetArrayField(TEXT("end"), mcp_common::Vector2DToJsonArray(End));
-    return mcp_common::MakeOkReply(Data);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_line_to_render_target"), TEXT("start and end are the same point"));
 }
 
 // ---------------------------------------------------------------------------
 // draw_texture_to_render_target
 // Begin -> Canvas->K2_DrawTexture(texture, position, size, ...) -> End.
 // ---------------------------------------------------------------------------
-// MCP:draw_texture_to_render_target - Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is always true, even when a zero size draws nothing. For a material use draw_material_to_render_target_region.
+// MCP:draw_texture_to_render_target - Draw a texture as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs, tinted by color. It alpha-blends over the existing pixels: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or texture is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a material use draw_material_to_render_target_region.
 //   @param render_target_path - Asset path of the destination render target
 //   @param texture_path - Asset path of the UTexture to draw, e.g. /Engine/EngineResources/WhiteSquareTexture
 //   @param position - Optional [x, y] destination position, default [0,0]
@@ -695,8 +720,11 @@ TSharedPtr<FJsonObject> HandleDrawTextureToRenderTarget(const TSharedPtr<FJsonOb
 
     // K2_DrawTexture(RenderTexture, ScreenPosition, ScreenSize, CoordinatePosition,
     //   CoordinateSize=UnitVector, RenderColor=White, BlendMode=Translucent, Rotation, PivotPoint).
+    // It skips a rectangle whose width or height is not positive.
+    bool bDrawn = false;
     auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
     {
+        bDrawn = Size.X > 0.0 && Size.Y > 0.0 && Canvas.Canvas != nullptr;
         Canvas.K2_DrawTexture(
             Texture,
             Position,
@@ -714,10 +742,10 @@ TSharedPtr<FJsonObject> HandleDrawTextureToRenderTarget(const TSharedPtr<FJsonOb
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetStringField(TEXT("texture_path"), Texture->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), true);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
     Data->SetArrayField(TEXT("position"), mcp_common::Vector2DToJsonArray(Position));
     Data->SetArrayField(TEXT("size"), mcp_common::Vector2DToJsonArray(Size));
-    return mcp_common::MakeOkReply(Data);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_texture_to_render_target"), TEXT("size has a width or height that is not positive"));
 }
 
 // ---------------------------------------------------------------------------
@@ -726,7 +754,7 @@ TSharedPtr<FJsonObject> HandleDrawTextureToRenderTarget(const TSharedPtr<FJsonOb
 // Draws the material into a sub-region of the render target (unlike
 // DrawMaterialToRenderTarget which is always full-screen).
 // ---------------------------------------------------------------------------
-// MCP:draw_material_to_render_target_region - Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is always true, even when a zero size draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
+// MCP:draw_material_to_render_target_region - Draw a material as a rectangle onto a UTextureRenderTarget2D asset in one canvas pass in the editor world: position and size in render-target pixels from the top-left (size defaults to the whole target), full 0-1 UVs. It composites over the existing pixels by the material's blend mode: nothing is cleared, saved or undoable, and render-target contents live on the GPU only, so keep them with create_static_texture_from_render_target or export_render_target. A missing render target or material is an error; drawn is false, and the call fails, when a width or height that is not positive draws nothing. For a full-target pass use draw_material_to_render_target; for a texture, draw_texture_to_render_target.
 //   @param render_target_path - Asset path of the destination render target
 //   @param material_path - Asset path of the UMaterialInterface to draw
 //   @param position - Optional [x, y] destination position, default [0,0]
@@ -746,9 +774,11 @@ TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTargetRegion(const TSharedPtr<
     const FVector2D Size = ParseVector2D(Params, TEXT("size"), FVector2D((float)RT->SizeX, (float)RT->SizeY));
 
     // K2_DrawMaterial(RenderMaterial, ScreenPosition, ScreenSize, CoordinatePosition,
-    //   CoordinateSize=UnitVector, Rotation, PivotPoint).
+    //   CoordinateSize=UnitVector, Rotation, PivotPoint). It skips a rectangle whose width or height is not positive.
+    bool bDrawn = false;
     auto DrawOnCanvas = [&](UCanvas& Canvas, const FVector2D&)
     {
+        bDrawn = Size.X > 0.0 && Size.Y > 0.0 && Canvas.Canvas != nullptr;
         Canvas.K2_DrawMaterial(
             Material,
             Position,
@@ -764,10 +794,10 @@ TSharedPtr<FJsonObject> HandleDrawMaterialToRenderTargetRegion(const TSharedPtr<
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("render_target_path"), RT->GetPathName());
     Data->SetStringField(TEXT("material_path"), Material->GetPathName());
-    Data->SetBoolField(TEXT("drawn"), true);
+    Data->SetBoolField(TEXT("drawn"), bDrawn);
     Data->SetArrayField(TEXT("position"), mcp_common::Vector2DToJsonArray(Position));
     Data->SetArrayField(TEXT("size"), mcp_common::Vector2DToJsonArray(Size));
-    return mcp_common::MakeOkReply(Data);
+    return RenderTarget_DrawReply(Data, bDrawn, TEXT("draw_material_to_render_target_region"), TEXT("size has a width or height that is not positive"));
 }
 
 const McpCommandFamilies::FRegistrar Registration =

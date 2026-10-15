@@ -216,14 +216,14 @@ Bulk-copy every scalar, vector and texture OVERRIDE from one material instance t
 
 *Destructive.*
 
-Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. copied is always true, so verify with get_mid_all_params. For saved Material Instance Constant assets use copy_material_instance_params.
+Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. Refused, with the MID untouched, when the source is the MID itself or has none of its parameters. copied is measured: every copyable parameter read back on the MID with the source's value. For saved Material Instance Constant assets use copy_material_instance_params.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `mid_object_path` | string | yes | Object path of the MID |
 | `source_material_path` | string | yes | Content path to the source material to copy from |
 
-**Returns:** `{ mid_object_path, source_material_path, source_material_name, copied }`
+**Returns:** `{ mid_object_path, source_material_path, source_material_name, params_in_source, params_copied, params_not_in_source, mismatched_params, copied }`
 
 ## `create_dynamic_material_on_actor`
 
@@ -897,7 +897,7 @@ Get all parameters and their current values from a Material Instance Dynamic
 
 *Read-only.*
 
-Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Read-only, never creates the instance; scalar_override_count and vector_override_count are only the parameter counts.
+Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1177,16 +1177,16 @@ Define which material-layer and blend functions a layered material instance stac
 
 *Destructive, idempotent.*
 
-Write one value on an expression node of a UMaterial asset (not an instance), found by its object name node_id. ParameterName renames a node that has a parameter name; otherwise Constant, ScalarParameter, Constant3Vector, Constant4Vector and VectorParameter nodes ignore param_name and take value as their main value (R, DefaultValue or Constant); other node types set the named property by reflection. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). An unknown node or property is an error, an unparsable value is not. Instances: set_material_instance_param.
+Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Material asset path |
 | `node_id` | string | yes | Id of the target expression in the material |
 | `param_name` | string | yes | Name of the property to set (e.g. "ParameterName", "R", "DefaultValue") |
-| `value` | string | no | Text to write: a number for Constant and ScalarParameter, "(R=1,G=0.5,B=0,A=1)" for the vector nodes (unparsable text gives black), the new name for ParameterName, else UE import text for the property; omitted means empty text. |
+| `value` | string | no | Text to write: a number for a numeric property, "(R=1,G=0.5,B=0,A=1)", "[1,0.5,0,1]" or "1,0.5,0" for a linear color, the new name for ParameterName, else UE import text for the property; omitted means empty text. |
 
-**Returns:** `{ material: string, node_id: string, param_name: string, value: string }`
+**Returns:** `{ material: string, node_id: string, param_name: string, value: string, value_after: string }`
 
 ## `set_material_physical_material`
 
@@ -1219,12 +1219,12 @@ Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist
 
 *Destructive, idempotent.*
 
-Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. An unknown param_name is not rejected: the override is stored and read back, so set is true even though no material input uses it -- check names with get_mid_all_params. old_value is 0 for a parameter without a value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.
+Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. param_name must be a global scalar parameter of the MID's material (as get_mid_all_params lists it); any other name is refused and nothing is written. set is the read-back of the new value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `mid_object_path` | string | yes | Object path of the MID (from create_material_instance_dynamic) |
-| `param_name` | string | yes | Name of the scalar parameter |
+| `param_name` | string | yes | Name of a scalar parameter of the MID's material |
 | `value` | number | yes | New float value |
 
 **Returns:** `{ mid_object_path, param_name, old_value, new_value, set }`

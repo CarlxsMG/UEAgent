@@ -59,6 +59,26 @@ namespace
 		return UE::ESdfSpecifier::Def;
 	}
 
+	// The strict form of ParseSpecifier: false for anything but Def, Over or Class (case-insensitive).
+	bool TryParseSpecifier(const FString& In, UE::ESdfSpecifier& Out)
+	{
+		if (In.Equals(TEXT("Def"), ESearchCase::IgnoreCase)) { Out = UE::ESdfSpecifier::Def; return true; }
+		if (In.Equals(TEXT("Over"), ESearchCase::IgnoreCase)) { Out = UE::ESdfSpecifier::Over; return true; }
+		if (In.Equals(TEXT("Class"), ESearchCase::IgnoreCase)) { Out = UE::ESdfSpecifier::Class; return true; }
+		return false;
+	}
+
+	// The canonical USD spelling of a specifier, as the replies report it.
+	const TCHAR* SpecifierName(UE::ESdfSpecifier Spec)
+	{
+		switch (Spec)
+		{
+		case UE::ESdfSpecifier::Over: return TEXT("Over");
+		case UE::ESdfSpecifier::Class: return TEXT("Class");
+		default: return TEXT("Def");
+		}
+	}
+
 	// Cap on how many metadata entries we surface in one get_usd_prim_metadata
 	// (no key) call. Beyond this, we return a "prim has N entries, request a
 	// specific key" note instead of enumerating everything.
@@ -130,12 +150,12 @@ namespace
 	}
 }
 
-// MCP:define_usd_prim - Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. A specifier of Over or Class is applied afterwards (specifier_set_ok); an unknown one means Def but is echoed as given. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
+// MCP:define_usd_prim - Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. The requested specifier is then authored at the edit target (specifier_set_ok); specifier reports it only when that write succeeded, and a failed write fails the call. An unknown specifier is refused before anything is authored. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
 //   @param stage_name [string!] - Name the stage was registered under
 //   @param prim_path [string!] - Absolute SdfPath, e.g. /World/Cube
 //   @param type_name [string] - USD type name (Xform, Mesh, Cube, Scope, Camera, DistantLight...). Default: Xform
-//   @param specifier [string] - "Def" | "Over" | "Class". Default: Def
-//   @returns { prim_path: string, type_name: string, specifier: string, is_valid: bool, specifier_set_ok: bool }
+//   @param specifier [string] - "Def" | "Over" | "Class", case-insensitive; anything else is refused. Default: Def
+//   @returns { prim_path: string, type_name: string, specifier?: string, is_valid: bool, specifier_set_ok: bool, requested?: object }
 TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -151,7 +171,16 @@ TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Param
 
 	FString SpecStr = TEXT("Def");
 	Params->TryGetStringField(TEXT("specifier"), SpecStr);
-	const UE::ESdfSpecifier Spec = ParseSpecifier(SpecStr);
+	if (SpecStr.IsEmpty())
+	{
+		SpecStr = TEXT("Def");
+	}
+	UE::ESdfSpecifier Spec = UE::ESdfSpecifier::Def;
+	if (!TryParseSpecifier(SpecStr, Spec))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Unknown specifier '%s': expected Def, Over or Class. Nothing was authored."), *SpecStr));
+	}
 
 	const UE::FSdfPath Path(*PrimPath);
 	UE::FUsdPrim Prim = Stage.DefinePrim(Path, *TypeName);
@@ -162,25 +191,29 @@ TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Param
 				*PrimPath, *TypeName, *StageName));
 	}
 
-	bool SpecSetOk = true;
-	if (Spec != UE::ESdfSpecifier::Def)
-	{
-		SpecSetOk = Prim.SetSpecifier(Spec);
-	}
+	// DefinePrim leaves an already-defined prim of the same type as it is, and a class prim is
+	// "defined" too, so Def is authored explicitly like Over and Class: the specifier reported is
+	// then the one this call wrote at the edit target. The wrapper has no specifier getter, so the
+	// write's own result is the only evidence available.
+	const bool SpecSetOk = Prim.SetSpecifier(Spec);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetStringField(TEXT("type_name"), Prim.GetTypeName().ToString());
-	Data->SetStringField(TEXT("specifier"), SpecStr);
+	if (SpecSetOk)
+	{
+		Data->SetStringField(TEXT("specifier"), SpecifierName(Spec));
+	}
 	Data->SetBoolField(TEXT("is_valid"), Prim.IsValid());
 	Data->SetBoolField(TEXT("specifier_set_ok"), SpecSetOk);
-	return mcp_common::MakeOkReply(Data);
+	mcp_common::AddRequestedEcho(Data, Params, { TEXT("specifier") });
+	return mcp_common::MakeOutcomeReply(Data, SpecSetOk, mcp_common::MeasuredOutcomeError(TEXT("define_usd_prim"), TEXT("specifier_set_ok")));
 }
 
-// MCP:override_usd_prim - Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched, even a def, though the reply still says specifier Over. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
+// MCP:override_usd_prim - Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched (already_existed true, no specifier reported, since nothing was authored); specifier Over comes back only for an over this call authored. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath to author the over at, e.g. "/World/Cube"
-//   @returns { prim_path: string, is_valid: bool, specifier?: string }
+//   @returns { prim_path: string, is_valid: bool, already_existed: bool, specifier?: string }
 //   @hints additive idempotent
 TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
@@ -193,12 +226,16 @@ TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Par
 	}
 
 	const UE::FSdfPath Path(*PrimPath);
+	// UsdStage::OverridePrim returns a prim that already exists at the path as it is, whatever its
+	// specifier, and authors an over only when there is none, so only that case is known to be Over.
+	const bool bAlreadyExisted = Stage.GetPrimAtPath(Path).IsValid();
 	UE::FUsdPrim Prim = Stage.OverridePrim(Path);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetBoolField(TEXT("is_valid"), Prim.IsValid());
-	if (Prim.IsValid())
+	Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+	if (Prim.IsValid() && !bAlreadyExisted)
 	{
 		Data->SetStringField(TEXT("specifier"), TEXT("Over"));
 	}

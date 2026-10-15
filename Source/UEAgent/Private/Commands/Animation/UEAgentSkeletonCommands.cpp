@@ -257,13 +257,13 @@ TSharedPtr<FJsonObject> HandleAddAnimSlotGroup(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_socket_to_skeleton_asset
 // ---------------------------------------------------------------------------
-// MCP:add_socket_to_skeleton_asset - Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save still returns success, so check saved. Mesh-only sockets: add_skeletal_mesh_socket.
+// MCP:add_socket_to_skeleton_asset - Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save makes success false, with saved=false and save_error. A socket on a skeletal mesh asset (copied to its skeleton when that skeleton is project content): add_skeletal_mesh_socket.
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param socket_name - Name of the socket; an existing socket with this name is updated instead of duplicated.
 //   @param bone_name - Bone to attach the socket to; must exist in the skeleton (default the root bone).
 //   @param location - Socket location relative to its bone as [x, y, z] (default 0,0,0)
 //   @param rotation - Socket rotation relative to its bone as [pitch, yaw, roll] (default 0,0,0)
-//   @returns { asset_path: string, socket_name: string, bone_name: string, socket_count: int, added: bool, already_existed: bool, saved: bool }
+//   @returns { asset_path: string, socket_name: string, bone_name: string, socket_count: int, added: bool, already_existed: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, SocketName;
@@ -323,7 +323,8 @@ TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& P
 
         FString SaveErr;
         const bool bSaved = Skeleton_MarkDirtyAndSave(Skeleton, SaveErr);
-        return mcp_common::MakeOkReply(BuildPayload(Existing, /*bAdded=*/false, bSaved, SaveErr));
+        return mcp_common::MakeSavedReply(BuildPayload(Existing, /*bAdded=*/false, bSaved, SaveErr), bSaved,
+            TEXT("add_socket_to_skeleton_asset"), SaveErr);
     }
 
     Skeleton->Modify();
@@ -342,7 +343,8 @@ TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& P
 
     FString SaveErr;
     const bool bSaved = Skeleton_MarkDirtyAndSave(Skeleton, SaveErr);
-    return mcp_common::MakeOkReply(BuildPayload(NewSocket, /*bAdded=*/true, bSaved, SaveErr));
+    return mcp_common::MakeSavedReply(BuildPayload(NewSocket, /*bAdded=*/true, bSaved, SaveErr), bSaved,
+        TEXT("add_socket_to_skeleton_asset"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------

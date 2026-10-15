@@ -17,6 +17,7 @@
 #include "SmartObjectRuntime.h"
 #include "SmartObjectSubsystem.h"
 #include "SmartObjectTypes.h"
+#include "ScopedTransaction.h"      // FScopedTransaction: the slot setters and removers are undoable
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UnrealType.h"   // FArrayProperty / FScriptArrayHelper for private-member reflection
@@ -756,6 +757,8 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
 	Params->TryGetArrayField(TEXT("activity_tags"), TagsArr);
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotActivityTags", "Set Smart Object Slot Activity Tags (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.ActivityTags = ParseTagContainer(TagsArr);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -784,6 +787,8 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	Params->TryGetArrayField(TEXT("user_tags"), TagsArr);
 	const FGameplayTagContainer Tags = ParseTagContainer(TagsArr);
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotUserTagFilter", "Set Smart Object Slot User Tag Filter (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.UserTagFilter = BuildTagQuery(Tags, Match);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -795,7 +800,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_user_tag_filter"));
 }
 
-// MCP:set_smart_object_slot_enabled - Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
+// MCP:set_smart_object_slot_enabled - Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction). Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param enabled - Whether the slot is enabled
@@ -810,6 +815,8 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotEnabled(
 	bool bEnabled = true;
 	Params->TryGetBoolField(TEXT("enabled"), bEnabled);
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotEnabled", "Set Smart Object Slot Enabled (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.bEnabled = bEnabled;
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -819,7 +826,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotEnabled(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_enabled"));
 }
 
-// MCP:set_smart_object_slot_transform - Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
+// MCP:set_smart_object_slot_transform - Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction). Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param offset - Optional [x, y, z] local offset
@@ -833,6 +840,8 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinitionSlot(Params, SlotIndex, Err);
 	if (!Def) { return Err; }
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotTransform", "Set Smart Object Slot Transform (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	SmartObjects_ReadOffsetRotation(Params, Slot.Offset, Slot.Rotation);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -1235,7 +1244,7 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectDefinitionDefaultBehavior(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_definition_default_behavior"));
 }
 
-// MCP:remove_smart_object_slot - Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. No undo. To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.
+// MCP:remove_smart_object_slot - Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. Undoable (one editor transaction). To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to remove
 //   @returns { definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool }
@@ -1256,6 +1265,8 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlot(
 	{
 		return mcp_common::MakeErrorReply(TEXT("Slots property not found (engine layout changed)"));
 	}
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectSlot", "Remove Smart Object Slot (MCP)"));
+	Def->Modify();
 	FScriptArrayHelper Helper(P, P->ContainerPtrToValuePtr<void>(Def));
 	Helper.RemoveValues(SlotIndex, 1);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -1300,6 +1311,8 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotBehaviorDefinition(
 		return mcp_common::MakeOkReply(Data);
 	}
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectSlotBehavior", "Remove Smart Object Slot Behavior Definition (MCP)"));
+	Def->Modify();
 	Slot.BehaviorDefinitions.RemoveAt(BehaviorIndex);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
 
@@ -1326,6 +1339,8 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotRuntimeTags(
 	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
 	Params->TryGetArrayField(TEXT("runtime_tags"), TagsArr);
 
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotRuntimeTags", "Set Smart Object Slot Runtime Tags (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.RuntimeTags = ParseTagContainer(TagsArr);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
@@ -1608,6 +1623,8 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotEntranceAnnotation(
 
 	// DefinitionData is a public member of the (private-Slots) slot struct, reached
 	// through GetMutableSlot — the adder mutates it the same way (Slot.DefinitionData.Add).
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectSlotEntrance", "Remove Smart Object Slot Entrance Annotation (MCP)"));
+	Def->Modify();
 	Slot.DefinitionData.RemoveAt(TargetDataIndex);
 	const bool bSaved = SmartObjects_SaveDefinition(Def);
 

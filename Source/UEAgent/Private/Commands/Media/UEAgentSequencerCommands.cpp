@@ -105,6 +105,9 @@
 #include "Tracks/MovieSceneMaterialParameterCollectionTrack.h"    // UMovieSceneMaterialParameterCollectionTrack
 #include "Materials/MaterialParameterCollection.h"                // UMaterialParameterCollection
 #include "Curves/RichCurve.h"                                     // ERichCurveInterpMode / ERichCurveTangentMode
+#include "Sections/MovieSceneComponentMaterialParameterSection.h" // ScalarParameterInfosAndCurves (MovieSceneTracks): key read-back
+#include "Sections/MovieSceneParameterSection.h"                  // GetScalarParameterNamesAndCurves (MovieSceneTracks): key read-back
+#include "MovieSceneCommonHelpers.h"                              // MovieSceneHelpers::FindNearestSectionAtTime (MovieScene)
 
 // Section-property setters
 #include "Sections/MovieSceneSkeletalAnimationSection.h"          // UMovieSceneSkeletalAnimationSection + FMovieSceneSkeletalAnimationParams (MovieSceneTracks)
@@ -2108,8 +2111,13 @@ ULevelSequence* LoadSequenceByPathOrName(const FString& PathOrName)
 
 // Load an inner ULevelSequence by full /Game path, creating + persisting a fresh
 // one (NewObject + Initialize, like ULevelSequenceFactoryNew) if it does not exist.
-ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* OutError)
+// bOutCreated, when given, is true only when this call created the sequence.
+ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* OutError, bool* bOutCreated = nullptr)
 {
+    if (bOutCreated)
+    {
+        *bOutCreated = false;
+    }
     if (InnerPath.IsEmpty())
     {
         return nullptr;
@@ -2176,6 +2184,10 @@ ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* Out
 
     FAssetRegistryModule::AssetCreated(NewSequence);
     SaveSequencePackage(NewSequence);
+    if (bOutCreated)
+    {
+        *bOutCreated = true;
+    }
     return NewSequence;
 }
 
@@ -2193,15 +2205,51 @@ namespace UEAgentSequencerImpl
         }
         return FString::Printf(TEXT("%s/%s%s"), *Folder, *Sequence->GetName(), Suffix);
     }
+
+    // Whether Outer plays Target through a sub or shot section of one of its root tracks, at any depth. Visited
+    // stops the walk on cycles that already exist between assets.
+    bool NestsSequence(const UMovieSceneSequence* Outer, const UMovieSceneSequence* Target,
+        TSet<const UMovieSceneSequence*>& Visited)
+    {
+        if (Outer == nullptr || Visited.Contains(Outer))
+        {
+            return false;
+        }
+        Visited.Add(Outer);
+
+        const UMovieScene* MovieScene = Outer->GetMovieScene();
+        if (MovieScene == nullptr)
+        {
+            return false;
+        }
+        for (const UMovieSceneTrack* Track : MovieScene->GetTracks())
+        {
+            const UMovieSceneSubTrack* SubTrack = Cast<UMovieSceneSubTrack>(Track);
+            if (SubTrack == nullptr)
+            {
+                continue;
+            }
+            for (const UMovieSceneSection* Section : SubTrack->GetAllSections())
+            {
+                const UMovieSceneSubSection* SubSection = Cast<UMovieSceneSubSection>(Section);
+                const UMovieSceneSequence* Inner = SubSection ? SubSection->GetSequence() : nullptr;
+                if (Inner != nullptr && (Inner == Target || NestsSequence(Inner, Target, Visited)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }
 
-// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset. Each call adds another section. If no inner sequence resolves, the track is still saved and section_added is false. For cinematic shots use add_shot_track.
+// MCP:add_subsequence_track - Nests one Level Sequence in another: finds or adds the target's root subsequence track, adds a sub section playing the inner sequence from start_frame for duration tick-resolution frames, and saves the target. The inner sequence is sub_sequence_path, or <target name>_Sub in the target's folder when omitted; it is loaded when it exists, else created and saved as a new asset (inner_sequence_created says which). Each call adds another section. An inner sequence that cannot be loaded or created, that is the target itself, or that already plays the target at any depth is an error and nothing is added. For cinematic shots use add_shot_track.
 //   @param sequence_path - Full /Game path (e.g. "/Game/MyGame/SUBSEQ_Example") OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param sub_sequence_path - Optional content path of the sub Level Sequence to nest. If omitted, a sibling inner Level Sequence is created and persisted.
 //   @param start_frame - Inclusive start frame for the sub section (default 0).
 //   @param duration - Section duration in tick frames (default 150).
-//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, inner_sequence_error?: string (why the inner sequence could not be created), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }
+//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2223,6 +2271,37 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Resolve / create the inner sequence to nest before touching the target, so a refusal leaves the target
+    // as it was. If omitted, synthesize a sibling inner sequence under the same folder so the section binds a
+    // real sub-sequence.
+    const FString InnerPath = SubSequencePath.IsEmpty()
+        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Sub")) : SubSequencePath;
+
+    FString InnerError;
+    bool bInnerCreated = false;
+    ULevelSequence* InnerSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError, &bInnerCreated);
+    if (!InnerSeq)
+    {
+        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
+            ? FString::Printf(TEXT("Failed to load or create the inner sequence '%s'"), *InnerPath) : InnerError);
+    }
+
+    // A sequence that plays itself, directly or through the inner one, recurses without end at evaluation.
+    // The path resolved to an existing asset in both cases, so nothing was created before this refusal.
+    if (InnerSeq == Sequence)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to nest '%s' inside itself: sub_sequence_path resolves to the target sequence"),
+            *Sequence->GetPathName()));
+    }
+    TSet<const UMovieSceneSequence*> Visited;
+    if (UEAgentSequencerImpl::NestsSequence(InnerSeq, Sequence, Visited))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to nest '%s' inside '%s': the inner sequence already plays the target, which would be a circular dependency"),
+            *InnerSeq->GetPathName(), *Sequence->GetPathName()));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("AddSubsequenceTrack", "MCP: Add Subsequence Track"));
     MovieScene->Modify();
 
@@ -2235,29 +2314,9 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(TEXT("Failed to add subsequence track"));
     }
 
-    // Resolve / create the inner sequence to nest. If omitted, synthesize a sibling
-    // inner sequence under the same folder so the section binds a real sub-sequence.
-    bool bInnerCreated = false;
-    const FString InnerPath = SubSequencePath.IsEmpty()
-        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Sub")) : SubSequencePath;
-
-    FString InnerError;
-    ULevelSequence* InnerSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError);
-    bInnerCreated = (InnerSeq != nullptr && InnerSeq != Sequence);
-
-    bool bSectionAdded = false;
-    FString InnerName;
-    UMovieSceneSubSection* SubSection = nullptr;
-    if (InnerSeq)
-    {
-        // AddSequence forwards to the exported AddSequenceOnRow(MOVIESCENE_API).
-        SubSection = Track->AddSequence(InnerSeq, FFrameNumber(StartFrame), Duration);
-        if (SubSection)
-        {
-            bSectionAdded = true;
-            InnerName = InnerSeq->GetName();
-        }
-    }
+    // AddSequence forwards to the exported AddSequenceOnRow(MOVIESCENE_API).
+    UMovieSceneSubSection* SubSection = Track->AddSequence(InnerSeq, FFrameNumber(StartFrame), Duration);
+    const bool bSectionAdded = (SubSection != nullptr);
 
     const bool bSaved = SaveSequencePackage(Sequence);
 
@@ -2266,17 +2325,16 @@ TSharedPtr<FJsonObject> HandleAddSubsequenceTrack(const TSharedPtr<FJsonObject>&
     Response->SetBoolField(TEXT("track_added"), bTrackCreated);
     Response->SetBoolField(TEXT("section_added"), bSectionAdded);
     Response->SetBoolField(TEXT("inner_sequence_created"), bInnerCreated);
-    if (!InnerError.IsEmpty())
-    {
-        Response->SetStringField(TEXT("inner_sequence_error"), InnerError);
-    }
     Response->SetNumberField(TEXT("start_frame"), StartFrame);
     Response->SetNumberField(TEXT("duration"), Duration);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
-    if (InnerSeq)
+    Response->SetStringField(TEXT("sub_sequence_path"), InnerSeq->GetPathName());
+    Response->SetStringField(TEXT("sub_sequence_name"), InnerSeq->GetName());
+    if (!bSectionAdded)
     {
-        Response->SetStringField(TEXT("sub_sequence_path"), InnerSeq->GetPathName());
-        Response->SetStringField(TEXT("sub_sequence_name"), InnerName);
+        Response->SetBoolField(TEXT("saved"), bSaved);
+        return mcp_common::MakeOutcomeReply(Response, false,
+            TEXT("add_subsequence_track: the subsequence track did not add a section for the inner sequence"));
     }
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_subsequence_track"));
 }
@@ -2314,13 +2372,13 @@ TSharedPtr<FJsonObject> HandleAddShotTrack(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_shot_track"));
 }
 
-// MCP:add_shot_section - Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet.
+// MCP:add_shot_section - Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet. An inner shot sequence that is the target itself or already plays it at any depth is an error and nothing is added.
 //   @param sequence_path - Full /Game path OR bare asset name of the target Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param shot_sequence_path - Optional content path of the inner shot Level Sequence. If omitted, an inner shot Level Sequence is created and persisted.
 //   @param start_frame - Inclusive start frame for the shot section (default 0).
 //   @param duration - Section duration in tick frames (default 150).
-//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool }
+//   @returns { sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool (true only when this call created the inner sequence), shot_name: string, shot_sequence_path: string, start_frame: int, duration: int, section_count: int, section_class: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2342,6 +2400,26 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Resolve / create the inner shot sequence before touching the target, so a refusal leaves it as it was.
+    bool bInnerCreated = false;
+    const FString InnerPath = ShotSequencePath.IsEmpty()
+        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Shot")) : ShotSequencePath;
+    FString InnerError;
+    ULevelSequence* ShotSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError, &bInnerCreated);
+    if (!ShotSeq)
+    {
+        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
+            ? FString(TEXT("Failed to load or create the inner shot sequence")) : InnerError);
+    }
+    // A shot that plays its own sequence, directly or through the shot, recurses without end at evaluation.
+    TSet<const UMovieSceneSequence*> Visited;
+    if (ShotSeq == Sequence || UEAgentSequencerImpl::NestsSequence(ShotSeq, Sequence, Visited))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Refusing to add '%s' as a shot of '%s': it is the target or already plays it (circular dependency)"),
+            *ShotSeq->GetPathName(), *Sequence->GetPathName()));
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("AddShotSection", "MCP: Add Cinematic Shot Section"));
     MovieScene->Modify();
 
@@ -2351,19 +2429,6 @@ TSharedPtr<FJsonObject> HandleAddShotSection(const TSharedPtr<FJsonObject>& Para
     if (!Track)
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to obtain cinematic shot track"));
-    }
-
-    // Resolve / create the inner shot sequence.
-    bool bInnerCreated = false;
-    const FString InnerPath = ShotSequencePath.IsEmpty()
-        ? UEAgentSequencerImpl::SiblingSequencePath(Sequence, TEXT("_Shot")) : ShotSequencePath;
-    FString InnerError;
-    ULevelSequence* ShotSeq = LoadOrCreateInnerSequence(InnerPath, &InnerError);
-    bInnerCreated = (ShotSeq != nullptr && ShotSeq != Sequence);
-    if (!ShotSeq)
-    {
-        return mcp_common::MakeErrorReply(InnerError.IsEmpty()
-            ? FString(TEXT("Failed to load or create the inner shot sequence")) : InnerError);
     }
 
     // AddSequence forwards to the exported AddSequenceOnRow (MOVIESCENETRACKS_API).
@@ -3132,7 +3197,7 @@ static UClass* ResolveComponentClass(const FString& ClassName)
         return USpotLightComponent::StaticClass();
     if (Lower == TEXT("pointlightcomponent") || Lower == TEXT("pointlight"))
         return UPointLightComponent::StaticClass();
-    if (Lower == TEXT("sceneComponent") || Lower == TEXT("scenecomponent"))
+    if (Lower == TEXT("scenecomponent"))
         return USceneComponent::StaticClass();
 
     if (ClassName.Contains(TEXT(".")) || ClassName.StartsWith(TEXT("/Script/")))
@@ -3147,7 +3212,7 @@ static UClass* ResolveComponentClass(const FString& ClassName)
     return nullptr;
 }
 
-// MCP:add_subcomponent_possessable - Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID or an unresolvable class is an error.
+// MCP:add_subcomponent_possessable - Adds a component possessable as a child of an existing binding (possessable or spawnable) of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; each call adds a new one, named possessable_name or else the component_class text. It records name, class and parent only: no component object is bound to it. To possess an actual component of an editor-world actor use bind_component_to_sequence; for whole actors use bind_actor_to_sequence or add_spawnable_to_sequence. An unknown parent GUID, an unresolvable class, or a class that is not an ActorComponent is an error.
 //   @param sequence_name - Name of the level sequence asset.
 //   @param parent_binding_guid - GUID of the parent binding (spawnable or possessable).
 //   @param component_class - Component class name (e.g. 'StaticMeshComponent', 'SpotLightComponent').
@@ -3171,6 +3236,11 @@ TSharedPtr<FJsonObject> HandleAddSubcomponentPossessable(const TSharedPtr<FJsonO
     UClass* CompClass = ResolveComponentClass(ComponentClassName);
     if (!CompClass)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Could not resolve component class '%s'"), *ComponentClassName));
+    // The short-name lookup accepts any UClass; a component possessable must be bound to a component.
+    if (!CompClass->IsChildOf(UActorComponent::StaticClass()))
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("component_class '%s' resolves to %s, which is not a UActorComponent subclass"),
+            *ComponentClassName, *CompClass->GetPathName()));
 
     ULevelSequence* Sequence = LevelSequenceUtils::FindByName(SequenceName);
     UMovieScene* MovieScene = nullptr;
@@ -3584,12 +3654,28 @@ TSharedPtr<FJsonObject> HandleSetSectionPrePostRollout(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_section_pre_post_rollout"));
 }
 
-// MCP:set_sequence_view_range - Set the editor view range of a Level Sequence (in seconds).  The view range controls the visible timeline window in the Sequencer editor (does NOT affect playback or asset playback range). Backed by UMovieScene::SetViewRange(double, double) -- MOVIESCENE_API.
+namespace UEAgentSequencerImpl
+{
+    // The reply of the editor-range setters. The view and working ranges live in Transient fields of
+    // FMovieSceneEditorData, so they last for this editor session only: the reply says persisted:false, and
+    // success means the movie scene reads back the requested range.
+    TSharedPtr<FJsonObject> MakeSessionRangeReply(const ULevelSequence* Sequence, const TRange<double>& Stored,
+        double RequestedStart, double RequestedEnd, const TCHAR* Command)
+    {
+        TSharedPtr<FJsonObject> Response = NewSecondsRangePayload(Sequence, Stored, RequestedStart, RequestedEnd);
+        Response->SetBoolField(TEXT("persisted"), false);
+        const bool bVerified = Response->GetBoolField(TEXT("verified"));
+        return mcp_common::MakeOutcomeReply(Response, bVerified, bVerified ? FString()
+            : FString::Printf(TEXT("%s: the movie scene does not read back the requested range"), Command));
+    }
+}
+
+// MCP:set_sequence_view_range - Sets the editor view range of a Level Sequence (path or bare asset name), in seconds: the visible window of the Sequencer timeline. Editor UI state only, it changes neither playback nor the playback range. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false); a Sequencer showing the sequence follows it on its next tick. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the scrollable bounds use set_sequence_working_range; for what plays use set_sequence_playback_range.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_seconds - Start of the view range, in seconds.
 //   @param end_seconds - End of the view range, in seconds. Must be > start_seconds.
-//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }
+//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }
 
 TSharedPtr<FJsonObject> HandleSetSequenceViewRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3602,22 +3688,22 @@ TSharedPtr<FJsonObject> HandleSetSequenceViewRange(const TSharedPtr<FJsonObject>
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Recorded for undo without dirtying the package: the view range is Transient, so a save would write
+    // nothing of it.
     const FScopedTransaction Transaction(LOCTEXT("SetSequenceViewRange", "MCP: Set Sequence View Range"));
-    MovieScene->Modify();
+    MovieScene->Modify(/*bAlwaysMarkDirty=*/false);
     MovieScene->SetViewRange(StartSec, EndSec);
-    const bool bSaved = SaveSequencePackage(Sequence);
 
-    TSharedPtr<FJsonObject> Response = UEAgentSequencerImpl::NewSecondsRangePayload(
-        Sequence, MovieScene->GetEditorData().GetViewRange(), StartSec, EndSec);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_view_range"));
+    return UEAgentSequencerImpl::MakeSessionRangeReply(
+        Sequence, MovieScene->GetEditorData().GetViewRange(), StartSec, EndSec, TEXT("set_sequence_view_range"));
 }
 
-// MCP:set_sequence_working_range - Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so although the package is saved the value is not written: after a reload the working range is recomputed from the playback range. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
+// MCP:set_sequence_working_range - Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false): after a reload the working range is recomputed from the playback range. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
 //   @param sequence_path - Asset path of the Level Sequence.
 //   @param sequence_name - Alias for sequence_path.
 //   @param start_seconds - Start of the working range, in seconds.
 //   @param end_seconds - End of the working range, in seconds. Must be > start_seconds.
-//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }
+//   @returns { sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }
 
 TSharedPtr<FJsonObject> HandleSetSequenceWorkingRange(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3630,14 +3716,14 @@ TSharedPtr<FJsonObject> HandleSetSequenceWorkingRange(const TSharedPtr<FJsonObje
     UMovieScene* MovieScene = nullptr;
     if (TSharedPtr<FJsonObject> Failure = UEAgentSequencerImpl::OpenMovieScene(Sequence, SequencePath, MovieScene)) { return Failure; }
 
+    // Recorded for undo without dirtying the package: the working range is Transient, so a save would write
+    // nothing of it.
     const FScopedTransaction Transaction(LOCTEXT("SetSequenceWorkingRange", "MCP: Set Sequence Working Range"));
-    MovieScene->Modify();
+    MovieScene->Modify(/*bAlwaysMarkDirty=*/false);
     MovieScene->SetWorkingRange(StartSec, EndSec);
-    const bool bSaved = SaveSequencePackage(Sequence);
 
-    TSharedPtr<FJsonObject> Response = UEAgentSequencerImpl::NewSecondsRangePayload(
-        Sequence, MovieScene->GetEditorData().GetWorkingRange(), StartSec, EndSec);
-    return mcp_common::MakeSavedReply(Response, bSaved, TEXT("set_sequence_working_range"));
+    return UEAgentSequencerImpl::MakeSessionRangeReply(
+        Sequence, MovieScene->GetEditorData().GetWorkingRange(), StartSec, EndSec, TEXT("set_sequence_working_range"));
 }
 
 // MCP:set_sequence_display_rate - Set the display frame rate of a Level Sequence.  The display rate is the asset-level "play rate" (frames per second of the timeline). Changing it rescales how existing frame numbers map to time. Backed by UMovieScene::SetDisplayRate(FFrameRate).  Note: The numerator/denominator are integers (FFrameRate), so the fps argument is rounded to the nearest whole-number fps. For non-integer rates (e.g. 23.976) the caller should still pass the closest whole number; the engine does not support fractional FFrameRate numerators without a custom non-integer tick resolution.
@@ -5133,20 +5219,96 @@ namespace UEAgentSequencerImpl
         int32 ScalarChannelCount = 0;
     };
 
+    // The frame the material-track tools key at: the optional frame param, a tick-resolution frame (default 0).
+    FFrameNumber ReadScalarKeyFrame(const TSharedPtr<FJsonObject>& Params)
+    {
+        double F = 0.0;
+        return FFrameNumber(Params->TryGetNumberField(TEXT("frame"), F) ? static_cast<int32>(F) : 0);
+    }
+
+    // Whether Channel holds a key at Frame whose value is Value.
+    bool ChannelHasKey(const FMovieSceneFloatChannel& Channel, FFrameNumber Frame, float Value)
+    {
+        const TArrayView<const FFrameNumber> Times = Channel.GetTimes();
+        const TArrayView<const FMovieSceneFloatValue> Values = Channel.GetValues();
+        for (int32 Index = 0; Index < Times.Num() && Index < Values.Num(); ++Index)
+        {
+            if (Times[Index] == Frame && FMath::IsNearlyEqual(Values[Index].Value, Value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether a section of Track holds a key for the scalar ParameterName at Frame with Value. This is the
+    // read-back of UMovieSceneMaterialTrack::AddScalarParameterKey, which returns nothing and skips the key when
+    // the section it picks is read-only. Component material tracks key UMovieSceneComponentMaterialParameterSection,
+    // the MPC track keys UMovieSceneParameterSection.
+    bool TrackHasScalarKey(const UMovieSceneMaterialTrack* Track, FName ParameterName, FFrameNumber Frame, float Value)
+    {
+        const FMaterialParameterInfo ParameterInfo(ParameterName);
+        for (const UMovieSceneSection* Section : Track->GetAllSections())
+        {
+            if (const UMovieSceneComponentMaterialParameterSection* MaterialSection = Cast<UMovieSceneComponentMaterialParameterSection>(Section))
+            {
+                for (const FScalarMaterialParameterInfoAndCurve& Entry : MaterialSection->ScalarParameterInfosAndCurves)
+                {
+                    if (Entry.ParameterInfo == ParameterInfo && ChannelHasKey(Entry.ParameterCurve, Frame, Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (const UMovieSceneParameterSection* ParameterSection = Cast<UMovieSceneParameterSection>(Section))
+            {
+                for (const FScalarParameterNameAndCurve& Entry : ParameterSection->GetScalarParameterNamesAndCurves())
+                {
+                    if (Entry.ParameterName == ParameterName && ChannelHasKey(Entry.ParameterCurve, Frame, Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    // Whether AddScalarParameterKey on ExistingTrack (null: a track about to be added) would refuse a key at Frame.
+    // It keys the track's section-to-key, else the section nearest Frame, else a new section, and skips the key
+    // when that section is read-only (locked, or in a read-only movie scene).
+    bool ScalarKeyWouldBeRefused(const UMovieScene* MovieScene, const UMovieSceneMaterialTrack* ExistingTrack, FFrameNumber Frame)
+    {
+        const UMovieSceneSection* Target = nullptr;
+        if (ExistingTrack)
+        {
+            Target = ExistingTrack->GetSectionToKey();
+            if (Target == nullptr)
+            {
+                Target = MovieSceneHelpers::FindNearestSectionAtTime(ExistingTrack->GetAllSections(), Frame);
+            }
+        }
+        return Target ? Target->IsReadOnly() : MovieScene->IsReadOnly();
+    }
+
     // Keys the optional scalar parameter_name, ensures a playback-range section and counts its float channels.
+    // bKeyAdded is read back from the track; bSectionAdded is true when the track gained a section, including the
+    // one keying creates.
     FScalarParameterKey KeyScalarParameter(const TSharedPtr<FJsonObject>& Params, UMovieScene* MovieScene, UMovieSceneMaterialTrack* Track)
     {
         FScalarParameterKey Keyed;
         Params->TryGetStringField(TEXT("parameter_name"), Keyed.ParameterName);
         Params->TryGetNumberField(TEXT("value"), Keyed.Value);
-        int32 FrameNum = 0;
-        { double F = 0.0; if (Params->TryGetNumberField(TEXT("frame"), F)) { FrameNum = static_cast<int32>(F); } }
+        const FFrameNumber Frame = ReadScalarKeyFrame(Params);
+        const int32 SectionsBefore = Track->GetAllSections().Num();
 
         if (!Keyed.ParameterName.IsEmpty())
         {
             // AddScalarParameterKey creates a parameter section when the track has none.
-            Track->AddScalarParameterKey(FName(*Keyed.ParameterName), FFrameNumber(FrameNum), static_cast<float>(Keyed.Value));
-            Keyed.bKeyAdded = true;
+            const FName ParameterName(*Keyed.ParameterName);
+            const float KeyValue = static_cast<float>(Keyed.Value);
+            Track->AddScalarParameterKey(ParameterName, Frame, KeyValue);
+            Keyed.bKeyAdded = TrackHasScalarKey(Track, ParameterName, Frame, KeyValue);
         }
         if (Track->GetAllSections().Num() == 0)
         {
@@ -5155,9 +5317,9 @@ namespace UEAgentSequencerImpl
             {
                 NewSection->SetRange(MovieScene->GetPlaybackRange());
                 Track->AddSection(*NewSection);
-                Keyed.bSectionAdded = true;
             }
         }
+        Keyed.bSectionAdded = Track->GetAllSections().Num() > SectionsBefore;
         if (Track->GetAllSections().Num() > 0 && Track->GetAllSections()[0])
         {
             Keyed.ScalarChannelCount = Track->GetAllSections()[0]->GetChannelProxy().GetChannels<FMovieSceneFloatChannel>().Num();
@@ -5235,14 +5397,14 @@ TSharedPtr<FJsonObject> HandleAddMaterialParameterCollectionTrack(const TSharedP
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_material_parameter_collection_track"));
 }
 
-// MCP:add_component_material_track - Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame); without it, it only adds a section spanning the playback range when the track has none. An unknown binding_guid is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
+// MCP:add_component_material_track - Adds a component material parameter track for one indexed material slot to an object binding of a Level Sequence (first asset-name match under /Game), or reuses the binding's existing track for that slot, and saves the sequence. With parameter_name it keys that scalar parameter at frame (a tick-resolution frame) and reads the key back: success requires it, and a key the engine would skip (locked section, read-only sequence) is refused before anything is written; without it, it only adds a section spanning the playback range when the track has none. The slot index is not checked against the bound component, which is not resolved. An unknown binding_guid or a material_index that is not a whole number >= 0 is an error. For a Material Parameter Collection use add_material_parameter_collection_track; for other animated properties use add_property_track.
 //   @param sequence_name - Name of the target Level Sequence
 //   @param binding_guid - GUID of the actor/component object binding to attach the material track to
-//   @param material_index - Optional indexed material slot the track animates (default 0)
+//   @param material_index - Optional indexed material slot the track animates, a whole number >= 0 (default 0)
 //   @param parameter_name - Optional scalar material parameter name to key
 //   @param value - Optional scalar value for the keyed parameter (default 0.0)
 //   @param frame - Optional frame number for the key (default 0)
-//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool, section_added: bool, scalar_channel_count: int, section_count: int, saved: bool }
+//   @returns { sequence_name: string, binding_guid: string, track_class: string, track_added: bool, material_index: int, material_type: string, parameter_name: string, value: number, key_added: bool (read back from the track), section_added: bool (the track gained a section, keying included), scalar_channel_count: int, section_count: int, saved: bool }
 TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString SequenceName, GuidStr;
@@ -5258,11 +5420,19 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
             FString::Printf(TEXT("Binding '%s' not found in sequence"), *GuidStr));
     }
 
+    // A material slot index is a whole number >= 0; a fraction or a negative number names no slot.
     int32 MaterialIndex = 0;
-    { double F = 0.0; if (Params->TryGetNumberField(TEXT("material_index"), F)) { MaterialIndex = static_cast<int32>(F); } }
-
-    const FScopedTransaction Transaction(LOCTEXT("AddComponentMaterialTrack", "MCP: Add Component Material Track"));
-    MovieScene->Modify();
+    double MaterialIndexD = 0.0;
+    if (Params->TryGetNumberField(TEXT("material_index"), MaterialIndexD))
+    {
+        if (MaterialIndexD < 0.0 || MaterialIndexD > static_cast<double>(MAX_int32)
+            || MaterialIndexD != FMath::FloorToDouble(MaterialIndexD))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("material_index must be a whole number >= 0 (a material slot index), got %g"), MaterialIndexD));
+        }
+        MaterialIndex = static_cast<int32>(MaterialIndexD);
+    }
 
     // Idempotent: reuse an existing component material track on this binding for the same indexed slot.
     bool bTrackCreated = false;
@@ -5277,6 +5447,21 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
             Track = MatTrack; break;
         }
     }
+
+    // A key the engine would skip is refused before anything is written.
+    FString ParameterName;
+    Params->TryGetStringField(TEXT("parameter_name"), ParameterName);
+    const FFrameNumber KeyFrame = UEAgentSequencerImpl::ReadScalarKeyFrame(Params);
+    if (!ParameterName.IsEmpty() && UEAgentSequencerImpl::ScalarKeyWouldBeRefused(MovieScene, Track, KeyFrame))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Cannot key '%s' at frame %d: the section it would land in is locked, or the sequence is read-only"),
+            *ParameterName, KeyFrame.Value));
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("AddComponentMaterialTrack", "MCP: Add Component Material Track"));
+    MovieScene->Modify();
+
     if (!Track)
     {
         Track = MovieScene->AddTrack<UMovieSceneComponentMaterialTrack>(BindingGuid);
@@ -5310,6 +5495,13 @@ TSharedPtr<FJsonObject> HandleAddComponentMaterialTrack(const TSharedPtr<FJsonOb
     Response->SetBoolField(TEXT("section_added"), Keyed.bSectionAdded);
     Response->SetNumberField(TEXT("scalar_channel_count"), Keyed.ScalarChannelCount);
     Response->SetNumberField(TEXT("section_count"), Track->GetAllSections().Num());
+    if (!Keyed.ParameterName.IsEmpty() && !Keyed.bKeyAdded)
+    {
+        Response->SetBoolField(TEXT("saved"), bSaved);
+        return mcp_common::MakeOutcomeReply(Response, false, FString::Printf(
+            TEXT("add_component_material_track: no key for '%s' at frame %d with value %g reads back from the track"),
+            *Keyed.ParameterName, KeyFrame.Value, Keyed.Value));
+    }
     return mcp_common::MakeSavedReply(Response, bSaved, TEXT("add_component_material_track"));
 }
 

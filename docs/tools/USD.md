@@ -196,16 +196,16 @@ Spawn an AUsdStageActor into the editor's current world (or return the existing 
 
 *Destructive.*
 
-Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. A specifier of Over or Class is applied afterwards (specifier_set_ok); an unknown one means Def but is echoed as given. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
+Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. The requested specifier is then authored at the edit target (specifier_set_ok); specifier reports it only when that write succeeded, and a failed write fails the call. An unknown specifier is refused before anything is authored. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prim_path` | string | yes | Absolute SdfPath, e.g. /World/Cube |
 | `stage_name` | string | no | Name the stage was registered under |
 | `type_name` | string | no | USD type name (Xform, Mesh, Cube, Scope, Camera, DistantLight...). Default: Xform |
-| `specifier` | string | no | "Def" \| "Over" \| "Class". Default: Def |
+| `specifier` | string | no | "Def" \| "Over" \| "Class", case-insensitive; anything else is refused. Default: Def |
 
-**Returns:** `{ prim_path: string, type_name: string, specifier: string, is_valid: bool, specifier_set_ok: bool }`
+**Returns:** `{ prim_path: string, type_name: string, specifier?: string, is_valid: bool, specifier_set_ok: bool, requested?: object }`
 
 ## `flatten_usd_stage`
 
@@ -492,14 +492,14 @@ Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage 
 
 *Additive, idempotent.*
 
-Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched, even a def, though the reply still says specifier Over. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
+Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched (already_existed true, no specifier reported, since nothing was authored); specifier Over comes back only for an over this call authored. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prim_path` | string | yes | Absolute SdfPath to author the over at, e.g. "/World/Cube" |
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
-**Returns:** `{ prim_path: string, is_valid: bool, specifier?: string }`
+**Returns:** `{ prim_path: string, is_valid: bool, already_existed: bool, specifier?: string }`
 
 ## `remove_usd_attribute`
 

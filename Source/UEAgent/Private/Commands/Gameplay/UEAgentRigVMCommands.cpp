@@ -324,7 +324,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_rigvm_link
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. The Blueprint is then compiled and saved, even when the link fails, which is an error (pins missing, incompatible or already linked). Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName
@@ -346,24 +346,27 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
     const bool bLinked = Controller->AddLink(
         SourcePin, TargetPin, /*bSetupUndoRedo*/ false);
 
-    FString SaveErr;
-    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
-
-    URigVMGraph* Model = CRBP->GetDefaultModel();
-
     TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
     Resp->SetStringField(TEXT("source_pin"), SourcePin);
     Resp->SetStringField(TEXT("target_pin"), TargetPin);
     Resp->SetBoolField(TEXT("linked"), bLinked);
-    Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
-    mcp_common::AddSaveOutcome(Resp, bSaved, SaveErr);
     if (!bLinked)
     {
-        // Honest failure surfaced as success=false so the harness can match it; an
-        // incompatible/already-existing pairing is the engine returning false here.
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked)"), *SourcePin, *TargetPin));
+        // An incompatible, missing or already-linked pairing is the engine returning false here. Nothing
+        // was linked, so the rig is neither compiled nor saved; the payload still says so (saved=false).
+        URigVMGraph* Model = CRBP->GetDefaultModel();
+        Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
+            TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked); the rig was not compiled or saved"),
+            *SourcePin, *TargetPin));
     }
+
+    FString SaveErr;
+    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
+
+    URigVMGraph* Model = CRBP->GetDefaultModel();
+    Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_rigvm_link"), SaveErr);
 }
 
@@ -407,7 +410,7 @@ TSharedPtr<FJsonObject> HandleGetRigVMGraph(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // remove_rigvm_node
 // ---------------------------------------------------------------------------
-// MCP:remove_rigvm_node - Remove a node from a Control Rig's RigVM solver graph
+// MCP:remove_rigvm_node - Remove a node from a Control Rig's RigVM solver graph, then compile and save the rig. A node that is not found, or that the controller fails to remove, is an error and nothing is compiled or saved.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param node_name - Graph node name to remove, as reported by add_rigvm_node
 //   @returns { asset_path: string, node_name: string, removed: bool, node_count: int, saved: bool, save_error: string }
@@ -435,19 +438,21 @@ TSharedPtr<FJsonObject> HandleRemoveRigVMNode(const TSharedPtr<FJsonObject>& Par
 
     const bool bRemoved = Controller->RemoveNode(Node, /*bSetupUndoRedo*/ false, /*bPrintPythonCommand*/ false);
 
-    FString SaveErr;
-    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
-
     TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
     Resp->SetStringField(TEXT("node_name"), NodeName);
     Resp->SetBoolField(TEXT("removed"), bRemoved);
-    Resp->SetNumberField(TEXT("node_count"), Model->GetNodes().Num());
-    mcp_common::AddSaveOutcome(Resp, bSaved, SaveErr);
     if (!bRemoved)
     {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("RemoveNode returned false for '%s'"), *NodeName));
+        // Nothing was removed, so the rig is neither compiled nor saved; the payload still says so.
+        Resp->SetNumberField(TEXT("node_count"), Model->GetNodes().Num());
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
+            TEXT("RemoveNode returned false for '%s'; the rig was not compiled or saved"), *NodeName));
     }
+
+    FString SaveErr;
+    const bool bSaved = RigVM_CompileAndSave(CRBP, SaveErr);
+    Resp->SetNumberField(TEXT("node_count"), Model->GetNodes().Num());
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_rigvm_node"), SaveErr);
 }
 

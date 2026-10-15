@@ -630,11 +630,11 @@ TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 5. set_geometry_collection_damage
 // ---------------------------------------------------------------------------
-// MCP:set_geometry_collection_damage - Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. The save result is not checked: success is true even when nothing reached disk. The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
+// MCP:set_geometry_collection_damage - Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error). The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param damage_model - Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model.
 //   @param damage_thresholds - Optional array of per-level damage threshold floats
-//   @returns { geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool }
+//   @returns { geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleSetGeometryCollectionDamage(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -669,14 +669,15 @@ TSharedPtr<FJsonObject> HandleSetGeometryCollectionDamage(const TSharedPtr<FJson
         }
     }
 
-    // Save the modified asset.
-    mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    // Save the modified asset; the reply succeeds only when the package reached disk.
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
     Result->SetStringField(TEXT("damage_model"), DamageModelToString(GC->DamageModel));
     Result->SetNumberField(TEXT("num_thresholds"), GC->DamageThreshold.Num());
-    Result->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("success"), bSaved);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_geometry_collection_damage"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -747,11 +748,11 @@ TSharedPtr<FJsonObject> HandleSetGeometryCollectionMass(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 6. add_geometry_collection_source
 // ---------------------------------------------------------------------------
-// MCP:add_geometry_collection_source - Append an additional StaticMesh source to an existing geometry collection
+// MCP:add_geometry_collection_source - Append an additional StaticMesh source to an existing geometry collection, then save it. Succeeds only when the package reaches disk; a failed save leaves the change in memory only (saved false, save_error).
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param source_mesh_path - Asset path to the UStaticMesh to append
 //   @param transform - Optional {location, rotation, scale} for the source mesh placement
-//   @returns { geometry_collection_path: string, source_mesh_path: string, num_sources: int, num_materials: int, success: bool }
+//   @returns { geometry_collection_path: string, source_mesh_path: string, num_sources: int, num_materials: int, success: bool, saved: bool, save_error: string? }
 TSharedPtr<FJsonObject> HandleAddGeometryCollectionSource(const TSharedPtr<FJsonObject>& Params)
 {
     FString GCPath;
@@ -827,15 +828,16 @@ TSharedPtr<FJsonObject> HandleAddGeometryCollectionSource(const TSharedPtr<FJson
     // Mark simulation data dirty.
     GC->InvalidateCollection();
 
-    // Save the modified asset.
-    mcp_common::SaveAssetPackage(GC->GetOutermost(), GC);
+    // Save the modified asset; the reply succeeds only when the package reached disk.
+    FString SaveError;
+    const bool bSaved = mcp_common::SaveAssetPackage(GC->GetOutermost(), GC, SaveError);
 
     TSharedPtr<FJsonObject> Result = Chaos_StartReply(GCPath);
     Result->SetStringField(TEXT("source_mesh_path"), SourceMeshPath);
     Result->SetNumberField(TEXT("num_sources"), GC->GeometrySource.Num());
     Result->SetNumberField(TEXT("num_materials"), GC->Materials.Num());
-    Result->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("success"), bSaved);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("add_geometry_collection_source"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

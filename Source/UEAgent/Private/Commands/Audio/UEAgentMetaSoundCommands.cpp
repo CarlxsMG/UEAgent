@@ -736,11 +736,11 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObjec
 // FindOrBeginBuilding for an existing asset + AddGraphOutputNode(name, dataType,
 // default literal). Adds a real graph output node. Saves the asset.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_graph_output - Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is not duplicated or retyped: the engine hands back that output and the reply still says added=true, so check get_metasound_info first. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
+// MCP:add_metasound_graph_output - Add a graph output of data_type (default Audio; others include Float, Int32, Bool, String and Trigger) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. An unregistered data_type or a source that does not load is an error. A name already used by an output is left untouched: with the same data_type the call succeeds with added=false and already_exists=true and saves nothing; with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_output.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param output_name - Name of the graph output node to add.
 //   @param data_type - Frontend data type for the output node (optional, default "Audio")
-//   @returns { asset_path: string, output_name: string, data_type: string, added: bool, saved: bool, save_error: string? }
+//   @returns { asset_path: string, output_name: string, data_type: string, added: bool, already_exists?: bool, saved: bool, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleAddMetaSoundGraphOutput(const TSharedPtr<FJsonObject>& Params)
 {
@@ -759,6 +759,29 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphOutput(const TSharedPtr<FJsonObje
     if (!Builder)
     {
         return Error;
+    }
+
+    // AddGraphOutputNode hands back an output that already has this name and resets its default literal, so a
+    // taken name is answered here without calling it: the same type is the state asked for (nothing is written
+    // or saved), another type is an error.
+    const FName OutputFName(*OutputName);
+    if (Builder->GetConstBuilder().FindGraphOutputNode(OutputFName) != nullptr)
+    {
+        const FMetasoundFrontendClassOutput* ExistingOutput = Builder->GetConstBuilder().FindGraphOutput(OutputFName);
+        const FName ExistingType = ExistingOutput ? ExistingOutput->TypeName : FName();
+        if (!ExistingType.IsEqual(FName(*DataType), ENameCase::IgnoreCase))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Graph output '%s' already exists with data type '%s', not '%s'; remove it first (remove_metasound_graph_output) to change its type"),
+                *OutputName, *ExistingType.ToString(), *DataType));
+        }
+        TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+        Data->SetStringField(TEXT("output_name"), OutputName);
+        Data->SetStringField(TEXT("data_type"), ExistingType.ToString());
+        Data->SetBoolField(TEXT("added"), false);
+        Data->SetBoolField(TEXT("already_exists"), true);
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Data);
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundAddGraphOutput", "MetaSound Add Graph Output"));

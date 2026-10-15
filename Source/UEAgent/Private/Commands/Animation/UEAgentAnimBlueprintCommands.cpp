@@ -2275,11 +2275,11 @@ TSharedPtr<FJsonObject> HandleScaffoldAimOffsetBlendSpace(
     return Resp;
 }
 
-// MCP:setup_foot_ik - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, then mark the blueprint structurally modified and save it without compiling. The foot bones are NOT bound: the node has no LeftFootBone or RightFootBone property (its legs live in LegsDefinition), so left_foot_bone and right_foot_bone are only echoed back, and the node is left unwired. Configure it with set_anim_graph_node_property and connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
+// MCP:setup_foot_ik - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset.
-//   @param left_foot_bone - Name of the left foot bone; required and echoed back, but not written to the node and not checked against the skeleton.
-//   @param right_foot_bone - Name of the right foot bone; required and echoed back, but not written to the node and not checked against the skeleton.
-//   @returns { anim_blueprint_path, left_foot_bone, right_foot_bone, ik_node_count, already_existed, saved }
+//   @param left_foot_bone - Left foot bone, written as the FK foot bone of leg 0; checked against the target skeleton when the blueprint has one.
+//   @param right_foot_bone - Right foot bone, written as the FK foot bone of leg 1; checked against the target skeleton when the blueprint has one.
+//   @returns { anim_blueprint_path, node_id, left_foot_bone, right_foot_bone, legs: [{ fk_foot_bone, ik_foot_bone, num_bones_in_limb }], bones_checked_against, ik_node_count, already_existed, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetupFootIk(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2294,6 +2294,22 @@ TSharedPtr<FJsonObject> HandleSetupFootIk(
     if (!AnimGraph)
     {
         return mcp_common::MakeErrorReply(TEXT("Could not find AnimGraph on anim blueprint"));
+    }
+
+    // The bones must exist before anything is written: the compiler only warns about an invalid leg, and the
+    // node then skips that leg at runtime. A template blueprint has no target skeleton to check against.
+    const USkeleton* TargetSkeleton = AnimBP->TargetSkeleton;
+    if (TargetSkeleton)
+    {
+        for (const FString* Bone : { &LeftFoot, &RightFoot })
+        {
+            if (TargetSkeleton->GetReferenceSkeleton().FindBoneIndex(FName(**Bone)) == INDEX_NONE)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Bone '%s' is not in the target skeleton %s; nothing was written."),
+                    **Bone, *TargetSkeleton->GetPathName()));
+            }
+        }
     }
 
     UAnimGraphNode_LegIK* ExistingIK = nullptr;
@@ -2322,28 +2338,25 @@ TSharedPtr<FJsonObject> HandleSetupFootIk(
         return mcp_common::MakeErrorReply(TEXT("Failed to create LegIK node"));
     }
 
-// Reflective property lookup — walk the UClass hierarchy (including the
-    // generated-class graph nodes) for the LeftFootBone / RightFootBone FStructProperty
-    // wrapping an FBoneReference. The FBoneReference struct exposes a single
-    // BoneName FName property; we set that.
-    UClass* NodeClass = ExistingIK->GetClass();
-    for (const FName& BonePropName : { FName(TEXT("LeftFootBone")), FName(TEXT("RightFootBone")) })
+    // The node keeps its legs in Node.LegsDefinition, one FAnimLegIKDefinition per leg. A leg evaluates only
+    // when both its FK foot bone (the end of the solved chain) and its IK foot bone (the target it reaches for)
+    // resolve, so each foot is written as the FK foot bone, and as the IK target too while the leg has none or
+    // names another foot -- a retargeted IK bone survives a rerun with the same feet.
+    ExistingIK->Modify();
+    TArray<FAnimLegIKDefinition>& Legs = ExistingIK->Node.LegsDefinition;
+    if (Legs.Num() < 2)
     {
-        const FName TargetBone = (BonePropName == FName(TEXT("LeftFootBone")))
-            ? FName(*LeftFoot) : FName(*RightFoot);
-        for (UClass* Cls = NodeClass; Cls && Cls != UObject::StaticClass(); Cls = Cls->GetSuperClass())
+        Legs.SetNum(2);
+    }
+    const FName FeetToBind[2] = { FName(*LeftFoot), FName(*RightFoot) };
+    for (int32 LegIndex = 0; LegIndex < 2; ++LegIndex)
+    {
+        FAnimLegIKDefinition& Leg = Legs[LegIndex];
+        const bool bSameFoot = Leg.FKFootBone.BoneName == FeetToBind[LegIndex];
+        Leg.FKFootBone.BoneName = FeetToBind[LegIndex];
+        if (!bSameFoot || Leg.IKFootBone.BoneName.IsNone())
         {
-            FStructProperty* StructProp = CastField<FStructProperty>(
-                Cls->FindPropertyByName(BonePropName));
-            if (!StructProp || !StructProp->Struct) { continue; }
-            if (StructProp->Struct->GetName() != TEXT("BoneReference")) { continue; }
-            void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(ExistingIK);
-            FProperty* BoneNameProp = StructProp->Struct->FindPropertyByName(TEXT("BoneName"));
-            if (BoneNameProp && StructPtr)
-            {
-                BoneNameProp->SetValue_InContainer(StructPtr, &TargetBone);
-            }
-            break;
+            Leg.IKFootBone.BoneName = FeetToBind[LegIndex];
         }
     }
 
@@ -2351,10 +2364,24 @@ TSharedPtr<FJsonObject> HandleSetupFootIk(
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(AnimBP->GetOutermost(), AnimBP, SaveErr);
 
+    // Read the legs back from the node rather than echoing the request.
+    TArray<TSharedPtr<FJsonValue>> LegsJson;
+    for (const FAnimLegIKDefinition& Leg : ExistingIK->Node.LegsDefinition)
+    {
+        TSharedPtr<FJsonObject> LegObj = MakeShared<FJsonObject>();
+        LegObj->SetStringField(TEXT("fk_foot_bone"), Leg.FKFootBone.BoneName.ToString());
+        LegObj->SetStringField(TEXT("ik_foot_bone"), Leg.IKFootBone.BoneName.ToString());
+        LegObj->SetNumberField(TEXT("num_bones_in_limb"), Leg.NumBonesInLimb);
+        LegsJson.Add(MakeShared<FJsonValueObject>(LegObj));
+    }
+
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("anim_blueprint_path"), AnimBP->GetPathName());
-    Data->SetStringField(TEXT("left_foot_bone"), LeftFoot);
-    Data->SetStringField(TEXT("right_foot_bone"), RightFoot);
+    Data->SetStringField(TEXT("node_id"), ExistingIK->NodeGuid.ToString());
+    Data->SetStringField(TEXT("left_foot_bone"), ExistingIK->Node.LegsDefinition[0].FKFootBone.BoneName.ToString());
+    Data->SetStringField(TEXT("right_foot_bone"), ExistingIK->Node.LegsDefinition[1].FKFootBone.BoneName.ToString());
+    Data->SetArrayField(TEXT("legs"), LegsJson);
+    Data->SetStringField(TEXT("bones_checked_against"), TargetSkeleton ? TargetSkeleton->GetPathName() : FString());
     Data->SetNumberField(TEXT("ik_node_count"), FMath::Max(1, ExistingIKCount));
     Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("setup_foot_ik"), SaveErr);

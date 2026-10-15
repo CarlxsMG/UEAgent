@@ -10,10 +10,12 @@
 #include "UObject/SavePackage.h"
 #include "UObject/SoftObjectPath.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 
 // Skeletal mesh runtime (Engine module — already a dep)
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
+#include "Animation/Skeleton.h"
 #include "Animation/MorphTarget.h"
 #include "ReferenceSkeleton.h"
 
@@ -123,6 +125,28 @@ namespace
 		return nullptr;
 	}
 
+	/** Why these commands must not write the package PackageName, or empty when they may: the save guard refuses a
+	 *  package under an enforced read-only root, a name under no mounted content root has no file, and a package
+	 *  whose file is outside the project directory is engine or engine-plugin content, which the editable-copy
+	 *  commands exist to keep untouched. */
+	FString SkMesh_PackageWriteBlocker(const FString& PackageName)
+	{
+		if (mcp_common::IsUnderReadOnlyRoot(PackageName) && mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
+		{
+			return FString::Printf(TEXT("%s is under a read-only root"), *PackageName);
+		}
+		FString FileName;
+		if (!FPackageName::TryConvertLongPackageNameToFilename(PackageName, FileName, FPackageName::GetAssetPackageExtension()))
+		{
+			return FString::Printf(TEXT("%s is not under a mounted content root"), *PackageName);
+		}
+		if (!FPaths::IsUnderDirectory(FileName, FPaths::ProjectDir()))
+		{
+			return FString::Printf(TEXT("%s is engine content outside the project, which these commands do not write"), *PackageName);
+		}
+		return FString();
+	}
+
 	/** The info of LOD LodIndex into OutInfo; the error reply when the index (IndexLabel in the message) is out of
 	 *  range or the LOD has no info. */
 	TSharedPtr<FJsonObject> SkMesh_FindLODInfo(USkeletalMesh* Mesh, int32 LodIndex, const TCHAR* IndexLabel, FSkeletalMeshLODInfo*& OutInfo)
@@ -166,8 +190,8 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_skeletal_mesh
 // ---------------------------------------------------------------------------
-// MCP:create_editable_skeletal_mesh - Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name under /Game so it can be edited, creating the folder if needed; /Game/ is prepended to a package_path that lacks it. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. duplicate_asset copies other asset types.
-//   @param package_path - Destination package path (e.g. /Game/MyGame)
+// MCP:create_editable_skeletal_mesh - Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name in the project's content so it can be edited, creating the folder if needed. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. A source_mesh that is not a skeletal mesh is an error, and so is a destination that is engine content, under a read-only root or under no mounted root. duplicate_asset copies other asset types.
+//   @param package_path - Destination folder: a long package path used as given (/Game, /Game/MyGame or a project plugin mount), or a relative folder taken under /Game.
 //   @param skeletal_mesh_name - Name for the new skeletal mesh asset
 //   @param source_mesh - Content path to source mesh to duplicate (default /Engine/EngineMeshes/SkeletalCube)
 //   @returns { asset_path: string, skeletal_mesh_name: string, source_mesh: string, created: bool }
@@ -184,11 +208,29 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeletalMesh(
 	FString SourceMesh = TEXT("/Engine/EngineMeshes/SkeletalCube");
 	Params->TryGetStringField(TEXT("source_mesh"), SourceMesh);
 
-	// Normalize path
-	if (!PackagePath.StartsWith(TEXT("/Game/")))
+	// A long package path ("/Game", "/Game/X", a plugin mount) is used as given; a relative folder ("X/Y") is
+	// taken under /Game.
+	while (PackagePath.EndsWith(TEXT("/")))
+	{
+		PackagePath.LeftChopInline(1);
+	}
+	if (PackagePath.IsEmpty())
+	{
+		PackagePath = TEXT("/Game");
+	}
+	else if (!PackagePath.StartsWith(TEXT("/")))
+	{
 		PackagePath = TEXT("/Game/") + PackagePath;
+	}
 	const FString FullPath = PackagePath + TEXT("/") + MeshName;
 	if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
+	const FString DestinationBlocker = SkMesh_PackageWriteBlocker(FullPath);
+	if (!DestinationBlocker.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Cannot create the editable copy: %s. Pick a folder in the project's content, e.g. /Game/MyGame."),
+			*DestinationBlocker));
+	}
 
 	// Idempotent. UEditorAssetLibrary::DoesAssetExist is not reliable headless for
 	// recently-created assets (see headless-asset-gotchas) -- LoadObject directly
@@ -207,17 +249,25 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeletalMesh(
 		}
 	}
 
+	// The source must be a skeletal mesh: duplicating whatever sits at source_mesh would report another asset
+	// type as an editable skeletal mesh.
+	USkeletalMesh* SourceSkMesh = mcp_common::LoadAssetOrSoftPath<USkeletalMesh>(SourceMesh);
+	if (!SourceSkMesh)
+	{
+		const UObject* Other = mcp_common::LoadAssetOrSoftPath(SourceMesh, UObject::StaticClass());
+		return mcp_common::MakeErrorReply(Other
+			? FString::Printf(TEXT("source_mesh %s is a %s, not a skeletal mesh; duplicate_asset copies other asset types"),
+				*SourceMesh, *Other->GetClass()->GetName())
+			: FString::Printf(TEXT("source_mesh not found: %s"), *SourceMesh));
+	}
+
 	if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
 		UEditorAssetLibrary::MakeDirectory(PackagePath);
 
-	// Load source and duplicate
-	UObject* SourceObj = LoadObject<UObject>(nullptr, *SourceMesh);
-	UObject* DuplicatedObj = nullptr;
-	if (SourceObj)
-		DuplicatedObj = UEditorAssetLibrary::DuplicateLoadedAsset(SourceObj, FullPath);
+	UObject* DuplicatedObj = UEditorAssetLibrary::DuplicateLoadedAsset(SourceSkMesh, FullPath);
 	if (!DuplicatedObj)
-		DuplicatedObj = UEditorAssetLibrary::DuplicateAsset(SourceMesh, FullPath);
-	if (!DuplicatedObj)
+		DuplicatedObj = UEditorAssetLibrary::DuplicateAsset(SourceSkMesh->GetPathName(), FullPath);
+	if (!Cast<USkeletalMesh>(DuplicatedObj))
 	{
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Failed to duplicate %s to %s"), *SourceMesh, *FullPath));
@@ -299,13 +349,13 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshInfo(
 // ---------------------------------------------------------------------------
 // add_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_skeletal_mesh_socket - Add a socket on a named bone of a skeletal mesh asset and save the mesh; a failed save is an error. The engine also adds a copy to the mesh's skeleton (unless it has a socket of that name), leaving the skeleton modified but unsaved. Errors when the mesh does not load or the bone is not in its reference skeleton. A socket_name the mesh already has is silently not added while the call still succeeds, so check socket_count. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
+// MCP:add_skeletal_mesh_socket - Add a socket on a named bone of a skeletal mesh asset (undoable) and save the mesh. A copy also goes to the mesh's skeleton, which is then saved too; when the skeleton already has a socket of that name, the mesh has no skeleton, or the skeleton is engine content or under a read-only root, no copy is made (added_to_skeleton false) and skeleton_note says why. Errors, writing nothing, when the mesh does not load, the mesh already has a socket of that name, or the bone is missing from the mesh or its skeleton. success is false when a changed package fails to save. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param socket_name - Name for the new socket
-//   @param bone_name - Name of the bone to attach the socket to
+//   @param socket_name - Name for the new socket; leading and trailing spaces are trimmed, and a name the mesh already has is an error.
+//   @param bone_name - Name of the bone to attach the socket to; it must exist in the mesh and, when the copy goes to the skeleton, in the skeleton too.
 //   @param location - Optional [x, y, z] relative location
 //   @param rotation - Optional [pitch, yaw, roll] relative rotation
-//   @returns { socket_name: string, bone_name: string, socket_count: int, location_x: float, location_y: float, location_z: float }
+//   @returns { socket_name: string, bone_name: string, socket_count: int, location_x: float, location_y: float, location_z: float, added_to_skeleton: bool, skeleton_path: string, skeleton_note: string?, saved: bool, save_error: string?, skeleton_saved: bool?, skeleton_save_error: string? }
 
 TSharedPtr<FJsonObject> HandleAddSkeletalMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
@@ -317,19 +367,72 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshSocket(
 	FString BoneNameStr;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("bone_name"), BoneNameStr)) { return Missing; }
 
+	// USkeletalMesh::AddSocket stores the trimmed name, so every check below uses it too.
+	SocketNameStr.TrimStartAndEndInline();
+	if (SocketNameStr.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(TEXT("socket_name is blank"));
+	}
+	const FName SocketName(*SocketNameStr);
+
 	USkeletalMesh* Mesh = nullptr;
 	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
+
+	// AddSocket only logs and returns on a duplicate name, so refuse it here instead of reporting a socket that
+	// was never added.
+	for (const USkeletalMeshSocket* Existing : Mesh->GetMeshOnlySocketList())
+	{
+		if (Existing && Existing->SocketName == SocketName)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("Skeletal mesh %s already has a socket named '%s'; nothing was written. Edit it with ")
+				TEXT("set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket."),
+				*Mesh->GetPathName(), *SocketNameStr));
+		}
+	}
 
 	const FName BoneName(*BoneNameStr);
 	if (!BoneExists(Mesh, BoneName))
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Bone '%s' not found in skeleton"), *BoneNameStr));
+			FString::Printf(TEXT("Bone '%s' not found in the reference skeleton of %s"), *BoneNameStr, *Mesh->GetPathName()));
 	}
 
-	// Create socket
+	// The copy for the skeleton. AddSocket(.., true) dereferences GetSkeleton() unchecked and validates the bone
+	// against the SKELETON's reference skeleton, so it is only requested once both hold, and only for a skeleton
+	// this command may save.
+	USkeleton* Skeleton = Mesh->GetSkeleton();
+	FString SkeletonNote;
+	bool bAddToSkeleton = false;
+	if (!Skeleton)
+	{
+		SkeletonNote = TEXT("the mesh has no skeleton, so the socket is mesh-only");
+	}
+	else if (Skeleton->FindSocket(SocketName))
+	{
+		SkeletonNote = TEXT("the skeleton already has a socket of that name, so the copy was not added");
+	}
+	else
+	{
+		const FString Blocker = SkMesh_PackageWriteBlocker(Skeleton->GetOutermost()->GetName());
+		if (!Blocker.IsEmpty())
+		{
+			SkeletonNote = TEXT("skeleton ") + Blocker + TEXT(", so the socket is mesh-only");
+		}
+		else if (Skeleton->GetReferenceSkeleton().FindBoneIndex(BoneName) == INDEX_NONE)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("Bone '%s' is in mesh %s but not in its skeleton %s, which gets a copy of the socket; nothing was written."),
+				*BoneNameStr, *Mesh->GetPathName(), *Skeleton->GetPathName()));
+		}
+		else
+		{
+			bAddToSkeleton = true;
+		}
+	}
+
 	USkeletalMeshSocket* Socket = NewObject<USkeletalMeshSocket>(Mesh);
-	Socket->SocketName = FName(*SocketNameStr);
+	Socket->SocketName = SocketName;
 	Socket->BoneName = BoneName;
 
 	// Optional location
@@ -343,13 +446,23 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshSocket(
 		Socket->RelativeRotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
 	}
 
-	Mesh->AddSocket(Socket, true); // true = also add to skeleton
-	Mesh->Modify();
+	// AddSocket calls Modify() on the mesh (and the skeleton) inside its own transaction before writing.
+	Mesh->AddSocket(Socket, bAddToSkeleton);
 
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
+	// Read back: AddSocket returns nothing and only logs when it refuses.
+	if (!Mesh->GetMeshOnlySocketList().Contains(Socket))
 	{
-		return SaveFailed;
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("The engine did not add socket '%s' to %s (see the editor log); nothing was saved."),
+			*SocketNameStr, *Mesh->GetPathName()));
 	}
+	const bool bCopiedToSkeleton = bAddToSkeleton && Skeleton->FindSocket(SocketName) != nullptr;
+
+	FString MeshSaveError;
+	const bool bMeshSaved = mcp_common::SaveAssetPackage(Mesh->GetOutermost(), Mesh, MeshSaveError);
+	FString SkeletonSaveError;
+	const bool bSkeletonSaved = !bCopiedToSkeleton
+		|| mcp_common::SaveAssetPackage(Skeleton->GetOutermost(), Skeleton, SkeletonSaveError);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("socket_name"), SocketNameStr);
@@ -358,8 +471,26 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshSocket(
 	Data->SetNumberField(TEXT("location_x"), Socket->RelativeLocation.X);
 	Data->SetNumberField(TEXT("location_y"), Socket->RelativeLocation.Y);
 	Data->SetNumberField(TEXT("location_z"), Socket->RelativeLocation.Z);
+	Data->SetBoolField(TEXT("added_to_skeleton"), bCopiedToSkeleton);
+	Data->SetStringField(TEXT("skeleton_path"), Skeleton ? Skeleton->GetPathName() : FString());
+	if (!SkeletonNote.IsEmpty())
+	{
+		Data->SetStringField(TEXT("skeleton_note"), SkeletonNote);
+	}
+	mcp_common::AddSaveOutcome(Data, bMeshSaved, MeshSaveError);
+	if (bCopiedToSkeleton)
+	{
+		Data->SetBoolField(TEXT("skeleton_saved"), bSkeletonSaved);
+		if (!bSkeletonSaved)
+		{
+			Data->SetStringField(TEXT("skeleton_save_error"), SkeletonSaveError);
+		}
+	}
 
-	return mcp_common::MakeOkReply(Data);
+	const bool bAllSaved = bMeshSaved && bSkeletonSaved;
+	return mcp_common::MakeOutcomeReply(Data, bAllSaved, bAllSaved ? FString() : FString(
+		TEXT("add_skeletal_mesh_socket: the socket was added in memory but a changed package did NOT reach disk. ")
+		TEXT("Read saved/save_error (the mesh) and skeleton_saved/skeleton_save_error (its skeleton).")));
 }
 
 // ---------------------------------------------------------------------------

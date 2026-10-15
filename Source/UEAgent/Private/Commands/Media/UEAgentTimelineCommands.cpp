@@ -108,9 +108,11 @@ namespace UEAgentTimelineImpl
     // Creation follows the editor's level-sequence factory (package, NewObject, then
     // Initialize(), which is what builds the inner UMovieScene; creating the asset through
     // IAssetTools without a factory skips that step). An asset that already exists is
-    // loaded and returned instead, which makes the call idempotent.
-    ULevelSequence* CreateOrLoadLevelSequence(const FString& SequenceName, const FString& PackagePath, FString& OutError)
+    // loaded and returned instead, which makes the call idempotent; bOutCreated tells the two apart.
+    ULevelSequence* CreateOrLoadLevelSequence(const FString& SequenceName, const FString& PackagePath, FString& OutError,
+        bool& bOutCreated)
     {
+        bOutCreated = false;
         FString Folder = PackagePath;
         Folder.RemoveFromEnd(TEXT("/"));
         const FString AssetPath = Folder + TEXT("/") + SequenceName;
@@ -153,6 +155,7 @@ namespace UEAgentTimelineImpl
 
         // Without this the registry would not list the new asset (nor save it as one).
         FAssetRegistryModule::AssetCreated(Created);
+        bOutCreated = true;
         return Created;
     }
 
@@ -281,12 +284,12 @@ namespace UEAgentTimelineImpl
 
 // --- Level Sequence assets ----------------------------------------------------------
 
-// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate. If that asset already exists it is loaded and those settings are overwritten without migrating its keys, which can shift them in time; sequence_created is true either way. Not undoable; another asset class at the path is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
+// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
 //   @param sequence_name - Name of the new sequence to create
 //   @param package_path - Target content path, defaults to /Game/Sequences
 //   @param duration - Playback duration in seconds, above 0 and at most 3600, default 10
-//   @param frame_rate - Frame rate in fps, above 0 and at most 120, truncated to whole fps, default 30
-//   @returns { sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool, saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }
+//   @param frame_rate - Frame rate in fps, at least 1 and at most 120, truncated to whole fps, default 30
+//   @returns { sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool (false when the asset already existed), saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }
 TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;
@@ -307,13 +310,28 @@ TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>&
     {
         return mcp_common::MakeErrorReply(TEXT("Duration must be between 0.0 and 3600.0 seconds"));
     }
-    if (FrameRate <= 0.0 || FrameRate > 120.0)
+    // The rate is truncated to whole fps, so anything below 1 would become a 0/1 rate, which is invalid.
+    if (FrameRate < 1.0 || FrameRate > 120.0)
     {
-        return mcp_common::MakeErrorReply(TEXT("Frame rate must be between 0.0 and 120.0 fps"));
+        return mcp_common::MakeErrorReply(TEXT("Frame rate must be between 1 and 120 fps (it is truncated to whole fps)"));
+    }
+
+    // The whole-number fps becomes both the tick resolution and the display rate, so one
+    // tick is one frame and the last frame is duration * that whole rate, to the nearest frame.
+    // Both are settled before the asset is touched, so a refusal writes nothing.
+    const int32 WholeFps = static_cast<int32>(FrameRate);
+    const FFrameRate Rate(WholeFps, 1);
+    const FFrameNumber FirstFrame(0);
+    const FFrameNumber LastFrame(FMath::RoundToInt32(Duration * WholeFps));
+    if (LastFrame.Value <= 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Duration %g s is shorter than one frame at %d fps"), Duration, WholeFps));
     }
 
     FString CreateError;
-    ULevelSequence* Sequence = Impl::CreateOrLoadLevelSequence(SequenceName, PackagePath, CreateError);
+    bool bCreated = false;
+    ULevelSequence* Sequence = Impl::CreateOrLoadLevelSequence(SequenceName, PackagePath, CreateError, bCreated);
     if (Sequence == nullptr)
     {
         return mcp_common::MakeErrorReply(CreateError.IsEmpty() ? FString(TEXT("Failed to create level sequence")) : CreateError);
@@ -324,16 +342,18 @@ TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(TEXT("Failed to get movie scene from level sequence"));
     }
 
-    // The whole-number fps becomes both the tick resolution and the display rate, so one
-    // tick is one frame and the last frame is simply duration * fps. The resolution goes
-    // in first so that the range below is expressed in it.
-    const int32 WholeFps = static_cast<int32>(FrameRate);
-    const FFrameRate Rate(WholeFps, 1);
-    Scene->SetTickResolutionDirectly(Rate);
+    // The resolution goes in first so that the range below is expressed in it. A new sequence has no
+    // keys, so it takes the rate directly; an existing one has every key, section and range rescaled
+    // to the new resolution (as set_sequence_frame_rate does), so nothing moves in time.
+    if (bCreated)
+    {
+        Scene->SetTickResolutionDirectly(Rate);
+    }
+    else if (Scene->GetTickResolution() != Rate)
+    {
+        UE::MovieScene::TimeHelpers::MigrateFrameTimes(Scene->GetTickResolution(), Rate, Scene);
+    }
     Scene->SetDisplayRate(Rate);
-
-    const FFrameNumber FirstFrame(0);
-    const FFrameNumber LastFrame(static_cast<int32>(Duration * FrameRate));
     Scene->SetPlaybackRange(TRange<FFrameNumber>(FirstFrame, LastFrame));
 
     // Read the scene back rather than trusting the setters.
@@ -350,7 +370,7 @@ TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>&
     Report->SetStringField(TEXT("package_path"), PackagePath);
     Report->SetNumberField(TEXT("duration"), Duration);
     Report->SetNumberField(TEXT("frame_rate"), FrameRate);
-    Report->SetBoolField(TEXT("sequence_created"), true);
+    Report->SetBoolField(TEXT("sequence_created"), bCreated);
     Report->SetBoolField(TEXT("playback_range_set"), bRangeMatches);
     Report->SetBoolField(TEXT("tick_rate_set"), bRateMatches);
     Report->SetNumberField(TEXT("actual_start_frame"), StoredRange.GetLowerBoundValue().Value);
@@ -866,7 +886,7 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count adds root tracks and bindings, not the tracks inside bindings. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
+// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
 //   @param sequence_name - Name of the target level sequence
 //   @returns { sequence_name: string, master_tracks: [object], bindings: [object], master_track_count: int, binding_count: int, total_track_count: int }
 TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& Params)
@@ -897,6 +917,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
 
     // Object bindings (possessables and spawnables), each with its own tracks.
     TArray<TSharedPtr<FJsonValue>> Bindings;
+    int32 BoundTrackCount = 0;
     for (const FMovieSceneBinding& Binding : Scene->GetBindings())
     {
         const FGuid BindingId = Binding.GetObjectGuid();
@@ -910,6 +931,8 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
             }
         }
 
+        BoundTrackCount += BoundTracks.Num();
+
         TSharedPtr<FJsonObject> BindingEntry = MakeShared<FJsonObject>();
         BindingEntry->SetStringField(TEXT("guid"), BindingId.ToString());
         BindingEntry->SetStringField(TEXT("display_name"), Scene->GetObjectDisplayName(BindingId).ToString());
@@ -922,8 +945,8 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
     Report->SetArrayField(TEXT("bindings"), Bindings);
     Report->SetNumberField(TEXT("master_track_count"), RootTracks.Num());
     Report->SetNumberField(TEXT("binding_count"), Bindings.Num());
-    // Root tracks (null entries included) plus bindings -- tracks inside bindings are not counted.
-    Report->SetNumberField(TEXT("total_track_count"), Scene->GetTracks().Num() + Scene->GetBindings().Num());
+    // Every track listed above: the root tracks plus the tracks of every binding.
+    Report->SetNumberField(TEXT("total_track_count"), RootTracks.Num() + BoundTrackCount);
     return mcp_common::MakeOkReply(Report);
 }
 

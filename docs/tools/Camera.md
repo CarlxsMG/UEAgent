@@ -60,12 +60,12 @@ Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Ide
 
 *Destructive.*
 
-Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
+Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. One undo step; the level is marked dirty, not saved. Negative lengths, sizes and speeds clamp to 0; an unknown probe_channel is an error and nothing is created or written. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name or label of the target actor in the editor world. |
-| `component_name` | string | no | Optional name for a new component (defaults to "SpringArm"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name. |
+| `component_name` | string | no | Optional name for a new component (defaults to "SpringArm"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a spring arm, which is configured whatever its name. |
 | `target_arm_length` | number | no | Optional float. Natural length of the spring arm (uu). Default 300. |
 | `socket_offset` | array | no | Optional [X, Y, Z] relative offset applied at the spring-arm tip. |
 | `target_offset` | array | no | Optional [X, Y, Z] world-space offset applied at the start of the spring. |
@@ -361,14 +361,14 @@ Set the camera position along a CameraRig_Rail (0.0 = start, 1.0 = end).
 
 *Destructive, idempotent.*
 
-Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset (required) |
 | `node_type` | string | yes | A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required) |
 
-**Returns:** `{ camera_rig_path, node_type, node_class, root_set }`
+**Returns:** `{ camera_rig_path, node_type, node_class, root_set, saved, save_error }`
 
 ## `set_camera_transform`
 

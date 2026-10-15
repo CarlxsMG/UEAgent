@@ -8,7 +8,7 @@
 
 *Destructive.*
 
-Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces.
+Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces. A missing option_index is created, appending empty options up to it; a negative one is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -34,7 +34,7 @@ Appends a new empty option to a UEnvQuery and returns its index.
 
 *Additive, idempotent.*
 
-Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it. Marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
+Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it; a negative one is an error. Undoable as one editor transaction; marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

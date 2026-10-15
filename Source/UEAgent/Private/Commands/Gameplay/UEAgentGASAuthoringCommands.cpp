@@ -201,8 +201,31 @@ namespace
         return nullptr;
     }
 
-    // LoadGameplayEffectCDO into Out, refused when the CDO's Modifiers array has no entry at Out.Index; the error
-    // reply on failure.
+    // The refusal of a CDO edit that GASAuthoring_SaveBlueprint could not persist, or null when the edit may
+    // go ahead. SaveAssetPackage refuses every save while a Play-in-Editor session runs, and a save under an
+    // enforced read-only root; editing the CDO first would leave the change in memory, and its package dirty,
+    // behind an error reply. Call it after loading the Blueprint and before the first write to its CDO.
+    TSharedPtr<FJsonObject> GASAuthoring_RefuseUnsavableEdit(const UBlueprint* Blueprint)
+    {
+        if (mcp_common::IsPieActive())
+        {
+            return mcp_common::MakeErrorReply(TEXT("REFUSED: a Play-in-Editor session is running and assets cannot ")
+                TEXT("be saved during it, so nothing was changed. Stop PIE (stop_play_in_editor) and retry."));
+        }
+        const FString PackageName = Blueprint->GetOutermost()->GetName();
+        if (mcp_common::IsUnderReadOnlyRoot(PackageName) && mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("REFUSED: '%s' lives under a read-only root, where saves are refused, so nothing was changed. ")
+                TEXT("Fork the asset into a writable root, or set the console variable ")
+                TEXT("'mcp.ReadOnlyRootEnforcement 0' if this really is intended."),
+                *PackageName));
+        }
+        return nullptr;
+    }
+
+    // LoadGameplayEffectCDO into Out for a modifier edit, refused when the CDO's Modifiers array has no entry at
+    // Out.Index or when the edit could not be saved (GASAuthoring_RefuseUnsavableEdit); the error reply on failure.
     TSharedPtr<FJsonObject> GASAuthoring_LoadGEModifier(FGASAuthoringModifier& Out)
     {
         FString Error;
@@ -217,7 +240,7 @@ namespace
                 TEXT("modifier_index %d out of range (Modifiers has %d entries; call add_gameplay_effect_modifier first)"),
                 Out.Index, Out.GECDO->Modifiers.Num()));
         }
-        return nullptr;
+        return GASAuthoring_RefuseUnsavableEdit(Out.Blueprint);
     }
 
     // A modifier setter's reply, starting with the modifier it addressed and its magnitude type.
@@ -661,6 +684,10 @@ namespace
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Reflection: property %s not found on UGameplayAbility"), PropName));
         }
+        if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(AbilityBP))
+        {
+            return Refused;
+        }
 
         AbilityCDO->Modify();
         ClassProp->SetObjectPropertyValue(ClassProp->ContainerPtrToValuePtr<void>(AbilityCDO), GEClass);
@@ -915,10 +942,10 @@ TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& P
 
 // GameplayEffect CDO authoring
 
-// MCP:set_gameplay_effect_duration - Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy or a non-GE Blueprint fails before any edit; during PIE the save is refused after the in-memory edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
+// MCP:set_gameplay_effect_duration - Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session or a read-only root fails before any edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param duration_policy - Instant, Infinite, or HasDuration
-//   @param duration_seconds - Duration in seconds, written only when duration_policy is HasDuration; ignored for Instant and Infinite, but the schema still requires a number, so pass 0 there
+//   @param duration_seconds - Duration in seconds; required when duration_policy is HasDuration, ignored for Instant and Infinite
 //   @returns { ge_blueprint_path: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonObject>& Params)
 {
@@ -947,6 +974,17 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
             FString::Printf(TEXT("Invalid duration_policy '%s' (expected Instant|Infinite|HasDuration)"), *DurationPolicyStr));
     }
 
+    // duration_seconds is needed only for HasDuration, so it is optional in the schema and checked here, before
+    // anything is written.
+    const bool bHasDuration = Policy == EGameplayEffectDurationType::HasDuration;
+    double DurationSeconds = 0.0;
+    const bool bDurationGiven = Params->TryGetNumberField(TEXT("duration_seconds"), DurationSeconds);
+    if (bHasDuration && !bDurationGiven)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("duration_seconds is required when duration_policy is HasDuration; nothing was changed"));
+    }
+
     UBlueprint* Blueprint = nullptr;
     FString Error;
     UGameplayEffect* GECDO = LoadGameplayEffectCDO(BlueprintPath, Blueprint, Error);
@@ -954,21 +992,16 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
 
     GECDO->Modify();
 
     GECDO->DurationPolicy = Policy;
-
-    double DurationSeconds = 0.0;
-    bool bDurationProvided = false;
-    if (Policy == EGameplayEffectDurationType::HasDuration)
+    if (bHasDuration)
     {
-        if (!Params->TryGetNumberField(TEXT("duration_seconds"), DurationSeconds))
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("duration_seconds is required when duration_policy is HasDuration"));
-        }
-        bDurationProvided = true;
         // FGameplayEffectModifierMagnitude has a public ctor from FScalableFloat, which
         // has a public ctor from float (ScalableFloat.h / GameplayEffect.h).
         GECDO->DurationMagnitude = FGameplayEffectModifierMagnitude(FScalableFloat((float)DurationSeconds));
@@ -1001,7 +1034,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
     Result->SetStringField(TEXT("ge_blueprint_path"), BlueprintPath);
     Result->SetStringField(TEXT("duration_policy"), ReadPolicyStr);
     Result->SetBoolField(TEXT("policy_matches"), ReadPolicy == Policy);
-    if (bDurationProvided && ReadCDO && ReadPolicy == EGameplayEffectDurationType::HasDuration)
+    if (bHasDuration && ReadCDO && ReadPolicy == EGameplayEffectDurationType::HasDuration)
     {
         // Read the static magnitude back out for confirmation (GetStaticMagnitudeIfPossible).
         float ReadDuration = 0.f;
@@ -1020,7 +1053,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
 //   UGameplayEffect::StackDurationRefreshPolicy / StackPeriodResetPolicy                     GameplayEffect.h
 //   FScalableFloat::GetValue() (UE_API)  ScalableFloat.h ; EGameplayEffectStackingType (None/AggregateBySource/AggregateByTarget)
 
-// MCP:set_gameplay_effect_period - Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint is an error; during PIE the save is refused after the in-memory edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
+// MCP:set_gameplay_effect_period - Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session or a read-only root fails before any edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint.
 //   @param period_seconds - Period in seconds between executions (0 = non-periodic).
 //   @param execute_on_application - Optional: if true the effect also executes immediately on application (default false).
@@ -1038,6 +1071,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectPeriod(const TSharedPtr<FJsonObje
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     GECDO->Modify();
@@ -1089,12 +1126,34 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
             FString::Printf(TEXT("Invalid stacking_type '%s' (expected None|AggregateBySource|AggregateByTarget)"), *StackingTypeStr));
     }
 
+    // The optional policies are parsed before anything is written, so a bad value leaves the CDO untouched.
+    TOptional<EGameplayEffectStackingDurationPolicy> RefreshPolicy;
+    FString RefreshStr;
+    if (Params->TryGetStringField(TEXT("duration_refresh_policy"), RefreshStr) && !RefreshStr.IsEmpty())
+    {
+        if (RefreshStr.Equals(TEXT("RefreshOnSuccessfulApplication"), ESearchCase::IgnoreCase)) { RefreshPolicy = EGameplayEffectStackingDurationPolicy::RefreshOnSuccessfulApplication; }
+        else if (RefreshStr.Equals(TEXT("NeverRefresh"), ESearchCase::IgnoreCase))              { RefreshPolicy = EGameplayEffectStackingDurationPolicy::NeverRefresh; }
+        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid duration_refresh_policy '%s' (expected RefreshOnSuccessfulApplication|NeverRefresh)"), *RefreshStr)); }
+    }
+    TOptional<EGameplayEffectStackingPeriodPolicy> ResetPolicy;
+    FString ResetStr;
+    if (Params->TryGetStringField(TEXT("period_reset_policy"), ResetStr) && !ResetStr.IsEmpty())
+    {
+        if (ResetStr.Equals(TEXT("ResetOnSuccessfulApplication"), ESearchCase::IgnoreCase)) { ResetPolicy = EGameplayEffectStackingPeriodPolicy::ResetOnSuccessfulApplication; }
+        else if (ResetStr.Equals(TEXT("NeverReset"), ESearchCase::IgnoreCase))              { ResetPolicy = EGameplayEffectStackingPeriodPolicy::NeverReset; }
+        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid period_reset_policy '%s' (expected ResetOnSuccessfulApplication|NeverReset)"), *ResetStr)); }
+    }
+
     UBlueprint* Blueprint = nullptr;
     FString Error;
     UGameplayEffect* GECDO = LoadGameplayEffectCDO(BlueprintPath, Blueprint, Error);
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     GECDO->Modify();
@@ -1108,19 +1167,13 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
 
     { double L = 0.0; if (Params->TryGetNumberField(TEXT("stack_limit"), L)) { GECDO->StackLimitCount = (int32)L; } }
 
-    FString RefreshStr;
-    if (Params->TryGetStringField(TEXT("duration_refresh_policy"), RefreshStr) && !RefreshStr.IsEmpty())
+    if (RefreshPolicy.IsSet())
     {
-        if (RefreshStr.Equals(TEXT("RefreshOnSuccessfulApplication"), ESearchCase::IgnoreCase)) { GECDO->StackDurationRefreshPolicy = EGameplayEffectStackingDurationPolicy::RefreshOnSuccessfulApplication; }
-        else if (RefreshStr.Equals(TEXT("NeverRefresh"), ESearchCase::IgnoreCase))              { GECDO->StackDurationRefreshPolicy = EGameplayEffectStackingDurationPolicy::NeverRefresh; }
-        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid duration_refresh_policy '%s' (expected RefreshOnSuccessfulApplication|NeverRefresh)"), *RefreshStr)); }
+        GECDO->StackDurationRefreshPolicy = RefreshPolicy.GetValue();
     }
-    FString ResetStr;
-    if (Params->TryGetStringField(TEXT("period_reset_policy"), ResetStr) && !ResetStr.IsEmpty())
+    if (ResetPolicy.IsSet())
     {
-        if (ResetStr.Equals(TEXT("ResetOnSuccessfulApplication"), ESearchCase::IgnoreCase)) { GECDO->StackPeriodResetPolicy = EGameplayEffectStackingPeriodPolicy::ResetOnSuccessfulApplication; }
-        else if (ResetStr.Equals(TEXT("NeverReset"), ESearchCase::IgnoreCase))              { GECDO->StackPeriodResetPolicy = EGameplayEffectStackingPeriodPolicy::NeverReset; }
-        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid period_reset_policy '%s' (expected ResetOnSuccessfulApplication|NeverReset)"), *ResetStr)); }
+        GECDO->StackPeriodResetPolicy = ResetPolicy.GetValue();
     }
 
     if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
@@ -1145,7 +1198,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry (the save is refused during PIE). attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
+// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session or a read-only root fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param attribute_name - Attribute to modify, Health or MySet.Health: the bare name or AttributeSetClass.Attribute, case-insensitive, first match among the loaded AttributeSet classes
 //   @param modifier_op - Add, Multiply, Divide, or Override (case-insensitive)
@@ -1204,6 +1257,10 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectModifier(const TSharedPtr<FJsonOb
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     GECDO->Modify();
@@ -1992,6 +2049,10 @@ TSharedPtr<FJsonObject> HandleConfigureAbilityTags(const TSharedPtr<FJsonObject>
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
 
     // Resolve each string into a registered FGameplayTag (must exist in the tag dictionary).
     FGameplayTagContainer NewContainer;
@@ -2069,6 +2130,10 @@ namespace
                 const FGameplayTag Tag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*CueTagStr), /*ErrorIfNotFound=*/false);
                 if (Tag.IsValid())
                 {
+                    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+                    {
+                        return Refused;
+                    }
                     CueCDO->Modify();
                     GASAuthoring_SetCueNotifyTag(CueCDO, Tag);
                     bCueTagSet = true;
@@ -2200,6 +2265,10 @@ namespace
         {
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Blueprint is not %s (or subclass): %s"), CueKind, *Out.BlueprintPath));
+        }
+        if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Out.Blueprint))
+        {
+            return Refused;
         }
 
         Out.CueCDO->Modify();
@@ -2337,7 +2406,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyLooping(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_actor_properties - Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. During PIE the save is refused after the in-memory edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
+// MCP:set_gameplay_cue_notify_actor_properties - Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session or a read-only root fails before any edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify_Actor/_Looping Blueprint
 //   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
 //   @param auto_destroy_delay - Optional float: seconds to stay alive before auto-destroy (needs auto_destroy_on_remove)
@@ -2363,6 +2432,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Blueprint is not an AGameplayCueNotify_Actor (or subclass): %s"), *BlueprintPath));
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     CueCDO->Modify();
@@ -2537,6 +2610,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyLoopingProperties(const TShare
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Blueprint is not an AGameplayCueNotify_Looping (or subclass): %s"), *BlueprintPath));
     }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
 
     CueCDO->Modify();
 
@@ -2593,8 +2670,6 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectComponent(const TSharedPtr<FJsonO
         return mcp_common::MakeErrorReply(Error);
     }
 
-    GECDO->Modify();
-
     // Idempotent: a GameplayEffect must not hold two components of the same type
     // (the engine errors "two or more types of X in GE" and drops one). The concrete
     // class name is always "<Type>GameplayEffectComponent", so if one already exists
@@ -2618,6 +2693,12 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectComponent(const TSharedPtr<FJsonO
             }
         }
     }
+
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
+    GECDO->Modify();
 
     // Add the component to the GE CDO's GEComponents array via the public AddComponent<T>()
     // template (the protected GEComponents array's only public mutator).
@@ -2854,6 +2935,11 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectComponent(const TSharedPtr<FJs
         }
     }
 
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
+
     // Mutate the CDO array, then persist without recompiling (GEComponents is a native Instanced
     // UPROPERTY on the UGameplayEffect parent CDO; it serializes with the package — same rationale
     // as the add path). RemoveValues shifts trailing entries down, re-indexing them contiguously.
@@ -2932,6 +3018,12 @@ namespace
         if (!GECDO)
         {
             OutErrorResponse = mcp_common::MakeErrorReply(Error);
+            return nullptr;
+        }
+        // Every caller writes the CDO next, so a save that would be refused stops it here.
+        OutErrorResponse = GASAuthoring_RefuseUnsavableEdit(Out.Blueprint);
+        if (OutErrorResponse.IsValid())
+        {
             return nullptr;
         }
 
@@ -3097,6 +3189,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
+    }
 
     bool bAlreadyExisted = false;
     UChanceToApplyGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UChanceToApplyGameplayEffectComponent>(GECDO, bAlreadyExisted);
@@ -3126,26 +3222,48 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
 
 // MCP:set_gameplay_effect_component_target_tag_requirements - Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
-//   @param application_require_tags - Optional tags the target must have for the GE to apply
-//   @param application_ignore_tags - Optional tags that, if present, block application
-//   @param ongoing_require_tags - Optional tags the target must keep for the GE to stay 'on'
-//   @param ongoing_ignore_tags - Optional tags that, if present, turn the GE 'off' while applied
-//   @param removal_require_tags - Optional tags that, if met, remove the GE
-//   @param removal_ignore_tags - Optional ignore tags for the removal requirement
+//   @param application_require_tags [array] - Optional array of gameplay tag strings: the target must have for the GE to apply
+//   @param application_ignore_tags [array] - Optional array of gameplay tag strings: that, if present, block application
+//   @param ongoing_require_tags [array] - Optional array of gameplay tag strings: the target must keep for the GE to stay 'on'
+//   @param ongoing_ignore_tags [array] - Optional array of gameplay tag strings: that, if present, turn the GE 'off' while applied
+//   @param removal_require_tags [array] - Optional array of gameplay tag strings: that, if met, remove the GE
+//   @param removal_ignore_tags [array] - Optional array of gameplay tag strings: ignore tags for the removal requirement
 //   @returns { ge_blueprint_path: string, component_class: string, already_existed: bool, application_require_tags: [string], application_ignore_tags: [string], ongoing_require_tags: [string], ongoing_ignore_tags: [string], removal_require_tags: [string], removal_ignore_tags: [string], unknown_tags: [string], set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ge_blueprint_path"), BlueprintPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    // Collect which of the 6 tag lists are provided. At least one is required (honest: no-op otherwise).
+    // At least one of the 6 tag lists is required (honest: no-op otherwise). Checked before anything is
+    // written: FindOrAddComponent below adds the component when the GE has none.
     struct FReqField { const TCHAR* Param; FGameplayTagContainer* Target; const TArray<TSharedPtr<FJsonValue>>* Array; };
+    static const TCHAR* const ListParams[] = {
+        TEXT("application_require_tags"), TEXT("application_ignore_tags"),
+        TEXT("ongoing_require_tags"),     TEXT("ongoing_ignore_tags"),
+        TEXT("removal_require_tags"),     TEXT("removal_ignore_tags"),
+    };
+    bool bAnyProvided = false;
+    for (const TCHAR* ListParam : ListParams)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+        bAnyProvided = bAnyProvided || (Params->TryGetArrayField(ListParam, Arr) && Arr);
+    }
+    if (!bAnyProvided)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Provide at least one tag list (application_/ongoing_/removal_ require_tags / ignore_tags)"));
+    }
+
     UBlueprint* Blueprint = nullptr;
     FString Error;
     UGameplayEffect* GECDO = LoadGameplayEffectCDO(BlueprintPath, Blueprint, Error);
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     bool bAlreadyExisted = false;
@@ -3164,24 +3282,17 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(co
     };
 
     TArray<TSharedPtr<FJsonValue>> AllUnknown;
-    bool bAnyProvided = false;
     for (FReqField& F : Fields)
     {
         const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
         if (Params->TryGetArrayField(F.Param, Arr) && Arr)
         {
-            bAnyProvided = true;
             FGameplayTagContainer Container;
             TArray<TSharedPtr<FJsonValue>> Resolved, Unknown;
             GASAuthoring_ParseTags(*Arr, Container, Resolved, Unknown);
             *F.Target = Container;
             AllUnknown.Append(Unknown);
         }
-    }
-    if (!bAnyProvided)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Provide at least one tag list (application_/ongoing_/removal_ require_tags / ignore_tags)"));
     }
 
     if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
@@ -3236,6 +3347,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentGrantedAbilities(const T
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
+    }
+    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    {
+        return Refused;
     }
 
     bool bAlreadyExisted = false;

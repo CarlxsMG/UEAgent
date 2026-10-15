@@ -114,15 +114,25 @@ namespace
         return Data;
     }
 
-    // Marks Asset's package dirty and saves it. The commands that call this do not report the save.
-    void GC_MarkDirtyAndSave(UObject* Asset)
+    // Marks Asset's package dirty and saves it: false, with OutSaveError saying why, when the
+    // save did not reach disk.
+    bool GC_MarkDirtyAndSave(UObject* Asset, FString& OutSaveError)
     {
         Asset->MarkPackageDirty();
-        FString SaveError;
-        if (UPackage* Package = Asset->GetPackage())
+        UPackage* Package = Asset->GetPackage();
+        if (!Package)
         {
-            mcp_common::SaveAssetPackage(Package, Asset, SaveError);
+            OutSaveError = TEXT("the asset has no package");
+            return false;
         }
+        return mcp_common::SaveAssetPackage(Package, Asset, OutSaveError);
+    }
+
+    // The same, for the commands that call this without reporting the save.
+    void GC_MarkDirtyAndSave(UObject* Asset)
+    {
+        FString SaveError;
+        GC_MarkDirtyAndSave(Asset, SaveError);
     }
 }
 
@@ -347,10 +357,10 @@ TSharedPtr<FJsonObject> HandleListCameraNodeTypes(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
+// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig; a failed save fails the call, with saved false and save_error, and leaves the change in memory. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
 //   @param node_type - A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required)
-//   @returns { camera_rig_path, node_type, node_class, root_set }
+//   @returns { camera_rig_path, node_type, node_class, root_set, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath, NodeType;
@@ -372,14 +382,16 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>
     UCameraNode* Node = NewObject<UCameraNode>(Rig, NodeClass, NAME_None, RF_Transactional);
     Rig->RootNode = Node;
     const bool bSet = (Rig->RootNode == Node);
-    GC_MarkDirtyAndSave(Rig);
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
     Data->SetStringField(TEXT("node_type"), NodeType);
     Data->SetStringField(TEXT("node_class"), NodeClass->GetName());
     Data->SetBoolField(TEXT("root_set"), bSet);
-    return mcp_common::MakeOkReply(Data);
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+    return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_rig_root_node")));
 }
 
 // MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back.
@@ -1938,9 +1950,9 @@ static USceneComponent* FindSceneComponentByName(AActor* Actor, const FString& C
     return nullptr;
 }
 
-// MCP:add_spring_arm - Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
+// MCP:add_spring_arm - Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. One undo step; the level is marked dirty, not saved. Negative lengths, sizes and speeds clamp to 0; an unknown probe_channel is an error and nothing is created or written. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
 //   @param actor_name - Name or label of the target actor in the editor world.
-//   @param component_name - Optional name for a new component (defaults to "SpringArm"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name.
+//   @param component_name - Optional name for a new component (defaults to "SpringArm"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a spring arm, which is configured whatever its name.
 //   @param target_arm_length - Optional float. Natural length of the spring arm (uu). Default 300.
 //   @param socket_offset - Optional [X, Y, Z] relative offset applied at the spring-arm tip.
 //   @param target_offset - Optional [X, Y, Z] world-space offset applied at the start of the spring.
@@ -1969,71 +1981,9 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
         ComponentName = RequestedComponentName;
     }
 
-    AActor* Actor = mcp_common::FindActorByName(mcp_common::GetEditorWorld(), ActorName);
-    if (!Actor)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Actor '%s' not found in editor world"), *ActorName));
-    }
-
-    // Find or create component (idempotent by name)
-    USpringArmComponent* Spring = Actor->FindComponentByClass<USpringArmComponent>();
-    bool bAlreadyExisted = (Spring != nullptr);
-    if (!Spring)
-    {
-        Spring = NewObject<USpringArmComponent>(Actor, USpringArmComponent::StaticClass(), FName(*ComponentName));
-        if (!Spring)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Failed to instantiate USpringArmComponent"));
-        }
-        Spring->RegisterComponent();
-        // Attach to root if the actor has one; otherwise the component sits at origin.
-        if (USceneComponent* Root = Actor->GetRootComponent())
-        {
-            Spring->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
-        }
-        Actor->AddInstanceComponent(Spring);
-    }
-    // No rename on a name mismatch: Obj.cpp crashes on a rename into a
-    // name slot owned by a pending-GC USpringArmComponent from a prior
-    // remove+re-add. NewObject<...>(Actor, Class, FName) already handles uniqueness
-    // via MakeUniqueObjectName; the engine-assigned name is returned in
-    // `component_name` of the response.
-
-    // Apply only provided fields — preserves "partial update" idempotency.
-    int32 AppliedCount = 0;
-
-    double LengthVal;
-    if (Params->TryGetNumberField(TEXT("target_arm_length"), LengthVal))
-    {
-        Spring->TargetArmLength = static_cast<float>(FMath::Max(0.0f, LengthVal));
-        AppliedCount++;
-    }
-
-    FVector SocketOffset;
-    if (Params->HasField(TEXT("socket_offset")))
-    {
-        SocketOffset = mcp_common::ReadJsonVector(Params, TEXT("socket_offset"));
-        Spring->SocketOffset = SocketOffset;
-        AppliedCount++;
-    }
-
-    FVector TargetOffset;
-    if (Params->HasField(TEXT("target_offset")))
-    {
-        TargetOffset = mcp_common::ReadJsonVector(Params, TEXT("target_offset"));
-        Spring->TargetOffset = TargetOffset;
-        AppliedCount++;
-    }
-
-    double ProbeSizeVal;
-    if (Params->TryGetNumberField(TEXT("probe_size"), ProbeSizeVal))
-    {
-        Spring->ProbeSize = static_cast<float>(FMath::Max(0.0f, ProbeSizeVal));
-        AppliedCount++;
-    }
-
+    // probe_channel is the only field that can be refused, so it is resolved before anything is
+    // created or written: a bad name leaves the actor exactly as it was.
+    TOptional<ECollisionChannel> ProbeChannel;
     FString ProbeChannelName;
     if (Params->TryGetStringField(TEXT("probe_channel"), ProbeChannelName) && !ProbeChannelName.IsEmpty())
     {
@@ -2074,7 +2024,87 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
                 FString::Printf(TEXT("Unknown collision channel '%s'. Use one of: ECC_Camera, ECC_Visibility, ECC_WorldStatic, ECC_Pawn, etc."),
                     *ProbeChannelName));
         }
-        Spring->ProbeChannel = static_cast<ECollisionChannel>(EnumVal);
+        ProbeChannel = static_cast<ECollisionChannel>(EnumVal);
+    }
+
+    AActor* Actor = mcp_common::FindActorByName(mcp_common::GetEditorWorld(), ActorName);
+    if (!Actor)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Actor '%s' not found in editor world"), *ActorName));
+    }
+
+    // One undo step for the whole call: Modify() records each object before it changes.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSpringArm", "Add Spring Arm (MCP)"));
+    Actor->Modify();
+
+    // The actor's first spring arm is configured in place; only an actor without one gets a new arm.
+    USpringArmComponent* Spring = Actor->FindComponentByClass<USpringArmComponent>();
+    bool bAlreadyExisted = (Spring != nullptr);
+    if (!Spring)
+    {
+        // NewObject with a name another object of the actor already holds is fatal when that
+        // object has another class ("Cannot replace existing object of a different class"), and
+        // replaces it in place when it is a spring arm (a removed one still waiting for GC). Any
+        // holder counts, garbage included, so a taken name gets a unique variant, the way
+        // add_component_to_actor names its component; component_name returns the final name.
+        FName NewName(*ComponentName);
+        if (StaticFindObjectFast(nullptr, Actor, NewName) != nullptr)
+        {
+            NewName = MakeUniqueObjectName(Actor, USpringArmComponent::StaticClass(), NewName);
+        }
+        Spring = NewObject<USpringArmComponent>(Actor, USpringArmComponent::StaticClass(), NewName, RF_Transactional);
+        if (!Spring)
+        {
+            return mcp_common::MakeErrorReply(
+                TEXT("Failed to instantiate USpringArmComponent"));
+        }
+        Spring->RegisterComponent();
+        // Attach to root if the actor has one; otherwise the component sits at origin.
+        if (USceneComponent* Root = Actor->GetRootComponent())
+        {
+            Spring->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+        }
+        Actor->AddInstanceComponent(Spring);
+    }
+    Spring->Modify();
+
+    // Apply only provided fields — preserves "partial update" idempotency.
+    int32 AppliedCount = 0;
+
+    double LengthVal;
+    if (Params->TryGetNumberField(TEXT("target_arm_length"), LengthVal))
+    {
+        Spring->TargetArmLength = static_cast<float>(FMath::Max(0.0f, LengthVal));
+        AppliedCount++;
+    }
+
+    FVector SocketOffset;
+    if (Params->HasField(TEXT("socket_offset")))
+    {
+        SocketOffset = mcp_common::ReadJsonVector(Params, TEXT("socket_offset"));
+        Spring->SocketOffset = SocketOffset;
+        AppliedCount++;
+    }
+
+    FVector TargetOffset;
+    if (Params->HasField(TEXT("target_offset")))
+    {
+        TargetOffset = mcp_common::ReadJsonVector(Params, TEXT("target_offset"));
+        Spring->TargetOffset = TargetOffset;
+        AppliedCount++;
+    }
+
+    double ProbeSizeVal;
+    if (Params->TryGetNumberField(TEXT("probe_size"), ProbeSizeVal))
+    {
+        Spring->ProbeSize = static_cast<float>(FMath::Max(0.0f, ProbeSizeVal));
+        AppliedCount++;
+    }
+
+    if (ProbeChannel.IsSet())
+    {
+        Spring->ProbeChannel = ProbeChannel.GetValue();
         AppliedCount++;
     }
 
@@ -2128,7 +2158,6 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
     }
 
     Spring->MarkRenderStateDirty();
-    Actor->Modify();
     if (UPackage* Pkg = Actor->GetPackage())
     {
         Pkg->MarkPackageDirty();

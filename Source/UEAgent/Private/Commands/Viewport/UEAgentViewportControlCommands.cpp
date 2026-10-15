@@ -65,6 +65,50 @@ namespace
         return nullptr;
     }
 
+    /**
+     * True when Field holds exactly three JSON numbers. mcp_common::ReadJsonVector reads any
+     * other shape (a short array, strings, an object) as (0, 0, 0), which would put the camera
+     * at the world origin instead of reporting the mistake.
+     */
+    bool ViewportControl_IsNumberTriple(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        if (!Params->TryGetArrayField(Field, Items) || !Items || Items->Num() != 3)
+        {
+            return false;
+        }
+        for (const TSharedPtr<FJsonValue>& Item : *Items)
+        {
+            if (!Item.IsValid() || Item->Type != EJson::Number)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * True when Field holds a rotation mcp_common::ReadJsonRotator reads as given: three numbers
+     * [pitch, yaw, roll], or an object with at least one numeric roll, pitch or yaw. Anything
+     * else reads as a zero rotation.
+     */
+    bool ViewportControl_IsRotation(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field)
+    {
+        if (ViewportControl_IsNumberTriple(Params, Field))
+        {
+            return true;
+        }
+        const TSharedPtr<FJsonObject>* Axes = nullptr;
+        if (Params->TryGetObjectField(Field, Axes) && Axes && Axes->IsValid())
+        {
+            double Unused = 0.0;
+            return (*Axes)->TryGetNumberField(TEXT("roll"), Unused)
+                || (*Axes)->TryGetNumberField(TEXT("pitch"), Unused)
+                || (*Axes)->TryGetNumberField(TEXT("yaw"), Unused);
+        }
+        return false;
+    }
+
     /** Map a string view-mode name to EViewModeIndex. Returns false if unknown. */
     bool ViewModeNameToIndex(const FString& Name, EViewModeIndex& OutIndex)
     {
@@ -290,7 +334,7 @@ TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Para
 // set_viewport_camera
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_camera - Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array in cm, else the camera goes to the origin. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
+// MCP:set_viewport_camera - Place the camera of the active level editor viewport (the focused one, else the first) at an absolute world location and/or rotation; at least one is required and no viewport is an error. Editor view only, not undoable or saved: a PIE player camera (set_view_target) or a camera actor (set_camera_transform) does not move. location must be an [x, y, z] array of three numbers in cm and rotation three numbers or a roll/pitch/yaw object; anything else is refused before the camera moves. The reply reads location and rotation back, rotation as [pitch, yaw, roll]. Frame an actor with focus_viewport.
 //   @param location - Optional [x, y, z] world location
 //   @param rotation - Optional [pitch, yaw, roll] world rotation
 //   @returns { applied: bool, location_set: bool, rotation_set: bool, location: [number], rotation: [number] }
@@ -302,6 +346,19 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
     bool bAnythingSet = false;
     bool bLocationSet = false;
     bool bRotationSet = false;
+
+    // Both shapes are checked before the camera moves, so a bad rotation does not leave a
+    // location already applied.
+    if (Params->HasField(TEXT("location")) && !ViewportControl_IsNumberTriple(Params, TEXT("location")))
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("location must be an array of three numbers [x, y, z] in cm; the camera was not moved"));
+    }
+    if (Params->HasField(TEXT("rotation")) && !ViewportControl_IsRotation(Params, TEXT("rotation")))
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("rotation must be an array of three numbers [pitch, yaw, roll] or an object with roll, pitch and/or yaw; the camera was not moved"));
+    }
 
     if (Params->HasField(TEXT("location")))
     {

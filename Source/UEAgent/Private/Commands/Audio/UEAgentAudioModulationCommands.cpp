@@ -8,6 +8,7 @@
 #include "Generators/SoundModulationLFO.h"
 #include "IAudioModulation.h"                 // USoundModulatorBase
 #include "Misc/PackageName.h"
+#include "ScopedTransaction.h"                 // FScopedTransaction (UnrealEd): undo for set_control_bus_mix_stage_value
 #include "Generators/SoundModulationADEnvelope.h"
 #include "Generators/SoundModulationEnvelopeFollower.h"
 #include "Sound/AudioBus.h"
@@ -465,7 +466,7 @@ TSharedPtr<FJsonObject> HandleGetControlBusMixInfo(
 // ---------------------------------------------------------------------------
 // set_control_bus_mix_stage_value
 // ---------------------------------------------------------------------------
-// MCP:set_control_bus_mix_stage_value - Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, with no undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
+// MCP:set_control_bus_mix_stage_value - Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, inside an undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @param bus_path - Asset path to the USoundControlBus whose stage is edited
 //   @param target_value - New stage target value (required float)
@@ -516,6 +517,10 @@ TSharedPtr<FJsonObject> HandleSetControlBusMixStageValue(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Cannot find stage for bus: %s"), *Bus->GetPathName()));
 	}
+
+	// Recorded before the write so the edit can be undone.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetControlBusMixStageValue", "Set Control Bus Mix Stage Value"));
+	Mix->Modify();
 
 	TargetStage->Value.TargetValue = (float)TargetValueD;
 	if (bHasAttack)  { TargetStage->Value.AttackTime  = (float)AttackTimeD; }

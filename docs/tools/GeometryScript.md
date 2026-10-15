@@ -55,7 +55,7 @@ Adaptive-remesh a DynamicMeshActor's dynamic mesh using a target edge length and
 
 *Destructive.*
 
-Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. boolean_applied is always true: compare triangle_count with triangle_count_before. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
+Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. When the engine refuses the result (an empty one, such as subtracting from an empty mesh) the mesh is left unchanged, boolean_applied is false and the call fails. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -72,7 +72,7 @@ Apply a CSG boolean (Subtract by default, Union or Intersect) between the live d
 
 *Destructive.*
 
-Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike apply_mesh_boolean (which builds a transient primitive tool), the tool geometry is the live dynamic mesh of source_actor_name. The target mesh is mutated in place; the source mesh is left untouched. NOT idempotent: re-running keeps cutting/merging the same tool against the already-modified target.
+Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike apply_mesh_boolean (which builds a transient primitive tool), the tool geometry is the live dynamic mesh of source_actor_name. The target mesh is mutated in place; the source mesh is left untouched. NOT idempotent: re-running keeps cutting/merging the same tool against the already-modified target. When the engine refuses the result (an empty one) the target is left unchanged, boolean_applied is false and the call fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -120,7 +120,7 @@ Voxel-wrap a DynamicMeshActor's dynamic mesh (replaces the mesh with a voxelised
 
 *Destructive.*
 
-Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type uniform and mixed work, but uv_preserving matches no engine name: it falls back to Mixed and leaves preserve_sharp_edges and auto_compact at true, so check the echoed settings. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
+Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type picks uniform, UV-preserving or mixed smoothing; an unknown value is an error. The reply echoes the settings the engine was given. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -137,7 +137,7 @@ Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into even
 
 *Destructive.*
 
-Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs or AutoGenerateXAtlasMeshUVs. This is what sits behind the editor's "Auto UV" button. Use it when a projection is not enough — organic or mixed-orientation geometry; for plank-and-post shapes set_mesh_uvs_from_projection with box is usually cleaner and far cheaper. Both methods PACK the result into standard UV space by default, so island layout is handled too. SLOW on dense meshes: this is a solver, not a projection.
+Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs or AutoGenerateXAtlasMeshUVs. This is what sits behind the editor's "Auto UV" button. Use it when a projection is not enough (organic or mixed-orientation geometry); for plank-and-post shapes set_mesh_uvs_from_projection with box is usually cleaner and far cheaper. Both methods PACK the result into standard UV space by default, so island layout is handled too. SLOW on dense meshes: this is a solver, not a projection. A UV channel the mesh does not have, or an empty mesh, is an error; applied is false, and the call fails, when the solver reports an error (xatlas needs a compact mesh: run compact_mesh first).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -296,14 +296,14 @@ Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrar
 
 *Destructive, idempotent.*
 
-Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. It first sets the mesh's UV channel count to exactly uv_channel + 1, so higher channels are discarded. Idempotent, in an editor transaction, nothing saved; uvs_generated is always true, even for uv_channel 8 or more, which changes nothing. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
+Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. A missing channel is added first (the channel count only grows, so higher channels such as a lightmap UV1 are kept). uv_channel 8 or more, or an empty mesh, is an error checked before anything changes; uvs_generated is false (the call fails) when the engine reports an error. Idempotent, in an editor transaction, nothing saved. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `uv_channel` | number | no | UV set index to write, default 0 |
+| `uv_channel` | number | no | UV set index to write, 0 to 7, default 0 |
 
-**Returns:** `{ actor_name: string, uv_channel: int, triangle_count: int, vertex_count: int, uvs_generated: bool }`
+**Returns:** `{ actor_name: string, uv_channel: int, uv_channel_count: int, triangle_count: int, vertex_count: int, uvs_generated: bool }`
 
 ## `get_dynamic_mesh_info`
 
@@ -616,7 +616,7 @@ Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
 
 *Destructive, idempotent.*
 
-Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved; recomputed is always true. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
+Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved. An empty mesh is an error, and recomputed is false (the call fails) when the engine reports an error. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -630,7 +630,7 @@ Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the edit
 
 *Destructive.*
 
-Recompute UVs on a UV channel using the configured flatten method.
+Recompute UVs on a UV channel using the configured flatten method. A channel the mesh does not have, or an empty mesh, is an error; recomputed is false, and the call fails, when the engine refuses (for example polygroups on a mesh without polygroups).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -645,7 +645,7 @@ Recompute UVs on a UV channel using the configured flatten method.
 
 *Destructive.*
 
-Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass from_material_id + to_material_id to merge one ID into another (UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs), or pass compact=true with the material list to close gaps left by deleted/merged IDs (CompactMaterialIDs) and get back the compacted list to hand to copy_dynamic_mesh_to_static_mesh. Gaps matter: MaterialIDs index into that list positionally, so an unused ID in the middle costs a wasted material slot on the baked asset.
+Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass from_material_id + to_material_id to merge one ID into another (UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs), or pass compact=true with the material list to close gaps left by deleted/merged IDs (CompactMaterialIDs) and get back the compacted list to hand to copy_dynamic_mesh_to_static_mesh. Gaps matter: MaterialIDs index into that list positionally, so an unused ID in the middle costs a wasted material slot on the baked asset. The materials list may be shorter than the IDs in use (or absent): the missing entries count as no material. When no triangle carries from_material_id, or from and to are the same ID, the mesh is left unchanged and the call succeeds with applied false, triangles_remapped 0 and a note. Otherwise applied is measured (remap: the triangles that carried from_material_id no longer do; compact: the engine reported no error) and the call fails when it is false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -656,7 +656,7 @@ Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass 
 | `materials` | array | no | Compact mode: ordered UMaterialInterface content paths, one per current MaterialID. The compacted list is returned in compacted_materials, in the new ID order. |
 | `remove_duplicate_materials` | boolean | no | Compact mode: also merge IDs that point at the SAME material asset (default false). |
 
-**Returns:** `{ actor_name, mode: string, from_material_id: int, to_material_id: int, max_material_id_after: int, distinct_material_ids_after: int, compacted_materials: [string], applied: bool }`
+**Returns:** `{ actor_name, mode: string, from_material_id: int, to_material_id: int, triangles_remapped?: int, max_material_id_after: int, distinct_material_ids_after: int, compacted_materials: [string], applied: bool, note?: string }`
 
 ## `remove_dynamic_mesh_actor`
 
@@ -717,14 +717,14 @@ Boolean-union a DynamicMeshActor's dynamic mesh with itself to repair self-inter
 
 *Destructive.*
 
-Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. rotation is required (omitting it is an error). Runs in an editor transaction, nothing saved; applied is always true. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
+Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. Runs in an editor transaction, nothing saved. An empty mesh is an error; a zero rotation succeeds with applied false and a note, leaving the mesh unchanged. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `rotation` | array | no | Required (the call fails without it): [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh |
+| `rotation` | array | yes | [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh |
 
-**Returns:** `{ actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool }`
+**Returns:** `{ actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool, note?: string }`
 
 ## `rotate_mesh_uvs`
 
@@ -746,14 +746,14 @@ Rotate all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the e
 
 *Destructive.*
 
-Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh.
+Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh, in an editor transaction. A scale that is not three numbers, or an empty mesh, is an error. A scale of 1,1,1 succeeds with applied false and a note, leaving the mesh unchanged.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
 | `scale` | array | no | [x, y, z] scale factor (1.0 = no change) |
 
-**Returns:** `{ actor_name, scale:{}, applied: true }`
+**Returns:** `{ actor_name: string, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }`
 
 ## `scale_mesh_uvs`
 
@@ -802,7 +802,7 @@ Resolve a region into a triangle selection and REPORT it, without modifying anyt
 
 *Destructive, idempotent.*
 
-Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent.
+Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent, in an editor transaction. applied is the slot read back after the assignment; the call fails when it does not hold the material.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -816,7 +816,7 @@ Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMesh
 
 *Destructive, idempotent.*
 
-Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. scope='all' repaints every triangle (UGeometryScriptLibrary_MeshMaterialFunctions::ClearMaterialIDs); scope='triangles' repaints the listed triangle IDs (SetMaterialIDOnTriangles). Calls EnableMaterialIDs first, because on a mesh without that attribute the engine drops the write and still reports success. Verify with get_mesh_material_ids, not with the success flag.
+Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. scope='all' repaints every triangle (UGeometryScriptLibrary_MeshMaterialFunctions::ClearMaterialIDs); scope='triangles' repaints the listed triangle IDs (SetMaterialIDOnTriangles). Calls EnableMaterialIDs first, because on a mesh without that attribute the engine drops the write. An ID in triangle_ids that is not a triangle, or an empty mesh, is an error checked before anything is painted. The targeted triangles are read back: applied is true when all of them carry material_id, and the call fails otherwise.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -825,7 +825,7 @@ Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. sco
 | `scope` | string | no | 'all' (default) or 'triangles'. |
 | `triangle_ids` | array | no | Required when scope='triangles': array of triangle IDs to repaint (e.g. from select_mesh_triangles). |
 
-**Returns:** `{ actor_name, material_id, scope, triangles_targeted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }`
+**Returns:** `{ actor_name, material_id, scope, triangles_targeted: int, triangles_painted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }`
 
 ## `set_mesh_material_id_in_region`
 
@@ -903,7 +903,7 @@ Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the 
 
 *Destructive, idempotent.*
 
-Set the number of extended polygroup layers on the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshPolygroupFunctions::SetNumExtendedPolygroupLayers. Idempotent: the engine dedups (only reshapes attributes when the count actually differs from the current one), so re-setting the same count is a no-op. The layer count is read back AFTER the set via GetNumExtendedPolygroupLayers to confirm it landed.
+Set the number of extended polygroup layers on the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshPolygroupFunctions::SetNumExtendedPolygroupLayers. Idempotent: the engine dedups (only reshapes attributes when the count actually differs from the current one), so re-setting the same count is a no-op. The layer count is read back AFTER the set via GetNumExtendedPolygroupLayers: applied is true when it equals the request, and the call fails when it does not.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -916,14 +916,14 @@ Set the number of extended polygroup layers on the live dynamic mesh of a Dynami
 
 *Destructive, idempotent.*
 
-Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8; a larger count changes nothing yet still reports changed true. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
+Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8, so a count above 8 is an error; num_uv_channels is the count read back after the call, and the call fails if it differs from the request. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `num_uv_channels` | number | yes | Desired count (>= 0; &lt;= 8 in practice) (required) |
+| `num_uv_channels` | number | yes | Desired count, 0 to 8 (required) |
 
-**Returns:** `{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped.`
+**Returns:** `{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; num_uv_channels is read back; note when channels were removed, whose UV data is dropped.`
 
 ## `set_polygroup_material_id`
 
@@ -970,7 +970,7 @@ Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional 
 
 *Destructive.*
 
-Apply a full FTransform (translation + rotation + scale) to the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh.
+Apply a full FTransform (translation + rotation + scale) to the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh, in an editor transaction. A location or scale that is not three numbers, or an empty mesh, is an error. An identity transform succeeds with applied false and a note, leaving the mesh unchanged.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -979,20 +979,20 @@ Apply a full FTransform (translation + rotation + scale) to the live dynamic mes
 | `rotation` | array | no | Optional [pitch, yaw, roll] rotation; default (0,0,0) |
 | `scale` | array | no | Optional [x, y, z] scale; default (1,1,1) |
 
-**Returns:** `{ actor_name, location:{}, rotation:{}, scale:{}, applied: true }`
+**Returns:** `{ actor_name: string, location_x: number, location_y: number, location_z: number, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, scale_x: number, scale_y: number, scale_z: number, applied: bool, note?: string }`
 
 ## `translate_dynamic_mesh`
 
 *Destructive.*
 
-Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh.
+Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh, in an editor transaction. A translation that is not three numbers, or an empty mesh, is an error. A zero translation succeeds with applied false and a note, leaving the mesh unchanged.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
 | `translation` | array | no | [x, y, z] translation delta in local space |
 
-**Returns:** `{ actor_name, translation:{}, applied: true }`
+**Returns:** `{ actor_name: string, translation_x: number, translation_y: number, translation_z: number, applied: bool, note?: string }`
 
 ## `translate_mesh_uvs`
 
