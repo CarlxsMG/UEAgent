@@ -146,6 +146,7 @@ namespace
 // ---------------------------------------------------------------------------
 // MCP:usd_module_status - Probe whether the USDCore plugin is loaded and what file formats USD can read/write.  Calls UnrealUSDWrapper::GetNativeFileFormats (expected to include "usd", "usda", "usdc", "usdz") and UnrealUSDWrapper::GetAllSupportedFileFormats (which also includes extensions from third-party USD plugins like Alembic "abc"). A zero count on either means USDCore did not load.
 //   @returns { native_formats: [string], supported_formats: [string], supported_count: int, native_count: int, native_present: bool, supported_present: bool }
+//   @hints read-only
 
 TSharedPtr<FJsonObject> HandleUsdModuleStatus(const TSharedPtr<FJsonObject>& Params)
 {

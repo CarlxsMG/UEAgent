@@ -1153,6 +1153,7 @@ TSharedPtr<FJsonObject> HandleGetIsmInstanceInfo(const TSharedPtr<FJsonObject>& 
 //   @param return_physical_material [bool] - Populate physical_material in the result. Defaults to false.
 //   @param world [string] - Which world to trace: absent/"editor" (default) | "server" (the PIE world with authority) | "client" | "pie:N" | "pie" (ambiguous: PlayWorld, else the first PIE context) | "game" (alias of "pie"). Editor-world traces do NOT hit World-Partition/OFPA actors, so pass a live world to verify obstacle collision; with 2+ PIE instances prefer "server"/"pie:N".
 //   @returns { hit: bool, blocking_hit: bool, actor_path: string, actor_name: string, component_name: string, location: {x,y,z}, impact_point: {x,y,z}, normal: {x,y,z}, impact_normal: {x,y,z}, distance: float, bone_name: string, physical_material: string, face_index: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleRaycastScene(const TSharedPtr<FJsonObject>& Params)
 {
     const TArray<TSharedPtr<FJsonValue>>* StartArr = nullptr;
@@ -1229,6 +1230,7 @@ TSharedPtr<FJsonObject> HandleRaycastScene(const TSharedPtr<FJsonObject>& Params
 //   @param ignore_actors [array] - Actor names/labels to exclude from the overlap.
 //   @param world [string] - Which world to query: absent/"editor" (default) | "server" (the PIE world with authority) | "client" | "pie:N" | "pie" (ambiguous) | "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene).
 //   @returns { overlaps: [{actor_path, actor_name, component_name, item_index, blocking}], count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params)
 {
     FString Shape;

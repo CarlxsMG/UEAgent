@@ -158,6 +158,7 @@ namespace
 // ---------------------------------------------------------------------------
 // MCP:interchange_module_status - Report Interchange framework availability.  Reads UInterchangeManager::IsInterchangeImportEnabled() (InterchangeManager.h, INTERCHANGEENGINE_API) and counts the supported file extensions reported by GetSupportedFormats(Assets) (InterchangeManager.h). Translator count itself is derived because UInterchangeManager's RegisteredTranslatorsClass set is private in 5.8 (InterchangeManager.h) — we surface ``enabled`` (= import enabled AND at least one supported format) which carries the same operational signal.
 //   @returns { enabled: bool, import_enabled: bool, asset_format_count: number, actor_format_count: number, scene_format_count: number, asset_formats: [string], translator_type_queried: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleInterchangeModuleStatus(const TSharedPtr<FJsonObject>& Params)
 {
     const bool bImportEnabled = UInterchangeManager::IsInterchangeImportEnabled();

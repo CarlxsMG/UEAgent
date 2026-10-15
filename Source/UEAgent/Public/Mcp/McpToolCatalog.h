@@ -16,6 +16,8 @@ class FJsonObject;
  *   - `force` on the commands that are unsafe with PIE running (from McpPieSafety)
  *   - parameter aliases + relaxed canonical names (the catalog's `aliasOf` and McpParamAliases)
  *   - rotation: the schema also accepts the {roll,pitch,yaw} OBJECT
+ *   - the `@returns` shape, appended to the description
+ *   - the MCP `annotations` (read-only, destructive, idempotent, open world), from the catalog
  *
  * Whatever is not in the schema cannot be sent by the client, so the three escape hatches
  * above (`force`, aliases, rotation object) are declared in the schema itself (otherwise they
@@ -55,8 +57,16 @@ public:
 		TMap<FString, TArray<FString>> RelaxedRequired;
 		/** The `inputSchema` tools/list carries for it (describe_tool returns it as is). */
 		TSharedPtr<FJsonObject> InputSchema;
+		/** The annotation's `@returns`: what a successful call answers. */
+		FString Returns;
+		/** The MCP `annotations` (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) that
+		 *  Tools/tool_hints.py derives from the handler's code. Null when the catalog has none. */
+		TSharedPtr<FJsonObject> Annotations;
 
 		const FParam* FindParam(const FString& ParamName) const;
+		/** The description tools/list and describe_tool publish: Description, then "Returns: " and
+		 *  Returns, so an agent knows the reply's shape before it calls. */
+		FString PublishedDescription() const;
 	};
 
 	/** Reads and builds. Returns null and fills OutError if the file is missing or cannot be parsed. */

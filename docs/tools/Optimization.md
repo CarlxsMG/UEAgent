@@ -6,6 +6,8 @@
 
 ## `analyze_asset_performance`
 
+*Read-only.*
+
 Analyzes an asset's performance characteristics including geometry, textures, and material complexity.
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Analyzes an asset's performance characteristics including geometry, textures, an
 **Returns:** `{ asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, optimization_type: string, lod_count?: number, triangle_count?: number, vertex_count?: number, section_count?: number, performance_rating: string, performance_issues: [string], suggestions: [string], width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number, instruction_count?: number }`
 
 ## `analyze_assets_performance_batch`
+
+*Read-only.*
 
 Batch version of analyze_asset_performance. Resolves and analyzes multiple assets by path in one call (avoids callers looping analyze_asset_performance one-by-one). Forces a synchronous load per asset, so max_results defaults conservatively.
 
@@ -27,6 +31,8 @@ Batch version of analyze_asset_performance. Resolves and analyzes multiple asset
 
 ## `check_asset_optimization`
 
+*Read-only.*
+
 Checks if an asset meets optimization standards and returns detailed optimization status with issues and recommendations.
 
 | Parameter | Type | Required | Description |
@@ -36,6 +42,8 @@ Checks if an asset meets optimization standards and returns detailed optimizatio
 **Returns:** `{ asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, is_optimized: bool, optimization_status: string, issues: [string], recommendations: [string], lod_count?: number, triangle_count?: number, vertex_count?: number, width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number }`
 
 ## `configure_asset_streaming`
+
+*Destructive, idempotent.*
 
 Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a texture or static mesh and saves it to disk. enable_streaming=true clears NeverStream (asset streams on demand); enable_streaming=false sets it (asset stays fully resident). Assets with no such knob (e.g. Material) fail honestly with success:false.
 
@@ -48,6 +56,8 @@ Sets the REAL NeverStream flag (UStreamableRenderAsset::NeverStream) on a textur
 
 ## `get_asset_compression`
 
+*Read-only.*
+
 Read a TEXTURE's compression settings (inverse of set_asset_compression): TC_* enum names plus pixel format and LOD group. Accepts UTexture2D / UTexture2DArray / UTextureCube / UTextureRenderTarget2D; hand it anything else and it does not error -- it answers is_texture=false and reports asset_class, so check that flag before reading the rest.
 
 | Parameter | Type | Required | Description |
@@ -57,6 +67,8 @@ Read a TEXTURE's compression settings (inverse of set_asset_compression): TC_* e
 **Returns:** `{ asset_path, asset_class, is_texture, compression_settings?, pixel_format?, lod_group?, source_format?, srgb?, never_stream?, note? }`
 
 ## `get_asset_lod_settings`
+
+*Read-only.*
 
 Read a mesh's LOD config (inverse of set_asset_lod_settings): per-LOD triangle count, vertex count and screen size for UStaticMesh or USkeletalMesh, plus LODGroup, which exists on StaticMesh only. There is NO lod-bias field in the response -- see the note below before you go looking for it.
 
@@ -68,6 +80,8 @@ Read a mesh's LOD config (inverse of set_asset_lod_settings): per-LOD triangle c
 
 ## `get_asset_memory_usage`
 
+*Read-only.*
+
 Calculates estimated memory usage for an asset including file size and runtime memory consumption.
 
 | Parameter | Type | Required | Description |
@@ -78,6 +92,8 @@ Calculates estimated memory usage for an asset including file size and runtime m
 
 ## `get_asset_streaming_config`
 
+*Read-only.*
+
 Read the streaming knobs (inverse of configure_asset_streaming). Works at two levels: with NO asset_path it reports the GLOBAL texture-streaming pool size (only when the editor runs a render-asset streaming manager -- an editor started with -nullrhi has none, and then streaming_manager_available is false and the pool size is omitted); with one, it adds that asset's NeverStream flag (which applies to any UStreamableRenderAsset -- textures AND static meshes) plus the texture-only LODGroup and VirtualTextureStreamingPriority. There is NO `streaming_priority` field -- see the note below.
 
 | Parameter | Type | Required | Description |
@@ -87,6 +103,8 @@ Read the streaming knobs (inverse of configure_asset_streaming). Works at two le
 **Returns:** `{ streaming_manager_available: bool, global_pool_size?: int, asset_path?, asset_class?, is_streamable?: bool, never_stream?: bool, lod_group?: string, lod_group_int?: number, use_virtual_texture_streaming_priority?: bool, note? }`
 
 ## `set_asset_compression`
+
+*Destructive, idempotent.*
 
 Sets the REAL texture compression quality (UTexture::CompressionQuality) on a texture asset and saves it to disk. Only UTexture targets are supported (no engine-level "compression" concept exists for meshes/materials); non-texture assets fail honestly with success:false.
 
@@ -99,6 +117,8 @@ Sets the REAL texture compression quality (UTexture::CompressionQuality) on a te
 
 ## `set_asset_lod_settings`
 
+*Destructive, idempotent.*
+
 Sets the REAL LOD count on a UStaticMesh (adds/removes FStaticMeshSourceModel entries via AddSourceModel/RemoveSourceModel, rebuilds via PostEditChange, saves to disk). SkeletalMesh LOD-count mutation is NOT supported (would require the FLODUtilities mesh-reduction subsystem, out of scope) -- read-only LOD info is still reported honestly. Non-mesh assets fail with success:false.
 
 | Parameter | Type | Required | Description |
@@ -109,6 +129,8 @@ Sets the REAL LOD count on a UStaticMesh (adds/removes FStaticMeshSourceModel en
 **Returns:** `{ asset_path: string, requested_lod_count: number, asset_type: string, current_lod_count?: number, total_triangles?: number, total_vertices?: number, lod_data?: [object], saved?: bool, success: bool, message: string, error?: string, final_lod_count: number, lod_efficiency?: number, lod_recommendations?: [string] }`
 
 ## `suggest_asset_optimizations`
+
+*Read-only.*
 
 Generates detailed optimization suggestions for an asset categorized by criticality, performance, and memory impact.
 

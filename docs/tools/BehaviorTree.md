@@ -6,6 +6,8 @@
 
 ## `add_blackboard_key`
 
+*Additive.*
+
 Append a key to a UBlackboardData asset and save it.
 
 | Parameter | Type | Required | Description |
@@ -19,6 +21,8 @@ Append a key to a UBlackboardData asset and save it.
 
 ## `add_bt_composite_child`
 
+*Additive, idempotent.*
+
 Add a child composite (Selector/Sequence/SimpleParallel) under a BehaviorTree composite.  The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent. The returned child_name is how you address this composite as a parent for further children.
 
 | Parameter | Type | Required | Description |
@@ -31,6 +35,8 @@ Add a child composite (Selector/Sequence/SimpleParallel) under a BehaviorTree co
 **Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: string, already_exists: bool, child_count: int, saved: bool, save_error?: string }`
 
 ## `add_bt_decorator`
+
+*Additive, idempotent.*
 
 Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge.
 
@@ -46,6 +52,8 @@ Attach a decorator (execution condition) to a specific child-edge of a BehaviorT
 
 ## `add_bt_service`
 
+*Additive, idempotent.*
+
 Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite.
 
 | Parameter | Type | Required | Description |
@@ -58,6 +66,8 @@ Attach a service (background tick) to a BehaviorTree composite.  The service is 
 **Returns:** `{ behavior_tree_path: string, parent_name: string, service_name: string, service_class: string, already_exists: bool, service_count: int, saved: bool, save_error?: string }`
 
 ## `add_bt_task_child`
+
+*Additive, idempotent.*
 
 Add a leaf task node (Wait/MoveTo/PlaySound/RunBehavior/...) under a BehaviorTree composite.  The task is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load. Idempotent by child_name within the parent.
 
@@ -72,6 +82,8 @@ Add a leaf task node (Wait/MoveTo/PlaySound/RunBehavior/...) under a BehaviorTre
 
 ## `create_behavior_tree`
 
+*Additive.*
+
 Create and save a new UBehaviorTree asset, optionally binding a blackboard.
 
 | Parameter | Type | Required | Description |
@@ -84,6 +96,8 @@ Create and save a new UBehaviorTree asset, optionally binding a blackboard.
 
 ## `create_blackboard_data`
 
+*Additive, idempotent.*
+
 Create an empty UBlackboardData asset at package_path/name and save it; success requires the save. Idempotent: an existing blackboard there is returned with already_exists=true and is not re-saved. Returns blackboard_path and key_count; add keys with add_blackboard_key.
 
 | Parameter | Type | Required | Description |
@@ -95,6 +109,8 @@ Create an empty UBlackboardData asset at package_path/name and save it; success 
 
 ## `get_behavior_tree_info`
 
+*Read-only.*
+
 Get information about a behavior tree's structure and properties
 
 | Parameter | Type | Required | Description |
@@ -104,6 +120,8 @@ Get information about a behavior tree's structure and properties
 **Returns:** `{ behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool }], root_node: object|null }`
 
 ## `get_behavior_tree_status`
+
+*Read-only.*
 
 Reader: runtime BT status + active task name (if any) on an AI pawn.
 
@@ -115,6 +133,8 @@ Reader: runtime BT status + active task name (if any) on an AI pawn.
 
 ## `get_blackboard_component`
 
+*Read-only.*
+
 Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. Read-only. Editor world only, never PIE, where pawns are not auto-possessed; for asset keys use get_blackboard_keys_asset.
 
 | Parameter | Type | Required | Description |
@@ -124,6 +144,8 @@ Read the UBlackboardComponent of an editor-world actor (its AIController blackbo
 **Returns:** `{ actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }]? }`
 
 ## `get_blackboard_data`
+
+*Read-only.*
 
 Retrieve all key-value pairs and complete data from an actor's blackboard
 
@@ -136,6 +158,8 @@ Retrieve all key-value pairs and complete data from an actor's blackboard
 
 ## `get_blackboard_keys`
 
+*Read-only.*
+
 List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Read-only; returns keys and key_count. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
@@ -147,6 +171,8 @@ List blackboard key definitions (name, type, instance_synced, base_class or enum
 
 ## `get_blackboard_keys_asset`
 
+*Read-only.*
+
 Read key definitions from a UBlackboardData asset (no live component needed).
 
 | Parameter | Type | Required | Description |
@@ -156,6 +182,8 @@ Read key definitions from a UBlackboardData asset (no live component needed).
 **Returns:** `{ blackboard_path: string, name: string, parent: string?, keys: [{ name: string, type: string, instance_synced: bool }], key_count: number }`
 
 ## `get_blackboard_value`
+
+*Read-only.*
 
 Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.
 
@@ -168,6 +196,8 @@ Read one key of the running blackboard of an editor-world actor (its AIControlle
 
 ## `pause_behavior_tree`
 
+*Destructive.*
+
 Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.
 
 | Parameter | Type | Required | Description |
@@ -177,6 +207,8 @@ Pause the behavior tree of an editor-world actor (its AIController brain compone
 **Returns:** `{ actor_name, paused, was_running }`
 
 ## `remove_blackboard_key`
+
+*Destructive, idempotent.*
 
 Remove a key from a UBlackboardData asset and save it.  Inverse of add_blackboard_key: drops the matching FBlackboardEntry from UBlackboardData::Keys (then UpdateKeyIDs to re-index). Addresses the key by key_name (as add_blackboard_key created it) or by index into the asset's own Keys array (parent-chain keys are not touched). Idempotent: a missing key returns removed:false / already_absent:true.
 
@@ -190,6 +222,8 @@ Remove a key from a UBlackboardData asset and save it.  Inverse of add_blackboar
 
 ## `remove_bt_composite_child`
 
+*Destructive, idempotent.*
+
 Remove a child composite (Selector/Sequence/...) from a BehaviorTree composite.  Inverse of add_bt_composite_child: drops the matching entry from the parent's Children array. Only composite child-edges are considered, so a task with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
 
 | Parameter | Type | Required | Description |
@@ -202,6 +236,8 @@ Remove a child composite (Selector/Sequence/...) from a BehaviorTree composite. 
 **Returns:** `{ behavior_tree_path: string, parent_name: string, child_name: string, child_kind: string, removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }`
 
 ## `remove_bt_decorator`
+
+*Destructive, idempotent.*
 
 Remove a decorator (execution condition) from a specific child-edge of a BehaviorTree composite.  Inverse of add_bt_decorator: drops the matching entry from that child's Decorators array (FBTCompositeChild::Decorators). Idempotent: a missing decorator returns removed:false / already_absent:true.
 
@@ -217,6 +253,8 @@ Remove a decorator (execution condition) from a specific child-edge of a Behavio
 
 ## `remove_bt_service`
 
+*Destructive, idempotent.*
+
 Remove a service (background tick) from a BehaviorTree composite.  Inverse of add_bt_service: drops the matching entry from the composite's Services array (UBTCompositeNode::Services). Idempotent: a missing service returns removed:false / already_absent:true.
 
 | Parameter | Type | Required | Description |
@@ -229,6 +267,8 @@ Remove a service (background tick) from a BehaviorTree composite.  Inverse of ad
 **Returns:** `{ behavior_tree_path: string, parent_name: string, service_name: string, removed: bool, already_absent: bool, service_count: int, saved: bool, save_error?: string }`
 
 ## `remove_bt_task_child`
+
+*Destructive, idempotent.*
 
 Remove a leaf task node (Wait/MoveTo/...) from a BehaviorTree composite.  Inverse of add_bt_task_child: drops the matching entry from the parent's Children array. Only task child-edges are considered, so a composite with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
 
@@ -243,6 +283,8 @@ Remove a leaf task node (Wait/MoveTo/...) from a BehaviorTree composite.  Invers
 
 ## `restart_behavior_tree`
 
+*Destructive.*
+
 Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
@@ -251,6 +293,8 @@ Restart the current behavior tree of an editor-world actor from its root (Restar
 
 ## `resume_behavior_tree`
 
+*Destructive.*
+
 Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
@@ -258,6 +302,8 @@ Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-
 | `actor_name` | string | yes | Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume. |
 
 ## `run_behavior_tree`
+
+*Destructive.*
 
 Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.
 
@@ -270,6 +316,8 @@ Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIControlle
 
 ## `set_behavior_tree_root`
 
+*Destructive, idempotent.*
+
 Set a BehaviorTree's RootNode to a new composite (Selector or Sequence) and save.
 
 | Parameter | Type | Required | Description |
@@ -280,6 +328,8 @@ Set a BehaviorTree's RootNode to a new composite (Selector or Sequence) and save
 **Returns:** `{ behavior_tree_path: string, composite: string, has_root_node: bool, root_node_class: string, saved: bool, save_error: string? }`
 
 ## `set_blackboard_key_subsettings`
+
+*Destructive, idempotent.*
 
 Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type.
 
@@ -294,6 +344,8 @@ Constrain an existing blackboard key's subsettings on a UBlackboardData asset an
 
 ## `set_blackboard_value`
 
+*Destructive, idempotent.*
+
 Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
 
 | Parameter | Type | Required | Description |
@@ -305,6 +357,8 @@ Write one key of the running blackboard of an editor-world actor, converting the
 **Returns:** `{ actor_name: string, key_name: string, key_type: string, value: string, set: bool }`
 
 ## `stop_behavior_tree`
+
+*Destructive.*
 
 Stop execution of a running behavior tree on an actor
 

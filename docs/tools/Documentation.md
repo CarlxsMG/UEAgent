@@ -6,6 +6,8 @@
 
 ## `create_asset_documentation`
 
+*Additive.*
+
 Build a JSON record of one asset from the Asset Registry, without loading it or writing a file: identity, .uasset size and date, a coarse category and usage blurb, and depth-1 dependencies and referencers (100 each at most). Errors without an editor world.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Build a JSON record of one asset from the Asset Registry, without loading it or 
 
 ## `create_project_overview`
 
+*Additive.*
+
 Create a comprehensive overview of the entire project including assets, actors, materials, and statistics.
 
 No parameters.
@@ -23,6 +27,8 @@ No parameters.
 **Returns:** `{ project_info: { project_name, engine_version, platform, generation_date, is_editor }, asset_types: [{ asset_type, count }], blueprint_info: { total_blueprints, normal_blueprints, macro_blueprints }, world_info: { world_name, net_mode, actor_count, level_count }, actor_types: [{ actor_type, count }], material_info: { total_materials }, texture_info: { total_textures }, audio_info: { total_audio_assets }, statistics: { total_assets, total_blueprints, total_materials, total_textures, total_audio_assets, total_actors } }`
 
 ## `generate_blueprint_docs`
+
+*Additive.*
 
 Generate documentation for all blueprints in the project (includes Blueprint, WidgetBlueprint, AnimBlueprint, and other Blueprint subclasses).
 

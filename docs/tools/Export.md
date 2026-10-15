@@ -6,6 +6,8 @@
 
 ## `cancel_render_job`
 
+*Destructive.*
+
 Cancels the in-progress movie render, if one is running (honest headless gate).  Movie renders run inside a Play-In-Editor session (UMoviePipelinePIEExecutor), so in a headless / non-interactive editor there is normally no active executor. When an active render exists it is canceled via UMoviePipelineExecutorBase::CancelAllJobs; otherwise this reports was_rendering:false honestly (an expected headless state, not an error).
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Cancels the in-progress movie render, if one is running (honest headless gate). 
 **Returns:** `{ canceled: bool, was_rendering: bool, note: string }`
 
 ## `configure_render_output`
+
+*Destructive, idempotent.*
 
 Configures output resolution / directory / image format on a render job's config.  Finds (or adds) a UMoviePipelineOutputSetting on the job's primary configuration to set resolution + output directory, and adds the matching image-sequence output container for the requested format (png/jpg/exr/bmp).
 
@@ -30,6 +34,8 @@ Configures output resolution / directory / image format on a render job's config
 
 ## `create_render_job`
 
+*Additive.*
+
 Allocates a real Movie Render Queue job for a Level Sequence (headless authoring).  Adds a new UMoviePipelineExecutorJob to the editor Movie Pipeline queue, points it at the given Level Sequence, optionally sets its map, and ensures it has a primary configuration. The job persists in the editor's transient render queue.          (e.g. "/Game/Maps/MyMap.MyMap").
 
 | Parameter | Type | Required | Description |
@@ -42,6 +48,8 @@ Allocates a real Movie Render Queue job for a Level Sequence (headless authoring
 
 ## `delete_render_job`
 
+*Destructive, idempotent.*
+
 Deletes a job from the editor Movie Render Queue (headless-safe).  Removes a single job by name via UMoviePipelineQueue::DeleteJob, or clears the whole queue via DeleteAllJobs when delete_all is set. Idempotent: deleting a job that is not present reports already_absent:true honestly instead of failing.
 
 | Parameter | Type | Required | Description |
@@ -52,6 +60,8 @@ Deletes a job from the editor Movie Render Queue (headless-safe).  Removes a sin
 **Returns:** `{ job_name?: string, deleted?: bool, already_absent?: bool, deleted_all?: bool, queue_job_count: number }`
 
 ## `export_asset_as_text`
+
+*Destructive.*
 
 Produce a CANONICAL, STABLE text dump of ANY asset (Blueprint, DataTable, Material, DataAsset, ...) for external diff / VCS snapshot / review, without the volatile bits of the binary .uasset. format='json' (default) gives a deterministic sorted UPROPERTY dump (a UDataTable uses its native GetTableAsJSON writer); format='t3d' gives the engine's UExporter T3D text. Returns the text inline (capped), a whole-text MD5 content hash for change detection, and writes the full dump to Saved/Exports/Text. This is the primitive under the diff tools.
 
@@ -65,6 +75,8 @@ Produce a CANONICAL, STABLE text dump of ANY asset (Blueprint, DataTable, Materi
 
 ## `export_asset_data`
 
+*Destructive.*
+
 Load an asset and write its class, package and every editable or Blueprint-visible property, as details-panel text, to a new file Saved/Exports/Assets/Name_YYYYMMDD_HHMMSS.json or .txt in the project. Returns export_file_path, export_success and file sizes; an unsupported format writes nothing (export_success=false).
 
 | Parameter | Type | Required | Description |
@@ -75,6 +87,8 @@ Load an asset and write its class, package and every editable or Blueprint-visib
 **Returns:** `{ asset_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }`
 
 ## `export_blueprint_data`
+
+*Destructive.*
 
 Exports blueprint structure and metadata to JSON or TXT format.
 
@@ -87,6 +101,8 @@ Exports blueprint structure and metadata to JSON or TXT format.
 
 ## `export_level_section`
 
+*Destructive.*
+
 Exports the actors of one section of the editor world (name, class, transform) to JSON or TXT. A section is a loaded level (the persistent level or a streaming sub-level, by package name), else an outliner folder (with its subfolders); '*' exports the whole world. An unknown section is an error that lists the loaded levels.
 
 | Parameter | Type | Required | Description |
@@ -98,6 +114,8 @@ Exports the actors of one section of the editor world (name, class, transform) t
 
 ## `flush_async_loading`
 
+*Destructive.*
+
 Block until all in-flight async package loads finish (::FlushAsyncLoading).
 
 No parameters.
@@ -105,6 +123,8 @@ No parameters.
 **Returns:** `{ flushed, async_packages_before, async_packages_after, packages_flushed }`
 
 ## `generate_asset_report`
+
+*Additive.*
 
 Generates comprehensive asset analysis report with property statistics to JSON or TXT format.
 
@@ -117,6 +137,8 @@ Generates comprehensive asset analysis report with property statistics to JSON o
 
 ## `get_engine_stats`
 
+*Read-only.*
+
 Report live engine profiling stats: average FPS/MS, process memory, the live UObject count and the engine version.
 
 No parameters.
@@ -124,6 +146,8 @@ No parameters.
 **Returns:** `{ average_fps, average_ms, max_fps, used_physical_bytes, peak_used_physical_bytes, available_physical_bytes, total_physical_bytes, used_physical_mb, peak_used_physical_mb, available_physical_mb, object_count, engine_version, is_editor }`
 
 ## `get_render_queue`
+
+*Read-only.*
 
 Lists the jobs currently in the editor Movie Render Queue.
 
@@ -133,6 +157,8 @@ No parameters.
 
 ## `get_source_control_status`
 
+*Read-only.*
+
 Report the editor revision-control connection, read-only: provider name, whether revision control is enabled and the provider available, and its status_text. Says nothing about individual files or their checkout state, and never connects or changes settings.
 
 No parameters.
@@ -140,6 +166,8 @@ No parameters.
 **Returns:** `{ provider, enabled, available, status_text }`
 
 ## `render_sequence_to_movie`
+
+*Destructive.*
 
 Authors a one-off render job for a sequence and starts the (async) movie render.  Allocates a real job (sequence + default PNG output config) and triggers RenderQueueWithExecutor using the PIE executor. The render runs ASYNCHRONOUSLY (it spins up a Play-In-Editor session), so this returns render_started immediately with an honest async note rather than blocking for completion. In a headless / non-interactive context the render may not start; the job + config are still authored for real.
 
@@ -151,6 +179,8 @@ Authors a one-off render job for a sequence and starts the (async) movie render.
 **Returns:** `{ sequence_name: string, job_name: string, job_created: bool, queue_job_count: number, render_started: bool, render_async: bool, note: string }`
 
 ## `set_packaging_setting`
+
+*Destructive, idempotent.*
 
 Write a /Script/UnrealEd.ProjectPackagingSettings key into DefaultGame.ini (via GConfig) and read it back to verify
 

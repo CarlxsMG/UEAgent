@@ -6,6 +6,8 @@
 
 ## `clear_uv_channel`
 
+*Destructive, idempotent.*
+
 Drop all UVs from one UV channel on a static mesh. Idempotent on already-empty channels. Resizes the UV-channel count if the cleared channel is the highest one (UE 5.8 doesn't auto-shrink channel count, so callers that want to "remove" a UV channel should follow up with set_num_uv_channels).
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Drop all UVs from one UV channel on a static mesh. Idempotent on already-empty c
 **Returns:** `{ static_mesh_path, uv_channel, uv_channel_count_before, uv_channel_count_after, cleared, saved }`
 
 ## `get_uv_health_report`
+
+*Read-only.*
 
 Read-only diagnostic summary for one UV channel on a static mesh: counts, lightmap status, in-unit-square ratio, overlap count, and unique UVs.
 
@@ -29,6 +33,8 @@ Read-only diagnostic summary for one UV channel on a static mesh: counts, lightm
 
 ## `list_uv_channels`
 
+*Read-only.*
+
 Per-LOD inventory of UV channels on a static mesh (read-only, no MarkDirty / no save).
 
 | Parameter | Type | Required | Description |
@@ -39,6 +45,8 @@ Per-LOD inventory of UV channels on a static mesh (read-only, no MarkDirty / no 
 **Returns:** `{ mesh_path: string, total_lods: int, lods: [{lod_index, uv_channel_count, vertex_count, triangle_count, lightmap_coordinate_index, has_lightmap, channels: [{channel, is_lightmap, vertex_count}]}] }`
 
 ## `set_triangle_uvs`
+
+*Destructive, idempotent.*
 
 Set the 3 UV corners of a single triangle in one UV channel. Use this for granular UV edits without a full repack / regeneration. The triangle becomes an isolated UV island (the engine allocates fresh UV elements per call). Triangle IDs are 0-based into the mesh's triangle list. The bIsValidTriangle out-param surfaces the engine's validity verdict (false if TriangleID is out of range, the UV channel doesn't exist, or the resulting topology would be invalid).
 

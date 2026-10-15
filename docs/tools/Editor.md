@@ -6,6 +6,8 @@
 
 ## `add_component_to_actor`
 
+*Additive, idempotent.*
+
 Attach a new component of a given class to an actor ALREADY PLACED in the level (an instance-level component, not a change to its Blueprint -- for that use add_component_to_blueprint, which affects every instance). Returns object_path, the full reflection path to feed straight into set_property_value / call_function to configure it, so no dedicated add_* wrapper is needed. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
 
 | Parameter | Type | Required | Description |
@@ -22,6 +24,8 @@ Attach a new component of a given class to an actor ALREADY PLACED in the level 
 
 ## `add_enum_entry`
 
+*Additive, idempotent.*
+
 Append one enumerator to a Blueprint Enum (UUserDefinedEnum) and give it a display name.  Idempotent (an entry whose display/internal name already exists reports already_existed with added=false, leaving the enum unchanged -- the engine itself does NOT dedup). The new entry lands at the end, before the hidden _MAX sentinel.
 
 | Parameter | Type | Required | Description |
@@ -32,6 +36,8 @@ Append one enumerator to a Blueprint Enum (UUserDefinedEnum) and give it a displ
 **Returns:** `{ enum_path: string, entry_name: string, added: bool, already_existed: bool, entry_count: int, entries: [string] }`
 
 ## `add_message_log_entry`
+
+*Additive.*
 
 Add an entry to a named engine Message Log listing.
 
@@ -45,6 +51,8 @@ Add an entry to a named engine Message Log listing.
 
 ## `add_struct_member`
 
+*Additive.*
+
 Add a field to a Blueprint (user-defined) struct: the way to grow a data shape -- a DataTable row struct, a save record, a component's payload -- without opening the struct editor. Honest on collisions: if the new name is invalid or already used it ROLLS BACK the auto-named member it had to create first and returns an error, instead of reporting success under the engine's MemberVar_N name and leaving orphans behind. Adding a field to a struct a DataTable already uses changes every row (new field at its default), so re-read the table afterwards. get_struct_members lists what is there; rename_struct_member and remove_struct_member are the edits.
 
 | Parameter | Type | Required | Description |
@@ -56,6 +64,8 @@ Add a field to a Blueprint (user-defined) struct: the way to grow a data shape -
 **Returns:** `{ struct_path, member_name, member_type, member_count }`
 
 ## `align_actors`
+
+*Destructive.*
 
 Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; batch_set_actor_transform is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
 
@@ -69,6 +79,8 @@ Snap two or more editor-world actors onto a shared location, rotation and/or sca
 
 ## `backup_asset`
 
+*Destructive.*
+
 Duplicate an asset into a timestamped /Game/MCP_Backups/ folder.  Call this before destructive operations (delete, reparent, overwrite). Accepts a package path or a full object path.
 
 | Parameter | Type | Required | Description |
@@ -79,6 +91,8 @@ Duplicate an asset into a timestamped /Game/MCP_Backups/ folder.  Call this befo
 
 ## `batch_delete_actors`
 
+*Destructive.*
+
 Delete several editor-world actors at once through the editor's own delete path, in ONE undoable transaction (a single undo brings them all back), returning the count and the JSON of each actor captured before deletion. WARNING: matches INTERNAL names only -- editor labels do not resolve -- names it cannot find are skipped silently, so compare deleted_count against how many you asked for; and if NONE resolve it errors with "No actors found to delete". Editor world only, and the removal is in memory until save_level writes the .umap.
 
 | Parameter | Type | Required | Description |
@@ -88,6 +102,8 @@ Delete several editor-world actors at once through the editor's own delete path,
 **Returns:** `{ deleted_count: int (compare against your input length), deleted_actors: [actor JSON captured before the delete] }`
 
 ## `batch_place_actors_on_terrain`
+
+*Additive.*
 
 Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as place_actor_on_terrain, applied per actor.
 
@@ -101,6 +117,8 @@ Ground many actors on the landscape in one call by sampling the heightmap at eac
 
 ## `batch_set_actor_transform`
 
+*Destructive, idempotent.*
+
 Move/rotate/scale MANY actors in a single undoable transaction, each with its own optional location/rotation/scale, reporting success_count, failure_count and the names that did not resolve. Cheaper and atomically undoable versus N set_actor_transform calls. Calls Modify() per actor so their OFPA packages dirty and save_level actually writes them. Takes the same `world` selector as set_actor_transform, so it reaches a live PIE world too. WARNING: resolves the INTERNAL name only (no editor labels, unlike set_actor_transform); a name it cannot find is counted in failure_count, not raised as an error -- read that number.
 
 | Parameter | Type | Required | Description |
@@ -112,6 +130,8 @@ Move/rotate/scale MANY actors in a single undoable transaction, each with its ow
 
 ## `begin_transaction`
 
+*Destructive.*
+
 Open one undoable transaction so a whole batch of edits collapses into a SINGLE undo entry: every Modify() between this and end_transaction joins it, and cancel_transaction rolls the lot back without leaving anything on the stack. Use it to make a multi-step edit atomically reversible; the returned transaction_index is what end_transaction / cancel_transaction need. already_open:true means one was already running -- transactions do not nest here.
 
 | Parameter | Type | Required | Description |
@@ -122,6 +142,8 @@ Open one undoable transaction so a whole batch of edits collapses into a SINGLE 
 **Returns:** `{ description: string, transaction_index: int, already_open: bool, undo_count: int }`
 
 ## `bulk_delete_assets`
+
+*Destructive.*
 
 GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is the most destructive command in the plugin, `bulk_delete_assets(["/Game/VendorPack"], recursive=true)` would be a valid unconfirmed call, and agent allowlists may run mutating tools with no prompt). Four independent gates REFUSE per item instead of skipping silently: readonly_roots (default: the project's Read Only Content Roots), protect_paths (wildcards -- the only gate that saves a zero-referencer asset), the currently-open editor world, and the OPT-IN require_zero_referencers gate whose referencer count EXCLUDES referencers that are themselves in this batch (so a self-contained dead subgraph can still be deleted whole). Deletion is a single ObjectTools::ForceDeleteObjects over the whole eligible batch -- resolving each object here via StaticFindObject/StaticLoadObject rather than through UEditorAssetSubsystem::DeleteAsset, whose UE::EditorAssetUtils::LoadAssetFromPath/EnsureAssetsLoaded preamble is a known crash site ("Array index out of bounds", deterministic on corrupted leftovers). deleted_count counts ONLY items that passed BOTH post-delete probes -- the package file is gone (FPackageName::DoesPackageExist) AND the object no longer resolves at its original path (StaticFindObject) -- never the API's own return value. Both are required because for a never-saved, registry-visible asset the disk probe is vacuously true (it was never on disk), so residency is the only real evidence; each failure names which probe still sees the item.
 
@@ -139,6 +161,8 @@ GUARDED batch asset deletion. ***dry_run DEFAULTS TO TRUE*** (deliberate: it is 
 
 ## `can_redo`
 
+*Read-only.*
+
 Cheap yes/no on whether anything can be re-applied, plus the LABEL of the entry redo would restore. can_redo:false right after an undo normally means a new edit has since wiped the redo stack. Prefer get_undo_state for the whole picture in one call.
 
 No parameters.
@@ -146,6 +170,8 @@ No parameters.
 **Returns:** `{ can_redo: bool, label: string (title of the transaction redo would restore), reason?: string (why not, when can_redo is false) }`
 
 ## `can_undo`
+
+*Read-only.*
 
 Cheap yes/no on whether anything is undoable right now, plus the LABEL of the entry undo would revert -- read that label before undoing so you do not roll back someone else's edit. Prefer get_undo_state when you also want counts and the redo side in the same call.
 
@@ -155,6 +181,8 @@ No parameters.
 
 ## `cancel_transaction`
 
+*Destructive.*
+
 Abort the transaction opened by begin_transaction: the edits made inside it are rolled back and NO entry is written to the undo stack (undo_count is unchanged). The escape hatch when a multi-step edit goes wrong halfway -- cleaner than committing with end_transaction and then calling undo, which leaves history behind.
 
 No parameters.
@@ -162,6 +190,8 @@ No parameters.
 **Returns:** `{ success: bool, transaction_index: int (the one that was cancelled), undo_count: int (unchanged -- nothing was recorded) }`
 
 ## `capture_viewport`
+
+*Destructive.*
 
 Screenshot the active editor viewport to a PNG (forcing a fresh draw first), optionally resized and optionally returned inline as base64. Use it to SHOW a result -- proof that something looks right, an image to hand to a human. Do NOT use it to diagnose: an image costs far more context than a command and is read far less reliably than one, so for "is the actor there / did the value change / did it move" prefer get_actor_bounds, get_component_properties, raycast_scene or a property read, which answer exactly and cheaply. Captures the EDITOR viewport, not a PIE window; high_res_screenshot is the higher-resolution sibling.
 
@@ -176,6 +206,8 @@ Screenshot the active editor viewport to a PNG (forcing a fresh draw first), opt
 
 ## `clear_message_log`
 
+*Destructive, idempotent.*
+
 Clear all messages from a named engine Message Log listing.
 
 | Parameter | Type | Required | Description |
@@ -186,6 +218,8 @@ Clear all messages from a named engine Message Log listing.
 
 ## `clear_undo_barriers`
 
+*Destructive, idempotent.*
+
 Remove ALL undo barriers at once so undo can traverse the whole buffer again -- including barriers another session or the human placed to protect their work, so prefer remove_undo_barrier for just your own. Nothing is undone by this; it only lifts the floor. WARNING: `success` is hardcoded true: `had_barrier` is the oracle, false meaning there was nothing to clear.
 
 No parameters.
@@ -193,6 +227,8 @@ No parameters.
 **Returns:** `{ success: bool (hardcoded), had_barrier: bool (THE oracle -- false = honest no-op), undo_count: int, queue_length: int }`
 
 ## `consolidate_assets`
+
+*Destructive.*
 
 Redirect every reference to the source assets onto the target with UEditorAssetSubsystem::ConsolidateAssets, which DELETES the sources (leaving redirectors) and saves what it changed. Only class-compatible sources are used; others are listed in skipped_incompatible and unloadable ones are dropped silently. dry_run=true only reports.
 
@@ -206,6 +242,8 @@ Redirect every reference to the source assets onto the target with UEditorAssetS
 
 ## `copy_actors`
 
+*Destructive.*
+
 Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by name or whatever is currently selected, so paste_actors can drop them back -- the way to clone a group while keeping their relative layout, which duplicate_actor (one actor, in place) does not do. WARNING: naming them REPLACES the current selection as a side effect, and matching is by INTERNAL name only. One of actor_names or copy_selected=true is required.
 
 | Parameter | Type | Required | Description |
@@ -216,6 +254,8 @@ Put editor-world actors on the editor CLIPBOARD (edactCopySelected), either by n
 **Returns:** `{ copied_count: int, success: bool (hardcoded; verify with paste_actors' pasted_count) }`
 
 ## `create_blueprint_interface`
+
+*Destructive.*
 
 Create a Blueprint Interface asset: a contract of function signatures that unrelated classes can implement, so callers talk to the contract instead of a concrete class. The right tool when several different kinds of actor must answer the same request (interactable, damageable, workable) and you do not want a shared base class -- one interface replaces N-by-M hard-wired cases. Created empty: add functions with add_blueprint_function, then implement_interface on each class and implement_interface_function per class.
 
@@ -228,6 +268,8 @@ Create a Blueprint Interface asset: a contract of function signatures that unrel
 
 ## `create_directory`
 
+*Additive, idempotent.*
+
 Make a content-browser folder at a UE long path (e.g. /Game/MyGame/Systems/Foo). Idempotent: an existing folder is not an error, it comes back already_existed:true. Use it to lay out a system's folders before creating assets there; a path that does not start with '/' is rejected.
 
 | Parameter | Type | Required | Description |
@@ -237,6 +279,8 @@ Make a content-browser folder at a UE long path (e.g. /Game/MyGame/Systems/Foo).
 **Returns:** `{ path: string, already_existed: bool (true = nothing was created, and that is a success) }`
 
 ## `create_enum`
+
+*Additive.*
 
 Create a Blueprint enum asset from an ordered list of enumerator DISPLAY names -- states, categories and types that Blueprints and DataTable columns switch on. Errors if the asset already exists (not idempotent). Beware the display/internal split that follows: the engine stores enumerators internally as NewEnumerator0, NewEnumerator1, ... and writers into DataTables must use those internal names, because a display name containing spaces is cut at the first space by the text importer and silently lands on index 0. So keep single-word display names, or expect to write NewEnumeratorN. add_enum_entry / rename_enum_entry / reorder_enum_entry edit it afterwards.
 
@@ -250,6 +294,8 @@ Create a Blueprint enum asset from an ordered list of enumerator DISPLAY names -
 
 ## `create_file_media_source`
 
+*Additive.*
+
 Create a UFileMediaSource asset at package_path/name that points at a movie file path, register it and save it; the file does not need to exist. An existing asset is returned unchanged (file_path is not applied). Returns asset_path, the stored file_path, created and saved.
 
 | Parameter | Type | Required | Description |
@@ -262,6 +308,8 @@ Create a UFileMediaSource asset at package_path/name that points at a movie file
 
 ## `create_functional_test`
 
+*Additive.*
+
 Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a multiplayer-friendly, Blueprint-scriptable test actor) and save it.
 
 | Parameter | Type | Required | Description |
@@ -273,6 +321,8 @@ Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a m
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_existed, saved }`
 
 ## `create_media_player`
+
+*Additive.*
 
 Create a UMediaPlayer asset at package_path/name with PlayOnOpen and looping set, optionally with a linked UMediaTexture named "&lt;name>_T" beside it, and save both. An existing player is returned unchanged (flags not applied). Returns asset_path, play_on_open, loop, media_texture_path, saved and texture_saved.
 
@@ -288,6 +338,8 @@ Create a UMediaPlayer asset at package_path/name with PlayOnOpen and looping set
 
 ## `create_media_texture`
 
+*Additive.*
+
 Create a UMediaTexture asset at package_path/name (AutoClear on, no player linked) and save it; an existing texture is returned unchanged, with its linked player if any. Link a player with link_media_texture_to_player. Returns asset_path, created, has_media_player and saved.
 
 | Parameter | Type | Required | Description |
@@ -298,6 +350,8 @@ Create a UMediaTexture asset at package_path/name (AutoClear on, no player linke
 **Returns:** `{ media_texture_name, asset_path, created, already_exists, has_media_player, media_player_path, saved, save_error }`
 
 ## `create_struct`
+
+*Destructive, idempotent.*
 
 Create a Blueprint Struct (UUserDefinedStruct). Idempotent by reset+rebuild: a stale struct already at the path is deleted and recreated fresh (reset_stale:true); a same-path asset of a different type is an honest error.
 
@@ -310,6 +364,8 @@ Create a Blueprint Struct (UUserDefinedStruct). Idempotent by reset+rebuild: a s
 
 ## `delete_actor`
 
+*Destructive.*
+
 Remove one actor from the EDITOR level through the editor's own delete path (select + edactDeleteSelected), so it is transacted and undoable, and echo back the deleted actor's JSON. WARNING: two edges that bite: it matches the INTERNAL name only -- unlike set_actor_transform, an editor LABEL will not resolve -- and it clears the current selection as a side effect. It cannot touch PIE actors (editor world only), and the deletion lives in memory until save_level writes the .umap. Use batch_delete_actors for several at once.
 
 | Parameter | Type | Required | Description |
@@ -320,6 +376,8 @@ Remove one actor from the EDITOR level through the editor's own delete path (sel
 
 ## `delete_directory`
 
+*Destructive, idempotent.*
+
 DESTRUCTIVE: removes a content-browser folder AND every asset inside it, recursively, with no dry-run and no referencer check (unlike bulk_delete_assets, which defaults to dry_run and refuses vendored roots). Driven through UEditorAssetSubsystem, which is the pair that works headless. Idempotent: an already-absent folder answers already_absent:true. Verify afterwards with `git status` on the corresponding Content/ path -- never with the `deleted` flag alone.
 
 | Parameter | Type | Required | Description |
@@ -329,6 +387,8 @@ DESTRUCTIVE: removes a content-browser folder AND every asset inside it, recursi
 **Returns:** `{ path: string, already_absent: bool, deleted: bool }`
 
 ## `deselect_actors`
+
+*Destructive.*
 
 Drop specific actors from the editor selection, or clear it entirely with deselect_all. The counterpart of select_actors; use the clear-all form to leave the editor in a known state before a tool that acts on the selection (copy_actors, move_actors_to_level) so it does not pick up leftovers. Editor world only; matches INTERNAL names.
 
@@ -341,6 +401,8 @@ Drop specific actors from the editor selection, or clear it entirely with desele
 
 ## `disable_plugin`
 
+*Destructive, idempotent.*
+
 Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
 
 | Parameter | Type | Required | Description |
@@ -350,6 +412,8 @@ Turn a plugin off in the .uproject and save the project file to disk. WARNING: `
 **Returns:** `{ plugin_name: string, enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart }`
 
 ## `duplicate_actor`
+
+*Additive.*
 
 Copy one editor-world actor in place through the editor's duplicate path, keeping its component overrides, and return both the new actor's JSON and the original's. Undoable; it changes the editor SELECTION as a side effect. Matches the INTERNAL name only (no editor labels). The clone exists in memory until save_level writes the .umap -- and a save that answers success while `git status` stays clean means the .umap is read-only (e.g. a Git LFS `lockable` file you have not locked), not that the duplicate failed.
 
@@ -361,6 +425,8 @@ Copy one editor-world actor in place through the editor's duplicate path, keepin
 
 ## `enable_plugin`
 
+*Destructive, idempotent.*
+
 Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. Use get_plugin_status to read the current state and disable_plugin for the inverse.
 
 | Parameter | Type | Required | Description |
@@ -371,6 +437,8 @@ Turn a plugin on in the .uproject and save the project file to disk. WARNING: `e
 
 ## `end_transaction`
 
+*Destructive.*
+
 Close the transaction opened by begin_transaction and COMMIT it, so everything done inside becomes one entry on the editor's undo stack (undo_count grows by one). Pair it with every begin_transaction -- leaving one open makes later edits silently join it. Use cancel_transaction instead when you want the batch thrown away rather than kept.
 
 No parameters.
@@ -378,6 +446,8 @@ No parameters.
 **Returns:** `{ success: bool, transaction_index: int (the one that was closed), undo_count: int after the commit }`
 
 ## `execute_console_command`
+
+*Destructive.*
 
 Run a console command through the EDITOR (GEditor->Exec against the editor world): cvars, `stat` overlays, `r.*` toggles, engine commands. WARNING: it does NOT reach a running PIE session's PlayerController, so player cheats like `BugItGo` come back handled:false -- to move or cheat a PIE pawn use execute_python against the anchored PIE world. `handled` is the engine's own "some Exec claimed this string", not proof of an effect: verify with the state (get_cvar, a property read), never with this bool.
 
@@ -388,6 +458,8 @@ Run a console command through the EDITOR (GEditor->Exec against the editor world
 **Returns:** `{ command: string, handled: bool (an Exec handler claimed the string -- not evidence the effect happened) }`
 
 ## `execute_python`
+
+*Destructive, open world.*
 
 Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE TRAP -- this tool is the ONE HOLE in the plugin's PIE guard: the commands that compile a Blueprint or write to disk are REFUSED while Play-in-Editor is live (McpPieSafety.gen.h), but arbitrary Python cannot be classified statically, so a script that reaches compile/save through unreal.* (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, anything that dirties a Blueprint) RUNS ANYWAY. With PIE live that ends either in a DEAD EDITOR -- the compiler's UREINST_* trampoline retains a world and CheckForWorldGCLeaks is Fatal, taking every unsaved edit with it -- or in a save that reports success without writing a byte (Editor.AllowSavingAssetsDuringPIE=0). So: call is_play_in_editor_active FIRST whenever your script compiles, saves, or mutates a Blueprint, and stop PIE before running it. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call: scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties / get_property_value. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 
@@ -403,6 +475,8 @@ Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME:
 
 ## `execute_python_file`
 
+*Destructive, open world.*
+
 Execute a Python (.py) file inside the running Unreal Editor. PIE TRAP: same hole as execute_python -- arbitrary Python is NOT covered by the plugin's PIE guard, so a script that compiles a Blueprint or saves an asset runs even with Play-in-Editor live, where compiling can KILL the editor (UREINST_* retains a world, CheckForWorldGCLeaks is Fatal) and saving reports success without writing (Editor.AllowSavingAssetsDuringPIE=0). Check is_play_in_editor_active first when the file compiles, saves or mutates a Blueprint; reading the live world during PIE is safe. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 
 | Parameter | Type | Required | Description |
@@ -415,6 +489,8 @@ Execute a Python (.py) file inside the running Unreal Editor. PIE TRAP: same hol
 
 ## `export_assets`
 
+*Destructive.*
+
 Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), each written to export_path/&lt;package path without its leading slash>.&lt;extension>, e.g. D:/Exports/Game/Meshes/SM_Rock.FBX. What was written is measured per asset on disk: exported lists each asset with its file, and not_exported the ones that did not load, have no exporter or failed to write. Succeeds only when every requested asset was written.
 
 | Parameter | Type | Required | Description |
@@ -425,6 +501,8 @@ Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/
 **Returns:** `{ exported_count: int, failed_count: int, requested_count: int, export_path: string, exported: [{ asset_path: string, file: string }], not_exported: [string] }`
 
 ## `find_actors_by_name`
+
+*Read-only.*
 
 Locate actors by a SUBSTRING of their internal name and/or their editor label, returning name, label, class and transform for each hit. This is the one to use when you know what a thing is CALLED but not its class -- get_actors_by_class needs an exact class name, and this one alone can search labels (match='label'), which is where hand-assigned names live. Plain case-INSENSITIVE substring, no wildcards and no regex: 'turret' matches BP_Turret_C_2, and '*' matches literally nothing. Its world selector is the canonical one: 'editor' (default), 'pie'/'game', 'server', 'client' and 'pie:N' all resolve for real, an unrecognised value FAILS instead of falling through to the editor world, and the reply stamps world_package/world_type/net_mode/pie_instance so you can tell which world answered.
 
@@ -439,6 +517,8 @@ Locate actors by a SUBSTRING of their internal name and/or their editor label, r
 
 ## `find_duplicate_assets`
 
+*Read-only.*
+
 Find groups of assets sharing the same base name under a folder tree (e.g. same name existing under both a vendored library tree and a first-party fork)
 
 | Parameter | Type | Required | Description |
@@ -452,6 +532,8 @@ Find groups of assets sharing the same base name under a folder tree (e.g. same 
 **Returns:** `{ folder_path, recursive, class_filter, min_group_size, group_count, total_duplicate_assets, assets_scanned, max_results, results_truncated, groups: [{ name, count, classes: [string], assets: [{path, package, class}] }] } (groups sorted by count descending)`
 
 ## `find_unused_assets`
+
+*Read-only.*
 
 Find assets in a folder with zero referencers, and annotate each survivor with the reasons it should be KEPT anyway. "Zero referencers" is not the same as "safe to delete": there are three common ways an asset stays alive with an empty referencer set -- it is explicitly protected, a Config/Default*.ini names it, or it is a fork descending from a vendored base library. Each becomes a keep_reason string on the entry; deletion_candidates lists only the entries with NO keep_reason. Nothing is ever removed from unused_assets by these flags (hiding a genuinely unreferenced asset would be the same lie in the other direction). NOTE: there is deliberately no `is_world` -- it is already visible in class_name ("World").
 
@@ -469,6 +551,8 @@ Find assets in a folder with zero referencers, and annotate each survivor with t
 
 ## `fixup_redirectors`
 
+*Destructive.*
+
 Clean up the redirectors a rename/move left behind, under a folder: load each referencing package (which repoints it) and re-save it, optionally force-deleting redirectors whose referencers all saved. Hand-rolled on purpose -- IAssetTools::FixupReferencers HARD-CRASHES on World-Partition/OFPA projects -- and heavily railed: it REFUSES while PIE is active, never writes under readonly_roots (default: the project's Read Only Content Roots), never outside /Game, and never loads or saves map or OFPA packages, handing the resident ones back in skipped_current_world for you to save_level instead. Deletions are DISK-verified (a redirector whose .uasset survives lands in redirectors_delete_failed, not in the count). WARNING: redirectors_found/deleted count OBJECTS: one renamed Blueprint leaves THREE in a single package -- read redirector_packages_found for files.
 
 | Parameter | Type | Required | Description |
@@ -481,6 +565,8 @@ Clean up the redirectors a rename/move left behind, under a folder: load each re
 
 ## `get_actors_in_level`
 
+*Read-only.*
+
 Dump EVERY actor of a world (name, class, transform), capped by max_results at 5000, with total_actors_in_level and results_truncated so you know if you saw all of it. The unfiltered census: reach for get_actors_by_class when you know the class, find_actors_by_name for a name/label substring, get_actors_in_radius for a place. Its world selector is the canonical one: 'editor' (default), 'pie'/'game', 'server', 'client' and 'pie:N' all resolve for real, an unrecognised value FAILS naming the worlds that exist instead of quietly answering from the editor world, and every reply carries world_package/world_type/net_mode/pie_instance so you can see WHICH world answered rather than assuming.
 
 | Parameter | Type | Required | Description |
@@ -492,6 +578,8 @@ Dump EVERY actor of a world (name, class, transform), capped by max_results at 5
 
 ## `get_allow_cinematic_control`
 
+*Read-only.*
+
 Read whether the active editor viewport allows cinematic control (Sequencer possession)
 
 No parameters.
@@ -500,6 +588,8 @@ No parameters.
 
 ## `get_automation_test_results`
 
+*Read-only.*
+
 Returns the cached result of the last synchronous test completed through run_automation_test or start_gauntlet_run, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
 
 No parameters.
@@ -507,6 +597,8 @@ No parameters.
 **Returns:** `{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count }`
 
 ## `get_compile_errors`
+
+*Destructive.*
 
 WARNING: despite the get_ prefix this COMPILES the Blueprint (silently) and then returns its error/warning count and every message with severity -- it is a mutation, not a read: compiling dirties the package, can cascade into other packages, and can knock a Blueprint's placed OFPA instances out of the world in memory (get_actors_by_class then returns 0 in editor AND PIE; load_level of the same map brings them back). Use it as the honest oracle for "does this BP build" -- num_errors and the message list are real, read off the compiler results log -- and reach for check_blueprint_errors / find_erroring_blueprints when a compile is not what you want.
 
@@ -518,6 +610,8 @@ WARNING: despite the get_ prefix this COMPILES the Blueprint (silently) and then
 
 ## `get_current_level`
 
+*Read-only.*
+
 Which map a world is sitting on: level_name, its package_name (/Game/... or /Engine/...), the resolved disk filename, whether the package is dirty, and a live actor count. package_name is the discriminator that catches the classic mistake -- if it starts with /Engine/ you are on an engine template (what new_level leaves behind) and a save_level without `filename` would overwrite the ENGINE's own map. Defaults to the EDITOR world; it also takes the standard `world` selector, so during PIE you can ask the play world ('pie'/'server'/'client'/'pie:N') instead of being told about the authoring map and having no way to know it.
 
 | Parameter | Type | Required | Description |
@@ -528,6 +622,8 @@ Which map a world is sitting on: level_name, its package_name (/Game/... or /Eng
 
 ## `get_cvar`
 
+*Read-only.*
+
 Reads a console variable's live value, help text, and flags.
 
 | Parameter | Type | Required | Description |
@@ -537,6 +633,8 @@ Reads a console variable's live value, help text, and flags.
 **Returns:** `{ name: string, value: string, string_value: string, int_value: int, float_value: float, bool_value: bool, help: string, flags: int, set_by: string }`
 
 ## `get_engine_ini_value`
+
+*Read-only.*
 
 Read one key from the merged in-memory config (GConfig) of an INI such as Engine or Game. Read-only; returns value and found (false, with an empty value, when the section or key is missing). Pass config_file without .ini. Writer: set_engine_ini_value.
 
@@ -550,6 +648,8 @@ Read one key from the merged in-memory config (GConfig) of an INI such as Engine
 
 ## `get_level_blueprint`
 
+*Additive.*
+
 Get (or, with create=true, bring into being) the current level's Level Blueprint and return the blueprint_path that the graph tools need -- its event graph is always called "EventGraph", so add_graph_node / connect_pins can target it directly with graph_name="EventGraph". This is the entry point for level-specific scripting that does not belong in any actor. Read-only by default: with create=false and no blueprint present it answers exists:false + success:true rather than failing.
 
 | Parameter | Type | Required | Description |
@@ -560,6 +660,8 @@ Get (or, with create=true, bring into being) the current level's Level Blueprint
 
 ## `get_media_info`
 
+*Read-only.*
+
 Read a media asset by path: class and media_type ("MediaPlayer", "MediaTexture", "FileMediaSource" or "Other"), plus play_on_open and loop for a player, the linked player and auto_clear for a texture, or file_path for a file source. Read-only.
 
 | Parameter | Type | Required | Description |
@@ -569,6 +671,8 @@ Read a media asset by path: class and media_type ("MediaPlayer", "MediaTexture",
 **Returns:** `{ asset_path, asset_name, class, media_type, play_on_open, loop, has_media_player, media_player_path, auto_clear, file_path }`
 
 ## `get_message_log_entries`
+
+*Read-only.*
 
 Read back the messages currently in a named engine Message Log listing (IMessageLogListing::GetFilteredMessages), each resolved back to the actor/component the engine attached to it. The reader that pairs with add_message_log_entry/clear_message_log.
 
@@ -582,6 +686,8 @@ Read back the messages currently in a named engine Message Log listing (IMessage
 
 ## `get_near_clip_plane`
 
+*Read-only.*
+
 Read the near clip plane (and far clip override) of the active editor viewport
 
 No parameters.
@@ -589,6 +695,8 @@ No parameters.
 **Returns:** `{ near_clip_plane: number, far_clip_plane_override: number }`
 
 ## `get_output_log_lines`
+
+*Read-only.*
 
 Read the single per-editor-session log buffer UEAgent attaches to GLog (general editor output, not PIE-only -- Serialize() captures every category/verbosity that passes through GLog, regardless of PIE state; usable for PIE Functional Test / wait_for_pie_completion orchestration too). NON-DESTRUCTIVE cursor read (since_sequence_id, same idiom as poll_gameplay_messages), structured entries. Supports all three filters (message text, verbosity level, category).
 
@@ -604,6 +712,8 @@ Read the single per-editor-session log buffer UEAgent attaches to GLog (general 
 
 ## `get_python_status`
 
+*Read-only.*
+
 Reports whether the editor Python plugin is loaded, available, configured and initialized, with the interpreter path and engine version; when Python is initialized it also evaluates sys.version for python_version (empty otherwise). Changes nothing; check it before execute_python or execute_python_file.
 
 No parameters.
@@ -611,6 +721,8 @@ No parameters.
 **Returns:** `{ engine_version, module_loaded, python_available, python_configured, python_initialized, interpreter_path, python_version }`
 
 ## `get_scalability_levels`
+
+*Read-only.*
 
 Reads the current engine scalability quality levels.  Calls Scalability::GetQualityLevels().
 
@@ -620,6 +732,8 @@ No parameters.
 
 ## `get_selected_actors`
 
+*Read-only.*
+
 Read what is selected in the editor viewport/outliner right now: each actor's JSON plus the count and the world it belongs to. Use it to act on "what the user just clicked" without asking for names, and as the read-back for select_actors / deselect_actors. Editor world only, and remember that delete_actor, duplicate_actor, copy_actors and move_actors_to_level all MUTATE the selection as a side effect -- read it before those, not after.
 
 No parameters.
@@ -627,6 +741,8 @@ No parameters.
 **Returns:** `{ selected_actors: [actor JSON], selected_count: int, world_name: string }`
 
 ## `get_struct_members`
+
+*Read-only.*
 
 List the members of a user-defined struct (UUserDefinedStruct) with their type, default value, and flags.  The reader that pairs with add_struct_member.
 
@@ -638,6 +754,8 @@ List the members of a user-defined struct (UUserDefinedStruct) with their type, 
 
 ## `get_transaction_history`
 
+*Read-only.*
+
 Read the editor's undo buffer as a list, most-recent-first: each entry's title, context, primary object and whether it has already been undone. Use it to answer "what changed the editor recently, and was it me" -- including edits made by the human in the UI -- before you undo anything or blame a tool for a state you did not expect. Pure read; get_undo_state gives the counts-only summary.
 
 | Parameter | Type | Required | Description |
@@ -648,6 +766,8 @@ Read the editor's undo buffer as a list, most-recent-first: each entry's title, 
 
 ## `get_undo_state`
 
+*Read-only.*
+
 One call that answers everything you need before touching undo/redo: both counts, both next-entry LABELS, and whether a transaction is still OPEN (transaction_open -- the thing that silently swallows later edits into someone else's batch). Read this instead of chaining can_undo + can_redo, and read it BEFORE undo/undo_multiple so you know what you are about to revert.
 
 No parameters.
@@ -655,6 +775,8 @@ No parameters.
 **Returns:** `{ can_undo, can_redo, undo_count (entries undo can still revert), redo_count (undone entries redo can restore), next_undo, next_redo, transaction_open, transaction_index }`
 
 ## `get_view_type`
+
+*Read-only.*
 
 Read the current view type of the active level editor viewport
 
@@ -664,6 +786,8 @@ No parameters.
 
 ## `get_viewport_exposure`
 
+*Read-only.*
+
 Read the current exposure settings of the active editor viewport
 
 No parameters.
@@ -671,6 +795,8 @@ No parameters.
 **Returns:** `{ fixed: bool, ev100: number }`
 
 ## `get_viewport_fov`
+
+*Read-only.*
 
 Read the current perspective FOV (in degrees) of the active editor viewport
 
@@ -680,6 +806,8 @@ No parameters.
 
 ## `get_viewport_state`
 
+*Read-only.*
+
 Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
 
 No parameters.
@@ -687,6 +815,8 @@ No parameters.
 **Returns:** `{ realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }`
 
 ## `high_res_screenshot`
+
+*Destructive.*
 
 Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHRONOUSLY. Prefers the Play-In-Editor game view when PIE is active (captured_pie=true); otherwise the active editor viewport. Drives FViewport::TakeHighResScreenShot() + FViewport::Draw(), which renders at resolution_multiplier x the viewport size and blocks (via ProcessScreenShots) until the file is on disk. The "HighResShot" exec path defers the write to the next render frame, which never runs headless, so it writes nothing. Requires a real RHI (errors honestly under -nullrhi) and a live viewport. Note: the supersampled path re-renders the scene, so the UMG/Slate HUD is NOT included; use capture_pie_screenshot for a HUD-inclusive PIE shot.
 
@@ -699,6 +829,8 @@ Capture a high-resolution (supersampled) screenshot and write it to a PNG SYNCHR
 
 ## `import_asset`
 
+*Destructive.*
+
 Import an IMAGE file from disk into a content folder as a Texture2D, driving the texture factory inline (it deliberately avoids IAssetTools::ImportAssets, which asserts when re-entered from the engine tick) and returning the created object path. It always overwrites an asset of the same name -- `replace_existing` is accepted and ignored. Images ONLY -- png/jpg/jpeg/bmp/tga/dds/exr/hdr/tif/tiff/psd/pcx: any other extension is a clean error naming the dedicated handler to use instead (import_texture_file for images, import_sound_file for .wav, import_landscape_heightmap for terrain, interchange_import_asset for FBX/glTF meshes). A missing source file or a destination that is not a /Game long path also errors before anything is touched.
 
 | Parameter | Type | Required | Description |
@@ -710,6 +842,8 @@ Import an IMAGE file from disk into a content folder as a Texture2D, driving the
 **Returns:** `{ source_file_path: string, destination_path: string, imported_object_paths: [string] }`
 
 ## `import_font_file`
+
+*Destructive.*
 
 Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the companion UFont that a FSlateFontInfo needs to actually render text. This is the only way to get a typeface into the project headlessly: import_asset is images-only on purpose, and nothing else in the toolset touches fonts. Drives UFontFileImportFactory inline (never IAssetTools::ImportAssets, which asserts when re-entered from the engine tick, same reason import_asset avoids it) and ALWAYS sets BatchCreateFontAsset explicitly -- left at its default the factory pops a MODAL DIALOG asking whether to create the UFont, which would hang the editor on a click that is never coming. Once imported, point a widget at it with set_widget_property on the dotted path "Font.FontObject" (a UFont) plus "Font.TypefaceFontName", or "Font.Size" for the size.
 
@@ -724,6 +858,8 @@ Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the c
 
 ## `link_media_texture_to_player`
 
+*Destructive.*
+
 Links a media texture to a media player via SetMediaPlayer
 
 | Parameter | Type | Required | Description |
@@ -734,6 +870,8 @@ Links a media texture to a media player via SetMediaPlayer
 **Returns:** `{ media_texture_path, media_player_path, linked, saved, bound_player_path, save_error }`
 
 ## `list_automation_tests`
+
+*Read-only.*
 
 List registered automation tests in the editor (read-only; does not run them)
 
@@ -746,6 +884,8 @@ List registered automation tests in the editor (read-only; does not run them)
 
 ## `list_cvars`
 
+*Read-only.*
+
 Lists registered console variables whose name contains a substring.  Iterates IConsoleManager::Get().ForEachConsoleObjectThatContains(filter), collecting only console *variables* (commands are skipped), capped at max_results.
 
 | Parameter | Type | Required | Description |
@@ -757,6 +897,8 @@ Lists registered console variables whose name contains a substring.  Iterates IC
 
 ## `list_cvars_with_prefix`
 
+*Read-only.*
+
 List console variables and commands whose name starts with prefix (case-insensitive); each entry has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a substring search use search_cvars.
 
 | Parameter | Type | Required | Description |
@@ -767,6 +909,8 @@ List console variables and commands whose name starts with prefix (case-insensit
 **Returns:** `{ count, cvars: [...] }`
 
 ## `list_dirty_packages`
+
+*Read-only.*
 
 What is UNSAVED in the editor right now: every dirty package with its disk path, split into map / OFPA-external / asset, and -- the reason to run it -- readonly_dirty_count, the single go/no-go number telling you a vendored root like /Game/VendorPack would be REWRITTEN by the next bulk save. Run it before closing the editor, before compiling, and before any save; it also resolves OFPA hashes to actor labels so /__ExternalActors__/AB/CD/EF12 becomes a name. Strictly read-only: never marks dirty, never saves. WARNING: it reports IN-MEMORY state only -- a package clean here can still differ from HEAD on disk, so `git status` stays the disk authority. And do NOT use its pie_active field as the PIE gate: it can answer false with PIE running; the oracle is is_play_in_editor_active.
 
@@ -780,6 +924,8 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 
 ## `list_engine_ini_sections`
 
+*Read-only.*
+
 List the section names of one INI in the merged in-memory config (GConfig), like get_engine_ini_value reads it: count, sections, found (false when GConfig does not know that INI) and file_path. Read-only.
 
 | Parameter | Type | Required | Description |
@@ -790,6 +936,8 @@ List the section names of one INI in the merged in-memory config (GConfig), like
 **Returns:** `{ count, sections: [string], found: bool, config_file, file_path }`
 
 ## `load_level`
+
+*Destructive.*
 
 Open a map in the editor (by /Game path or disk .umap), replacing the current world. Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
 
@@ -803,6 +951,8 @@ Open a map in the editor (by /Game path or disk .umap), replacing the current wo
 
 ## `migrate_assets`
 
+*Destructive.*
+
 Copy assets, and their dependencies unless ignore_dependencies, into another project's Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. The engine first saves every dirty package of this editor, and migrates nothing if one of them fails to save. What was copied is measured from the migration's own package list against the disk: migrated lists each package written (dependencies included), skipped_existing the requested ones the destination already had, failed the requested ones neither written nor skipped. Succeeds when nothing requested failed. destination_path must be a Content folder with a .uproject (or one .uplugin) next to it, or the engine migrates nothing and the call fails.
 
 | Parameter | Type | Required | Description |
@@ -814,6 +964,8 @@ Copy assets, and their dependencies unless ignore_dependencies, into another pro
 **Returns:** `{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool, migrated: [{ package: string, file: string }], skipped_existing: [string], failed: [string], note: string? }`
 
 ## `move_actors_to_level`
+
+*Destructive, idempotent.*
 
 Relocate existing editor-world actors into another sub-level (persistent or a loaded streaming level) -- it rescues actors that got spawned into the wrong level, which set_current_level only prevents going forward. Idempotent: actors already there come back in already_in_level instead of being touched. WARNING: it is clipboard-backed, so the editor SELECTION is mutated as a side effect, and the destination must be loaded AND unlocked. Both levels' packages get dirty: save_level after.
 
@@ -827,6 +979,8 @@ Relocate existing editor-world actors into another sub-level (persistent or a lo
 
 ## `new_level`
 
+*Destructive.*
+
 Loads the ENGINE default template map into the editor. It does NOT create a level and the level is NOT empty (~45 actors: Floor, PlayerStart, DirectionalLight, SkyLight, SkyAtmosphere, fog); `level_name` is accepted but IGNORED. After this the editor sits on an /Engine map, so a save_level without `filename` would write over the engine's own .umap. Like load_level it REFUSES to run while other UWorlds are resident in memory, because this is a LoadMap and the engine's world-leak check turns that into a Fatal error that kills the editor process (see force).
 
 | Parameter | Type | Required | Description |
@@ -838,6 +992,8 @@ Loads the ENGINE default template map into the editor. It does NOT create a leve
 
 ## `open_message_log`
 
+*Destructive.*
+
 Open the editor Message Log window to a given listing.
 
 | Parameter | Type | Required | Description |
@@ -848,6 +1004,8 @@ Open the editor Message Log window to a given listing.
 
 ## `paste_actors`
 
+*Destructive.*
+
 Drop whatever copy_actors left on the editor clipboard into the current level (edactPasteSelected), optionally re-centring the whole group on a world location while KEEPING each actor's relative offset -- that is the point of the copy/paste pair versus duplicate_actor. The pasted actors end up selected and are returned with their new names and transforms. Editor world only; they live in memory until save_level writes the .umap.
 
 | Parameter | Type | Required | Description |
@@ -857,6 +1015,8 @@ Drop whatever copy_actors left on the editor clipboard into the current level (e
 **Returns:** `{ pasted_actors: [actor JSON with the new auto-assigned names], pasted_count: int, success: bool }`
 
 ## `place_actor_on_terrain`
+
+*Additive.*
 
 Ground an actor on the landscape by sampling the heightmap at its XY (no line trace; traces miss the landscape headless). Sets the actor's Z so either its mesh bbox bottom or its origin sits at the sampled height + z_offset.
 
@@ -870,6 +1030,8 @@ Ground an actor on the landscape by sampling the heightmap at its XY (no line tr
 
 ## `print_to_output_log`
 
+*Destructive.*
+
 Print a message to the Unreal Output Log via UE_LOG(LogTemp, ...).
 
 | Parameter | Type | Required | Description |
@@ -881,6 +1043,8 @@ Print a message to the Unreal Output Log via UE_LOG(LogTemp, ...).
 
 ## `redo`
 
+*Destructive.*
+
 Re-apply the transaction that undo just reverted and report what remains, including next_redo. WARNING: `success` is ALWAYS true even with an empty redo stack -- read `applied` instead. Note the redo stack is discarded as soon as any NEW edit is made after an undo, so a redo that answers applied:false usually means something was changed in between, not that the command failed.
 
 No parameters.
@@ -888,6 +1052,8 @@ No parameters.
 **Returns:** `{ applied: bool (THE oracle), undo_count: int, can_redo: bool, next_redo: string (label of the next redoable entry) }`
 
 ## `redo_multiple`
+
+*Destructive.*
 
 Re-apply N undone transactions in one call, stopping early when the redo stack runs out rather than erroring. WARNING: compare actually_redone against requested -- that gap is the only honest signal. Remember any new edit made after an undo wipes the redo stack, so this can legitimately redo nothing.
 
@@ -898,6 +1064,8 @@ Re-apply N undone transactions in one call, stopping early when the redo stack r
 **Returns:** `{ requested: int (your input), actually_redone: int (compare against it), undo_count: int }`
 
 ## `reload_asset_package`
+
+*Destructive.*
 
 Re-read already-loaded packages FROM DISK, non-interactively (it never opens the modal that would freeze a headless editor), either preserving or permanently discarding their in-memory edits. This is the repair for the situation list_dirty_packages flags: a vendored package left dirty by a compile cascade is cleaned with on_dirty="discard" (was_dirty:[...] -> still_dirty:[]), so the next bulk save cannot write it. Also the way to throw away a bad in-memory edit without touching disk. It reports before/after evidence per package, and skips what it cannot safely reload (not loaded, OFPA, worlds) instead of pretending. WARNING: on_dirty="discard" is irreversible for unsaved work -- check what is dirty first.
 
@@ -911,6 +1079,8 @@ Re-read already-loaded packages FROM DISK, non-interactively (it never opens the
 
 ## `remove_component_from_actor`
 
+*Destructive.*
+
 Detach and destroy one component from an actor PLACED in the level, by component name -- the inverse of add_component_to_actor and, like it, an instance-level edit that does not touch the actor's Blueprint (use remove_component_from_blueprint for the class). Discover the exact component_name with get_actor_components first. Editor world only; dirties the actor's package, so save_level to keep it.
 
 | Parameter | Type | Required | Description |
@@ -921,6 +1091,8 @@ Detach and destroy one component from an actor PLACED in the level, by component
 **Returns:** `{ actor_name: string, removed_component: string, component_type: string, success: bool }`
 
 ## `remove_enum_entry`
+
+*Destructive, idempotent.*
 
 Remove one enumerator from a Blueprint Enum by display name (or internal name).  Idempotent (a missing entry reports already_absent without error); refuses to remove the last remaining entry. The hidden _MAX sentinel is never counted or removable.
 
@@ -933,6 +1105,8 @@ Remove one enumerator from a Blueprint Enum by display name (or internal name). 
 
 ## `remove_struct_member`
 
+*Destructive, idempotent.*
+
 Remove a member from a user-defined struct.  Idempotent (a missing member reports already_absent without error); the engine refuses to remove the last remaining member (a struct cannot be empty) -- reported as an honest error.
 
 | Parameter | Type | Required | Description |
@@ -944,6 +1118,8 @@ Remove a member from a user-defined struct.  Idempotent (a missing member report
 
 ## `remove_undo_barrier`
 
+*Destructive.*
+
 Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished. WARNING: `success` is hardcoded true: `removed` is the oracle and comes back false as an honest no-op when there was no barrier. Use clear_undo_barriers to drop every barrier at once.
 
 No parameters.
@@ -951,6 +1127,8 @@ No parameters.
 **Returns:** `{ success: bool (hardcoded), removed: bool (THE oracle -- false = there was nothing to pop), undo_barrier: int now in force, undo_count: int }`
 
 ## `rename_enum_entry`
+
+*Destructive, idempotent.*
 
 Rename one enumerator of a Blueprint Enum (UUserDefinedEnum): resolve the entry by its current display name (or internal name) to its index, then set a new display name via FEnumEditorUtils::SetEnumeratorDisplayName.  Idempotent: renaming an entry to the name it already has is a no-op success (already_named). An unknown current entry is an honest error; so is a new name that is empty/invalid or duplicates another entry's display name (the engine's IsEnumeratorDisplayNameValid rejects it). The hidden _MAX sentinel is never addressable.
 
@@ -964,6 +1142,8 @@ Rename one enumerator of a Blueprint Enum (UUserDefinedEnum): resolve the entry 
 
 ## `rename_struct_member`
 
+*Destructive, idempotent.*
+
 Rename a member of a user-defined struct by resolving its current display name to its stable VarGuid, then applying the new display name (the same FStructureEditorUtils::RenameVariable path add_struct_member uses to set the initial name).  Idempotent: renaming a member to the name it already has is a no-op success (already_named). An unknown current member, or a new name that collides with another member's name, is an honest error.
 
 | Parameter | Type | Required | Description |
@@ -975,6 +1155,8 @@ Rename a member of a user-defined struct by resolving its current display name t
 **Returns:** `{ struct_path: string, member_name: string, new_name: string, renamed: bool, already_named: bool, member: object }`
 
 ## `reorder_enum_entry`
+
+*Destructive.*
 
 Move one enumerator to a new position in a Blueprint Enum, shifting the others (e.g. [A,B,C,D] move B->index 2 = [A,C,B,D]).  to_index is clamped to the user-entry range (the trailing _MAX sentinel is excluded). An unknown entry is an honest error.
 
@@ -988,6 +1170,8 @@ Move one enumerator to a new position in a Blueprint Enum, shifting the others (
 
 ## `reset_transaction_buffer`
 
+*Destructive, idempotent.*
+
 IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entries too, not just yours) and drops any open transaction. It does not revert anything -- edits already made stay made, they just stop being undoable. Use only to reclaim memory after a huge batch, or when a corrupt buffer is causing trouble; to undo work use undo/undo_multiple. undo_count_before vs after is the evidence.
 
 | Parameter | Type | Required | Description |
@@ -998,6 +1182,8 @@ IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entri
 
 ## `run_automation_test`
 
+*Destructive.*
+
 Run a single automation test by name and return its result (synchronous tests only)
 
 | Parameter | Type | Required | Description |
@@ -1007,6 +1193,8 @@ Run a single automation test by name and return its result (synchronous tests on
 **Returns:** `{ test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count, note }`
 
 ## `run_functional_test_in_pie`
+
+*Destructive.*
 
 Start a Play-in-Editor session that runs the named AFunctionalTest BP and return the test verdict. Requires the named BP to exist; it will be auto-added to the current editor world's "PrepareForPIE" list so PIE picks it up. Honest-gated: returns success=false (not an error) if PIE fails to start -- the harness detects a transport drop separately.
 
@@ -1019,6 +1207,8 @@ Start a Play-in-Editor session that runs the named AFunctionalTest BP and return
 
 ## `run_smoke_tests`
 
+*Destructive.*
+
 Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. For one test with its log entries use run_automation_test.
 
 No parameters.
@@ -1026,6 +1216,8 @@ No parameters.
 **Returns:** `{ ran, all_passed, note }`
 
 ## `save_asset`
+
+*Destructive.*
 
 Write ONE .uasset to disk by package path (a Blueprint, DataTable, material...) and VERIFY the effect: still_dirty_after_save:false plus file_on_disk:true is the oracle, not `saved`. Use save_level for the .umap and reload_asset_package to undo an in-memory edit instead. PIE: this is REFUSED while Play-in-Editor runs (it never stops or touches your session) -- the engine guard Editor.AllowSavingAssetsDuringPIE=0 rejects the write before attempting anything, so a save during play would report success without writing a byte. Stop PIE and retry, or pass force=true. WARNING: when it answers success:false with PIE down, a common cause is the file being READ-ONLY on disk (e.g. a Git LFS `lockable` file that has not been `git lfs lock`ed). You do not have to check that by hand: `file_read_only` is measured on every call and the error message states whether a read-only file IS or is NOT the explanation. WARNING: it writes exactly one package, so it cannot stop a compile cascade from dirtying a vendored asset that a LATER bulk save then rewrites -- list_dirty_packages before, `git status` after.
 
@@ -1039,6 +1231,8 @@ Write ONE .uasset to disk by package path (a Blueprint, DataTable, material...) 
 
 ## `save_level`
 
+*Destructive.*
+
 Write the editor's current level (.umap) to disk; it REFUSES while PIE is running (the engine guard rejects the write anyway) and derives `success` from the file being on disk afterwards, never from the save call's own bool. WARNING: it also REFUSES when the target .umap is READ-ONLY on disk, which in an LFS repo means a `lockable` path you have not `git lfs lock`ed: that write cannot succeed, and answering over HEAD's still-untouched bytes would report success:true having written nothing. The refusal names the file and the fix (`git lfs lock <file>`) -- take the lock, do not retry. WARNING: on a file that ALREADY existed, `file_exists_on_disk` alone still cannot tell "I wrote it" from "it was already there": the field that proves the write is `file_mtime_changed`. It is deliberately NOT gating `success`, because a save with nothing dirty to write also leaves the mtime alone and that is not a failure. WARNING: with `filename` this is a SaveAs that DUPLICATES: the editor stays on the old map, the new one becomes a resident world (which then makes load_level refuse), and a SECOND save to the same filename opens a modal that freezes the editor -- treat filename as one-shot per name per session.
 
 | Parameter | Type | Required | Description |
@@ -1049,6 +1243,8 @@ Write the editor's current level (.umap) to disk; it REFUSES while PIE is runnin
 **Returns:** `{ success: bool, error?: string, data?: { saved_filename?: string, saved_package?: string, saved_disk_path?: string, level_name?: string, file_exists_on_disk: bool, file_size_bytes: int, file_existed_before: bool, file_mtime_changed: bool (the write itself -- see the read-only note above), save_call_returned: bool, rescued_with_save_packages: bool, pie_was_stopped: bool, orphan_world_risk?: bool, requested?: { filename?: string, save_as?: bool } } }`
 
 ## `search_cvars`
+
+*Read-only.*
 
 Search console variables and commands whose name contains term (case-insensitive); each hit has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a prefix listing use list_cvars_with_prefix; for one cvar in full, get_cvar.
 
@@ -1061,6 +1257,8 @@ Search console variables and commands whose name contains term (case-insensitive
 
 ## `select_actors`
 
+*Destructive.*
+
 Select actors by name in the editor viewport/outliner, appending to or replacing the current selection, and report which ones were not found. Use it to stage the input for the selection-driven tools (copy_actors with copy_selected, move_actors_to_level) or to show the user what you mean before they look. WARNING: matches INTERNAL names only (no editor labels) and misses are reported in not_found_names instead of failing, so check not_found_count. Editor world only.
 
 | Parameter | Type | Required | Description |
@@ -1071,6 +1269,8 @@ Select actors by name in the editor viewport/outliner, appending to or replacing
 **Returns:** `{ selected_actors: [actor JSON], selected_count: int, not_found_count: int, not_found_names?: [string], add_to_selection: bool }`
 
 ## `set_actor_transform`
+
+*Destructive, idempotent.*
 
 Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use batch_set_actor_transform for many actors, place_actor_on_terrain to drop one onto the landscape.
 
@@ -1086,6 +1286,8 @@ Move, rotate and/or scale ONE actor (omitted components are left as they are) an
 
 ## `set_allow_cinematic_control`
 
+*Destructive, idempotent.*
+
 Toggle cinematic-control on the active editor viewport (Sequencer overrride)
 
 | Parameter | Type | Required | Description |
@@ -1095,6 +1297,8 @@ Toggle cinematic-control on the active editor viewport (Sequencer overrride)
 **Returns:** `{ applied: bool, requested: bool, allows_cinematic_control: bool }`
 
 ## `set_camera_speed`
+
+*Destructive, idempotent.*
 
 Set the camera movement speed of the active level editor viewport (the focused one, else the first). Affects this editor session only and saves nothing. Returns requested and camera_speed, the value read back from the viewport afterwards.
 
@@ -1106,6 +1310,8 @@ Set the camera movement speed of the active level editor viewport (the focused o
 
 ## `set_current_level`
 
+*Destructive, idempotent.*
+
 Choose which sub-level of the editor world is CURRENT, i.e. where newly spawned or pasted actors will land. Set it before spawn_actor / paste_actors when a map is split into streaming sub-levels, otherwise everything piles into whichever level happens to be active. Errors honestly if the named streaming level is not loaded/visible; already_current:true when it was already the one. Use move_actors_to_level to relocate actors that ended up in the wrong one.
 
 | Parameter | Type | Required | Description |
@@ -1115,6 +1321,8 @@ Choose which sub-level of the editor world is CURRENT, i.e. where newly spawned 
 **Returns:** `{ current_level: string, changed: bool, already_current: bool, success: true } -- current_level is the level current after the call; a level that is not found, or not loaded and visible, is an error instead.`
 
 ## `set_cvar`
+
+*Destructive, idempotent.*
 
 Sets a console variable via IConsoleManager and reads the value back.  Uses IConsoleManager::Get().FindConsoleVariable(name)->Set(value, ECVF_SetByConsole). Honest error if the named cvar does not exist (unlike a raw console Exec which silently no-ops).
 
@@ -1127,6 +1335,8 @@ Sets a console variable via IConsoleManager and reads the value back.  Uses ICon
 
 ## `set_cvars_from_json`
 
+*Destructive, idempotent.*
+
 Apply many cvars in one call. JSON shape: {"name":"value", ...}
 
 | Parameter | Type | Required | Description |
@@ -1136,6 +1346,8 @@ Apply many cvars in one call. JSON shape: {"name":"value", ...}
 **Returns:** `{ applied, requested, errors: [{name, error}] }`
 
 ## `set_engine_ini_value`
+
+*Destructive, idempotent.*
 
 Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/&lt;Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded.
 
@@ -1150,6 +1362,8 @@ Write one key into the GConfig copy of an INI (Engine by default), flush it to t
 
 ## `set_enum_bitflags`
 
+*Destructive, idempotent.*
+
 Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumerators can be combined as bit flags.  Idempotent: re-setting the same state reports already_set with applied=false.
 
 | Parameter | Type | Required | Description |
@@ -1161,6 +1375,8 @@ Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumera
 
 ## `set_far_clip_plane`
 
+*Destructive, idempotent.*
+
 Override the far clip plane distance on the active editor viewport
 
 | Parameter | Type | Required | Description |
@@ -1170,6 +1386,8 @@ Override the far clip plane distance on the active editor viewport
 **Returns:** `{ applied: bool, requested: number, far_clip_plane: number, override_active: bool }`
 
 ## `set_game_view`
+
+*Destructive, idempotent.*
 
 Toggle "Game View" mode on the active editor viewport (hides editor-only chrome)
 
@@ -1181,6 +1399,8 @@ Toggle "Game View" mode on the active editor viewport (hides editor-only chrome)
 
 ## `set_near_clip_plane`
 
+*Destructive, idempotent.*
+
 Override the near clip plane distance on the active editor viewport
 
 | Parameter | Type | Required | Description |
@@ -1190,6 +1410,8 @@ Override the near clip plane distance on the active editor viewport
 **Returns:** `{ applied: bool, requested: number, near_clip_plane: number, override_active: bool }`
 
 ## `set_scalability_quality`
+
+*Destructive, idempotent.*
 
 Sets engine scalability quality via the Scalability API and reads it back.  Modifies a Scalability::FQualityLevels (starting from the current live state), then applies it with Scalability::SetQualityLevels + ApplyCachedQualityLevels.
 
@@ -1202,6 +1424,8 @@ Sets engine scalability quality via the Scalability API and reads it back.  Modi
 
 ## `set_show_flag`
 
+*Destructive, idempotent.*
+
 Toggle a single engine show flag on the active editor viewport
 
 | Parameter | Type | Required | Description |
@@ -1212,6 +1436,8 @@ Toggle a single engine show flag on the active editor viewport
 **Returns:** `{ applied: bool, flag_name: string, flag_index: int, requested: bool, value: bool }`
 
 ## `set_struct_member_default`
+
+*Destructive, idempotent.*
 
 Set the default value of a user-defined struct member (read-modify-write; the value is validated against the member's type by the engine, so an incompatible value is an honest error).  Idempotent: re-setting the same value is a no-op success.
 
@@ -1225,6 +1451,8 @@ Set the default value of a user-defined struct member (read-modify-write; the va
 
 ## `set_undo_barrier`
 
+*Destructive, idempotent.*
+
 Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier, or clear_undo_barriers for all of them.
 
 No parameters.
@@ -1232,6 +1460,8 @@ No parameters.
 **Returns:** `{ success: bool (hardcoded), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }`
 
 ## `set_view_type`
+
+*Destructive, idempotent.*
 
 Set the active editor viewport type (perspective / top / bottom / left / right / front / back)
 
@@ -1242,6 +1472,8 @@ Set the active editor viewport type (perspective / top / bottom / left / right /
 **Returns:** `{ applied: bool, requested: string, view_type: string, view_type_index: int }`
 
 ## `set_viewport_camera`
+
+*Destructive, idempotent.*
 
 Move the active editor viewport camera to a new location and or rotation
 
@@ -1254,6 +1486,8 @@ Move the active editor viewport camera to a new location and or rotation
 
 ## `set_viewport_exposure`
 
+*Destructive, idempotent.*
+
 Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_exposure reads them.
 
 | Parameter | Type | Required | Description |
@@ -1265,6 +1499,8 @@ Set the exposure of the active level editor viewport: fixed at ev100 when fixed 
 
 ## `set_viewport_fov`
 
+*Destructive, idempotent.*
+
 Set the perspective FOV (in degrees) of the active editor viewport
 
 | Parameter | Type | Required | Description |
@@ -1274,6 +1510,8 @@ Set the perspective FOV (in degrees) of the active editor viewport
 **Returns:** `{ applied: bool, requested: number, fov: number }`
 
 ## `set_viewport_realtime`
+
+*Destructive, idempotent.*
 
 Enable or disable realtime rendering on the active editor viewport
 
@@ -1285,6 +1523,8 @@ Enable or disable realtime rendering on the active editor viewport
 
 ## `set_viewport_view_mode`
 
+*Destructive, idempotent.*
+
 Set the rendering view mode of the active editor viewport
 
 | Parameter | Type | Required | Description |
@@ -1294,6 +1534,8 @@ Set the rendering view mode of the active editor viewport
 **Returns:** `{ applied: bool, requested: string, view_mode_index: int, view_mode: string }`
 
 ## `show_notification`
+
+*Destructive.*
 
 Show a fire-and-forget toast in the editor (Slate notification manager) with a message, an optional completion state and a lifetime in seconds. Returns shown and echoes message, completion_state and duration; an unrecognized completion_state silently falls back to None. Changes nothing else.
 
@@ -1307,6 +1549,8 @@ Show a fire-and-forget toast in the editor (Slate notification manager) with a m
 
 ## `snap_actor_to_ground`
 
+*Destructive.*
+
 Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use place_actor_on_terrain when the ground is definitely the landscape and you want no trace at all, batch_place_actors_on_terrain for many actors.
 
 | Parameter | Type | Required | Description |
@@ -1319,6 +1563,8 @@ Drop ONE editor-world actor straight down until its bounds bottom rests on whate
 **Returns:** `{ actor: actor JSON, hit: bool, landed: bool, sampled_from: 'trace'|'heightmap', hit_actor?: string, hit_distance?: number }`
 
 ## `spawn_actor`
+
+*Additive.*
 
 Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor) into the editor level or a live PIE world, at an optional location/rotation/scale, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists, and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.
 
@@ -1336,6 +1582,8 @@ Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, Direction
 
 ## `start_gauntlet_run`
 
+*Destructive.*
+
 Drive the in-process FAutomationTestFramework as the in-editor equivalent of a Gauntlet test run. Gauntlet proper still requires a dedicated subprocess (UnrealEditor-Cmd.exe -Gauntlet=...) that the MCP headless harness cannot spawn, but for the common case of "run a test and report pass/fail" the Automation Framework gives the same verdict from inside the editor. We run synchronously (single game-thread callback) and report the execution info (errors / warnings / duration). Multi-tick tests (PIE / load-map / latent waits) are abandoned honestly with completed=false (StopTest asserts on a non-empty latent queue).
 
 | Parameter | Type | Required | Description |
@@ -1346,6 +1594,8 @@ Drive the in-process FAutomationTestFramework as the in-editor equivalent of a G
 
 ## `undo`
 
+*Destructive.*
+
 Step the editor's undo stack back by one transaction and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and the honest verification is re-reading whatever you changed. Use undo_multiple for N steps and get_undo_state to look before you leap; an undo barrier will stop it.
 
 No parameters.
@@ -1353,6 +1603,8 @@ No parameters.
 **Returns:** `{ applied: bool (THE oracle -- false means nothing was undone), undo_count: int, can_undo: bool, next_undo: string (label of the next entry) }`
 
 ## `undo_multiple`
+
+*Destructive.*
 
 Walk the undo stack back N transactions in one call, stopping early at the real stack depth (or at an undo barrier) instead of erroring. Use it to unwind a whole failed batch. WARNING: compare actually_undone against requested: a smaller number is the honest signal that the stack ran out, and it is the only oracle here.
 

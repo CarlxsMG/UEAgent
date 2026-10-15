@@ -6,6 +6,8 @@
 
 ## `check_blueprint_errors`
 
+*Read-only.*
+
 Check a blueprint for compilation errors, warnings, structural issues, and orphaned nodes. Read-only: it does NOT recompile the Blueprint (it reports the cached Status).
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Check a blueprint for compilation errors, warnings, structural issues, and orpha
 **Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, error_status: string, error_message: string, errors: [string], warnings: [string], error_count: int, warning_count: int, blueprint_compiled: bool, compilation_status: string, is_static_analysis: bool, recompiled_blueprint: bool, orphaned_node_heuristic: string }`
 
 ## `get_blueprint_debug_info`
+
+*Read-only.*
 
 Retrieve comprehensive debug information about a blueprint including structure, metadata, and complexity analysis. Read-only: it does NOT recompile the Blueprint.
 
@@ -26,6 +30,8 @@ Retrieve comprehensive debug information about a blueprint including structure, 
 
 ## `list_validators`
 
+*Read-only.*
+
 List the editor data validators the DataValidation subsystem has enabled (ForEachEnabledValidator): class_name, class_path and enabled for each, plus validator_count. Read-only; errors when the DataValidation plugin subsystem is unavailable. validate_asset runs them on one asset.
 
 No parameters.
@@ -33,6 +39,8 @@ No parameters.
 **Returns:** `{ validators: [{ class_name: string, class_path: string, enabled: bool }], validator_count: number }`
 
 ## `profile_blueprint_execution`
+
+*Destructive.*
 
 STATIC complexity analysis of a blueprint (node/function/variable counts + heuristic score). It does NOT profile any runtime execution. WARNING, SIDE EFFECT: by default it RECOMPILES the Blueprint purely to time the compile, which marks the asset dirty and can surface new compile errors on an asset you only meant to READ -- pass compile_for_timing=false for a genuinely read-only analysis. Three response fields are misnamed and each is flagged as such in the payload: `execution_time` is the COMPILE time in ms, `cpu_usage` is the heuristic complexity score (not CPU), and `memory_usage` is the .uasset size on disk (not memory).
 
@@ -45,6 +53,8 @@ STATIC complexity analysis of a blueprint (node/function/variable counts + heuri
 
 ## `remove_blueprint_breakpoint`
 
+*Destructive, idempotent.*
+
 Remove a debugging breakpoint from a specific node within a blueprint graph via FKismetDebugUtilities::RemoveBreakpointFromNode. Idempotent (already_absent when none exists).
 
 | Parameter | Type | Required | Description |
@@ -55,6 +65,8 @@ Remove a debugging breakpoint from a specific node within a blueprint graph via 
 **Returns:** `{ blueprint_path: string, node_name: string, removed: bool, already_absent: bool, found_in_graph: bool, node_class?: string, node_title?: string }`
 
 ## `run_map_check`
+
+*Destructive.*
 
 Run editor Map Check on the current level and report message counts, each message resolved back to the actor/component the engine attached to it.
 
@@ -67,6 +79,8 @@ Run editor Map Check on the current level and report message counts, each messag
 
 ## `set_blueprint_breakpoint`
 
+*Destructive, idempotent.*
+
 Set a real debugging breakpoint on a specific node within a blueprint graph via FKismetDebugUtilities::CreateBreakpoint. Idempotent (guarded by FindBreakpointForNode).
 
 | Parameter | Type | Required | Description |
@@ -77,6 +91,8 @@ Set a real debugging breakpoint on a specific node within a blueprint graph via 
 **Returns:** `{ blueprint_path: string, node_name: string, breakpoint_set: bool, already_existed: bool, found_in_graph: bool, node_class?: string, node_title?: string }`
 
 ## `test_blueprint_function`
+
+*Destructive.*
 
 Static analysis of one function graph of a blueprint (node/pin counts + heuristics). WARNING: it does NOT execute the function; it RECOMPILES the Blueprint (FKismetEditorUtilities::CompileBlueprint) and reports the COMPILE time as `execution_time`.
 
@@ -90,6 +106,8 @@ Static analysis of one function graph of a blueprint (node/pin counts + heuristi
 
 ## `trace_blueprint_execution`
 
+*Read-only.*
+
 STATIC listing of a blueprint's graphs and their nodes. It does NOT trace anything at runtime, despite the name: `trace_status` reports "StaticAnalysisOnly", and `total_execution_paths` does NOT count execution paths -- it counts GRAPHS, kept under that name only for compatibility, alongside the honest alias `graphs_analyzed` and the flag `total_execution_paths_is_graph_count`. Collapsed composite subgraphs are invisible unless you pass include_composites=true. TO ACTUALLY OBSERVE RUNTIME use set_blueprint_breakpoint (+ PIE) or watch_pie_property instead.
 
 | Parameter | Type | Required | Description |
@@ -101,6 +119,8 @@ STATIC listing of a blueprint's graphs and their nodes. It does NOT trace anythi
 
 ## `validate_asset`
 
+*Read-only.*
+
 Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid, Script use case) on one asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings. Read-only; validators_run counts the enabled validators, not those that applied.
 
 | Parameter | Type | Required | Description |
@@ -110,6 +130,8 @@ Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid,
 **Returns:** `{ asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }`
 
 ## `validate_assets_in_path`
+
+*Read-only.*
 
 Run data validation on every asset under a content path.
 
@@ -123,6 +145,8 @@ Run data validation on every asset under a content path.
 
 ## `validate_blueprint`
 
+*Read-only.*
+
 Validate a blueprint asset by checking its structure, file size, and validity. Static (asset-registry + on-disk) check only: it does NOT compile the Blueprint.
 
 | Parameter | Type | Required | Description |
@@ -132,6 +156,8 @@ Validate a blueprint asset by checking its structure, file size, and validity. S
 **Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, validation_status: string, validation_message: string, is_static_analysis: bool, file_size_bytes?: int, file_size_mb?: number }`
 
 ## `watch_pie_property`
+
+*Destructive.*
 
 Sample one or SEVERAL properties across a PIE session, arming BEFORE PIE starts so a write that happens in BeginPlay is still observable. Answers "what did this value do during play", NOT "who wrote it": it SAMPLES rather than intercepting writes, so `identifies_writer` is always false and a transient A->B->A between two samples is invisible. THE ORDER MATTERS: action="start" arms and returns immediately (it cannot block the game thread), THEN you start PIE, and afterwards action="status" returns the recorded samples. Arming while PIE is ALREADY running is honoured but flagged (`armed_while_pie_running`) -- the BeginPlay window has already passed for that session, which is precisely the failure this tool exists to avoid, so stop PIE, arm, then start PIE. It self-disarms on duration_seconds or max_samples (it can never leak a ticker) and the recorded samples survive until action="clear".
 

@@ -6,6 +6,8 @@
 
 ## `add_collision_channel`
 
+*Additive, idempotent.*
+
 Register a custom project collision channel (claims the first free ECC_GameTraceChannelN slot). Idempotent on channel_name.
 
 | Parameter | Type | Required | Description |
@@ -18,6 +20,8 @@ Register a custom project collision channel (claims the first free ECC_GameTrace
 **Returns:** `{ channel_name: string, channel: string, default_response: string, trace_type: bool, static_object: bool, already_existed: bool, note: string }`
 
 ## `add_collision_profile`
+
+*Destructive.*
 
 Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile.
 
@@ -34,6 +38,8 @@ Create a project collision profile, or replace an existing one of that name in f
 
 ## `diff_project_config`
 
+*Read-only.*
+
 Diff THIS project's Config/Default*.ini against ANOTHER project's, aligned by section+key (pure file read via FConfigFile::Read; no world, no editor state). Surfaces settings that differ or failed to migrate: custom collision channels (GameTraceChannel/ObjectChannel under [/Script/Engine.CollisionProfile]), input mappings, enabled plugins ([Plugins]/[/Script/...]), and every other key. Perspective is THIS -> OTHER: 'added' = present in OTHER but not THIS; 'removed' = present in THIS but not OTHER; 'changed' = present in both with different value(s). Multi-value keys (array-of-struct like +Channels/+ActionMappings) are compared as sorted value lists so hash-ordering never yields a false diff.
 
 | Parameter | Type | Required | Description |
@@ -46,6 +52,8 @@ Diff THIS project's Config/Default*.ini against ANOTHER project's, aligned by se
 
 ## `get_collision_profile`
 
+*Read-only.*
+
 Read one project collision profile by name, read-only: object_type_name, collision_enabled, can_modify, help_message and custom_responses [{channel, response}], which lists only the per-channel overrides. An unknown name is an error; add_collision_profile is the writer.
 
 | Parameter | Type | Required | Description |
@@ -55,6 +63,8 @@ Read one project collision profile by name, read-only: object_type_name, collisi
 **Returns:** `{ profile_name: string, object_type_name: string, collision_enabled: string, can_modify: bool, help_message: string, custom_responses: [{channel: string, response: string}] }`
 
 ## `get_component_properties`
+
+*Read-only.*
 
 Read every editable or Blueprint-visible property of one component, with its current value as text, plus whether it is active and registered, without changing anything: the read-back for set_component_property. Pass actor_name for a placed actor (world picks the editor instance or a live PIE world) or blueprint_name for a Blueprint component template.
 
@@ -69,6 +79,8 @@ Read every editable or Blueprint-visible property of one component, with its cur
 
 ## `get_default_game_map`
 
+*Read-only.*
+
 Read UGameMapsSettings EditorStartupMap and GameDefaultMap from the in-memory CDO, and (by default) ALSO from Config/DefaultEngine.ini on disk so a memory-only write cannot masquerade as a persisted one.
 
 | Parameter | Type | Required | Description |
@@ -79,6 +91,8 @@ Read UGameMapsSettings EditorStartupMap and GameDefaultMap from the in-memory CD
 
 ## `get_project_info`
 
+*Read-only.*
+
 Read the project metadata from the in-memory UGeneralProjectSettings defaults (Project Settings, Description), read-only. Returns project_name, project_version, company_name, company_distinguished_name, copyright_notice, description, homepage, licensing_terms, privacy_policy and support_contact, as strings that may be empty.
 
 No parameters.
@@ -86,6 +100,8 @@ No parameters.
 **Returns:** `{ project_name: string, project_version: string, company_name: string, company_distinguished_name: string, copyright_notice: string, description: string, homepage: string, licensing_terms: string, privacy_policy: string, support_contact: string }`
 
 ## `get_project_settings_value`
+
+*Read-only.*
 
 Read one property of a settings class default object (CDO) as its ExportText string; this is the in-memory value, not re-read from the .ini on disk. Returns class_name, property_name and value; an unknown class or property is an error. set_project_settings_value is the writer.
 
@@ -98,6 +114,8 @@ Read one property of a settings class default object (CDO) as its ExportText str
 
 ## `list_collision_channels`
 
+*Read-only.*
+
 List every collision channel (built-in + custom) with its default response.
 
 No parameters.
@@ -106,6 +124,8 @@ No parameters.
 
 ## `list_project_setting_sections`
 
+*Read-only.*
+
 List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.
 
 No parameters.
@@ -113,6 +133,8 @@ No parameters.
 **Returns:** `{ count: int, sections: [object] }`
 
 ## `rerun_construction_scripts`
+
+*Destructive.*
 
 Run AActor::RerunConstructionScripts() on a level actor: destroys every construction-script-generated component and rebuilds it, exactly as dragging the actor in the editor would. This is the ONLY way to reach that function from MCP -- it is ENGINE_API and public but NOT a UFUNCTION, so reflection, call_function and execute_python cannot see it. Use it to find out what a property edit really survives, or to re-apply a Blueprint's construction logic after editing the instance. Reports the before/after component sets instead of a bare success.
 
@@ -124,6 +146,8 @@ Run AActor::RerunConstructionScripts() on a level actor: destroys every construc
 **Returns:** `{ actor_name: string, resolved_actor_name: string, actor_label: string, actor_class: string, world: string, has_non_trivial_user_construction_script: bool, actor_survived: bool, components_before: int, components_after: int, component_names_before: [string], component_names_after: [string], destroyed_component_names: [string], created_component_names: [string], verification: object, verification_checks: [object], world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `set_component_property`
+
+*Destructive, idempotent.*
 
 Set the value of any property on a level actor's component via the canonical JSON->property importer (mcp_common::SetObjectProperty). Handles every FProperty kind: object/soft-object/class/soft-class refs (by "/Game/..." path string), enums (by name), FGameplayTag/FGameplayTagContainer (registry-validated), nested structs, arrays, sets and maps -- not just scalars, FVector, FRotator and FLinearColor. WARNING: it writes the EDITOR world BY DEFAULT even while PIE is running, and that is deliberate, not a bug: it is the only MCP route to a property Python's set_editor_property refuses (CPF_DisableEditOnInstance), and because the edit lands in the editor instance the NEXT PIE session already starts with it. The flip side is that a value written mid-PIE does NOT reach the running actor -- so to hit the live one you must ask for it: world='server' | 'client' | 'pie:N'. The reply stamps world_name/world_package/world_type/net_mode/pie_instance, so success:true says WHICH world was written (world_package is the field carrying the UEDPIE_N prefix -- in a World Partition map the UWorld keeps the map's own name).
 
@@ -140,6 +164,8 @@ Set the value of any property on a level actor's component via the canonical JSO
 
 ## `set_default_game_map`
 
+*Destructive, idempotent.*
+
 Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
 
 | Parameter | Type | Required | Description |
@@ -152,6 +178,8 @@ Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VER
 
 ## `set_physics_gravity`
 
+*Destructive, idempotent.*
+
 Set UPhysicsSettings DefaultGravityZ, persist it to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
 
 | Parameter | Type | Required | Description |
@@ -162,6 +190,8 @@ Set UPhysicsSettings DefaultGravityZ, persist it to the VERSIONED Config/Default
 **Returns:** `{ gravity_z: number, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, disk_present: bool, disk_value: string, disk_matches_memory: bool, verification: object, verification_checks: [object] }`
 
 ## `set_project_settings_value`
+
+*Destructive, idempotent.*
 
 Write a UDeveloperSettings property, persist it to the VERSIONED Config/Default*.ini (TryUpdateDefaultConfigFile for `defaultconfig` classes, SaveConfig otherwise) and re-read that .ini FROM DISK to prove it landed.
 

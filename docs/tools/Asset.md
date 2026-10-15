@@ -6,6 +6,8 @@
 
 ## `add_asset_to_collection`
 
+*Additive.*
+
 Adds an asset to an existing collection and reads back its object count.          must match the share type the collection was created with.
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Adds an asset to an existing collection and reads back its object count.        
 **Returns:** `{ collection_name: string, share_type: string, asset_path: string, added: bool, verified: bool, object_count: number }`
 
 ## `add_static_mesh_socket`
+
+*Additive.*
 
 Add a socket to a static mesh with location, rotation, scale and tag.
 
@@ -33,6 +37,8 @@ Add a socket to a static mesh with location, rotation, scale and tag.
 
 ## `bulk_rename_assets`
 
+*Destructive.*
+
 Rename/move multiple assets in one IAssetTools::RenameAssets batch, with per-item disk verification instead of the batch bool. Guards: refuses while PIE is active; refuses paths under readonly_roots (default: the project's Read Only Content Roots setting) on BOTH the source and the destination; pre-detects the native-CDO reference case that makes the engine's FMessageDialog auto-cancel the whole batch (would_block_on_modal) and does NOT call RenameAssets in that case. Also reports referencer packages left DIRTY -- PerformAssetRename discards its FailedPackages list unless UE source control is connected, so a referencer (typically OFPA) can be left unwritten while RenameAssets still returns true.
 
 | Parameter | Type | Required | Description |
@@ -46,6 +52,8 @@ Rename/move multiple assets in one IAssetTools::RenameAssets batch, with per-ite
 
 ## `clear_and_fill_render_target`
 
+*Destructive, idempotent.*
+
 Fill an entire render target with a solid color via the canvas
 
 | Parameter | Type | Required | Description |
@@ -57,6 +65,8 @@ Fill an entire render target with a solid color via the canvas
 
 ## `clear_render_target`
 
+*Destructive, idempotent.*
+
 Clear a render target to a solid color via ClearRenderTarget2D
 
 | Parameter | Type | Required | Description |
@@ -67,6 +77,8 @@ Clear a render target to a solid color via ClearRenderTarget2D
 **Returns:** `{ render_target_path: string, cleared: bool, clear_color: [number] }`
 
 ## `compare_asset_versions`
+
+*Read-only.*
 
 Apply the binary ref-scan of scan_uasset_refs to the SAME asset (rel_path) across N external Content roots, reporting ref-count / size / mtime (and optional pattern-match count) per root so you can tell an incomplete (stub) copy from the complete one at a glance.
 
@@ -80,6 +92,8 @@ Apply the binary ref-scan of scan_uasset_refs to the SAME asset (rel_path) acros
 
 ## `create_collection`
 
+*Additive, idempotent.*
+
 Creates a static Content Browser collection (idempotent).  Uses the UE 5.7 project ICollectionContainer. If the collection already exists a stable payload is returned (already_existed=True).          "Private", or "Shared".
 
 | Parameter | Type | Required | Description |
@@ -90,6 +104,8 @@ Creates a static Content Browser collection (idempotent).  Uses the UE 5.7 proje
 **Returns:** `{ collection_name: string, share_type: string, created: bool, already_existed: bool, exists: bool }`
 
 ## `create_editable_static_mesh`
+
+*Additive.*
 
 Duplicate a static mesh to an editable location in /Game.
 
@@ -102,6 +118,8 @@ Duplicate a static mesh to an editable location in /Game.
 **Returns:** `{ asset_path, static_mesh_name, source_mesh, created }`
 
 ## `create_render_target_2d`
+
+*Additive.*
 
 Create a UTextureRenderTarget2D asset at package_path/name with the given size and format, black clear color, and save it. An existing one there is returned as is: width, height and format are then ignored (already_exists:true). Returns asset_path, width, height, format and pixel_format.
 
@@ -117,6 +135,8 @@ Create a UTextureRenderTarget2D asset at package_path/name with the given size a
 
 ## `create_render_target_2d_array`
 
+*Destructive.*
+
 Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DArray::Init(SizeX, SizeY, Slices, Format) and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8" (default), "FloatRGBA"/"RGBA16F", "RGBA32F", "R16F".
 
 | Parameter | Type | Required | Description |
@@ -131,6 +151,8 @@ Creates a persisted UTextureRenderTarget2DArray.  Wraps UTextureRenderTarget2DAr
 
 ## `create_render_target_cube`
 
+*Destructive.*
+
 Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps UTextureRenderTargetCube::Init(SizeX, Format) when a format is given, or InitAutoFormat(SizeX) otherwise, and saves the asset to disk. Re-running deletes and rebuilds the asset deterministically.  format accepts one of "B8G8R8A8"/"BGRA8", "FloatRGBA"/"RGBA16F", "RGBA32F". When omitted the format is auto-derived (InitAutoFormat).
 
 | Parameter | Type | Required | Description |
@@ -144,6 +166,8 @@ Creates a persisted UTextureRenderTargetCube (6-face cube render target).  Wraps
 
 ## `create_static_texture_from_render_target`
 
+*Destructive.*
+
 Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps UKismetRenderingLibrary::RenderTargetCreateStaticTexture2DEditorOnly and saves the resulting static texture to disk. Re-running deletes and rebuilds the asset deterministically.  render_target_path accepts either short "/Game/MyGame/RT_Example" or fully-qualified "...RT_Example.RT_Example" asset paths.
 
 | Parameter | Type | Required | Description |
@@ -155,6 +179,8 @@ Bakes a UTexture2D from an existing UTextureRenderTarget2D (editor only).  Wraps
 **Returns:** `{ texture_name: string, asset_path: string, render_target_path: string, created: bool, saved: bool, width: int, height: int, format: string, save_error?: string }`
 
 ## `create_texture_2d_array`
+
+*Destructive.*
 
 Creates a persisted UTexture2DArray from slices (no external file import).  If ``source_texture_paths`` is given, those UTexture2D assets are loaded into the array's SourceTextures; otherwise ``slice_count`` small solid-color slices of ``size`` x ``size`` are generated. The array Source is then built via UTexture2DArray::UpdateSourceFromSourceTextures(true) and the asset is saved.  source_texture_paths is an optional array of UTexture2D asset paths used as the array's slices. Each must have a valid editor source. If omitted, slices are generated.  size is the per-slice pixel size (clamped 1..2048).
 
@@ -170,6 +196,8 @@ Creates a persisted UTexture2DArray from slices (no external file import).  If `
 
 ## `create_texture_2d_from_data`
 
+*Destructive.*
+
 Creates a persisted UTexture2D filled with a solid color (no external file).  Allocates the editor source (FTextureSource::Init, BGRA8), fills every pixel with ``fill_color``, calls UpdateResource, registers the asset and saves it to disk. Re-running deletes and rebuilds the asset deterministically.  fill_color is an [R, G, B, A] array of 0-255 byte values (default = opaque white).
 
 | Parameter | Type | Required | Description |
@@ -184,6 +212,8 @@ Creates a persisted UTexture2D filled with a solid color (no external file).  Al
 
 ## `delete_collection`
 
+*Destructive, idempotent.*
+
 Destroys a Content Browser collection (idempotent; inverse of create_collection).  Uses the UE 5.7 project ICollectionContainer::DestroyCollection. If the collection is already absent a stable payload is returned (already_absent=True).          "Private", or "Shared".
 
 | Parameter | Type | Required | Description |
@@ -194,6 +224,8 @@ Destroys a Content Browser collection (idempotent; inverse of create_collection)
 **Returns:** `{ collection_name: string, share_type: string, destroyed: bool, already_absent: bool, exists: bool }`
 
 ## `diff_content_trees`
+
+*Read-only.*
 
 Compare two Content folders (project vs external, fork vs source) WITHOUT loading the editor: reports assets added/removed/changed keyed by relative path, using file size and (optionally) a whole-file MD5 content hash. Verifies a Migrate or audits a fork on disk. Each tree may be a disk directory OR a /Game|/Engine mount path.
 
@@ -206,6 +238,8 @@ Compare two Content folders (project vs external, fork vs source) WITHOUT loadin
 **Returns:** `{ tree_a: string, tree_b: string, dir_a: string, dir_b: string, only_in_a: [string], only_in_b: [string], changed: [{rel, size_a, size_b, hash_a, hash_b, reason}], identical_count: int, only_in_a_count: int, only_in_b_count: int, changed_count: int, message: string }`
 
 ## `draw_line_to_render_target`
+
+*Destructive.*
 
 Draw a line into a render target via the canvas
 
@@ -221,6 +255,8 @@ Draw a line into a render target via the canvas
 
 ## `draw_material_to_render_target`
 
+*Destructive.*
+
 Render a material full-screen quad into a render target
 
 | Parameter | Type | Required | Description |
@@ -231,6 +267,8 @@ Render a material full-screen quad into a render target
 **Returns:** `{ render_target_path: string, material_path: string, drawn: bool }`
 
 ## `draw_material_to_render_target_region`
+
+*Destructive.*
 
 Draw a material into a region of a render target via the canvas
 
@@ -244,6 +282,8 @@ Draw a material into a region of a render target via the canvas
 **Returns:** `{ render_target_path: string, material_path: string, drawn: bool, position: [number], size: [number] }`
 
 ## `draw_text_to_render_target`
+
+*Destructive.*
 
 Draw a string of text into a render target via the canvas
 
@@ -259,6 +299,8 @@ Draw a string of text into a render target via the canvas
 
 ## `draw_texture_to_render_target`
 
+*Destructive.*
+
 Draw a texture into a region of a render target via the canvas
 
 | Parameter | Type | Required | Description |
@@ -273,6 +315,8 @@ Draw a texture into a region of a render target via the canvas
 
 ## `evaluate_curve_at_time`
 
+*Read-only.*
+
 Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UCurveLinearColor and evaluates it at the requested time. For multi-channel curves (Vector=3, LinearColor=4) the optional channel selects which component the scalar 'value' field reports; the full component array is always returned in 'values'.
 
 | Parameter | Type | Required | Description |
@@ -284,6 +328,8 @@ Evaluate a curve asset at a given time.  Loads a UCurveFloat / UCurveVector / UC
 **Returns:** `{ curve_path: string, curve_class: string, time: float, curve_type: string, num_channels: int, channel: int, value: float, values: [float], vector: {x,y,z}, color: {r,g,b,a} }`
 
 ## `export_render_target`
+
+*Destructive.*
 
 Export a render target to an image file on disk
 
@@ -297,6 +343,8 @@ Export a render target to an image file on disk
 
 ## `generate_asset_thumbnail`
 
+*Additive.*
+
 Render and cache an asset's thumbnail (or report the existing cached one).  When the editor can render (FApp::CanEverRender() and the RHI is initialized), this generates a fresh thumbnail via ThumbnailTools and caches it into the package's thumbnail map. When rendering is unavailable, or the object type has no thumbnail renderer, it honestly reports the existing cached thumbnail state.
 
 | Parameter | Type | Required | Description |
@@ -306,6 +354,8 @@ Render and cache an asset's thumbnail (or report the existing cached one).  When
 **Returns:** `{ asset_path: string, object_path: string, asset_class: string, rendered: bool, has_thumbnail: bool, width: int, height: int, compressed_bytes: int, message: string }`
 
 ## `get_asset_by_name`
+
+*Read-only.*
 
 Retrieve ONE asset by exact name and return its identity (name, class, object path, package, is_loaded, file size) plus, with load_full_data, type-specific detail: a Blueprint's parent class / compile status / generated class, a StaticMesh's section-vertex-LOD counts, whether a material is an instance. WARNING: When the name is ambiguous it still resolves to the FIRST match and merely lists the rest in `ambiguous_matches` -- check that field, or use resolve_asset_by_name, which refuses to pick for you. The fallback name scan only covers /Game, so an /Engine or plugin-mount asset must be addressed by its full package name. Use get_assets_by_names for a batch, get_asset_metadata for registry tags, and search_assets_by_pattern when you only know part of the name.
 
@@ -317,6 +367,8 @@ Retrieve ONE asset by exact name and return its identity (name, class, object pa
 **Returns:** `{ name: string, class: string, path: string, package: string, is_loaded: bool, file_size_bytes?: int, file_size_kb?: number, parent_class?: string, is_compiled?: bool, is_valid?: bool, generated_class?: string, num_sections?: int, num_vertices?: int, num_lods?: int, is_material_instance?: bool, ambiguous_matches?: [string] }`
 
 ## `get_asset_dependencies_recursive`
+
+*Read-only.*
 
 Recursively walk an asset's package dependencies via the Asset Registry.  Breadth-first, deduplicated, capped at max_depth (default 3). Each returned dependency records the depth at which it was first reached (1 == direct).
 
@@ -330,6 +382,8 @@ Recursively walk an asset's package dependencies via the Asset Registry.  Breadt
 
 ## `get_asset_disk_size`
 
+*Read-only.*
+
 Get the on-disk file size of an asset's package (.uasset/.umap).  Resolves the package filename via FPackageName::LongPackageNameToFilename and stats it with IFileManager::FileSize.
 
 | Parameter | Type | Required | Description |
@@ -339,6 +393,8 @@ Get the on-disk file size of an asset's package (.uasset/.umap).  Resolves the p
 **Returns:** `{ asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb: number, size_mb: number, exists_on_disk: bool, message: string }`
 
 ## `get_asset_file_size`
+
+*Read-only.*
 
 Read the ON-DISK size of an asset's .uasset in bytes, KB and MB, plus the absolute file path it resolved to -- the measurement for a disk-budget question ("what is costing the 491 MB in this import?"). WARNING: Size is NOT a proxy for content or integrity: a DataTable that GREW by 5 KB had lost 46 of its 48 references. To measure content use get_data_table_info, read_data_table_row_complex or get_asset_dependencies; for in-memory cost use get_asset_memory_usage. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
 
@@ -350,6 +406,8 @@ Read the ON-DISK size of an asset's .uasset in bytes, KB and MB, plus the absolu
 
 ## `get_asset_import_data`
 
+*Read-only.*
+
 Read an asset's UAssetImportData: source filename(s) and import timestamp.  Returns has_import_data, source_file (first resolved filename), the full source_files list (relative + resolved filename + import_time), and source_file_count.
 
 | Parameter | Type | Required | Description |
@@ -359,6 +417,8 @@ Read an asset's UAssetImportData: source filename(s) and import timestamp.  Retu
 **Returns:** `{ asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time: string }`
 
 ## `get_asset_last_modified`
+
+*Read-only.*
 
 Read the .uasset file's last-modified timestamp (formatted string + Unix epoch) and how old it is in days and hours -- "was this asset actually written to disk when I saved it?", the disk-side oracle for a save whose return value claimed success. WARNING: It is a FILE timestamp: an asset edited in memory but not saved reports its old date, and Unreal does not distinguish creation from modification (the tool reads the same stamp for both). Use list_assets_modified_since to sweep a whole folder by date, and list_dirty_packages for unsaved-in-memory changes. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
 
@@ -370,6 +430,8 @@ Read the .uasset file's last-modified timestamp (formatted string + Unix epoch) 
 
 ## `get_asset_metadata`
 
+*Read-only.*
+
 Read an asset's Asset Registry TAGS (the indexed key/value pairs an asset publishes -- parent class, mesh stats, fork-lineage tags, ...) together with its name, class, object path and package. WARNING: its `asset_name` is NOT a name: the tool literally prefixes "/Game/" to whatever you pass, so it must be a path RELATIVE TO /Game ("MyGame/Systems/Foo/BP_Foo.BP_Foo"), never a bare asset name and never an absolute "/Game/..." path -- and it LOADS the asset to resolve it. Use get_assets_metadata_batch for many paths at once, get_asset_by_name for identity from a bare name, and get_assets_by_tag to search BY a tag value instead of reading the tags of one asset.
 
 | Parameter | Type | Required | Description |
@@ -379,6 +441,8 @@ Read an asset's Asset Registry TAGS (the indexed key/value pairs an asset publis
 **Returns:** `{ name: string, class: string, path: string, package: string, asset_class_path?: string, package_path?: string, tags?: [{ name, value }] }`
 
 ## `get_asset_metadata_tags`
+
+*Read-only.*
 
 Reads all editor metadata tags (UMetaData) of an asset.  Wraps UEditorAssetLibrary::GetMetadataTagValues and returns each tag as a {key, value} pair. (Distinct from get_asset_metadata, which reads asset registry data instead of the asset's stored metadata tags.)
 
@@ -390,6 +454,8 @@ Reads all editor metadata tags (UMetaData) of an asset.  Wraps UEditorAssetLibra
 
 ## `get_asset_thumbnail`
 
+*Read-only.*
+
 Report whether an asset is of a type that CAN carry a thumbnail, alongside its resolved object path, class and loaded state. WARNING: `has_thumbnail` is a CLASS test, not a lookup of stored thumbnail bytes: it is true for any StaticMesh, Material, Texture, Blueprint, SkeletalMesh or Level and false for everything else, whether or not a thumbnail was ever rendered -- and it returns no image data at all. To actually see something rendered, use generate_asset_thumbnail or capture_viewport. Resolution matches get_asset_by_name (full package name first, then a /Game-only exact-name scan, first hit wins with the rest in ambiguous_matches).
 
 | Parameter | Type | Required | Description |
@@ -399,6 +465,8 @@ Report whether an asset is of a type that CAN carry a thumbnail, alongside its r
 **Returns:** `{ asset_name: string, asset_path: string, has_thumbnail: bool, asset_class: string, asset_loaded: bool, asset_class_name?: string, ambiguous_matches?: [string] }`
 
 ## `get_assets_by_names`
+
+*Read-only.*
 
 Batch variant of get_asset_by_name: resolve N asset names in ONE round-trip instead of N calls, returning per entry a found flag plus that asset's identity (class, object path, package, is_loaded) or the error that stopped it. Delegates to get_asset_by_name literally, so it inherits both its /Game-only fallback scan and its ambiguous_matches transparency -- an ambiguous name still resolves to the first hit, so check that field per entry. Use get_assets_metadata_batch when you want registry TAGS rather than identity.
 
@@ -410,6 +478,8 @@ Batch variant of get_asset_by_name: resolve N asset names in ONE round-trip inst
 **Returns:** `{ requested_count: int, resolved: [{ asset_name, found: bool, name?, class?, path?, package?, is_loaded?, ambiguous_matches?, ... (same fields as get_asset_by_name when found) }] }`
 
 ## `get_assets_by_tag`
+
+*Read-only.*
 
 Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side and metadata-only -- it never force-loads anything. This is the only tool here that queries by tag rather than by name, path or type: "every asset carrying the fork-origin tag (mcp.forkOrigin by default)", "every Blueprint whose ParentClass tag is X". It is also the general-class search that get_assets_by_type cannot do, since class_filter resolves ANY class (with subclasses) instead of five hardcoded ones. Search by class alone by pairing class_filter with a tag every asset of that class publishes; use get_asset_metadata to read the tags OF one asset rather than search by them.
 
@@ -426,6 +496,8 @@ Search assets BY an Asset Registry tag (FARFilter::TagsAndValues), server-side a
 
 ## `get_assets_by_type`
 
+*Read-only.*
+
 List every asset of a CLASS under a content path, with name, object path, class, package and is_loaded, plus total_found and results_truncated. Takes any resolvable class -- "DataTable", "NiagaraSystem", "LandscapeGrassType", a "/Script/Module.Class" path -- matched WITH its subclasses, plus five shortcuts kept for convenience: "Blueprint", "StaticMesh", "Texture" (Texture2D exactly), "Sound" (SoundWave exactly) and "Material", which is the one that earns its keep by grouping Material + MaterialInstanceConstant + MaterialInstanceDynamic. Searches /Game by default and any mount via package_path (/Engine, /Water, plugin content). Sister tools: get_assets_in_folder to enumerate a directory whatever the class, search_assets_by_pattern to search by NAME, get_assets_by_tag to search by an Asset Registry tag.
 
 | Parameter | Type | Required | Description |
@@ -437,6 +509,8 @@ List every asset of a CLASS under a content path, with name, object path, class,
 **Returns:** `{ assets: [{ name, path, class, package, is_loaded }], count: int, total_found: int, asset_type: string, package_path: string, max_results: int, results_truncated: bool }`
 
 ## `get_assets_in_folder`
+
+*Read-only.*
 
 Enumerate every asset under a content FOLDER (recursively by default), each with name, object path, class, package and is_loaded, plus total_found so you can tell a truncated listing from a complete one. The "what is actually in this directory?" inventory -- metadata only, it never loads an asset. Reaches any mounted content root, not just /Game. Pick this over search_assets_by_pattern when you know WHERE to look rather than what the name contains, over get_assets_by_type when you want everything regardless of class, and over resolve_asset_by_name when you do not have an exact name at all.
 
@@ -450,6 +524,8 @@ Enumerate every asset under a content FOLDER (recursively by default), each with
 
 ## `get_assets_metadata_batch`
 
+*Read-only.*
+
 Batch variant of get_asset_metadata: read the Asset Registry tags of N assets in ONE round-trip instead of N calls, returning per entry a found flag plus the same fields get_asset_metadata emits (or an error string). It runs get_asset_metadata for each entry, so it inherits its path semantics exactly -- including the trap that each entry is prefixed with "/Game/", so entries must be paths RELATIVE to /Game, never bare names and never absolute "/Game/..." paths. Use get_assets_by_names for identity/type info from bare NAMES instead of tags.
 
 | Parameter | Type | Required | Description |
@@ -460,6 +536,8 @@ Batch variant of get_asset_metadata: read the Asset Registry tags of N assets in
 **Returns:** `{ requested_count: int, processed_count: int, results_truncated: bool, results: [{ asset_path, found: bool, name?, class?, path?, package?, asset_class_path?, package_path?, tags?, error? }] }`
 
 ## `get_collection_assets`
+
+*Read-only.*
 
 Lists the asset object paths contained in a collection.          must match the collection's share type.
 
@@ -472,6 +550,8 @@ Lists the asset object paths contained in a collection.          must match the 
 
 ## `get_collections`
 
+*Read-only.*
+
 List every Content Browser collection of the project container, of every share type, without changing anything: name and share_type of each (the share_type that get_collection_assets and the other collection tools need), plus collection_count. Errors when the collection manager is unavailable.
 
 No parameters.
@@ -479,6 +559,8 @@ No parameters.
 **Returns:** `{ collections: [{ name: string, share_type: string }], collection_count: number }`
 
 ## `get_reference_path`
+
+*Read-only.*
 
 Find the shortest reference CHAIN through the AssetRegistry dependency graph: with `from`, the shortest from -> ... -> target (walking dependencies); without `from`, the shortest chain from a root (a package nothing references) DOWN to target (walking referencers) -- i.e. 'what keeps target alive / why is it undeletable'. get_asset_referencers gives the direct edges; this gives the PATH.
 
@@ -493,6 +575,8 @@ Find the shortest reference CHAIN through the AssetRegistry dependency graph: wi
 
 ## `get_render_target_2d_array_info`
 
+*Read-only.*
+
 Read metadata for a UTextureRenderTarget2DArray asset (size, slice count, format). Metadata-only, no pixel readback.
 
 | Parameter | Type | Required | Description |
@@ -502,6 +586,8 @@ Read metadata for a UTextureRenderTarget2DArray asset (size, slice count, format
 **Returns:** `{ render_target_name: string, asset_path: string, width: int, height: int, slices: int, pixel_format: string, is_hdr: bool, is_srgb: bool }`
 
 ## `get_render_target_cube_info`
+
+*Read-only.*
 
 Read metadata for a UTextureRenderTargetCube asset (face size, mip count, format). Metadata-only, no pixel readback.
 
@@ -513,6 +599,8 @@ Read metadata for a UTextureRenderTargetCube asset (face size, mip count, format
 
 ## `get_render_target_info`
 
+*Read-only.*
+
 Read the metadata of a UTextureRenderTarget2D asset without reading pixels or changing it: width, height, format (RTF_*), pixel_format and is_srgb. For 2D-array or cube render targets use get_render_target_2d_array_info or get_render_target_cube_info; export_render_target writes the image to disk.
 
 | Parameter | Type | Required | Description |
@@ -522,6 +610,8 @@ Read the metadata of a UTextureRenderTarget2D asset without reading pixels or ch
 **Returns:** `{ render_target_name: string, asset_path: string, width: int, height: int, format: string, pixel_format: string, is_srgb: bool }`
 
 ## `get_static_mesh_info`
+
+*Read-only.*
 
 Get detailed info about a static mesh: LODs, verts, materials (with slots), sockets, nanite, collision, bounds.
 
@@ -533,6 +623,8 @@ Get detailed info about a static mesh: LODs, verts, materials (with slots), sock
 
 ## `get_static_mesh_lightmap`
 
+*Read-only.*
+
 Read lightmap resolution and lightmap UV coordinate index of a static mesh.
 
 | Parameter | Type | Required | Description |
@@ -542,6 +634,8 @@ Read lightmap resolution and lightmap UV coordinate index of a static mesh.
 **Returns:** `{ static_mesh_path, lightmap_resolution, lightmap_coordinate_index }`
 
 ## `get_static_mesh_sections`
+
+*Read-only.*
 
 Get section-level info for all LODs of a static mesh (shadow, collision, ray tracing flags).
 
@@ -553,6 +647,8 @@ Get section-level info for all LODs of a static mesh (shadow, collision, ray tra
 
 ## `get_static_mesh_sockets`
 
+*Read-only.*
+
 List all sockets of a static mesh with transform and tag.
 
 | Parameter | Type | Required | Description |
@@ -562,6 +658,8 @@ List all sockets of a static mesh with transform and tag.
 **Returns:** `{ static_mesh_path, socket_count, sockets: [{name, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, tag}] }`
 
 ## `get_texture_array_info`
+
+*Read-only.*
 
 Reads metadata for a UTexture2DArray asset.  texture_array_path accepts short "/Game/MyGame/T_Array" or fully-qualified "...T_Array.T_Array" asset paths.
 
@@ -573,6 +671,8 @@ Reads metadata for a UTexture2DArray asset.  texture_array_path accepts short "/
 
 ## `get_texture_info`
 
+*Read-only.*
+
 Reads metadata for a UTexture2D asset.  texture_path accepts short or fully-qualified "/Game/MyGame/T_Example.T_Example" asset paths.
 
 | Parameter | Type | Required | Description |
@@ -582,6 +682,8 @@ Reads metadata for a UTexture2D asset.  texture_path accepts short or fully-qual
 **Returns:** `{ texture_name: string, asset_path: string, width: int, height: int, format: string, srgb: bool, compression: string, lod_group: string, has_source: bool, num_mips: int, mip_gen_settings: string }`
 
 ## `import_sound_file`
+
+*Destructive.*
 
 Import an external WAV file into a USoundWave asset.  Uses the legacy USoundFactory (AudioEditor module) path, no Interchange. The new sound wave is saved to disk and verified by loading it back; the response reports the resulting asset_path, duration (seconds) and num_channels.
 
@@ -596,6 +698,8 @@ Import an external WAV file into a USoundWave asset.  Uses the legacy USoundFact
 
 ## `import_texture_file`
 
+*Destructive.*
+
 Import an external image file (PNG/JPG/TGA/...) into a UTexture2D asset.  Uses the legacy UTextureFactory path (no Interchange). The new texture is saved to disk and verified by loading it back; the response reports the resulting asset_path, width and height.
 
 | Parameter | Type | Required | Description |
@@ -608,6 +712,8 @@ Import an external image file (PNG/JPG/TGA/...) into a UTexture2D asset.  Uses t
 **Returns:** `{ file_path: string, package_path: string, asset_path: string, asset_name: string, width: int, height: int, imported: bool }`
 
 ## `ingest_external_uassets`
+
+*Destructive.*
 
 Copy .uasset/.uexp/.ubulk/.umap from an EXTERNAL Content tree into THIS project, preserving each file's path relative to its Content root, then register the new packages with IAssetRegistry::ScanPathsSynchronous(bForceRescan) and sweep object redirectors under the destination. Fills the gap that migrate_assets only EXPORTS and import_asset is FBX/PNG-only. HEAVY: touches project Content on disk + mutates the registry -- run with confirmation.
 
@@ -623,6 +729,8 @@ Copy .uasset/.uexp/.ubulk/.umap from an EXTERNAL Content tree into THIS project,
 
 ## `list_assets_modified_since`
 
+*Read-only.*
+
 List package files (.uasset/.umap) under a content path whose ON-DISK mtime is newer than a timestamp -- the `find -newermt` recipe for isolating an UE Migrate set or a session's changes, but returning /Game package names. Enumerates the filesystem (so it catches just-migrated assets the registry may not have indexed yet).
 
 | Parameter | Type | Required | Description |
@@ -635,6 +743,8 @@ List package files (.uasset/.umap) under a content path whose ON-DISK mtime is n
 
 ## `reimport_asset`
 
+*Destructive.*
+
 Reimport an asset from its recorded source file via FReimportManager (legacy).  Works on any asset that carries UAssetImportData (e.g. a texture or sound that was imported from a file on disk). Runs fully automated (no dialogs). Returns can_reimport, reimported, and the recorded source_files.
 
 | Parameter | Type | Required | Description |
@@ -644,6 +754,8 @@ Reimport an asset from its recorded source file via FReimportManager (legacy).  
 **Returns:** `{ asset_path: string, can_reimport: bool, reimported: bool, source_files: [string] }`
 
 ## `remove_asset_from_collection`
+
+*Destructive, idempotent.*
 
 Removes an asset from a collection and reads back its object count (idempotent; inverse of add_asset_to_collection).  If the asset is already absent from the collection a stable payload is returned (already_absent=True).          must match the share type the collection was created with.
 
@@ -657,6 +769,8 @@ Removes an asset from a collection and reads back its object count (idempotent; 
 
 ## `remove_render_target_2d`
 
+*Destructive, idempotent.*
+
 Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with a `note` explaining which, never an exception, so it is idempotent and safe to re-run. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
 
 | Parameter | Type | Required | Description |
@@ -666,6 +780,8 @@ Delete a render target asset, but only after loading it and verifying it really 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_render_target_2d_array`
+
+*Destructive, idempotent.*
 
 Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
 
@@ -677,6 +793,8 @@ Delete a 2D-ARRAY render target, but only after loading it and verifying it real
 
 ## `remove_render_target_cube`
 
+*Destructive, idempotent.*
+
 Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
 
 | Parameter | Type | Required | Description |
@@ -686,6 +804,8 @@ Delete a CUBE render target, but only after loading it and verifying it really i
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_static_mesh_socket`
+
+*Destructive, idempotent.*
 
 Remove a socket from a static mesh by name (idempotent).
 
@@ -698,6 +818,8 @@ Remove a socket from a static mesh by name (idempotent).
 
 ## `remove_static_texture_from_render_target`
 
+*Destructive, idempotent.*
+
 Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent.
 
 | Parameter | Type | Required | Description |
@@ -708,6 +830,8 @@ Delete the static UTexture2D that create_static_texture_from_render_target baked
 
 ## `remove_texture_2d_array`
 
+*Destructive, idempotent.*
+
 Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
 
 | Parameter | Type | Required | Description |
@@ -717,6 +841,8 @@ Delete a static TEXTURE array, but only after loading it and verifying it really
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `rename_static_mesh_socket`
+
+*Destructive, idempotent.*
 
 Rename an existing static mesh socket (guards against name collisions; idempotent).
 
@@ -730,6 +856,8 @@ Rename an existing static mesh socket (guards against name collisions; idempoten
 
 ## `resolve_asset_by_name`
 
+*Read-only.*
+
 Resolve an exact asset name (or path) to EVERY matching asset and report `match_count` + `unambiguous`, instead of silently picking the first one the way get_asset_by_name, get_blueprint_parent, get_graph_nodes and the rest of the by-name tools do. Run this FIRST whenever you are about to address an asset by bare name: a project can have hundreds of duplicate names (the same name in a vendored pack and in the game's own folders, plus dated backup copies), and `unambiguous:false` is the only warning you will get before another tool hands you a stale backup's contents as if they were the real asset. From there, pass the full path everywhere. match_count:0 with success:true is a valid, informative answer -- it means "no asset with this exact name", which is a real measurement of non-existence (unlike search_assets_by_pattern's count:0, which can just mean the pattern had a wildcard in it).
 
 | Parameter | Type | Required | Description |
@@ -742,6 +870,8 @@ Resolve an exact asset name (or path) to EVERY matching asset and report `match_
 
 ## `scan_uasset_refs`
 
+*Read-only.*
+
 Lightweight BINARY scan of a .uasset/.umap on disk (NO editor load): tokenizes the raw package bytes and reports the referenced-asset-path tokens (/Game//Engine//Script) plus, optionally, tokens matching a regex `pattern`. A quick way to compare copies of one asset: an incomplete (stub) copy shows far fewer reference tokens than the complete one. Accepts a disk path OR a /Game|/Engine mount path.
 
 | Parameter | Type | Required | Description |
@@ -752,6 +882,8 @@ Lightweight BINARY scan of a .uasset/.umap on disk (NO editor load): tokenizes t
 **Returns:** `{ package_file: string, resolved_path: string, exists: bool, file_size_bytes: number, modified: string, pattern: string, ref_path_unique: int, ref_path_occurrences: number, ref_paths: [{token, count}], match_unique: int, match_occurrences: number, matches: [{token, count}] }`
 
 ## `search_assets_by_pattern`
+
+*Read-only.*
 
 Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water, plugin mounts, ...) and returning name, object path, class and package per hit. The broad "does anything called &lt;token> exist, and where?" search. It has TWO match modes and picks one automatically, reporting which in `match_mode`: a pattern WITHOUT `*`/`?` is a case-insensitive SUBSTRING test (FString::Contains) -- pass the bare token, this is the common case; a pattern WITH `*` or `?` is a real glob (FString::MatchesWildcard). WARNING: The glob is ANCHORED AT BOTH ENDS -- it matches the WHOLE name, not a substring -- so `Grass*` means "starts with Grass" and `*Grass*` is what reproduces substring behaviour. It only ever looks at the asset NAME, so it cannot find an asset by its folder or by a class it belongs to: use resolve_asset_by_name to check ONE exact name and get every homonym, get_assets_in_folder to enumerate a directory, get_assets_by_type for the 5 built-in type filters, and get_assets_by_tag for an Asset Registry tag.
 
@@ -766,6 +898,8 @@ Find assets by NAME, scanning every mounted content root (/Game, /Engine, /Water
 
 ## `set_asset_metadata_tag`
 
+*Destructive, idempotent.*
+
 Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset is loaded, UEditorAssetLibrary::SetMetadataTag is applied, the owning package is saved, and the value is read back to verify.
 
 | Parameter | Type | Required | Description |
@@ -778,6 +912,8 @@ Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset 
 
 ## `set_static_mesh_collision_complexity`
 
+*Destructive, idempotent.*
+
 Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh asset, creating its BodySetup when missing, then save it; a failed save is an error. An unrecognized complexity silently becomes default, so check collision_complexity, which is read back.
 
 | Parameter | Type | Required | Description |
@@ -788,6 +924,8 @@ Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh ass
 **Returns:** `{ static_mesh_path, collision_complexity, saved }`
 
 ## `set_static_mesh_lightmap`
+
+*Destructive, idempotent.*
 
 Set lightmap resolution and/or lightmap UV coordinate index on a static mesh (no rebuild).
 
@@ -801,6 +939,8 @@ Set lightmap resolution and/or lightmap UV coordinate index on a static mesh (no
 
 ## `set_static_mesh_material_slot`
 
+*Destructive, idempotent.*
+
 Assign a material to an existing material slot of a static mesh.
 
 | Parameter | Type | Required | Description |
@@ -813,6 +953,8 @@ Assign a material to an existing material slot of a static mesh.
 
 ## `set_static_mesh_nanite`
 
+*Destructive, idempotent.*
+
 Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. Returns nanite_enabled read back.
 
 | Parameter | Type | Required | Description |
@@ -824,6 +966,8 @@ Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subs
 **Returns:** `{ static_mesh_path, nanite_enabled, saved }`
 
 ## `set_static_mesh_socket_transform`
+
+*Destructive, idempotent.*
 
 Update the relative transform of an existing static mesh socket (only the provided fields).
 
@@ -838,6 +982,8 @@ Update the relative transform of an existing static mesh socket (only the provid
 **Returns:** `{ static_mesh_path, socket_name, updated, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, saved }`
 
 ## `set_texture_sampler_settings`
+
+*Destructive, idempotent.*
 
 Sets sampler/LOD settings on an existing UTexture2D and saves it.  Applies the requested fields, then PostEditChange + UpdateResource + save (no shader recompile), reading the resulting values back.  Enum params accept the name with or without prefix: address_x/address_y in {Wrap,Clamp,Mirror}; filter in {Nearest,Bilinear,Trilinear,Default}; mip_gen_settings in {FromTextureGroup,SimpleAverage,NoMipmaps,LeaveExistingMips,Sharpen0..10,Blur1..5,Unfiltered,Angular}.
 
@@ -855,6 +1001,8 @@ Sets sampler/LOD settings on an existing UTexture2D and saves it.  Applies the r
 **Returns:** `{ texture_name, asset_path, address_x, address_y, filter, mip_gen_settings, lod_bias, max_texture_size, flip_green, changed: bool, saved: bool, *_warning?: string, save_error?: string }`
 
 ## `set_texture_settings`
+
+*Destructive, idempotent.*
 
 Sets the given sRGB, compression and LOD group of a UTexture2D asset, rebuilds its resource when one changed and saves it in every case, returning the values read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning.
 

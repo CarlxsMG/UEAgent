@@ -6,6 +6,8 @@
 
 ## `add_input_modifier`
 
+*Additive.*
+
 Reshape the VALUE a key sends before the action sees it: append a modifier (Negate to flip an axis, Swizzle to remap X/Y/Z, DeadZone for stick drift, Scalar for sensitivity) to a key mapping in a mapping context. This is how one Axis2D action serves WASD -- S is W negated, not a second action. Modifiers change the value, triggers change when it fires (add_input_trigger); list_input_modifier_types enumerates the classes, remove_input_modifier undoes it by index. The context is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
@@ -21,6 +23,8 @@ Reshape the VALUE a key sends before the action sees it: append a modifier (Nega
 **Returns:** `{ context_name, action_name, key, modifier_type, modifier_class, index, modifier_count, saved, save_error? }`
 
 ## `add_input_trigger`
+
+*Additive.*
 
 Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released / Hold / Tap / Pulse / ChordAction) so a key can mean tap-to-do-X and hold-to-do-Y instead of consuming two keys. Targets either one key mapping inside a mapping context (pass context + key) or, with no context and no key, the InputAction asset's own Triggers array -- the difference decides whether the rule applies to that binding or to the action everywhere, so a key without a context is refused rather than read as the action. The edited asset is saved, and the call succeeds only when it reaches disk. Tune it afterwards with set_input_action_trigger_behavior; list_input_trigger_types enumerates the classes.
 
@@ -38,6 +42,8 @@ Decide WHEN a key fires its action: append a trigger (Down / Pressed / Released 
 
 ## `add_mapping_to_context`
 
+*Additive.*
+
 Bind a key to an InputAction in a saved Enhanced Input mapping context, addressing both by SHORT ASSET NAME (IMC_Foo / IA_Bar) instead of full paths -- otherwise the same operation as map_input_action, which takes paths. Returns the mapping index, which is what add_input_trigger / add_input_modifier / list_input_triggers address. A context that already maps that key to that action keeps its mapping (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key first.
 
 | Parameter | Type | Required | Description |
@@ -53,6 +59,8 @@ Bind a key to an InputAction in a saved Enhanced Input mapping context, addressi
 
 ## `create_force_feedback_effect`
 
+*Additive, idempotent.*
+
 Create a UForceFeedbackEffect data asset (NewObject + save).  Seeds the effect with one default FForceFeedbackChannelDetails so it is a meaningful, non-empty asset. Idempotent: if the asset already exists it is loaded and returned.
 
 | Parameter | Type | Required | Description |
@@ -63,6 +71,8 @@ Create a UForceFeedbackEffect data asset (NewObject + save).  Seeds the effect w
 **Returns:** `{ name: string, asset_path: string, asset_class: string, channel_detail_count: number, is_force_feedback_effect: bool, already_existed: bool, created: bool }`
 
 ## `create_input_action`
+
+*Additive.*
 
 Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding -- what the player does, independent of which key does it. Pick value_type up front (Bool for a button, Axis1D for a trigger/scroll, Axis2D for a stick or WASD, Axis3D), then bind it to a key inside a mapping context with map_input_action or add_mapping_to_context. Changing the type later is set_input_action_value_type; behaviour flags are set_input_action_flags. The asset is saved, and the call succeeds only when it reaches disk.
 
@@ -77,6 +87,8 @@ Create an Enhanced Input InputAction asset (IA_): the verb half of a keybinding 
 
 ## `create_input_mapping_context`
 
+*Additive.*
+
 Create an Enhanced Input mapping context asset (IMC_): the container that binds keys to InputActions and can be pushed and popped as a set. Prefer a context per MODE (driving, swimming, building, menu) over one key per verb -- pushing a context re-purposes the existing keys instead of consuming another global one. Empty on creation: fill it with map_input_action / add_mapping_to_context, and check the keys are free first with find_free_input_key. The asset is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
@@ -89,6 +101,8 @@ Create an Enhanced Input mapping context asset (IMC_): the container that binds 
 
 ## `discover_input_types`
 
+*Read-only.*
+
 One-call inventory of what Enhanced Input offers in this build: every value type plus every concrete modifier and trigger subclass, including any the project or a plugin added. Run it before add_input_trigger / add_input_modifier so you pass a class that actually exists instead of guessing a name. Superset of list_input_modifier_types and list_input_trigger_types, which return the same lists one at a time. Read-only.
 
 No parameters.
@@ -96,6 +110,8 @@ No parameters.
 **Returns:** `{ modifier_count, trigger_count, modifier_types: [...], trigger_types: [...] }`
 
 ## `find_free_input_key`
+
+*Read-only.*
 
 Which keys are still FREE: lists every input key not bound by any Enhanced Input mapping context or legacy mapping, filterable by category (keyboard / gamepad / mouse / touch) and substring. The complement of list_all_input_mappings and the tool to run before binding a new keyboard shortcut, since a collision compiles silently and only shows up in play. Trustworthy where the Python route is not: InputMappingContext.mappings is deprecated and returns empty, which makes every taken key look available.
 
@@ -109,6 +125,8 @@ Which keys are still FREE: lists every input key not bound by any Enhanced Input
 
 ## `get_action_mappings`
 
+*Read-only.*
+
 List the project's LEGACY action key mappings only (action_name + key + shift/ctrl/alt/cmd), with a count. Narrower than get_input_settings, which returns actions and axes together, and blind to Enhanced Input mapping contexts -- an empty list does not mean the game has no buttons bound. Use list_all_input_mappings when the question is "is this key already taken".
 
 No parameters.
@@ -116,6 +134,8 @@ No parameters.
 **Returns:** `{ action_name, key, shift, ctrl, alt, cmd, action_mappings, count }`
 
 ## `get_available_keys`
+
+*Read-only.*
 
 List the input key NAMES the engine knows (keyboard, mouse, gamepad, touch), with an optional substring filter -- how you find the exact spelling a binding call needs ("SpaceBar", "Gamepad_FaceButton_Bottom", "LeftMouseButton") instead of guessing. "Available" here means the engine defines it, NOT that it is unbound: for keys that are actually free use find_free_input_key, and for what is already taken list_all_input_mappings.
 
@@ -127,6 +147,8 @@ List the input key NAMES the engine knows (keyboard, mouse, gamepad, touch), wit
 
 ## `get_axis_mappings`
 
+*Read-only.*
+
 List the project's LEGACY axis key mappings only (axis_name + key + scale), with a count -- the analog/movement half of the legacy input system. Blind to Enhanced Input mapping contexts, so an empty list is not proof that movement is unbound; get_input_settings returns actions and axes together, and list_all_input_mappings covers both systems.
 
 No parameters.
@@ -134,6 +156,8 @@ No parameters.
 **Returns:** `{ axis_name, key, scale, axis_mappings, count }`
 
 ## `get_input_action`
+
+*Read-only.*
 
 Read one Enhanced Input InputAction asset in full: its value type (Bool / Axis1D / Axis2D / Axis3D), its accumulation behaviour, all the consume/pause/reserve flags, and the triggers and modifiers attached to the ACTION itself. The read-back oracle for create_input_action, set_input_action_value_type and set_input_action_flags, and the place to check b_consume_input -- an action left consuming input can swallow a key for the whole game. Triggers listed here are the action's own; the ones on a specific key binding live in the mapping context (list_input_triggers).
 
@@ -145,6 +169,8 @@ Read one Enhanced Input InputAction asset in full: its value type (Bool / Axis1D
 **Returns:** `{ action_path, action_name, value_type, accumulation_behavior, b_consume_input, b_trigger_when_paused, b_consumes_action_and_axis_mappings, b_reserve_all_mappings, trigger_events_that_consume_legacy_keys, action_description, b_tap, triggers, modifiers }`
 
 ## `get_input_action_state`
+
+*Read-only.*
 
 Read the live Enhanced Input state of one InputAction for a local player in a running PIE or game session: is_tracked, trigger_events, value, last_triggered_world_time and the mapping contexts that carry it, applied or not. It is the oracle for whether an input fired, since inject_key_input and trigger_input_action succeed either way: read it before and after, and an advancing last_triggered_world_time is the proof. is_mapped_in_applied_context false means no applied context maps it (removed on mounting, in a vehicle or a menu); is_tracked false means the engine is not evaluating it, typically an unpossessed pawn. In co-op, world picks which local player is read.
 
@@ -160,6 +186,8 @@ Read the live Enhanced Input state of one InputAction for a local player in a ru
 
 ## `get_input_mapping_context`
 
+*Read-only.*
+
 Read ONE Enhanced Input mapping context asset (IMC): every action-to-key mapping it declares. An IMC asset stores no priority -- that is given when the context is added to a player (AddMappingContext), so it is not reported here. The per-asset reader, and the reliable one -- the Python property InputMappingContext.mappings is deprecated and hands back an EMPTY list without failing, so a scan built on it reports a fully-bound context as empty. Use list_all_input_mappings for the project-wide "which keys are taken / which conflict" question.
 
 | Parameter | Type | Required | Description |
@@ -170,6 +198,8 @@ Read ONE Enhanced Input mapping context asset (IMC): every action-to-key mapping
 
 ## `get_input_settings`
 
+*Read-only.*
+
 Read the project's LEGACY input mappings from UInputSettings: named action mappings (key + shift/ctrl/alt/cmd modifiers) and axis mappings (key + scale), in one call. Legacy only -- it does NOT see Enhanced Input mapping contexts, so on an Enhanced Input project it can return almost nothing while the game is fully bound. For the complete picture across both systems use list_all_input_mappings; for one Enhanced Input context use get_input_mapping_context.
 
 No parameters.
@@ -177,6 +207,8 @@ No parameters.
 **Returns:** `{ action_name, key, shift, ctrl, alt, cmd, action_mappings, axis_name, scale, axis_mappings }`
 
 ## `get_player_input`
+
+*Read-only.*
 
 Read what a player is pressing RIGHT NOW: resolves the PlayerController for a local player index and returns it plus the currently pressed keys. Runtime state, so it needs a live PIE/game session -- an empty pressed_keys outside PIE means nothing. For which keys are BOUND (a static question) use list_all_input_mappings instead; to make an action fire use trigger_input_action.
 
@@ -187,6 +219,8 @@ Read what a player is pressing RIGHT NOW: resolves the PlayerController for a lo
 **Returns:** `{ player_controller, pressed_keys }`
 
 ## `list_all_input_mappings`
+
+*Read-only.*
 
 Which keys are already TAKEN, and which ones CONFLICT: aggregates every key-to-action binding across ALL Enhanced Input mapping context assets plus the legacy InputSettings action/axis mappings, and flags any key bound to more than one distinct action. Run it BEFORE claiming a new key -- a keybinding collision does not fail to compile, it surfaces weeks later inside another system. This is the aggregate you can trust: the Python route (InputMappingContext.mappings) is deprecated and returns an EMPTY list, which reads as "every key is free" even when every letter is taken. Use find_free_input_key for the complement (what is still unbound), get_input_mapping_context for one context.
 
@@ -199,6 +233,8 @@ Which keys are already TAKEN, and which ones CONFLICT: aggregates every key-to-a
 
 ## `list_input_modifier_types`
 
+*Read-only.*
+
 List the concrete input modifier classes available in this build (Negate, Swizzle, DeadZone, Scalar and any project/plugin ones) -- the valid values for add_input_modifier. Read-only. Use discover_input_types to get modifiers, triggers and value types in a single call.
 
 No parameters.
@@ -207,6 +243,8 @@ No parameters.
 
 ## `list_input_trigger_types`
 
+*Read-only.*
+
 List the concrete input trigger classes available in this build (Down, Pressed, Released, Hold, Tap, Pulse, ChordAction and any project/plugin ones) -- the valid values for add_input_trigger. Read-only. Use discover_input_types to get triggers, modifiers and value types in a single call.
 
 No parameters.
@@ -214,6 +252,8 @@ No parameters.
 **Returns:** `{ count, types: [...] }`
 
 ## `list_input_triggers`
+
+*Read-only.*
 
 List the triggers attached to ONE key mapping inside an Enhanced Input mapping context, addressed by mapping_index, with each trigger's class and index. The read-back for add_input_trigger and the way to find the trigger_index that remove_input_trigger needs. Scoped to the binding: triggers living on the InputAction asset itself show up in get_input_action instead.
 
@@ -225,6 +265,8 @@ List the triggers attached to ONE key mapping inside an Enhanced Input mapping c
 **Returns:** `{ count, triggers: [{index, class_name, display_name}] }`
 
 ## `map_input_action`
+
+*Destructive.*
 
 Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. A context that already maps that key to that action is left as it is (added false, already_mapped true, not saved); a new mapping succeeds only when the context reaches disk. Other actions on the same key are not checked: use find_free_input_key or list_all_input_mappings first.
 
@@ -240,6 +282,8 @@ Bind a key to an InputAction in an Enhanced Input mapping context, both by full 
 
 ## `register_input_key_mapping`
 
+*Additive.*
+
 Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSettings::MapPlayerKey (EnhancedInputUserSettings.h). Wraps FMapPlayerKeyArgs with the supplied mapping name + new key + slot. The call fails when the engine refuses the remap, with its reasons in failure_tags.
 
 | Parameter | Type | Required | Description |
@@ -254,6 +298,8 @@ Remaps a player input mapping to a new key at runtime via UEnhancedInputUserSett
 
 ## `remove_input_modifier`
 
+*Destructive.*
+
 Delete one modifier from a key mapping in an Enhanced Input mapping context, by mapping_index + modifier_index -- e.g. removing a Negate that flipped an axis the wrong way -- and save the context; the call succeeds only when the context reaches disk. Indices shift after a removal, so work from the highest down. add_input_modifier is the inverse.
 
 | Parameter | Type | Required | Description |
@@ -266,6 +312,8 @@ Delete one modifier from a key mapping in an Enhanced Input mapping context, by 
 
 ## `remove_input_trigger`
 
+*Destructive.*
+
 Delete one trigger from a key mapping in an Enhanced Input mapping context, by mapping_index + trigger_index -- e.g. dropping a Hold so the key fires immediately again -- and save the context; the call succeeds only when the context reaches disk. Get the indices from list_input_triggers; they shift after a removal, so work from the highest down.
 
 | Parameter | Type | Required | Description |
@@ -277,6 +325,8 @@ Delete one trigger from a key mapping in an Enhanced Input mapping context, by m
 **Returns:** `{ applied, removed_class_name, remaining_count, saved, save_error? }`
 
 ## `remove_mapping_from_context`
+
+*Destructive.*
 
 Unbind a key from an InputAction in a saved Enhanced Input mapping context -- how you free a key that list_all_input_mappings flagged as conflicting, or retire a verb. Identified by context + action + key, so only the first mapping of that action to that key goes; the assets themselves survive. The engine moves the context's last mapping into the freed slot, so mapping indexes (add_input_trigger, list_input_triggers) can change. The context is saved, and a removal succeeds only when it reaches disk; a mapping that is not there succeeds with removed false and already_absent true, and saves nothing.
 
@@ -292,6 +342,8 @@ Unbind a key from an InputAction in a saved Enhanced Input mapping context -- ho
 **Returns:** `{ context_name, action_name, key, removed, already_absent, mapping_count, saved, save_error? }`
 
 ## `set_input_action_flags`
+
+*Destructive, idempotent.*
 
 Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consumes_action_and_axis_mappings, reserve_all_mappings, the legacy-key consume bitmask, accumulation behaviour and the editor description. Handle consume_input with care -- it is the flag that decides whether OTHER actions on the same key still fire, and turning it on can swallow the game's interaction key entirely, a failure that shows up in an unrelated system days later. Only the fields you pass change, and a call that passes none is an error; the action is saved, and the call succeeds only when it reaches disk. Verify with get_input_action.
 
@@ -311,6 +363,8 @@ Set an InputAction's behaviour flags: consume_input, trigger_when_paused, consum
 
 ## `set_input_action_trigger_behavior`
 
+*Destructive, idempotent.*
+
 Tune HOW an input trigger fires on an InputAction: actuation threshold, hold time and one-shot for Hold triggers, tap release window for Tap, time-dilation sensitivity for timed ones -- i.e. how long "hold E to interact" must be held. Address the trigger either by index or by trigger_class (first of that type). Only the fields you pass change; the action is saved, and the call succeeds only when it reaches disk. Add the trigger first with add_input_trigger and re-read with get_input_action.
 
 | Parameter | Type | Required | Description |
@@ -329,6 +383,8 @@ Tune HOW an input trigger fires on an InputAction: actuation threshold, hold tim
 
 ## `set_input_action_value_type`
 
+*Destructive, idempotent.*
+
 Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D / Axis2D / Axis3D). Not cosmetic -- the type decides what shape of value the bound handlers receive and what trigger_input_action must inject, so switching it can break existing graph pins. Re-read with get_input_action and re-check the handlers. The action is saved, and the call succeeds only when it reaches disk.
 
 | Parameter | Type | Required | Description |
@@ -340,6 +396,8 @@ Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D
 **Returns:** `{ action_name, action_path, value_type, value_type_set, saved, save_error? }`
 
 ## `trigger_input_action`
+
+*Destructive.*
 
 Inject a value for an Enhanced Input action into a local player's UEnhancedInputLocalPlayerSubsystem in a running PIE or game session, so the real bound handlers run with the action's own modifiers and triggers (headless key injection never reaches Enhanced Input). dispatched true does not prove a handler fired: compare get_input_action_state before and after.
 
@@ -356,6 +414,8 @@ Inject a value for an Enhanced Input action into a local player's UEnhancedInput
 **Returns:** `{ dispatched: bool, note: string, action_path: string, value_type: string, injected_value: [x,y,z], player_index: number, hold_seconds: number, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `unregister_input_key_mapping`
+
+*Destructive.*
 
 Resets a player input mapping back to its default key at runtime via UEnhancedInputUserSettings::UnMapPlayerKey (EnhancedInputUserSettings.h). Inverse of register_input_key_mapping; locates the mapping by name + slot and clears the player override (does not need new_key, does not delete the row). The call fails when the engine refuses it, with its reasons in failure_tags.
 

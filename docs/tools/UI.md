@@ -6,6 +6,8 @@
 
 ## `add_list_view`
 
+*Additive.*
+
 Construct a UListView under the widget BP root and add it to the tree.
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Construct a UListView under the widget BP root and add it to the tree.
 **Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added }`
 
 ## `add_tile_view`
+
+*Additive.*
 
 Construct a UTileView under the widget BP root and add it to the tree.
 
@@ -30,6 +34,8 @@ Construct a UTileView under the widget BP root and add it to the tree.
 
 ## `add_tree_view`
 
+*Additive.*
+
 Construct a UTreeView under the widget BP root (or a named parent panel widget) and add it to the tree. HONEST SCOPE: authoring only, same posture as add_list_view/add_tile_view -- constructs the widget + wires EntryWidgetClass. Populating the tree's actual hierarchy (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is OUT OF SCOPE: that delegate is a native TSlateDelegates callback, not reflectively assignable -- wire it in the widget BP graph (native C++/BP override) or drive it live in PIE.
 
 | Parameter | Type | Required | Description |
@@ -42,6 +48,8 @@ Construct a UTreeView under the widget BP root (or a named parent panel widget) 
 **Returns:** `{ widget_blueprint_name, widget_name, tree_view_class, already_existed, entry_widget_class, parent_widget_name?, widget_added, saved, save_error?, note }`
 
 ## `add_viewmodel`
+
+*Additive.*
 
 Append a UMVVMViewModelContext to a Widget BP's MVVM authoring state.
 
@@ -58,6 +66,8 @@ Append a UMVVMViewModelContext to a Widget BP's MVVM authoring state.
 
 ## `add_widget_animation`
 
+*Additive.*
+
 Add a UWidgetAnimation (with an inner UMovieScene) to a Widget Blueprint.  Mirrors the editor's "New Animation" flow: constructs a UWidgetAnimation on the blueprint, gives it an inner UMovieScene (20fps, 0..5s range), sets the display label, appends to WidgetBP->Animations, then compiles and saves.
 
 | Parameter | Type | Required | Description |
@@ -68,6 +78,8 @@ Add a UWidgetAnimation (with an inner UMovieScene) to a Widget Blueprint.  Mirro
 **Returns:** `{ widget_bp_path: string, animation_name: string, object_name: string, display_name: string, added: bool, already_existed: bool, has_movie_scene: bool, animation_count: int, saved: bool, save_error: string }`
 
 ## `add_widget_animation_keyframe`
+
+*Additive.*
 
 Add a keyframe to an existing widget-animation property track's section (call add_widget_animation_track first). Converts time_seconds to an FFrameNumber via the MovieScene's tick resolution, extends the section's range to cover the key if needed, then adds the key on the matching channel(s) via the requested interpolation (AddLinearKey | AddCubicKey | AddConstantKey for float/color's FMovieSceneFloatChannel(s); bool channels have no interpolation concept and always use UpdateOrAddKey).
 
@@ -85,6 +97,8 @@ Add a keyframe to an existing widget-animation property track's section (call ad
 
 ## `add_widget_animation_track`
 
+*Additive.*
+
 Add (or reuse) a MovieScene property track for a widget's property inside a UWidgetAnimation: finds/creates a UMovieScenePossessable bound to the named widget (+ matching FWidgetAnimationBinding), resolves property_path to a top-level reflected property on the widget's class, and adds the matching typed track (UMovieSceneFloatTrack | UMovieSceneColorTrack | UMovieSceneBoolTrack) with a full-playback-range section. track_type="auto" infers from the property's reflected type (FFloatProperty/FDoubleProperty->float; FLinearColor or FSlateColor struct->color; FBoolProperty->bool). Call add_widget_animation_keyframe afterward to place keys. Single-level property_path only (not dotted sub-paths).
 
 | Parameter | Type | Required | Description |
@@ -99,6 +113,8 @@ Add (or reuse) a MovieScene property track for a widget's property inside a UWid
 
 ## `add_widget_extended`
 
+*Additive.*
+
 Add an EXTENDED-palette widget to a Widget Blueprint's tree.  Same authoring path as add_widget_to_blueprint but supports a wider set of widget types (resolved via /Script/UMG.&lt;Name>), PLUS arbitrary native widget classes and UserWidget (nested Widget Blueprint) instances.
 
 | Parameter | Type | Required | Description |
@@ -111,6 +127,8 @@ Add an EXTENDED-palette widget to a Widget Blueprint's tree.  Same authoring pat
 **Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `add_widget_property_binding`
+
+*Destructive.*
 
 Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "Bind" dropdown, headless. The property then recomputes every frame from that function instead of holding a fixed value (a health bar's Percent, a label's Text, a panel's Visibility). TWO RULES, both enforced by the ENGINE'S OWN validator (FDelegateEditorBinding::IsBindingValid, the same code the UMG compiler runs -- this tool does not second-guess it): the property is bindable only if its widget declares a companion delegate named "&lt;Property>Delegate" (Text -> TextDelegate), and the function must have a COMPATIBLE SIGNATURE (same return type, NO parameters) and be PURE (BlueprintPure or const), because it is called while painting. A refusal names which of the two failed and, when the property is not bindable at all, lists the ones that are. Create the function first with add_blueprint_function + set its return type; one property can hold only ONE binding, so re-binding the same property REPLACES it (reported in replaced_existing).
 
@@ -126,6 +144,8 @@ Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "
 
 ## `add_widget_to_blueprint`
 
+*Additive.*
+
 Add a widget to a Widget Blueprint's tree under a named panel (or the root).
 
 | Parameter | Type | Required | Description |
@@ -138,6 +158,8 @@ Add a widget to a Widget Blueprint's tree under a named panel (or the root).
 **Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `apply_widget_style_preset`
+
+*Destructive.*
 
 Apply ONE block of style properties to EVERY widget of a Widget Blueprint that matches a filter, in a single pass with ONE compile + ONE save -- the multi-widget companion to set_widget_property's multi-path form. Selection is target_widgets (explicit names, wins over everything) OR target_class (matched with IsA, so subclasses count) AND/OR name_pattern (wildcard). At least one selector is required: to hit every widget in the tree say so explicitly with name_pattern="*". Every value goes through the same honest applier, so the per-widget report distinguishes what landed from what was ignored; dry_run=true resolves the match and reports it WITHOUT writing, which is the cheap way to check a filter before it touches 40 widgets.
 
@@ -158,6 +180,8 @@ Apply ONE block of style properties to EVERY widget of a Widget Blueprint that m
 
 ## `bind_widget_to_viewmodel`
 
+*Destructive.*
+
 Append an FMVVMBlueprintViewBinding to a Widget BP's MVVM authoring state, with a REAL SourcePath/DestinationPath (resolved via reflection and written through UMVVMEditorSubsystem, then re-read to verify the write actually stuck).
 
 | Parameter | Type | Required | Description |
@@ -170,6 +194,8 @@ Append an FMVVMBlueprintViewBinding to a Widget BP's MVVM authoring state, with 
 **Returns:** `{ widget_blueprint_name, source_path, destination_path, binding_mode, created, binding_count, binding_id, source_path_verified, destination_path_verified, has_mvvm_extension }`
 
 ## `click_pie_widget`
+
+*Destructive.*
 
 Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve a UWidget by name among the active viewport UserWidgets (reusing the read_pie_widgets walk) and BROADCAST its named BlueprintAssignable multicast delegate (default OnClicked). Unlike read_pie_widgets (read-only) this MUTATES runtime state -- it runs the exact bound handlers a real click would, including the client->server RPC path, so equip/inventory/craft UI flows can be driven headless instead of by a human (driving them via call_function bypasses that RPC path and yields false negatives). Errors clearly if no Play-In-Editor session is running or the widget/event is not found.
 
@@ -185,6 +211,8 @@ Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve
 
 ## `create_common_ui_stack`
 
+*Additive.*
+
 Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if absent). root_class, when given, picks which UCommonActivatableWidgetStack subclass gets constructed (e.g. a project-authored BP subclass) -- an unresolvable or non-subclass value does not fail the call, it honestly falls back to the base stack class with a note (see root_class_note in the response).
 
 | Parameter | Type | Required | Description |
@@ -195,6 +223,8 @@ Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if abse
 **Returns:** `{ widget_blueprint_name, root_class?, already_existed, stack_class, root_class_requested, root_class_resolved, root_class_note?, root_changed, root_widget, root_widget_class }`
 
 ## `create_widget`
+
+*Additive.*
 
 Create a new UMG widget from a class and optionally add it to the viewport.
 
@@ -209,6 +239,8 @@ Create a new UMG widget from a class and optionally add it to the viewport.
 
 ## `create_widget_blueprint`
 
+*Additive.*
+
 Create (and save) a new UWidgetBlueprint asset with a CanvasPanel root.
 
 | Parameter | Type | Required | Description |
@@ -220,6 +252,8 @@ Create (and save) a new UWidgetBlueprint asset with a CanvasPanel root.
 **Returns:** `{ name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created: bool, root_widget: string, root_widget_class: string, saved: bool, save_error: string }`
 
 ## `duplicate_widget`
+
+*Additive.*
 
 Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and add the clone under a target parent panel, copying the source's slot property values onto the new slot when the slot classes match. Refuses (clear error, no partial/broken result) to duplicate a panel widget that currently has children -- UE's object duplication would leave the clone's slots aliasing the SAME original child widgets rather than deep-copying them (see FDuplicateDataWriter); duplicate leaf widgets, or rebuild the panel's children individually with add_widget_extended. Name collisions on new_name are a clear error (not a silent alias of the pre-existing widget at that name).
 
@@ -234,6 +268,8 @@ Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and a
 
 ## `get_pie_focused_widget`
 
+*Read-only.*
+
 Report which UMG widget currently has FOCUS in the running PIE session -- the assertion that makes gamepad navigation testable instead of eyeballed. Resolves FSlateApplication's focused SWidget and maps it back to the UMG UWidget that created it, by walking up to the owning SObjectWidget and matching cached widgets: the same route the engine's own navigation component uses, and it has to walk up because the widget holding focus is usually an internal SButton, not the one that maps 1:1 to a UWidget. Pair it with inject_key_input route="slate", the only input path that moves focus at all: press Down, read this, assert. Returns has_focus:false as an honest success (not an error) when nothing is focused -- which is itself the finding when a menu opens with no focus and every navigation key then appears to do nothing.
 
 | Parameter | Type | Required | Description |
@@ -244,6 +280,8 @@ Report which UMG widget currently has FOCUS in the running PIE session -- the as
 
 ## `get_widget_animations`
 
+*Read-only.*
+
 List the UWidgetAnimations of a Widget Blueprint asset, each with its object name, display_name and has_movie_scene, plus animation_count and the resolved asset_path. Read-only; add_widget_animation creates one and remove_widget_animation accepts either name.
 
 | Parameter | Type | Required | Description |
@@ -253,6 +291,8 @@ List the UWidgetAnimations of a Widget Blueprint asset, each with its object nam
 **Returns:** `{ widget_bp_path: string, asset_path: string, animations: [{name, display_name, has_movie_scene}], animation_count: int }`
 
 ## `get_widget_blueprint_tree`
+
+*Read-only.*
 
 Return a Widget Blueprint's widget tree as nested {name, class, children[]} AND, on request, the actual VALUES of its widgets and slots -- which is what makes verifying a style a cheap read instead of a PIE session. Off by default (a bare tree is what name-only callers want); three switches turn it on: property_paths reads exact dotted paths ("WidgetStyle.Normal.TintColor") on every node whether or not they still hold the default -- this is the oracle that closes a set_widget_property; include_properties reports only what DIFFERS from each widget's archetype, i.e. what this Widget Blueprint actually changed, instead of the ~120 inherited properties nobody reads; include_slot adds each widget's UPanelSlot class plus its own non-default values (position, anchors, padding, row/column). Values come back as TYPED JSON, not UE export-text. widget_name dumps one subtree instead of the whole asset.
 
@@ -270,6 +310,8 @@ Return a Widget Blueprint's widget tree as nested {name, class, children[]} AND,
 
 ## `get_widget_hierarchy`
 
+*Read-only.*
+
 Retrieve the widget hierarchy tree including parent, children, and nested structure information.
 
 | Parameter | Type | Required | Description |
@@ -279,6 +321,8 @@ Retrieve the widget hierarchy tree including parent, children, and nested struct
 **Returns:** `{ widget_name: string, hierarchy: { name: string, class: string, depth: number, valid: bool, enabled: bool, visibility: string, size?: { width, height }, position?: { x, y, z }, children: [object], child_count: number }, widget_valid: bool }`
 
 ## `get_widget_properties`
+
+*Read-only.*
 
 Retrieve detailed properties and state information for a widget by name.
 
@@ -290,6 +334,8 @@ Retrieve detailed properties and state information for a widget by name.
 
 ## `list_level_widget_components`
 
+*Read-only.*
+
 CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy / remove_widget search by widget_name. It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 
 | Parameter | Type | Required | Description |
@@ -299,6 +345,8 @@ CALL THIS FIRST to discover valid widget_name values instead of guessing: it enu
 **Returns:** `{ components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }`
 
 ## `list_widget_property_bindings`
+
+*Read-only.*
 
 List the UMG PROPERTY BINDINGS of a Widget Blueprint -- the "Bind" dropdown next to a property in the Designer's details panel, which makes that property recompute every frame by calling a function instead of holding a fixed value. These live in UWidgetBlueprint::Bindings, NOT in the widget tree and NOT in the event graph, so no other reader sees them; and UWidgetBlueprint::Bindings is NOT exposed to Python either (get_editor_property("bindings") throws), so this is the only headless way to read them. Each entry is re-validated live with the engine's own FDelegateEditorBinding::IsBindingValid, so a binding whose function was renamed or made non-pure comes back valid:false WITH the compiler's reason -- that is the difference between "there is a binding" and "there is a binding that works".
 
@@ -311,6 +359,8 @@ List the UMG PROPERTY BINDINGS of a Widget Blueprint -- the "Bind" dropdown next
 
 ## `list_widget_types`
 
+*Read-only.*
+
 List the CURATED widget_type names accepted by add_widget_to_blueprint (family="basic") / add_widget_extended (family="extended", the default -- a strict superset of basic), with each entry's resolved /Script/UMG.&lt;Name> class path and whether LoadObject actually resolves it in this build (should always be true; reported for honesty rather than assumed). This list is a convenience shortlist, NOT the full set of accepted values -- both tools also accept any native widget class path (/Script/Module.ClassName) and any UserWidget-derived Widget Blueprint's /Game asset path (embeds a nested instance); see custom_class_note in the response.
 
 | Parameter | Type | Required | Description |
@@ -320,6 +370,8 @@ List the CURATED widget_type names accepted by add_widget_to_blueprint (family="
 **Returns:** `{ family: string, widget_types: [{ widget_type: string, class_path: string, resolvable: bool }], count: int, custom_class_note: string }`
 
 ## `play_widget_animation`
+
+*Destructive.*
 
 Play a widget animation. REAL playback (UUserWidget::PlayAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (played:false, headless:true, requires_pie:true) when no PIE session is running or no live instance is found.
 
@@ -338,6 +390,8 @@ Play a widget animation. REAL playback (UUserWidget::PlayAnimation) when a live 
 
 ## `pop_common_ui_widget`
 
+*Destructive.*
+
 Pop the ACTIVE screen off a live CommonUI stack, or clear the whole stack -- the inverse of push_common_ui_widget and the other half of driving a menu state machine headless (open, go deeper, come back, assert what is on top). WARNING: RUNTIME ONLY, same as the push: with no PIE session there is nothing on any stack. Popping an empty stack is an honest success with popped:false, not an error.
 
 | Parameter | Type | Required | Description |
@@ -351,6 +405,8 @@ Pop the ACTIVE screen off a live CommonUI stack, or clear the whole stack -- the
 
 ## `push_common_ui_widget`
 
+*Additive.*
+
 Push a screen onto a LIVE CommonUI activatable stack in the running PIE session -- the operation that lets a menu state machine be driven to a specific state and then asserted. create_common_ui_stack only puts the stack in place; its contents are populated at runtime with AddWidget, which this calls headless, so "open the pause menu, then the options page, now check the back button" is reproducible. WARNING: RUNTIME ONLY: the container's widget list and its widget pool are Transient, so with no PIE session there is genuinely nothing to push onto and this says so rather than pretending. The pushed widget is activated by the stack itself; read the result with get_common_ui_stack or read_pie_widgets, and move focus into it with set_pie_widget_focus.
 
 | Parameter | Type | Required | Description |
@@ -363,6 +419,8 @@ Push a screen onto a LIVE CommonUI activatable stack in the running PIE session 
 **Returns:** `{ stack_widget_name, pushed_class, pushed_widget: string, widget_count: int, active_widget: string } -- widget_count and active_widget are read off the stack AFTER the push, so they are evidence rather than an echo.`
 
 ## `read_pie_widgets`
+
+*Read-only.*
 
 Read LIVE UMG from the running PIE session (game thread): enumerate the active UUserWidgets added to the viewport and walk each widget tree, emitting name/class plus optional visibility/hover/text/value/geometry as a parent/child tree.  Reads only game-thread-safe widget-tree state (never the render thread). Errors clearly if no Play-In-Editor session is running.  DESCENDS INTO NESTED WIDGET BLUEPRINTS: an AAA screen is a Widget Blueprint composed of Widget Blueprints, so everything interesting sits one level below the first. Cycles are handled with a visited set plus max_depth, and a subtree that IS cut says so in subtree_omitted instead of looking like a leaf. Rich text is read too (URichTextBlock does not derive from UTextBlock). Not implemented: include_bindings, which is accepted and flagged in bindings_note.
 
@@ -381,6 +439,8 @@ Read LIVE UMG from the running PIE session (game thread): enumerate the active U
 
 ## `remove_viewmodel`
 
+*Destructive, idempotent.*
+
 Remove a UMVVMViewModelContext (by context name) from a Widget BP's MVVM authoring state. Inverse of add_viewmodel; idempotent (already-absent is an honest success).
 
 | Parameter | Type | Required | Description |
@@ -392,6 +452,8 @@ Remove a UMVVMViewModelContext (by context name) from a Widget BP's MVVM authori
 
 ## `remove_widget`
 
+*Destructive.*
+
 Remove a widget by name from its parent or viewport.
 
 | Parameter | Type | Required | Description |
@@ -401,6 +463,8 @@ Remove a widget by name from its parent or viewport.
 **Returns:** `{ widget_name: string, was_in_viewport: bool, had_parent: bool }`
 
 ## `remove_widget_animation`
+
+*Destructive.*
 
 Remove a UWidgetAnimation from a Widget Blueprint.  Inverse of add_widget_animation: finds the animation by object name or display label, removes it from WidgetBP->Animations, unregisters it as a blueprint variable (OnVariableRemoved), then compiles and saves. If no such animation exists it is an honest no-op (removed:false, already_existed:false, no save).
 
@@ -412,6 +476,8 @@ Remove a UWidgetAnimation from a Widget Blueprint.  Inverse of add_widget_animat
 **Returns:** `{ widget_bp_path: string, animation_name: string, object_name: string, removed: bool, already_existed: bool, animation_count: int, saved: bool, save_error: string }`
 
 ## `remove_widget_property_binding`
+
+*Destructive, idempotent.*
 
 Remove a UMG property binding (the Designer's "Bind" dropdown set back to none), so the property goes back to holding its authored fixed value. Inverse of add_widget_property_binding and idempotent: a property that was not bound is an honest success with removed:false, never an error.
 
@@ -426,6 +492,8 @@ Remove a UMG property binding (the Designer's "Bind" dropdown set back to none),
 
 ## `rename_widget`
 
+*Destructive.*
+
 Rename a widget in a Widget Blueprint's tree (WidgetTree membership, blueprint variable map, bindings, and animation bindings all updated in one call -- the same path as the Designer's F2).
 
 | Parameter | Type | Required | Description |
@@ -437,6 +505,8 @@ Rename a widget in a Widget Blueprint's tree (WidgetTree membership, blueprint v
 **Returns:** `{ widget_bp_path: string, old_name: string, new_name: string, resolved_name: string, renamed: bool, saved: bool, save_error: string }`
 
 ## `render_widget_preview`
+
+*Destructive.*
 
 Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the widget with the editor's own designer flags, draws it through FWidgetRenderer into a render target and writes the file. This is what turns "does this style look right?" from a PIE session someone has to watch into a static read plus one image to LOOK at. HONEST SCOPE: it is a DESIGN preview, the same thing the UMG Designer shows -- not the live HUD. Anything that only exists while the game runs (text filled in NativeConstruct, property bindings, ViewModel data, anything behind an IsDesignTime() guard) renders at its default/empty value. Use read_pie_widgets or capture_pie_screenshot for the running session. Returns rendered:false with a reason (never a blank image) when the editor has no RHI (-nullrhi/headless), because FWidgetRenderer cannot draw there.
 
@@ -453,6 +523,8 @@ Render a Widget Blueprint to a PNG on disk WITHOUT running the game: builds the 
 
 ## `reorder_widget_child`
 
+*Destructive.*
+
 Change a widget's index among its parent panel's children via UPanelWidget::ShiftChild (clamps new_index internally; safe with any int). For a CanvasPanel parent, visual stacking is governed by each child's CanvasPanelSlot ZOrder (set_widget_slot_properties z_order), NOT child index -- the index shift is still applied and reported honestly, with a note.
 
 | Parameter | Type | Required | Description |
@@ -464,6 +536,8 @@ Change a widget's index among its parent panel's children via UPanelWidget::Shif
 **Returns:** `{ widget_bp_path: string, widget_name: string, parent_name: string, old_index: int, requested_index: int, resolved_index: int, child_count: int, reordered: bool, parent_is_canvas_panel: bool, note?: string, saved: bool, save_error: string }`
 
 ## `reparent_widget`
+
+*Destructive.*
 
 Move a widget to a new parent panel (optionally at a specific child index), via FWidgetBlueprintOperationUtils::MoveWidget -- the same primitive backing the Designer's drag-and-drop reparent. Validates the new parent is a panel widget and refuses to create a cycle. Optional slot_properties are applied to the widget's NEW slot afterward via the shared reflection setter (e.g. {"Row":1,"Column":2} for a GridSlot). THIS IS ALSO HOW YOU FILL A NAMED SLOT: a UNamedSlot is a UContentWidget (hence a panel), so add one with add_widget_extended widget_type="NamedSlot" and reparent the content into it -- there is no separate SetContentForSlot tool and none is needed (it answers reparented:true, new_slot_class:PanelSlot).
 
@@ -478,6 +552,8 @@ Move a widget to a new parent panel (optionally at a specific child index), via 
 **Returns:** `{ widget_bp_path: string, widget_name: string, old_parent_name: string, new_parent_name: string, new_slot_class: string, resolved_child_index: int, reparented: bool, slot_properties_applied: int, slot_property_errors?: [string], saved: bool, save_error: string }`
 
 ## `scaffold_menu_screen`
+
+*Additive.*
 
 Build a styled menu screen: create or reuse the Widget Blueprint at package_path/name with a centred panel, optional title and one button per entry bound to an event-graph OnClicked handler, then compile and save. Re-runs reuse widgets and bindings. Returns contrast_ratio_normal_text; the default colors pass audit_widget_accessibility. Layout is not measured (long labels can clip) and text is inline, not String Table.
 
@@ -505,6 +581,8 @@ Build a styled menu screen: create or reuse the Widget Blueprint at package_path
 
 ## `set_box_slot_properties`
 
+*Destructive, idempotent.*
+
 Configure a widget's box-family slot layout (alignment/padding/size).  Applies when the widget is parented under a HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox; dispatches by the concrete slot type. Size only applies to Horizontal/Vertical/ScrollBox slots -- on the others it is returned as an honest note. For a CanvasPanel child use set_widget_slot_properties; for a GridPanel child use set_grid_slot_properties.
 
 | Parameter | Type | Required | Description |
@@ -520,6 +598,8 @@ Configure a widget's box-family slot layout (alignment/padding/size).  Applies w
 **Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, notes: [string], saved: bool, save_error: string }`
 
 ## `set_grid_slot_properties`
+
+*Destructive, idempotent.*
 
 Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_extended widget_type="GridPanel"). Setting the same values again is idempotent.
 
@@ -541,6 +621,8 @@ Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/
 
 ## `set_named_slot_content`
 
+*Destructive, idempotent.*
+
 Put a widget into a NAMED SLOT of a NESTED Widget Blueprint instance -- the "template screen with holes" pattern. reparent_widget already fills a UNamedSlot that belongs to your own tree (it is a UContentWidget, so it is just a panel), but the slot of an embedded instance is not a panel in your tree at all: it is an entry in that instance's NamedSlotBindings, and no other tool writes it. WARNING: the engine's SetContentForSlot returns nothing and SILENTLY DROPS the binding when the slot name does not exist, so this re-reads it with GetContentForSlot afterwards and reports the RE-READ, never the call. List what a given instance offers with available_slots in the response, or pass no slot_name at all to just enumerate them.
 
 | Parameter | Type | Required | Description |
@@ -555,6 +637,8 @@ Put a widget into a NAMED SLOT of a NESTED Widget Blueprint instance -- the "tem
 **Returns:** `{ widget_bp_path, host_widget_name, host_class, available_slots: [string], slot_name, content_widget_name, filled: bool, verified_content: string, saved, save_error } -- verified_content is what GetContentForSlot returns AFTER the write: empty when the engine dropped the binding, which is the only way to tell that from a success.`
 
 ## `set_pie_list_view_items`
+
+*Destructive, idempotent.*
 
 Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_name (optionally drilling into child_name) among the active viewport UserWidgets using the same walk click_pie_widget uses, resolves each entry in items[] to a UObject* (an actor name/label in the PIE world, else a /Game asset path via FSoftObjectPath::TryLoad), then calls SetListItems (or AddItems when append=true). Companion to add_list_view/add_tile_view, which only construct an EMPTY view.
 
@@ -572,6 +656,8 @@ Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_
 
 ## `set_pie_widget_focus`
 
+*Destructive, idempotent.*
+
 Give keyboard/gamepad FOCUS to a live UMG widget in the running PIE session, so navigation has somewhere to start from. Menus routinely open with nothing focused, and then every navigation key does nothing -- which reads exactly like broken navigation and sends you to debug rules that were fine. Resolves the widget the same way click_pie_widget does (widget_name, optionally drilling in with child_name, nested Widget Blueprints included), then calls UWidget::SetKeyboardFocus. Verify with get_pie_focused_widget and drive from there with inject_key_input route="slate".
 
 | Parameter | Type | Required | Description |
@@ -584,6 +670,8 @@ Give keyboard/gamepad FOCUS to a live UMG widget in the running PIE session, so 
 **Returns:** `{ focused: bool, widget_name: string, widget_class: string, has_keyboard_focus: bool } -- has_keyboard_focus is RE-READ off the widget after the call, so it is evidence and not an echo: false means Slate refused the focus, and the usual cause is that the widget is not focusable (check IsFocusable and its Visibility -- a HitTestInvisible widget cannot take focus).`
 
 ## `set_pie_widget_value`
+
+*Destructive, idempotent.*
 
 Set a LIVE PIE input widget's REAL value (companion to click_pie_widget, which only broadcasts a delegate with zero-init params and never touches Slider/CheckBox/EditableTextBox/ComboBoxString state first). Resolves the widget exactly like click_pie_widget (same widget_name/child_name/player_index rules), then calls the widget's real setter: USlider::SetValue, UCheckBox::SetIsChecked, UEditableTextBox::SetText/UEditableText::SetText, UComboBoxString::SetSelectedOption, or UProgressBar::SetPercent. fire_event genuinely gates a manual OnCheckStateChanged/OnTextChanged(+OnTextCommitted) broadcast for CheckBox/EditableText(Box); Slider/ComboBoxString auto-broadcast on the engine side whenever the value actually changes (fire_event cannot suppress that -- see event_fired_note); ProgressBar has no change event at all. Errors clearly if no PIE session is running, the widget is not found, or its class is not one of the supported input types.
 
@@ -601,6 +689,8 @@ Set a LIVE PIE input widget's REAL value (companion to click_pie_widget, which o
 
 ## `set_slot_properties`
 
+*Destructive, idempotent.*
+
 Set ANY property of a widget's UPanelSlot BY REFLECTION, whatever the concrete slot class is -- including the 9 of UMG's 17 slot types that no shortcut covers (UButtonSlot, which is every widget inside a Button; UUniformGridSlot, UWrapBoxSlot, UStackBoxSlot, UWidgetSwitcherSlot, USafeZoneSlot, UScaleBoxSlot, UBackgroundBlurSlot, UWindowTitleBarAreaSlot) and any slot type a future engine version adds. Accepts dotted paths into nested slot structs ("Padding.Left", "Size.SizeRule") and reports field by field what landed, same honest contract as set_widget_property: the oracle is applied[]/ignored[]/errors[], not success. For the common cases prefer the validated shortcuts, which also normalise formats this does not guess: set_widget_slot_properties (CanvasPanel anchors/offsets/z-order), set_box_slot_properties (HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox alignment+padding+size) and set_grid_slot_properties (GridPanel row/column/spans).
 
 | Parameter | Type | Required | Description |
@@ -614,6 +704,8 @@ Set ANY property of a widget's UPanelSlot BY REFLECTION, whatever the concrete s
 
 ## `set_viewmodel_field`
 
+*Destructive, idempotent.*
+
 Instantiate a UMVVMViewModelBase on a UUserWidget instance and set it via UMVVMBlueprintLibrary::SetViewModelByClass.
 
 | Parameter | Type | Required | Description |
@@ -626,6 +718,8 @@ Instantiate a UMVVMViewModelBase on a UUserWidget instance and set it via UMVVMB
 
 ## `set_widget_drag_drop`
 
+*Destructive, idempotent.*
+
 Honest gap report: there is no UWidget UPROPERTY that exposes DragDropOperationClass, and OnDragDetected/OnDrop are DECLARE_DYNAMIC delegates (not reflectively assignable). The drag/drop behavior must be configured in the widget BP graph.
 
 | Parameter | Type | Required | Description |
@@ -637,6 +731,8 @@ Honest gap report: there is no UWidget UPROPERTY that exposes DragDropOperationC
 **Returns:** `{ widget_blueprint_name, widget_name, operation_class, set: false, has_drag_drop_property: false, note }`
 
 ## `set_widget_navigation`
+
+*Destructive, idempotent.*
 
 Author a widget's GAMEPAD/KEYBOARD navigation rules -- what gets focus when the player pushes up, down, left, right, Tab or Shift+Tab off this widget. Without this a menu cannot be driven with a pad, and it is NOT reachable through set_widget_property: UWidget::Navigation is an Instanced SUBOBJECT that starts null, so there is no asset path a reflection setter could point at and a dotted path fails on a null segment. Follows the editor's own flow, including the two details that matter: the subobject is created RF_Transactional with template flags propagated, and if all six directions end up on Escape the subobject is DISCARDED (that is what tells "no navigation authored" apart from "navigation authored that happens to be the default", and it is what the Designer does). Read the result back with get_widget_blueprint_tree include_navigation=true.
 
@@ -652,6 +748,8 @@ Author a widget's GAMEPAD/KEYBOARD navigation rules -- what gets focus when the 
 
 ## `set_widget_property`
 
+*Destructive, idempotent.*
+
 Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressing NESTED STYLE FIELDS by dotted path ("WidgetStyle.Normal.TintColor", "WidgetStyle.Hovered.OutlineSettings.CornerRadii") and reporting FIELD BY FIELD what actually landed.  Two calling shapes over one write path: property_name+value writes a single path; `properties` writes a whole map with ONE Modify + ONE compile + ONE save (a FButtonStyle is ~30 leaf fields -- one call, not 30 recompiles). WARNING: The oracle is `applied[]`/`ignored[]`/`errors[]`, NOT success: a JSON key that matches no reflected field lands in `ignored[]` and `all_applied` goes false instead of the silent no-op the engine's converter reports as success. Read the result back with get_widget_blueprint_tree(property_paths=[...]).
 
 | Parameter | Type | Required | Description |
@@ -666,6 +764,8 @@ Set ONE or MANY reflected properties on a widget of a Widget Blueprint, addressi
 **Returns:** `{ widget_bp_path: string, widget_name: string, widget_class: string, requested_paths: [string], applied: [string], ignored: [string], errors: [{path, error}], failed_paths: [string], applied_count: int, all_applied: bool, current_values: object, saved: bool, save_error: string }`
 
 ## `set_widget_slot_properties`
+
+*Destructive, idempotent.*
 
 Set CanvasPanelSlot layout for a widget parented under a CanvasPanel.
 
@@ -684,6 +784,8 @@ Set CanvasPanelSlot layout for a widget parented under a CanvasPanel.
 
 ## `set_widget_visibility`
 
+*Destructive, idempotent.*
+
 Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisible, SelfHitTestInvisible.
 
 | Parameter | Type | Required | Description |
@@ -694,6 +796,8 @@ Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisi
 **Returns:** `{ widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }`
 
 ## `stop_widget_animation`
+
+*Destructive.*
 
 Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE instance of this WidgetBP is found in the viewport's active UUserWidgets; falls back to an honest headless gate (stopped:false, headless:true, requires_pie:true) otherwise.
 
@@ -706,6 +810,8 @@ Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE 
 **Returns:** `{ widget_bp_path: string, animation_name: string, animation_exists: bool, stopped: bool, headless: bool, requires_pie: bool, note: string, saved: bool, live_widget_name?: string, live_animation_name?: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `unbind_widget_from_viewmodel`
+
+*Destructive, idempotent.*
 
 Remove an FMVVMBlueprintViewBinding from a Widget BP's MVVM authoring state, by index (primary) or binding GUID. Inverse of bind_widget_to_viewmodel; idempotent (already-absent is an honest success).
 

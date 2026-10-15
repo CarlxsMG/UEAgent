@@ -140,6 +140,13 @@ def alias_rules(table: str) -> dict[str, list[tuple[str, str]]]:
     return rules
 
 
+def published_description(command: dict) -> str:
+    """The description, then "Returns: " and the `@returns` shape (FTool::PublishedDescription)."""
+    description = command.get("description") or ""
+    returns = (command.get("returns") or "").strip()
+    return f"{description}\n\nReturns: {returns}" if returns else description
+
+
 def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tuple[str, str]]]) -> list[dict]:
     tools: list[dict] = []
     seen: set[str] = set()
@@ -210,7 +217,10 @@ def build_tools(catalog: dict, pie_unsafe: set[str], aliases: dict[str, list[tup
             required = [p["name"] for p in params if p["required"] and p["name"].lower() not in relaxed]
             if required:
                 input_schema["required"] = required
-            tools.append({"name": name, "description": command.get("description") or "", "inputSchema": input_schema})
+            tool = {"name": name, "description": published_description(command), "inputSchema": input_schema}
+            if isinstance(command.get("annotations"), dict):
+                tool["annotations"] = command["annotations"]
+            tools.append(tool)
             seen.add(name.lower())
     return tools
 
@@ -312,6 +322,13 @@ def check() -> int:
         problems.append("no parameter is `aliasOf` another: the handlers' alias chains are not in the catalog")
     if still_required:
         problems.append(f"required although another spelling may replace it: {still_required[:5]}")
+    without_annotations = [tool["name"] for tool in tools if "annotations" not in tool]
+    if without_annotations:
+        problems.append(f"{len(without_annotations)} tools without annotations: {without_annotations[:5]}")
+    read_only = sum(tool.get("annotations", {}).get("readOnlyHint") is True for tool in tools)
+    with_returns = sum("\n\nReturns: " in tool["description"] for tool in tools)
+    if not with_returns:
+        problems.append("no description carries its `Returns:` shape: the catalog's `returns` was not read")
 
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
@@ -333,7 +350,7 @@ def check() -> int:
     }
     problems += [name for name, ok in expected.items() if not ok]
     print(f"{len(tools)} tools, {with_force} with `force`, {aliases} alias parameters, "
-          f"{len(spellings)} handler spellings, served over stdio")
+          f"{len(spellings)} handler spellings, {read_only} read-only, {with_returns} with `Returns:`, served over stdio")
     for problem in problems:
         print(f"  FAIL {problem}")
     return 1 if problems else 0

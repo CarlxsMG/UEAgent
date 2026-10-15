@@ -6,6 +6,8 @@
 
 ## `add_foliage_instances`
 
+*Destructive.*
+
 Place foliage instances of a UFoliageType at explicit transforms in the level's InstancedFoliageActor. DANGER: measured CRASHING the editor process (access violation inside UnrealEditor-FoliageEdit.dll) -- reproducibly, and a single instance crashes just like a thousand, so trimming the count does not help. The reply you see is a "Connection reset", which reads like a network hiccup and is not. Use add_instanced_static_mesh_component + add_ism_instance instead: an InstancedFoliageActor is itself an actor holding instanced-static-mesh components, so it is the same code path minus the crash. Save your work before calling this at all.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Place foliage instances of a UFoliageType at explicit transforms in the level's 
 **Returns:** `{ foliage_type_path: string, foliage_type: string, requested: int, instances_added: int, instance_count_before: int, instance_count: int, placed_instance_count: int, instances_added_ok: bool, foliage_actor: string }`
 
 ## `add_height_mask_node`
+
+*Additive.*
 
 Drop the nodes of an altitude mask into a material graph: a SmoothStep preset with ConstMin=min_height / ConstMax=max_height in world units, for blending a layer in by height (snow above a line, sand below one). It does NOT build a wired chain despite the name: the SmoothStep Value input is left UNCONNECTED and no world-position node is wired, so you must connect WorldPosition Z into it yourself (connect_material_expressions) or the mask stays constant. Use the reply's expression_id and note to find the pin, then re-read the graph as the oracle.
 
@@ -31,6 +35,8 @@ Drop the nodes of an altitude mask into a material graph: a SmoothStep preset wi
 
 ## `add_landscape_layer`
 
+*Additive.*
+
 Register a LandscapeLayerInfo asset as a target weight (paint) layer on a landscape, so the terrain can store weight for it and the material's LandscapeLayerBlend can read it. Step 2 of three, between create_landscape_layer_info and paint_landscape_layer -- painting a layer that was never registered writes nothing. Already-registered layers return already_present=true; remove_landscape_layer is the inverse, get_landscape_layers lists what is registered now.
 
 | Parameter | Type | Required | Description |
@@ -41,6 +47,8 @@ Register a LandscapeLayerInfo asset as a target weight (paint) layer on a landsc
 **Returns:** `{ landscape_actor_name: string, layer_info_path: string, layer_name: string, layer_added: bool, already_present: bool, target_layer_count: int }`
 
 ## `add_landscape_layer_blend_node`
+
+*Additive.*
 
 Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pre-populated with one input per name in layer_names (weight / alpha / height blend). This is what lets grass, rock, sand and snow coexist on one landscape material, and the layer names must match the ones registered on the terrain with add_landscape_layer or those inputs read zero weight forever. The node is created with its layer inputs but nothing feeding them -- wire each layer's texture chain with connect_material_expressions, then compile_material and check get_material_stats.
 
@@ -56,6 +64,8 @@ Add the LandscapeLayerBlend node that makes a terrain material multi-layered, pr
 
 ## `add_landscape_spline_control_point`
 
+*Additive.*
+
 Add a control point to a landscape's spline component -- the first half of laying a road, river bed or path across the terrain (connect consecutive points with add_landscape_spline_segment). Coordinates are LANDSCAPE-LOCAL, not world: subtract the landscape's location (get_landscape_info) before passing them, or the point lands somewhere else entirely. `width` is a HALF-width. The reply's control_point_index is what the segment and edit tools address.
 
 | Parameter | Type | Required | Description |
@@ -68,6 +78,8 @@ Add a control point to a landscape's spline component -- the first half of layin
 
 ## `add_landscape_spline_segment`
 
+*Additive.*
+
 Join two existing landscape spline control points with a segment -- the second half of laying a road, river or path: points alone render nothing, the segments between them are the spline. Both indices must already exist (add_landscape_spline_control_point returns them). Chain segments point-to-point for a route; use get_landscape_splines to confirm segment_count grew.
 
 | Parameter | Type | Required | Description |
@@ -79,6 +91,8 @@ Join two existing landscape spline control points with a segment -- the second h
 **Returns:** `{ landscape_name: string, segment_index: int, segment_count: int, start_point_index: int, end_point_index: int, added: bool }`
 
 ## `add_light`
+
+*Additive.*
 
 Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
 
@@ -94,6 +108,8 @@ Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (n
 
 ## `add_slope_mask_node`
 
+*Additive.*
+
 Drop the two nodes of a slope mask into a material graph: a SmoothStep preset with ConstMin=min_slope / ConstMax=max_slope, plus a downstream node whose output is the mask (intended 1 on flat ground, 0 on vertical walls). It does NOT build a wired chain despite the name: no VertexNormalWS node is created and both inputs are left UNCONNECTED, so until you wire VertexNormalWS.B into the SmoothStep Value pin yourself (connect_material_expressions) the mask evaluates to a constant. The reply's expression_id and note tell you which node to wire. Verify by re-reading the graph, not by success.
 
 | Parameter | Type | Required | Description |
@@ -108,6 +124,8 @@ Drop the two nodes of a slope mask into a material graph: a SmoothStep preset wi
 
 ## `add_spline_component`
 
+*Destructive.*
+
 Adds a USplineComponent instance to a named editor-world actor.  NewObject + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance. If points are given, clears the default points and adds each in local space.
 
 | Parameter | Type | Required | Description |
@@ -118,6 +136,8 @@ Adds a USplineComponent instance to a named editor-world actor.  NewObject + Reg
 **Returns:** `{ actor_name: string, component_name: string, component_class: string, num_points: int, added: bool }`
 
 ## `add_spline_mesh_component`
+
+*Additive.*
 
 Adds a USplineMeshComponent instance to a named editor-world actor.  NewObject + SetStaticMesh + RegisterComponent + AddInstanceComponent + attach to root + CreationMethod=Instance, then SetStartAndEnd to deform the mesh straight from start to end (tangent = end - start).
 
@@ -132,6 +152,8 @@ Adds a USplineMeshComponent instance to a named editor-world actor.  NewObject +
 
 ## `add_streaming_level`
 
+*Additive, idempotent.*
+
 Adds a saved level package to the editor world as a streaming sub-level.  Creates a ULevelStreamingDynamic wrapper referencing the given level package and attaches it to the current editor world's StreamingLevels array. The package must already exist on disk (a streaming level references a saved .umap). Idempotent: if the level is already a streaming level, returns its current state with added=false.          (an object path "/Game/Maps/SubLevel.SubLevel" is also accepted).
 
 | Parameter | Type | Required | Description |
@@ -144,6 +166,8 @@ Adds a saved level package to the editor world as a streaming sub-level.  Create
 
 ## `assign_actor_to_data_layer_instance`
 
+*Destructive.*
+
 Assigns an editor-world actor to a data layer instance.  Uses UDataLayerEditorSubsystem::AddActorToDataLayer against the data layer instance referencing the given asset. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap).
 
 | Parameter | Type | Required | Description |
@@ -154,6 +178,8 @@ Assigns an editor-world actor to a data layer instance.  Uses UDataLayerEditorSu
 **Returns:** `{ actor_name: string, data_layer_asset_path: string, instance_name: string, short_name: string, assigned: bool, message: string }`
 
 ## `attach_actor`
+
+*Destructive.*
 
 Attach one actor to another optionally at a socket keeping world transform
 
@@ -167,6 +193,8 @@ Attach one actor to another optionally at a socket keeping world transform
 
 ## `break_level_instance`
 
+*Destructive.*
+
 Breaks an ALevelInstance actor, un-nesting its sub-level content into the current editor level as plain actors and destroying the original level-instance actor.  Canonical headless path: resolve the ALevelInstance by label/name, then ULevelInstanceSubsystem::CanBreakLevelInstance (gate) -> BlockLoadLevelInstance (synchronous load) -> BreakLevelInstance. CanBreakLevelInstance is checked BEFORE BlockLoadLevelInstance on purpose: BlockLoadLevelInstance asserts check(!IsEditing()) and CanBreakLevelInstance rejects the editing/level-script states, so this ordering prevents the assert. BreakLevelInstance returns false when nothing was moved (an empty sub-level is the honest broke=false case, NOT an error). The original actor is destroyed by the engine, so this is a one-shot destructive op: re-running with the same name reports "level instance not found". Requires the editor (GEditor); BreakLevelInstance touches GEditor->GetSelectedActors()/Trans unguarded.
 
 | Parameter | Type | Required | Description |
@@ -179,6 +207,8 @@ Breaks an ALevelInstance actor, un-nesting its sub-level content into the curren
 
 ## `build_lighting`
 
+*Destructive.*
+
 Start an asynchronous static lighting build of all levels in the editor world (not only the current one) and return started without waiting for the result. Side effect: writes the quality and OnlyBuildCurrentLevel=false into LightingBuildOptions of the editor per-project settings.
 
 | Parameter | Type | Required | Description |
@@ -189,6 +219,8 @@ Start an asynchronous static lighting build of all levels in the editor world (n
 
 ## `build_minimap`
 
+*Destructive.*
+
 Reports whether a World Partition minimap can be / has been built for the current editor world.  HONEST gate: minimap generation is a GPU scene-capture / commandlet-rendering operation (FWorldPartitionMiniMapHelper::CaptureBoundsMiniMapToTexture via ASceneCapture2D, or UWorldPartitionMiniMapBuilder whose RequiresCommandletRendering()==true, both gated by -AllowCommandletRendering) and cannot be driven synchronously from a single request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition, and on a WP world reads back whether a minimap texture already exists) and returns built=false with a note.
 
 No parameters.
@@ -196,6 +228,8 @@ No parameters.
 **Returns:** `{ world: string, is_world_partition: bool, built: bool, already_has_minimap?: bool, success: bool, note: string, message: string }`
 
 ## `capture_pie_screenshot`
+
+*Destructive.*
 
 Write a PNG of the game viewport (else the active editor viewport) from a synchronous ReadPixels, which omits the UMG/Slate HUD; returns output_path, width, height and bytes_written. With include_ui=true during PIE, a cropped HUD version overwrites output_path a frame later (ui_overwrite_next_frame).
 
@@ -208,6 +242,8 @@ Write a PNG of the game viewport (else the active editor viewport) from a synchr
 
 ## `commit_level_instance`
 
+*Destructive.*
+
 Closes the in-place edit opened by edit_level_instance: the engine commits (or discards) the edits, saves the sub-level .umap back to disk, and re-collapses the streaming level into the instanced ALevelInstance.  Canonical headless path: resolve the ALevelInstance by label/name, then ULevelInstanceSubsystem::CanCommitLevelInstance (gate) -> CommitLevelInstance. When the instance is NOT being edited, CanCommitLevelInstance returns false with reason "not currently being edited" — that is reported honestly as { committed:false, was_editing:false } and is a SUCCESS (a no-op close), NOT an error, so this is safe to call unconditionally to guarantee no dangling edit-mode. CommitLevelInstance returns whether the sub-level package save succeeded (committed:false on an honest save failure). Optional discard (default false) throws the edits away instead of saving. Requires the editor (GEditor); CommitLevelInstance touches GEditor->Trans / selection unguarded. Under -unattended the commit's save dialogs do not block.
 
 | Parameter | Type | Required | Description |
@@ -219,6 +255,8 @@ Closes the in-place edit opened by edit_level_instance: the engine commits (or d
 
 ## `configure_gravity`
 
+*Destructive, idempotent.*
+
 Set world gravity from a named preset (Earth -980, Moon -163, Mars -371, Zero, Low, High -1960, Enabled, Disabled), writing the same WorldSettings fields as set_world_gravity and returning old/new/requested triplets plus a physics-component census of the world. Prefer set_world_gravity when you have an exact number. WARNING: gravity_configured is a real re-read (it compares GlobalGravityZ against what was asked), but an UNRECOGNISED preset name is NOT an error: it comes back gravity_configured:false with the reason in gravity_message and nothing written -- read that field, not the envelope.
 
 | Parameter | Type | Required | Description |
@@ -229,6 +267,8 @@ Set world gravity from a named preset (Earth -980, Moon -163, Mars -371, Zero, L
 
 ## `convert_map_to_world_partition`
 
+*Destructive.*
+
 Reports whether the current editor world can be converted to World Partition.  HONEST gate: the only complete conversion path is the UWorldPartitionConvertCommandlet (commandlet-only, needs -run=WorldPartitionConvert -AllowCommandletRendering as a separate process), and the runtime FWorldPartitionConverter::Convert mutates the level in place WITHOUT saving, so it cannot be driven safely or synchronously from this request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition) and returns converted=false with a note explaining why (already WP, or commandlet-only).
 
 | Parameter | Type | Required | Description |
@@ -238,6 +278,8 @@ Reports whether the current editor world can be converted to World Partition.  H
 **Returns:** `{ world: string, is_world_partition: bool, converted: bool, already_converted: bool, success: bool, note: string, message: string }`
 
 ## `copy_landscape_region`
+
+*Additive.*
 
 Clone a rectangle of terrain relief: copy a heightmap region between two landscapes (or within one, by omitting the source name), resampling automatically when the source and destination rectangles differ in size. Regions are in VERTEX coordinates, not world units -- get the ranges from get_landscape_info (min_x/max_x, size_x). Use it to duplicate an island or reuse sculpted relief; use import_landscape_heightmap when the source is a file instead.
 
@@ -252,6 +294,8 @@ Clone a rectangle of terrain relief: copy a heightmap region between two landsca
 
 ## `create_data_layer_asset`
 
+*Additive.*
+
 Creates and saves a new UDataLayerAsset (World Partition data layer).
 
 | Parameter | Type | Required | Description |
@@ -265,6 +309,8 @@ Creates and saves a new UDataLayerAsset (World Partition data layer).
 
 ## `create_data_layer_instance`
 
+*Additive.*
+
 Instances a UDataLayerAsset into the editor world's World Partition.  Uses UDataLayerEditorSubsystem::CreateDataLayerInstance. Requires the editor world to be a World Partition world; on the default non-WP map this returns an honest "requires world partition" error (no editor-world swap is done).
 
 | Parameter | Type | Required | Description |
@@ -274,6 +320,8 @@ Instances a UDataLayerAsset into the editor world's World Partition.  Uses UData
 **Returns:** `{ data_layer_asset_path: string, instance_name: string, short_name: string, full_name: string, data_layer_type: string, is_runtime: bool, asset_path: string, created: bool, already_exists: bool }`
 
 ## `create_foliage_type`
+
+*Additive.*
 
 Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping a static mesh, so it can be placed as foliage and tuned with set_foliage_type_properties. Creating the asset is safe; note that the tools that PLACE instances of it (add_foliage_instances, scatter_foliage_in_box, scatter_foliage_on_layer) can crash the editor, so plan to scatter via instanced-static-mesh components or PCG. For landscape GRASS driven by the terrain material use create_landscape_grass_type instead.
 
@@ -286,6 +334,8 @@ Create and save a FoliageType asset (UFoliageType_InstancedStaticMesh) wrapping 
 **Returns:** `{ name: string, package_path: string, asset_path: string, static_mesh: string, foliage_class: string, created: bool, already_exists: bool, mesh_set: bool, saved: bool, message: string }`
 
 ## `create_landscape`
+
+*Additive.*
 
 Create a new terrain: spawn an ALandscape actor in the editor world sized by section_size x sections_per_component x component_count, filled with a FLAT heightmap at `height`. This is step 1 of two -- the relief comes from a following import_landscape_heightmap onto this actor, and going through this pair instead of the editor's New Landscape dialog is the point: the dialog treats its Location field as the terrain CENTRE (not the corner) and can fill only part of the components on import, silently. Verify the result with get_landscape_info (location, size_x/size_y, component_count), never with what you typed.
 
@@ -302,6 +352,8 @@ Create a new terrain: spawn an ALandscape actor in the editor world sized by sec
 
 ## `create_landscape_grass_type`
 
+*Additive, idempotent.*
+
 Create and save a LandscapeGrassType asset, optionally seeding its first grass variety with a mesh. This is landscape grass, not foliage: instances are generated by the terrain MATERIAL through a LandscapeGrassOutput node, so the asset alone renders nothing until it is wired there -- and unlike the foliage scatter tools, this path does not crash the editor. Idempotent (an existing asset comes back with already_existed). Tune it with set_landscape_grass_type_properties; the honest check that the wiring resolved is ULandscapeComponent.get_grass_types_bp(), since counting grass instances headless reads 0 even when the player sees grass.
 
 | Parameter | Type | Required | Description |
@@ -313,6 +365,8 @@ Create and save a LandscapeGrassType asset, optionally seeding its first grass v
 **Returns:** `{ name: string, package_path: string, asset_path: string, grass_class: string, variety_count: int, created: bool, already_existed: bool, saved: bool, message: string }`
 
 ## `create_landscape_layer_info`
+
+*Additive, idempotent.*
 
 Create and save the LandscapeLayerInfo asset that a terrain paint layer needs before it can hold weight (grass, rock, sand, snow...). Step 1 of three: create the asset here, register it on the terrain with add_landscape_layer, then paint weight with paint_landscape_layer. Idempotent-ish -- an existing asset comes back with already_exists=true.
 
@@ -326,6 +380,8 @@ Create and save the LandscapeLayerInfo asset that a terrain paint layer needs be
 
 ## `create_level_instance`
 
+*Additive, idempotent.*
+
 Spawns an ALevelInstance actor in the editor world and binds it to a saved map (.umap).  Uses the canonical headless-safe path: SpawnActor&lt;ALevelInstance> + ALevelInstance::SetWorldAsset (NOT the editor-interactive ULevelInstanceSubsystem::CreateLevelInstanceFrom). The referenced .umap MUST already exist on disk; validated before binding so no actor is left with a broken WorldAsset. The sub-level is streamed in deferred/async, so loaded is always false here (binding != synchronous load). Idempotent: an existing ALevelInstance referencing the same world asset at the same location is returned with already_exists=true.
 
 | Parameter | Type | Required | Description |
@@ -337,6 +393,8 @@ Spawns an ALevelInstance actor in the editor world and binds it to a saved map (
 **Returns:** `{ actor_name: string, world_asset_path: string, world_asset_set: bool, world_asset_valid: bool, loaded: bool, location: [number,number,number], already_exists: bool, note: string }`
 
 ## `create_world_partition_map`
+
+*Additive.*
 
 Creates and saves a new World Partition-enabled UWorld map asset on disk.  The editor world is NOT swapped: a new Inactive UWorld is created inside a /Game package with World Partition enabled (mirroring UWorldFactory's headless creation path) and saved as a .umap.
 
@@ -350,6 +408,8 @@ Creates and saves a new World Partition-enabled UWorld map asset on disk.  The e
 
 ## `detach_actor`
 
+*Destructive.*
+
 Detach an actor from its current parent keeping world transform
 
 | Parameter | Type | Required | Description |
@@ -360,6 +420,8 @@ Detach an actor from its current parent keeping world transform
 
 ## `edit_level_instance`
 
+*Destructive, idempotent.*
+
 Enters in-place edit mode on an ALevelInstance: the engine unloads the instanced sub-level and re-loads it as an editable streaming level so its actors can be modified in the current editor world, then closed by commit_level_instance.  Canonical headless path: resolve the ALevelInstance by label/name, then ULevelInstanceSubsystem::CanEditLevelInstance (gate) -> EditLevelInstance. CanEditLevelInstance is checked BEFORE EditLevelInstance on purpose: EditLevelInstanceInternal opens with check(CanEditLevelInstance(LI)) — a HARD ASSERT — so this ordering turns an un-editable instance into an honest error (with the engine's Reason) instead of a crash. Idempotent: an instance already in edit mode is a no-op (already_editing:true, editing:true). DEFENSIVE CRASH GUARD: on a World-Partitioned map the edit path calls FModuleManager::GetModuleChecked("LevelInstanceEditor") which asserts if that module is not loaded; when the world is partitioned AND the LevelInstanceEditor module is not loaded we fail honestly instead of proceeding. (create_level_instance produces non-partitioned maps, so the normal flow passes this guard.) Requires the editor (GEditor); EditLevelInstance touches GEditor->Trans / selection unguarded. The edit resets the undo stack and streams the world asynchronously (deferred world-swap), so the edit MUST be closed by a matching commit_level_instance.
 
 | Parameter | Type | Required | Description |
@@ -369,6 +431,8 @@ Enters in-place edit mode on an ALevelInstance: the engine unloads the instanced
 **Returns:** `{ actor_name: string, editing: bool, already_editing: bool, note: string }`
 
 ## `export_landscape_heightmap`
+
+*Destructive.*
 
 Dump the landscape heightmap (or a vertex sub-region) to a PNG or 16-bit .r16 file on disk -- THE oracle for any question about the whole terrain: whether an import really landed, where the real min/max heights are, whether a region is unfilled. Prefer it over sampling points with get_landscape_height_at when the question covers the whole surface: a handful of probes has repeatedly suggested flips and offsets that did not exist, while comparing the exported array against the source closes it in one step. An .r16 is exactly width*height*2 bytes, so a short file is itself a failure signal. Use get_landscape_height_at instead for a single world XY.
 
@@ -381,6 +445,8 @@ Dump the landscape heightmap (or a vertex sub-region) to a PNG or 16-bit .r16 fi
 **Returns:** `{ landscape_actor_name: string, file_path: string, export_width: int, export_height: int, exported: bool, file_exists: bool, file_size: number, export_warning: string }`
 
 ## `flatten_landscape_in_box`
+
+*Destructive.*
 
 Level the terrain under a footprint: snap every heightmap vertex inside a world-space box to ONE absolute height, so a base, road or building pad sits flat. Give the height either as target_z in world units (converted using the landscape scale) or as a raw uint16 target_height (0..65535, where 32768 is the midpoint). Absolute, unlike set_landscape_height_in_box which adds a delta; follow with smooth_landscape_in_box to blend the hard rim it leaves. vertices_modified = 0 means the box never touched the terrain.
 
@@ -398,6 +464,8 @@ Level the terrain under a footprint: snap every heightmap vertex inside a world-
 
 ## `focus_viewport`
 
+*Destructive.*
+
 Frame the editor viewport on an actor or the current selection
 
 | Parameter | Type | Required | Description |
@@ -407,6 +475,8 @@ Frame the editor viewport on an actor or the current selection
 **Returns:** `{ focused_actor: string, focused_count: int }`
 
 ## `foliage_type_exists`
+
+*Read-only.*
 
 Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- has_foliage_instances answers whether anything of it is placed in the level.
 
@@ -418,6 +488,8 @@ Yes/no guard: does this FoliageType asset path exist and load? Cheap preconditio
 
 ## `get_absolute_transform`
 
+*Read-only.*
+
 Read the absolute (world-space) location/rotation/scale flags of an EDITOR-world actor's root SceneComponent. The read-back oracle for set_absolute_transform, and the first thing to check when an attached actor inherits an unexpected offset or scale from its parent. An actor with no RootComponent answers has_root:false instead of failing.
 
 | Parameter | Type | Required | Description |
@@ -427,6 +499,8 @@ Read the absolute (world-space) location/rotation/scale flags of an EDITOR-world
 **Returns:** `{ actor_name: string, has_root: bool, absolute_location?: bool, absolute_rotation?: bool, absolute_scale?: bool }`
 
 ## `get_actor_blueprint`
+
+*Read-only.*
 
 Tell whether a placed actor comes from a Blueprint and, if so, name its generated class and source asset. Cheap one-actor answer to "what BP is this thing?" -- for the reverse (all actors of a class) use get_actors_by_class. World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', so a RUNTIME-SPAWNED actor -- which never exists in the editor world, where it reads as a flat "Actor not found" -- can be identified too; the reply stamps world_name/world_package/net_mode/pie_instance.
 
@@ -439,6 +513,8 @@ Tell whether a placed actor comes from a Blueprint and, if so, name its generate
 
 ## `get_actor_components`
 
+*Read-only.*
+
 List every component on one actor in the editor OR the live PIE world: name, class, is_active, plus mesh/light details. Accepts world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other one) and stamps world_name/world_package/net_mode/pie_instance so a co-op reading says WHICH world it came from. Use this to discover component names; then get_component_properties (also world-aware) for their values -- reading with the default world='editor' returns the pre-BeginPlay archetype, not the running actor.
 
 | Parameter | Type | Required | Description |
@@ -450,6 +526,8 @@ List every component on one actor in the editor OR the live PIE world: name, cla
 
 ## `get_actor_folder`
 
+*Read-only.*
+
 Read an actor's outliner folder path (reader twin of set_actor_folder)
 
 | Parameter | Type | Required | Description |
@@ -459,6 +537,8 @@ Read an actor's outliner folder path (reader twin of set_actor_folder)
 **Returns:** `{ actor_name: string, folder_path: string }`
 
 ## `get_actor_label`
+
+*Read-only.*
 
 Read an actor's display label from the level (reader twin of set_actor_label)
 
@@ -470,6 +550,8 @@ Read an actor's display label from the level (reader twin of set_actor_label)
 
 ## `get_actor_lock_location`
 
+*Read-only.*
+
 Read whether an EDITOR-world actor is location-locked in the viewport (AActor::IsLockLocation). The read-back oracle for set_actor_lock_location, and the thing to check first when a transform command reports success but the actor has not moved.
 
 | Parameter | Type | Required | Description |
@@ -479,6 +561,8 @@ Read whether an EDITOR-world actor is location-locked in the viewport (AActor::I
 **Returns:** `{ actor_name, locked }`
 
 ## `get_actor_references`
+
+*Read-only.*
 
 Despite the name this does NOT find who references the actor: it lists that actor's own COMPONENTS (type/name/class), i.e. a thinner get_actor_components with no mesh/light detail. For real reference graphs use the Asset Registry tools (get_asset_referencers / get_asset_dependencies). World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', which also makes it see components ADDED AT RUNTIME (AddComponent in BeginPlay) that the editor world does not have; the reply stamps world_name/world_package/net_mode/pie_instance.
 
@@ -491,6 +575,8 @@ Despite the name this does NOT find who references the actor: it lists that acto
 
 ## `get_actors_by_class`
 
+*Read-only.*
+
 Census of one class in a chosen world: names + locations of every actor whose class name matches EXACTLY (no subclasses; a Blueprint needs its runtime name with the _C suffix, e.g. BP_Foo_C), capped at 1000. The co-op workhorse -- world='editor'|'pie'|'server'|'client'|'pie:N' ('server' = the PIE world with authority, 'client' = the other), and the reply stamps world_name/world_package/net_mode/pie_instance so actors_count:0 is readable as "not in THIS world" instead of "does not exist". Use find_actors_by_name for substring/label search, get_actors_in_radius for proximity. Two false zeros: with 2+ PIE clients a bare world='pie' resolves to only ONE of the two worlds; and after compile_blueprint the placed OFPA instances vanish from BOTH editor and PIE worlds in memory (git shows them intact on disk -- the fix is load_level of the same map, never re-placing them).
 
 | Parameter | Type | Required | Description |
@@ -501,6 +587,8 @@ Census of one class in a chosen world: names + locations of every actor whose cl
 **Returns:** `{ class_name: string, world: string, actors: [{ name: string, class: string, location: { x: number, y: number, z: number } }], actors_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `get_actors_in_radius`
+
+*Read-only.*
 
 Spatial query: every actor whose ORIGIN (not its bounds) lies within radius cm of a world point, with each one's distance and location. Pick this over get_actors_by_class when the question is "what is near here" instead of "where are the X". World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', so actors SPAWNED AT RUNTIME -- which the editor world never contains -- are reachable, and the reply stamps world_name/world_package/net_mode/pie_instance so actors_count:0 reads as "nothing near here IN THIS WORLD" instead of "nothing near here".
 
@@ -514,6 +602,8 @@ Spatial query: every actor whose ORIGIN (not its bounds) lies within radius cm o
 
 ## `get_data_layer_asset_info`
 
+*Read-only.*
+
 Reads type, debug color and runtime flags of a UDataLayerAsset.
 
 | Parameter | Type | Required | Description |
@@ -523,6 +613,8 @@ Reads type, debug color and runtime flags of a UDataLayerAsset.
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, name: string, data_layer_type: string, is_runtime: bool, is_private: bool, supports_actor_filters: bool, debug_color: [number, number, number, number] }`
 
 ## `get_data_layer_assets`
+
+*Read-only.*
 
 Lists all UDataLayerAsset assets under a content path via the AssetRegistry.
 
@@ -534,6 +626,8 @@ Lists all UDataLayerAsset assets under a content path via the AssetRegistry.
 
 ## `get_data_layer_instances`
 
+*Read-only.*
+
 Lists the editor world's data layer instances.  REAL read via UDataLayerManager::ForEachDataLayerInstance. Returns an empty list on a non-WP (default) map, which is the correct result.
 
 No parameters.
@@ -541,6 +635,8 @@ No parameters.
 **Returns:** `{ world_name: string, is_world_partition_enabled: bool, data_layer_instances: [{instance_name, short_name, full_name, data_layer_type, is_runtime, asset_path}], count: int, note: string }`
 
 ## `get_foliage_in_radius`
+
+*Read-only.*
 
 List the actual foliage instances of one FoliageType inside a world-space sphere, with each one's location, rotation, scale and instance_index. Use it to check what is standing on a spot before building there, or as a dry run before remove_foliage_in_radius. Capped by max_results (default 100, hard cap 1000), so a full count must come from get_foliage_instance_count, not from len(instances).
 
@@ -557,6 +653,8 @@ List the actual foliage instances of one FoliageType inside a world-space sphere
 
 ## `get_foliage_instance_count`
 
+*Read-only.*
+
 Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. Use get_foliage_in_radius when you need WHERE they are, has_foliage_instances for a plain yes/no.
 
 | Parameter | Type | Required | Description |
@@ -566,6 +664,8 @@ Count how many instances of one FoliageType are placed across the level's Instan
 **Returns:** `{ foliage_type_path: string, foliage_type: string, instance_count: int, placed_instance_count: int, foliage_actor_count: int }`
 
 ## `get_foliage_type_properties`
+
+*Read-only.*
 
 Read a FoliageType asset's authored tunables in one call -- density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags. The read-back oracle for set_foliage_type_properties, and cheaper than reflection-walking the asset from Python. Describes the ASSET, not what is placed in the level: for that use get_foliage_instance_count / get_foliage_in_radius.
 
@@ -577,6 +677,8 @@ Read a FoliageType asset's authored tunables in one call -- density, radius, sca
 
 ## `get_foliage_types`
 
+*Read-only.*
+
 List every FoliageType actually present in the level's InstancedFoliageActors, with the instance counts each carries. The level-side inventory ("what vegetation is in this map, and how much"), as opposed to get_foliage_type_properties which describes one asset. Nothing here means nothing has been placed, even if the FoliageType assets exist in Content.
 
 No parameters.
@@ -584,6 +686,8 @@ No parameters.
 **Returns:** `{ foliage_types: [object], foliage_type_count: int, foliage_actor_count: int }`
 
 ## `get_landscape_grass_type_properties`
+
+*Read-only.*
 
 Read one grass variety of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags. The read-back oracle for set_landscape_grass_type_properties. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
 
@@ -595,6 +699,8 @@ Read one grass variety of a LandscapeGrassType asset: mesh, density, placement j
 **Returns:** `{ asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }`
 
 ## `get_landscape_height_at`
+
+*Read-only.*
 
 How high is the ground here: sample the terrain surface height (world Z) at one world (x, y) -- the tool for placing an actor on the terrain, checking a spawn point is above water, or proving a region is not flat. Reads the heightmap texture directly (FHeightmapAccessor + bilinear interpolation), so unlike raycast_scene it needs NO collision, NO PIE and no cooked physics: it answers in the editor world where a line trace just misses the landscape. Honest at the edges -- outside the extent it clamps to the nearest vertex and says in_bounds=false, and it reports the (col,row) vertex it sampled so you can verify the pixel-to-world mapping. Use export_landscape_heightmap instead when the question is about the WHOLE terrain (min/max, unfilled regions, did an import land): a handful of probes has repeatedly suggested flips and offsets that were not there.
 
@@ -608,6 +714,8 @@ How high is the ground here: sample the terrain surface height (world Z) at one 
 
 ## `get_landscape_info`
 
+*Read-only.*
+
 Find the terrain and read its geometry: every ALandscape actor in the editor world with its world location and scale, vertex extent (min_x/min_y/max_x/max_y, size_x/size_y) and component layout (component_count, component_size_quads, subsection_size_quads, num_subsections). The first call of any landscape task -- it gives you the actor name the other landscape tools need, and the numbers to convert a world XY into a heightmap vertex. Also the ONLY trustworthy check of where the terrain actually is: the editor's New Landscape dialog treats its Location field as the CENTRE, so a terrain can sit half a world away from the corner you typed; read `location` here afterwards instead of believing the input. Note it lists ALandscape actors only, not the LandscapeStreamingProxy actors a World-Partition map renders through.
 
 No parameters.
@@ -615,6 +723,8 @@ No parameters.
 **Returns:** `{ landscapes: [{ actor_name, actor_path, location: [x,y,z], scale: [x,y,z], component_size_quads, subsection_size_quads, num_subsections, min_x, min_y, max_x, max_y, size_x, size_y, component_count }], landscape_count: int }`
 
 ## `get_landscape_layers`
+
+*Read-only.*
 
 List which paint/weight layers are registered on a landscape (name plus its LandscapeLayerInfo asset). The cheap check before painting: a layer missing from this list will silently absorb any paint_landscape_layer call. Use it to discover the layer names a terrain material expects.
 
@@ -626,6 +736,8 @@ List which paint/weight layers are registered on a landscape (name plus its Land
 
 ## `get_landscape_material`
 
+*Read-only.*
+
 Read which material the terrain is currently using: the landscape's assigned render material and hole material as asset paths (direct UPROPERTY read, null when unset). The read-back oracle for set_landscape_material. It reports the ALandscape actor only -- on a World-Partition map the LandscapeStreamingProxy actors carry their own copy, so to prove the whole terrain is dressed also read landscape_material on the proxies.
 
 | Parameter | Type | Required | Description |
@@ -636,6 +748,8 @@ Read which material the terrain is currently using: the landscape's assigned ren
 
 ## `get_landscape_nanite_status`
 
+*Read-only.*
+
 Report a landscape's Nanite flags (enabled / built / up-to-date / out-of-date) without triggering a build. Read-only, editor-only. TRUST ONLY nanite_enabled: the built/up-to-date flags can CONTRADICT each other (nanite_built=false alongside nanite_up_to_date=true and out_of_date=false) and stay at built=false while the editor is visibly building the meshes -- they do not distinguish "not built" from "built and current". For "is the Nanite mesh actually built", count the "Built static mesh ...LandscapeNaniteMesh" lines in Saved/Logs/ instead.
 
 | Parameter | Type | Required | Description |
@@ -645,6 +759,8 @@ Report a landscape's Nanite flags (enabled / built / up-to-date / out-of-date) w
 **Returns:** `{ landscape_actor_name: string, nanite_enabled: bool, nanite_built: bool, nanite_up_to_date: bool, nanite_out_of_date: bool, note?: string }`
 
 ## `get_landscape_spline_control_point`
+
+*Read-only.*
 
 Read ONE landscape spline control point by index: its landscape-local location and rotation, half-width, side/end falloff, and how many segments connect to it. The per-point reader that pairs with set_landscape_spline_control_point; get_landscape_splines only gives component-level counts, so this is the only way to see where a road or river point actually sits. connected_segment_count = 0 marks a dangling point that draws nothing.
 
@@ -657,6 +773,8 @@ Read ONE landscape spline control point by index: its landscape-local location a
 
 ## `get_landscape_splines`
 
+*Read-only.*
+
 Summary of a landscape's spline component: whether it has one at all, plus the control point and segment counts. The quick "is there a road/river network on this terrain, and how big" check, and the count oracle after adding or removing points. For an individual point's position and width use get_landscape_spline_control_point -- this returns no per-point data.
 
 | Parameter | Type | Required | Description |
@@ -667,6 +785,8 @@ Summary of a landscape's spline component: whether it has one at all, plus the c
 
 ## `get_level_instance_info`
 
+*Read-only.*
+
 Lists every ALevelInstance actor in the editor world.  REAL read via TActorIterator&lt;ALevelInstance>; serialises each actor's referenced world asset and loaded state. An empty list on a map with no level instances is the correct result (honest read).
 
 No parameters.
@@ -674,6 +794,8 @@ No parameters.
 **Returns:** `{ world: string, level_instances: [{ actor_name: string, world_asset_path: string, world_asset_valid: bool, is_loaded: bool, location: [number,number,number] }], count: number }`
 
 ## `get_lighting_in_area`
+
+*Read-only.*
 
 Light-only spatial query: every actor carrying a LightComponent within radius cm of a world point, reporting light_type, intensity, color and distance. Use it to answer "why is this spot dark / blown out" without walking the whole outliner (get_actors_in_radius returns everything and no light data). World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', which is what lets you see lights attached to actors that only exist at runtime (a torch on a spawned character, a muzzle flash), and the reply stamps world_name/world_package/net_mode/pie_instance so lights_count:0 is readable as "not in THIS world".
 
@@ -687,6 +809,8 @@ Light-only spatial query: every actor carrying a LightComponent within radius cm
 
 ## `get_navigation_data`
 
+*Read-only.*
+
 Inventory of navigation in a chosen world: every ANavigationData actor (the RecastNavMesh included) with its class, every NavMeshBoundsVolume with its location, and whether the world is flagged whole-world-navigable. The first thing to read when AI will not path -- no bounds volume, or a volume with an empty brush, means zero navmesh tiles. Errors honestly if the world has no navigation system at all. World-aware: world='editor' (default) | 'server' | 'client' | 'pie:N' | 'pie'. WARNING: The navmesh is SERVER-AUTHORITATIVE: asking a client answers "Navigation System not found" while the server's navmesh is perfectly alive, so anchor world='server' -- and the reply stamps world_name/world_package/net_mode/pie_instance so you can prove which one you asked.
 
 | Parameter | Type | Required | Description |
@@ -696,6 +820,8 @@ Inventory of navigation in a chosen world: every ANavigationData actor (the Reca
 **Returns:** `{ world: string, navigation_data: [{ name: string, class: string }], navigation_data_count: number, nav_bounds_volumes: [{ name: string, location_x: number, location_y: number, location_z: number }], nav_bounds_volumes_count: number, navigation_system_available: bool, is_whole_world_navigable: bool, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `get_spline_points`
+
+*Read-only.*
 
 Reads the control points of a named actor's USplineComponent (reader twin of set_spline_points). Returns each point's index and local-space location (the same space set_spline_points writes in), plus the total count and closed-loop flag.
 
@@ -707,6 +833,8 @@ Reads the control points of a named actor's USplineComponent (reader twin of set
 
 ## `get_streaming_levels`
 
+*Read-only.*
+
 Lists every streaming sub-level of the current editor world.  Reads UWorld::GetStreamingLevels(); works even when the world has zero streaming levels (returns an empty array).
 
 No parameters.
@@ -714,6 +842,8 @@ No parameters.
 **Returns:** `{ streaming_levels: [{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool }], streaming_level_count: number, world_package: string }`
 
 ## `get_world_partition_info`
+
+*Read-only.*
 
 Reads the editor world's World Partition state.  REAL read: works on any map. Returns is_world_partition_enabled=false on the default (non-WP) editor map, which is the correct result.
 
@@ -723,6 +853,8 @@ No parameters.
 
 ## `get_world_partition_runtime_hash`
 
+*Read-only.*
+
 Reads the editor world's World Partition runtime hash.  REAL read: reports the runtime hash class and the number of GENERATED streaming grids (UWorldPartitionRuntimeSpatialHash::GetNumGrids), which is 0 until a cook/build generates the runtime grids. On the default non-WP editor map it honestly returns is_world_partition=false (no swap is done).
 
 No parameters.
@@ -730,6 +862,8 @@ No parameters.
 **Returns:** `{ is_world_partition: bool, runtime_hash_type?: string, num_streaming_grids?: int, success: bool, note: string }`
 
 ## `get_world_settings`
+
+*Read-only.*
 
 Read a world's framework wiring: default GameMode plus the pawn / PlayerController / HUD / spectator classes it hands out, and gravity, time dilation and paused state. Use this to check WHICH GameMode+PC a map will spawn; use get_world_settings_detail for the physics/KillZ/world-bounds side. World-aware: with the default world='editor' there is no live GameMode, so the classes come from the DefaultGameMode CDO -- i.e. what the map INTENDS; ask for world='server' and GetAuthGameMode() returns the GameMode a running PIE ACTUALLY instantiated, which is the read that settles a set_player_controller_class that looks applied and is not. WARNING: world_type is stamped by the canonical world evidence, so it can read 'PIE', not only Game/Editor/Other.
 
@@ -741,6 +875,8 @@ Read a world's framework wiring: default GameMode plus the pawn / PlayerControll
 
 ## `get_world_settings_detail`
 
+*Read-only.*
+
 Read a world's physics/bounds side of WorldSettings: GlobalGravityZ plus the override flag AND the effective GetGravityZ, KillZ and its damage type, enable_world_bounds_checks, world_to_meters, time dilation, default GameMode and force_no_precomputed_lighting. This is the read-back for set_world_gravity / set_kill_z, and the place that tells you whether world-bounds checks are even on; use get_world_settings instead for the GameMode/pawn/PlayerController/HUD wiring. World-aware: world='editor' (default -- and it is the EDITOR world that set_world_gravity/set_kill_z actually write) | 'server' | 'client' | 'pie:N' | 'pie' read the RUNNING duplicate instead, which is how you tell "the map is authored with this gravity" apart from "the session is running with it".
 
 | Parameter | Type | Required | Description |
@@ -751,6 +887,8 @@ Read a world's physics/bounds side of WorldSettings: GlobalGravityZ plus the ove
 
 ## `has_foliage_instances`
 
+*Read-only.*
+
 Yes/no: does this FoliageType have any instances placed in the current level (with the count alongside)? The one-line gate for "is this vegetation actually in the map"; foliage_type_exists answers the different question of whether the asset exists at all, and get_foliage_in_radius says where the instances are.
 
 | Parameter | Type | Required | Description |
@@ -760,6 +898,8 @@ Yes/no: does this FoliageType have any instances placed in the current level (wi
 **Returns:** `{ has_instances: bool, instance_count: int, foliage_type_path: string }`
 
 ## `import_landscape_heightmap`
+
+*Destructive.*
 
 Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing landscape: this is the reliable route to terrain relief, and the reason to prefer it over the editor's Import from File dialog, which can fill only part of the components and drop the peak with no warning at all. It does not negotiate resolution -- create the landscape at the file's own vertex size first (create_landscape) so resampled comes back false. success/applied is an acknowledgement, not proof: the oracle is export_landscape_heightmap plus an array compare against the source file, or get_landscape_height_at probes.
 
@@ -773,6 +913,8 @@ Load a PNG or 16-bit .r16 heightmap file from disk and stamp it onto an existing
 
 ## `inject_analog_input`
 
+*Destructive.*
+
 Feed an analog axis value (gamepad stick, trigger) to a running PIE session's PlayerController -- how you actually MOVE or LOOK headless, where inject_key_input only does digital keys. NOTE: A single axis sample decays to zero within a tick, so sustained motion needs hold_seconds, which re-injects every tick for that long and then neutralises with a 0.0; it is fire-and-forget and returns immediately. Requires an active PIE session and a genuinely analog key (a digital one is a clean error).
 
 | Parameter | Type | Required | Description |
@@ -785,6 +927,8 @@ Feed an analog axis value (gamepad stick, trigger) to a running PIE session's Pl
 **Returns:** `{ injected: bool, key: string, value: number, pie_client_index: int, hold_seconds: number }`
 
 ## `inject_key_input`
+
+*Destructive.*
 
 Press or release a keyboard/gamepad key at a running PIE session's PlayerController, so an agent can drive the game headless -- jump, interact, open a menu. Press and release are SEPARATE calls: a tap is two of them, a hold is press now and release later. Requires an active PIE session; use inject_analog_input for sticks and triggers (with its hold_seconds for sustained movement) and inject_mouse_button for clicks. WARNING: `injected` only means the event reached the controller: whether the game DID anything is a state read, and in co-op read the right world.
 
@@ -800,6 +944,8 @@ Press or release a keyboard/gamepad key at a running PIE session's PlayerControl
 
 ## `inject_mouse_button`
 
+*Destructive.*
+
 Fire a simulated mouse click at a running PIE session's PlayerController: fire/aim/interact without a human at the mouse. Press and release are SEPARATE calls, so a click is two of them and a hold is press now, release later. It injects the button only -- it does not move the cursor, so aim with set_control_rotation first. Requires an active PIE session; use inject_key_input for keyboard/gamepad buttons and click_pie_widget for UMG buttons, which this does NOT reach.
 
 | Parameter | Type | Required | Description |
@@ -812,6 +958,8 @@ Fire a simulated mouse click at a running PIE session's PlayerController: fire/a
 
 ## `is_play_in_editor_active`
 
+*Read-only.*
+
 THE oracle for "is the game running right now": asks ULevelEditorSubsystem::IsInPlayInEditor and returns is_pie_active plus status 'Playing'/'Stopped' and the current level name. Cheap, read-only, no params. Use it to confirm start_play_in_editor / stop_play_in_editor (both answer from before the async transition finishes) and as the gate before any save -- saving with PIE up is refused by the engine. WARNING: Do NOT use the pie_active field of list_dirty_packages for this: it can report false with PIE running and answering.
 
 No parameters.
@@ -819,6 +967,8 @@ No parameters.
 **Returns:** `{ is_pie_active: bool, current_level: string (the EDITOR's current level, not the PIE world), status: 'Playing'|'Stopped' }`
 
 ## `list_orphaned_ofpa_actors`
+
+*Read-only.*
 
 Finds __ExternalActors__ (OFPA) packages with no registered World Partition descriptor -- actors invisible to get_actors_by_class/list_world_partition_actors because their package fell out of sync with the level's registered actor set (e.g. after a bad delete+save). Three enumeration layers, most-to-least authoritative: (1) raw filesystem scan of the level's external-actors folder (catches AssetRegistry blind spots); (2) AssetRegistry GetAssetsByPath (bIncludeOnlyOnDiskAssets=true, zero-load class info via AssetClassPath); (3) IF map_path is the CURRENTLY OPEN editor world with an initialized World Partition, a live cross-check against the real descriptor set. When map_path is a DIFFERENT map (the recommended procedure: clean up orphans with the editor on another map), layer 3 is skipped and disk-and-registry-both-present candidates are reported as candidate_unconfirmed rather than a false-confident confirmed_orphan. Read-only: never loads a package, never opens/swaps to map_path.
 
@@ -830,6 +980,8 @@ Finds __ExternalActors__ (OFPA) packages with no registered World Partition desc
 **Returns:** `{ map_path, external_actors_path, disk_count, asset_registry_count, live_registered_count (nullable), live_cross_check_available, confirmed_orphan_count, candidate_unconfirmed_count, candidates: [{ path, generated_class_name, is_loaded, on_disk, in_asset_registry, classification }], note }`
 
 ## `list_world_partition_actors`
+
+*Read-only.*
 
 Lists the editor world's World Partition actors by walking their DESCRIPTORS without loading any actor package.  Unlike get_actors_by_class (which only sees LOADED AActors via TActorIterator), this reads FWorldPartitionActorDescInstance for every actor known to World Partition, INCLUDING spatially-unloaded / streamed-out ones (solving "get_actors_by_class only sees loaded actors"). Editor-world read only (WP actor descriptors are editor-only data); honest empty list on a non-WP (default) map.
 
@@ -844,6 +996,8 @@ Lists the editor world's World Partition actors by walking their DESCRIPTORS wit
 
 ## `load_world_partition_region`
 
+*Destructive.*
+
 Pins the World Partition cells intersecting an axis-aligned region [min,max] into memory for inspection (editor world).  Creates a UWorldPartitionEditorLoaderAdapter backed by FLoaderAdapterShape over the box and calls ILoaderAdapter::Load(); the adapter stays REGISTERED so the region remains resident (mirrors the editor's "Load Region from Here"), which then lets get_actors_by_class / actor tools see the now-loaded actors. Honest error on a non-WP (default) map or an uninitialized World Partition. Non-destructive: it loads (pins) actors, it never spawns/edits/saves.
 
 | Parameter | Type | Required | Description |
@@ -856,6 +1010,8 @@ Pins the World Partition cells intersecting an axis-aligned region [min,max] int
 
 ## `pack_level_actors`
 
+*Destructive, idempotent.*
+
 Bakes a saved map (.umap) into a reusable APackedLevelActor Blueprint headless: the source level's static-mesh actors are merged into ISM components on the generated Blueprint so it streams as one cheap actor.  Uses FPackedLevelActorBuilder::CreateDefaultBuilder + CreateOrUpdateBlueprint with bCheckoutAndSave=false on purpose — that builder save path is silently cancelled under -unattended (FileHelpers PR_Cancelled) and would falsely report success; instead the Blueprint package is persisted explicitly via UEditorLoadingAndSavingUtils::SavePackages and its REAL result is returned as `saved`. The build runs in the builder's own FPreviewScene (no editor-world swap, no PIE, no render). Requires the editor (GEditor). Idempotent: an existing Blueprint at blueprint_path is updated in place (the engine early-outs via PackedHash when the source is unchanged), never duplicated.
 
 | Parameter | Type | Required | Description |
@@ -867,6 +1023,8 @@ Bakes a saved map (.umap) into a reusable APackedLevelActor Blueprint headless: 
 **Returns:** `{ blueprint_path: string, source_world_asset: string, blueprint_created: bool, packed: bool, packed_hash: number, saved: bool, note: string }`
 
 ## `paint_landscape_layer`
+
+*Destructive.*
 
 Paint terrain texture layers headless: write ONE uniform weight (0-255) into a landscape weightmap over a vertex region, or the whole terrain if you omit region. Blunt by design -- it fills a rectangle, it does not brush or blend, so build variety by painting several layers over different rectangles. The layer must already be registered with add_landscape_layer or nothing is stored. Region coordinates are VERTICES, not world units: get the ranges from get_landscape_info. Check vertices_painted and paint_warning rather than the success flag.
 
@@ -881,6 +1039,8 @@ Paint terrain texture layers headless: write ONE uniform weight (0-255) into a l
 
 ## `possess_pawn`
 
+*Destructive.*
+
 Possess a pawn (by actor name/label) with the active PIE session's PlayerController (AController::Possess). Honest note (not an error) if the engine's own authority gate silently no-ops the possession (Standalone/ListenServer's local PlayerController normally has authority; a pure Client's does not).
 
 | Parameter | Type | Required | Description |
@@ -891,6 +1051,8 @@ Possess a pawn (by actor name/label) with the active PIE session's PlayerControl
 **Returns:** `{ possessed: bool, already_possessed: bool, had_authority: bool, pawn_actor_name: string, pie_client_index: int, note?: string }`
 
 ## `remove_actor_from_data_layer_instance`
+
+*Destructive, idempotent.*
 
 Removes an editor-world actor from a data layer instance (inverse of assign_actor_to_data_layer_instance).  Uses UDataLayerEditorSubsystem::RemoveActorFromDataLayer against the data layer instance referencing the given asset. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap). Idempotent: removed=false means the actor was not in the layer (not an error).
 
@@ -903,6 +1065,8 @@ Removes an editor-world actor from a data layer instance (inverse of assign_acto
 
 ## `remove_all_foliage_for_type`
 
+*Destructive.*
+
 Delete EVERY placed instance of one FoliageType from all InstancedFoliageActors in the level -- the bulk undo for a scatter that went wrong. Destructive and not per-region; use remove_foliage_in_radius to clear only around a point. The FoliageType asset itself is untouched. Check remaining=0 in the reply, not just removed_all.
 
 | Parameter | Type | Required | Description |
@@ -913,6 +1077,8 @@ Delete EVERY placed instance of one FoliageType from all InstancedFoliageActors 
 
 ## `remove_data_layer_instance`
 
+*Destructive, idempotent.*
+
 Removes a data layer instance from the editor world's World Partition (inverse of create_data_layer_instance).  Uses UDataLayerEditorSubsystem::DeleteDataLayer (void), verified by read-back: after delete GetDataLayerInstance(asset) must be null. Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap). Idempotent: already_deleted=true when no instance referenced the asset before the call.
 
 | Parameter | Type | Required | Description |
@@ -922,6 +1088,8 @@ Removes a data layer instance from the editor world's World Partition (inverse o
 **Returns:** `{ data_layer_asset_path: string, deleted: bool, already_deleted: bool, instance_name?: string, note?: string }`
 
 ## `remove_foliage_in_radius`
+
+*Destructive.*
 
 Clear foliage around a point: delete every instance of one FoliageType inside a world-space sphere -- the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Use remove_all_foliage_for_type to remove it everywhere instead. Preview what would go with get_foliage_in_radius first; the oracle is instances_removed plus a re-count.
 
@@ -937,6 +1105,8 @@ Clear foliage around a point: delete every instance of one FoliageType inside a 
 
 ## `remove_landscape_layer`
 
+*Destructive.*
+
 Unregister a target weight (paint) layer from a landscape -- the inverse of add_landscape_layer. Identify it either by layer_info_path or by layer_name. This detaches the layer from the terrain; it does not delete the LandscapeLayerInfo asset, and any material that still blends that layer will now read zero weight for it.
 
 | Parameter | Type | Required | Description |
@@ -949,6 +1119,8 @@ Unregister a target weight (paint) layer from a landscape -- the inverse of add_
 
 ## `remove_landscape_spline_control_point`
 
+*Destructive.*
+
 Delete a landscape spline control point by index, and with it every segment attached to it (segments_removed says how many) -- so removing a mid-route point BREAKS the road or river in two rather than healing it; re-join the neighbours with add_landscape_spline_segment. Remaining indices shift, so delete from the highest index down when removing several.
 
 | Parameter | Type | Required | Description |
@@ -960,6 +1132,8 @@ Delete a landscape spline control point by index, and with it every segment atta
 
 ## `remove_landscape_spline_segment`
 
+*Destructive.*
+
 Delete ONE landscape spline segment by index, unlinking its two endpoint control points but keeping them -- the way to cut a road or river without losing the route's points (remove_landscape_spline_control_point destroys the point and all its segments instead). Segment indices shift after a removal, so work from the highest index down.
 
 | Parameter | Type | Required | Description |
@@ -970,6 +1144,8 @@ Delete ONE landscape spline segment by index, unlinking its two endpoint control
 **Returns:** `{ landscape_name: string, segment_index: int, removed: bool, segment_count: int, control_points_unlinked: int }`
 
 ## `remove_orphaned_ofpa_actors`
+
+*Destructive.*
 
 Honest-gated deletion of __ExternalActors__ (OFPA) orphan packages. Every entry in actor_paths is RE-VERIFIED against a fresh 3-layer scan (never trusts the caller's list, e.g. from a stale list_orphaned_ofpa_actors call) -- only a definitive classification='confirmed_orphan' is eligible for deletion; anything else (candidate_unconfirmed / registered / registered_no_file / unknown) is refused regardless of dry_run/force_save. dry_run DEFAULTS TO TRUE (deliberate deviation from a delete-by-default signature: editor crashes around OFPA + World Partition actor deletion are documented, and this tool is unexercised) and is ALWAYS forced to true -- no override parameter exists for this -- when map_path is the CURRENTLY OPEN editor world; open a different map first to actually delete (the recommended cleanup procedure). Deletion (when dry_run=false) is raw file removal of the .uasset (+ sibling .uexp/.ubulk), NOT ObjectTools::ForceDeleteObjects on a bare AActor package -- that path is untested here for a standalone-loaded actor with no owning level, and is plausibly part of why in-editor OFPA actor deletion crashes; a package still loaded in memory is refused unless force_save=true.
 
@@ -984,6 +1160,8 @@ Honest-gated deletion of __ExternalActors__ (OFPA) orphan packages. Every entry 
 
 ## `remove_streaming_level`
 
+*Destructive.*
+
 Removes a streaming sub-level from the current editor world.  If the sub-level is loaded, uses UEditorLevelUtils::RemoveLevelFromWorld; otherwise detaches the streaming wrapper via UWorld::RemoveStreamingLevel. The result is verified by re-querying the world's streaming levels.
 
 | Parameter | Type | Required | Description |
@@ -993,6 +1171,8 @@ Removes a streaming sub-level from the current editor world.  If the sub-level i
 **Returns:** `{ package_name: string, removed: bool, method: string, streaming_level_count: number }`
 
 ## `scatter_foliage_in_box`
+
+*Destructive.*
 
 Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_ism_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
 
@@ -1008,6 +1188,8 @@ Scatter N seeded-random foliage instances of a type inside a world-space box (sa
 **Returns:** `{ foliage_type_path: string, foliage_type: string, requested: int, seed: int, align_to_ground: bool, instances_added: int, instance_count_before: int, total_instance_count: int, placed_instance_count: int, instances_added_ok: bool, center: [number], extent: [number], foliage_actor: string }`
 
 ## `scatter_foliage_on_layer`
+
+*Destructive.*
 
 Scatter foliage only where a landscape PAINT LAYER is strong enough: samples seeded candidates in a box, keeps those whose layer weight clears layer_weight_threshold, and rejects the rest -- so trees land on the forest layer and not on rock. The rule-driven sibling of scatter_foliage_in_box. DANGER: it reaches the same FFoliageInfo::AddInstance path that can crash the editor from its two sibling tools, so treat it as unsafe and prefer add_instanced_static_mesh_component + add_ism_instance (query the layer weight yourself) or a PCG graph. Save your work before calling it.
 
@@ -1027,6 +1209,8 @@ Scatter foliage only where a landscape PAINT LAYER is strong enough: samples see
 
 ## `set_absolute_transform`
 
+*Destructive, idempotent.*
+
 Make an EDITOR-world actor's root SceneComponent use ABSOLUTE (world-space) location/rotation/scale instead of inheriting from its parent -- for an attached actor that drifts or shears when its parent moves or is scaled. At least one of the three flags must be supplied (otherwise clean error), and the reply re-reads all three off the component. Read them back with get_absolute_transform; this does NOT call Modify(), so pair it with another dirtying edit or the save may skip the actor.
 
 | Parameter | Type | Required | Description |
@@ -1039,6 +1223,8 @@ Make an EDITOR-world actor's root SceneComponent use ABSOLUTE (world-space) loca
 **Returns:** `{ applied: bool, actor_name: string, absolute_location: bool, absolute_rotation: bool, absolute_scale: bool (all three re-read off the root component) }`
 
 ## `set_actor_component_collision`
+
+*Destructive, idempotent.*
 
 Sets collision on a PLACED actor's UPrimitiveComponent (the placed-actor twin of set_blueprint_component_collision). Resolves the actor by name/label then its primitive component (by name, or the root primitive when component_name is omitted) and applies, in order: SetCollisionProfileName (expands the profile into the FBodyInstance response array), SetCollisionEnabled, then per-channel SetCollisionResponseToChannel. Channel keys accept a friendly display name ("Pawn", "Visibility", or a project CUSTOM trace/object channel) OR an ECC_* token; this is how you block a custom game channel that the BlockAll profile leaves at Ignore. After applying, collision-enabled is toggled off/on to force the FBodyInstance to rebuild its filter data, and Actor->Modify() marks the (OFPA) package dirty so save_level persists the change.
 
@@ -1055,6 +1241,8 @@ Sets collision on a PLACED actor's UPrimitiveComponent (the placed-actor twin of
 
 ## `set_actor_folder`
 
+*Destructive, idempotent.*
+
 Move an editor-world actor, found by internal name or label (first match), into an outliner folder; an empty folder_path moves it back to the root. Undoable, marks the level dirty, not saved; returns the internal actor_name and folder_path as given. get_actor_folder reads it back.
 
 | Parameter | Type | Required | Description |
@@ -1065,6 +1253,8 @@ Move an editor-world actor, found by internal name or label (first match), into 
 **Returns:** `{ actor_name: string, folder_path: string }`
 
 ## `set_actor_label`
+
+*Destructive, idempotent.*
 
 Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
 
@@ -1077,6 +1267,8 @@ Set the outliner label of an editor-world actor found by internal name or curren
 
 ## `set_actor_lifetime`
 
+*Destructive, idempotent.*
+
 Schedules an actor in the active world (a running PIE/game world if one exists, otherwise the editor world) for automatic destruction after N seconds via FTimerManager::SetTimer. Idempotent: re-running cancels the previous timer and resets the countdown. Used for transient effects (damage numbers, FX) that should auto-cleanup. Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.
 
 | Parameter | Type | Required | Description |
@@ -1088,6 +1280,8 @@ Schedules an actor in the active world (a running PIE/game world if one exists, 
 
 ## `set_actor_lock_location`
 
+*Destructive, idempotent.*
+
 Lock or unlock an actor in the EDITOR world so viewport dragging cannot move it by accident (AActor::SetLockLocation). Pin landmarks -- PlayerStart, landscape, hand-placed props -- before a batch transform pass. Calls Modify(), so it dirties the actor's package and needs a save_level to persist. Read the flag back with get_actor_lock_location. Does not affect runtime/PIE movement.
 
 | Parameter | Type | Required | Description |
@@ -1098,6 +1292,8 @@ Lock or unlock an actor in the EDITOR world so viewport dragging cannot move it 
 **Returns:** `{ applied, actor_name, locked }`
 
 ## `set_actor_material`
+
+*Destructive, idempotent.*
 
 Assign a material to an actor's mesh component slot
 
@@ -1111,6 +1307,8 @@ Assign a material to an actor's mesh component slot
 
 ## `set_actor_spatially_loaded`
 
+*Destructive, idempotent.*
+
 Toggles an editor-world actor's World Partition spatial-loading flag (AActor::SetIsSpatiallyLoaded).  Guarded by AActor::CanChangeIsSpatiallyLoadedFlag() because the setter check()s that precondition (same baked guard as spawn_box_volume) -- so an actor that forbids the change never crashes the editor. Wrapped in FScopedTransaction + Actor->Modify() so the flag change marks the actor's (OFPA) package dirty and survives save_level. applied=false with can_change=false is the honest result for an actor that forbids the change (e.g. a non-partitioned / always-loaded actor); nothing is mutated in that case.
 
 | Parameter | Type | Required | Description |
@@ -1121,6 +1319,8 @@ Toggles an editor-world actor's World Partition spatial-loading flag (AActor::Se
 **Returns:** `{ actor_name: string, actor_path: string, requested: bool, is_spatially_loaded: bool, applied: bool, can_change: bool, changed: bool, note: string }`
 
 ## `set_control_rotation`
+
+*Destructive, idempotent.*
 
 Set a Controller's control rotation (AController::SetControlRotation) in the active PIE session -- aims the view and, for a possessed pawn, its control-driven facing. Targets the named pawn's controller, a named controller, or (no target_name) the PIE session's PlayerController. PIE-gated: clean error if no PIE session.
 
@@ -1136,6 +1336,8 @@ Set a Controller's control rotation (AController::SetControlRotation) in the act
 
 ## `set_data_layer_debug_color`
 
+*Destructive, idempotent.*
+
 Sets the debug color of a UDataLayerAsset and saves it.
 
 | Parameter | Type | Required | Description |
@@ -1146,6 +1348,8 @@ Sets the debug color of a UDataLayerAsset and saves it.
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, debug_color: [number, number, number, number], data_layer_type: string, color_set: bool, saved: bool }`
 
 ## `set_data_layer_initial_runtime_state`
+
+*Destructive, idempotent.*
 
 Authors the initial runtime state ("Unloaded"|"Loaded"|"Activated") of a runtime data layer's instance in the current World Partition map, creating the instance from the asset if missing.  Headless authoring (no PIE); the state takes effect when the level streams in. Requires a World Partition map (honest error otherwise).
 
@@ -1159,6 +1363,8 @@ Authors the initial runtime state ("Unloaded"|"Loaded"|"Activated") of a runtime
 
 ## `set_data_layer_parent`
 
+*Destructive, idempotent.*
+
 Sets (or clears) the parent of a data layer instance in the editor world's World Partition (twin of create_data_layer_instance).  Uses UDataLayerEditorSubsystem::SetParentDataLayer, verified by read-back (GetParent() must equal the requested parent). Both instances are resolved from their UDataLayerAsset paths (create the instances first via create_data_layer_instance). Pass parent_data_layer_asset_path empty/omitted to detach (reparent to root). Requires a World Partition world; on a non-WP (default) map this returns an honest error (no editor-world swap). Idempotent: already_parented=true when the instance already had the requested parent. Note: SetParentDataLayer returns false (parented=false) when the engine rejects the relationship (CanBeChildOf()==false, e.g. a runtime child under an editor parent or a cycle); the read-back reports the honest result.
 
 | Parameter | Type | Required | Description |
@@ -1169,6 +1375,8 @@ Sets (or clears) the parent of a data layer instance in the editor world's World
 **Returns:** `{ data_layer_asset_path: string, parent_data_layer_asset_path: string, instance_name: string, parent_instance_name: string, parented: bool, already_parented: bool, note?: string }`
 
 ## `set_data_layer_runtime_state`
+
+*Destructive, idempotent.*
 
 Sets the LIVE runtime state ("Unloaded"|"Loaded"|"Activated") of a runtime data layer in a running World Partition game (PIE).  Requires a World Partition map; outside PIE this is an honest gate (applied:false + note pointing to set_data_layer_initial_runtime_state) rather than a failure.
 
@@ -1182,6 +1390,8 @@ Sets the LIVE runtime state ("Unloaded"|"Loaded"|"Activated") of a runtime data 
 
 ## `set_data_layer_type`
 
+*Destructive, idempotent.*
+
 Sets the EDataLayerType ("Editor" or "Runtime") of a UDataLayerAsset and saves it.  Editor-only authoring on the data asset itself (no world required); mirrors set_data_layer_debug_color.
 
 | Parameter | Type | Required | Description |
@@ -1192,6 +1402,8 @@ Sets the EDataLayerType ("Editor" or "Runtime") of a UDataLayerAsset and saves i
 **Returns:** `{ data_layer_asset_path: string, asset_path: string, data_layer_type: string, is_runtime: bool, type_set: bool, saved: bool }`
 
 ## `set_foliage_type_properties`
+
+*Destructive, idempotent.*
 
 Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.
 
@@ -1217,6 +1429,8 @@ Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fi
 
 ## `set_kill_z`
 
+*Destructive, idempotent.*
+
 Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings_detail -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
 
 | Parameter | Type | Required | Description |
@@ -1227,6 +1441,8 @@ Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling
 **Returns:** `{ applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (hardcoded) }`
 
 ## `set_landscape_grass_type_properties`
+
+*Destructive, idempotent.*
 
 Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
 
@@ -1255,6 +1471,8 @@ Set fields of one grass variety of a LandscapeGrassType asset, only those you pa
 
 ## `set_landscape_height_in_box`
 
+*Destructive, idempotent.*
+
 Raise or lower terrain: add delta_z world units to every heightmap vertex inside a world-space box (give box_min/box_max, or center/extent). A RELATIVE edit -- to force a region to one absolute height use flatten_landscape_in_box, and to soften the seams afterwards use smooth_landscape_in_box. Check vertices_modified in the reply: a zero means the box missed the terrain, which is what a wrongly-signed world coordinate looks like.
 
 | Parameter | Type | Required | Description |
@@ -1270,6 +1488,8 @@ Raise or lower terrain: add delta_z world units to every heightmap vertex inside
 
 ## `set_landscape_material`
 
+*Destructive, idempotent.*
+
 Dress the terrain: assign the landscape's render material (and optionally its hole material) by asset path. Does MORE than the name suggests and that is the point -- it PROPAGATES to every LandscapeStreamingProxy, which is what actually renders on a World-Partition map, so you do not have to walk the proxies by hand. Consequence to budget for: it dirties one package per proxy plus the landscape. Idempotent (re-assigning the same material returns already_set), and the shader recompile is async even though the assignment is immediate. Do not trust material_assigned as the oracle -- re-read with get_landscape_material and spot-check a proxy's own landscape_material.
 
 | Parameter | Type | Required | Description |
@@ -1281,6 +1501,8 @@ Dress the terrain: assign the landscape's render material (and optionally its ho
 **Returns:** `{ landscape_name: string, material_path: string, material_assigned: bool, already_set: bool, hole_material_path?: string, hole_material_assigned?: bool, note: string }`
 
 ## `set_landscape_spline_control_point`
+
+*Destructive, idempotent.*
 
 Move, rotate or re-width one existing landscape spline control point by index -- how you adjust a road or river route without rebuilding the spline. Only the fields you pass change (applied_count reports how many landed). Location is LANDSCAPE-LOCAL, not world, and width is a HALF-width. Read the current values first with get_landscape_spline_control_point.
 
@@ -1296,6 +1518,8 @@ Move, rotate or re-width one existing landscape spline control point by index --
 
 ## `set_pie_window_size`
 
+*Destructive, idempotent.*
+
 Set the size of the Play-In-Editor window, so a UI can be checked at more than whatever resolution the window happens to have. start_play_in_editor takes no size parameter, so without this the classic UI bug -- fine at 1920x1080, overlapping at 1280x720 -- cannot be reproduced headless. Writes ULevelEditorPlaySettings, the same setting the editor's Play dropdown edits, and it applies to the NEXT PIE session: one already running keeps its window. For a single Widget Blueprint you do not need PIE at all -- render_widget_preview takes width/height/scale directly.
 
 | Parameter | Type | Required | Description |
@@ -1308,6 +1532,8 @@ Set the size of the Play-In-Editor window, so a UI can be checked at more than w
 
 ## `set_player_controller_class`
 
+*Destructive, idempotent.*
+
 Point the world's GameMode at a PlayerController class, writing the live GameMode instance if one exists and otherwise the defaults of the world's Blueprint GameMode (refused when the GameMode is a native class, or when the world has none: those defaults are process-wide and never saved). success is read back from the slot written. WARNING: It does NOT compile or save the GameMode Blueprint, so a later PIE can still instantiate the OLD class from the already-compiled BlueprintGeneratedClass (three reads can agree on the new class while PIE spawns the engine default). Always follow with compile_blueprint on the GameMode and then save_asset, and verify in PIE by the SPAWNED controller's full class path -- never by re-reading this slot.
 
 | Parameter | Type | Required | Description |
@@ -1318,6 +1544,8 @@ Point the world's GameMode at a PlayerController class, writing the live GameMod
 
 ## `set_preserve_scale_ratio`
 
+*Destructive, idempotent.*
+
 DOES NOTHING and says so: the editor's preserve-scale-ratio preference (UEditorPerProjectUserSettings::bPreserveScaleRatio) is not in the public UPROPERTY set, so this tool writes nothing and always answers applied:false with a note pointing at Editor Preferences > Level Editor > Viewports. Kept only so the call fails loudly instead of silently; it does not affect set_actor_transform, whose scale is always taken literally.
 
 | Parameter | Type | Required | Description |
@@ -1327,6 +1555,8 @@ DOES NOTHING and says so: the editor's preserve-scale-ratio preference (UEditorP
 **Returns:** `{ applied: false (always), preserve: bool (your input, echoed), note: string explaining the gap }`
 
 ## `set_spline_points`
+
+*Destructive, idempotent.*
 
 Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoints + AddSplinePoint each (local space) + optional SetClosedLoop + UpdateSpline.
 
@@ -1340,6 +1570,8 @@ Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoin
 
 ## `set_streaming_level_loaded`
 
+*Destructive, idempotent.*
+
 Sets whether a streaming sub-level should be loaded (ULevelStreaming::SetShouldBeLoaded).
 
 | Parameter | Type | Required | Description |
@@ -1351,6 +1583,8 @@ Sets whether a streaming sub-level should be loaded (ULevelStreaming::SetShouldB
 
 ## `set_streaming_level_visible`
 
+*Destructive, idempotent.*
+
 Sets whether a streaming sub-level should be visible (ULevelStreaming::SetShouldBeVisible).
 
 | Parameter | Type | Required | Description |
@@ -1361,6 +1595,8 @@ Sets whether a streaming sub-level should be visible (ULevelStreaming::SetShould
 **Returns:** `{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_visible: bool, applied: bool }`
 
 ## `set_view_target`
+
+*Destructive, idempotent.*
 
 Point the active PIE session's PlayerController camera at an actor (APlayerController::SetViewTargetWithBlend). blend_time=0 cuts instantly; >0 blends linearly. PIE-gated: clean error if no PIE session. Frames captures without spawning a camera by hand.
 
@@ -1374,6 +1610,8 @@ Point the active PIE session's PlayerController camera at an actor (APlayerContr
 
 ## `set_world_gravity`
 
+*Destructive, idempotent.*
+
 Set an exact global gravity on the EDITOR world's WorldSettings: writes GlobalGravityZ and the "Override World Gravity" flag, then RE-READS GetGravityZ() into the reply so gravity_z is a measurement rather than an echo. Earth is about -980 with the default centimetre unit. Use this when you want a number; use configure_gravity for named presets (Earth/Moon/Mars/Zero). Undoable (wrapped in a transaction) but it dirties the MAP -- save_level to keep it, and check the .umap is not read-only or the save writes nothing.
 
 | Parameter | Type | Required | Description |
@@ -1384,6 +1622,8 @@ Set an exact global gravity on the EDITOR world's WorldSettings: writes GlobalGr
 **Returns:** `{ applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), success: bool (hardcoded) }`
 
 ## `set_world_partition_runtime_hash`
+
+*Destructive, idempotent.*
 
 HONEST gate for editing the World Partition runtime hash grid settings.  Mirrors HandleBuildMinimap: the WP runtime grid settings (CellSize/LoadingRange) live in UWorldPartitionRuntimeSpatialHash::Grids, an editor-only private UPROPERTY with NO public setter, and the streaming grid is generated during cook/build (GenerateStreaming is WITH_EDITOR), so it cannot be set synchronously headless. The tool resolves the editor world + detects WP for real and reports applied=false; nothing is mutated. On the non-WP default map it honestly returns is_world_partition=false.
 
@@ -1396,6 +1636,8 @@ HONEST gate for editing the World Partition runtime hash grid settings.  Mirrors
 **Returns:** `{ is_world_partition: bool, runtime_hash_type?: string, applied: bool, runtime_regenerated?: bool, success: bool, note: string }`
 
 ## `smooth_landscape_in_box`
+
+*Destructive.*
 
 Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 1 to 5 iterations. The finisher for the other two sculpt tools -- flatten_landscape_in_box and set_landscape_height_in_box leave a hard rim, and a couple of iterations here blends it. It only averages what is there; it cannot add relief.
 
@@ -1411,6 +1653,8 @@ Soften terrain: run a 3x3 box blur over the heightmap inside a world-space box, 
 **Returns:** `{ landscape_actor_name: string, iterations: int, applied: bool, vertices_smoothed: int, region_width: int, region_height: int, region: [int] }`
 
 ## `spawn_level_streaming_volume`
+
+*Additive, idempotent.*
 
 Spawns an ALevelStreamingVolume with a box brush and binds it to an existing streaming sub-level.  Builds a default box brush (CubeBuilder via UActorFactory::CreateBrushForVolumeActor), applies the usage/previs/disabled flags, then appends the volume to the target ULevelStreaming::EditorStreamingVolumes array (idempotent: re-binding the same volume is a no-op). The actual load/unload trigger is runtime/PIE-only and is not exercised headless.
 
@@ -1428,6 +1672,8 @@ Spawns an ALevelStreamingVolume with a box brush and binds it to an existing str
 
 ## `spawn_navmesh_bounds_volume`
 
+*Additive.*
+
 Spawns a navigation mesh bounds volume at a specified location with optional extent, and builds a REAL cube brush so the volume has non-empty nav bounds (an empty brush yields 0 navmesh tiles). No hand placement in the editor UI required. The brush is RE-READ off the spawned actor after building (poly count from its UModel, bounds from the actor), so nothing in the payload is a hand-written claim.
 
 | Parameter | Type | Required | Description |
@@ -1438,6 +1684,8 @@ Spawns a navigation mesh bounds volume at a specified location with optional ext
 **Returns:** `{ actor_name: string, actor_path: string, location_x: number, location_y: number, location_z: number, extent_x: number, extent_y: number, extent_z: number, brush_built: bool, has_brush_geometry: bool, brush_present: bool, brush_poly_count: number (-1 = no UModel/no editor-only Polys data), brush_empty: bool, bounds_valid: bool, bounds_extent_x: number, bounds_extent_y: number, bounds_extent_z: number, bounds_extent_actual: { x, y, z }, bounds_origin_actual: { x, y, z }, actor_scale: { x, y, z }, location_actual: { x, y, z }, requested: { extent }, success: bool }`
 
 ## `spawn_text_render_actor`
+
+*Additive.*
 
 Spawns a TextRenderActor into the active world (a running PIE/game world if one exists, otherwise the editor world) and configures its text. Sets the UTextRenderComponent's text / color / world size if given (world_size read back to verify). Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.
 
@@ -1453,6 +1701,8 @@ Spawns a TextRenderActor into the active world (a running PIE/game world if one 
 
 ## `start_play_in_editor`
 
+*Destructive.*
+
 Press Play: starts a real PlayInEditor session (a true play world with a spawned PlayerController, not SimulateInEditor), optionally multi-client and networked for co-op testing via number_of_clients + net_mode=ListenServer. WARNING: RequestPlaySession is ASYNC and this tool probes right after asking, so `pie_started` comes back FALSE on a start that is perfectly fine -- the oracle is a follow-up is_play_in_editor_active, never this field. With 2+ clients the worlds are UEDPIE_0 (server) and UEDPIE_1 (client), and later reads must be anchored with world='server'/'client' because PIE actor NAMES are swapped between them. Refuses if another MCP session (or a human) already owns PIE unless force=true.
 
 | Parameter | Type | Required | Description |
@@ -1466,6 +1716,8 @@ Press Play: starts a real PlayInEditor session (a true play world with a spawned
 
 ## `stop_play_in_editor`
 
+*Destructive.*
+
 Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay). WARNING: `pie_stopped` is HARDCODED true whenever PIE was running and teardown is async, so the only oracle is a follow-up is_play_in_editor_active. WARNING: Treat every call as an operation that CAN KILL THE EDITOR: any UWorld/UPackage handle left in an execute_python global keeps the PIE world rooted and the engine aborts with "Object ... from PIE level still referenced" -- purge the __main__ namespace and gc.collect() BEFORE calling. Refuses when another MCP session (or a human) started the PIE, and then needs force=true.
 
 | Parameter | Type | Required | Description |
@@ -1475,6 +1727,8 @@ Press Stop: requests the end of the Play-in-Editor session (EditorRequestEndPlay
 **Returns:** `{ pie_stopped: bool (hardcoded true when PIE was up -- not a measurement), was_in_pie: bool, still_in_pie: bool (read immediately, so usually still true: teardown is async), message: string }`
 
 ## `wait_for_pie_completion`
+
+*Read-only.*
 
 Block until the human closes Play-in-Editor (or the timeout fires), pumping the game thread while it polls, and report elapsed_seconds + whether it completed or timed out. Use it to hand the session to a human for a piloted run and get control back when they hit Stop; use is_play_in_editor_active for an instant, non-blocking check. Returns immediately with started_in_pie:false when PIE was not running.
 

@@ -6,6 +6,8 @@
 
 ## `activate_game_feature_plugin`
 
+*Destructive, idempotent.*
+
 Load and activate a Game Feature Plugin by name or URL. ASYNC + honest-headless: the state transition runs on the subsystem's own ticker, so this fires the activation (logging the eventual result) and returns immediately with the current state -- poll get_game_feature_plugin_state until state == "Active". Idempotent: if already active, no-ops with already_active=true.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Load and activate a Game Feature Plugin by name or URL. ASYNC + honest-headless:
 **Returns:** `{ url: string, already_active: bool, state: string, is_active: bool, is_loaded: bool, is_registered: bool, note: string }`
 
 ## `deactivate_game_feature_plugin`
+
+*Destructive, idempotent.*
 
 Deactivate an active Game Feature Plugin by name or URL. ASYNC + honest-headless (same fire-and-return pattern as activate): returns immediately with the current state; poll get_game_feature_plugin_state. Idempotent: if not active, no-ops with already_inactive=true.
 
@@ -28,6 +32,8 @@ Deactivate an active Game Feature Plugin by name or URL. ASYNC + honest-headless
 
 ## `get_game_feature_plugin_state`
 
+*Read-only.*
+
 Read the current lifecycle state of a Game Feature Plugin by name or URL (synchronous). The engine's EGameFeaturePluginState enum is non-reflective, so this is the canonical way to observe/poll a plugin's state after an async activate/deactivate.
 
 | Parameter | Type | Required | Description |
@@ -39,6 +45,8 @@ Read the current lifecycle state of a Game Feature Plugin by name or URL (synchr
 
 ## `list_game_feature_plugins`
 
+*Read-only.*
+
 Enumerate every Game Feature Plugin the subsystem knows about (built-in + registered), with each one's current state. Read-only, synchronous.
 
 No parameters.
@@ -46,6 +54,8 @@ No parameters.
 **Returns:** `{ plugins: [{ name: string, url: string, loaded_as_built_in: bool, state: string }], count: int }`
 
 ## `unload_game_feature_plugin`
+
+*Destructive, idempotent.*
 
 Unload a Game Feature Plugin by name or URL (complement of activate/deactivate). ASYNC + honest-headless (same fire-and-return pattern): returns immediately with the current state; poll get_game_feature_plugin_state. Idempotent: if not loaded, no-ops with already_unloaded=true. Note: an active plugin is still loaded, so this unloads it regardless of active state.
 

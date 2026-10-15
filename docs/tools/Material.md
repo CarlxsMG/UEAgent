@@ -6,6 +6,8 @@
 
 ## `add_collection_scalar_param`
 
+*Destructive.*
+
 Add a scalar parameter (new GUID) to a Material Parameter Collection asset and save it; an existing scalar of that name only gets its default overwritten (already_existed=true). Returns scalar_count_before, scalar_count, default_value and id. For a color use add_collection_vector_param.
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Add a scalar parameter (new GUID) to a Material Parameter Collection asset and s
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, param_added: bool, already_existed: bool, scalar_count_before: int, scalar_count: int, default_value: number, id: string, saved: bool }`
 
 ## `add_collection_vector_param`
+
+*Additive.*
 
 Append a vector RGBA parameter to a Material Parameter Collection
 
@@ -30,6 +34,8 @@ Append a vector RGBA parameter to a Material Parameter Collection
 
 ## `add_material_attribute_layers_node`
 
+*Additive.*
+
 Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions.
 
 | Parameter | Type | Required | Description |
@@ -40,6 +46,8 @@ Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUs
 **Returns:** `{ material_path: string, expression_added: bool, expression_class: string, connected_material_attributes: bool, use_material_attributes: bool, num_expressions: int, recompiled: bool, saved: bool, node_name: string, save_error: string }`
 
 ## `add_material_function_call`
+
+*Additive.*
 
 Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionCall node bound to the function, so the function's inputs and outputs become the node's pins. Refused, with the node removed again, when the function cannot be called from this material.
 
@@ -52,6 +60,8 @@ Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionC
 **Returns:** `{ material_path: string, function_path: string, node_name: string, node_class: string, expression_count: number }`
 
 ## `add_material_function_input`
+
+*Additive.*
 
 Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and delete_material_function_input, plus num_inputs and added.
 
@@ -69,6 +79,8 @@ Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the
 
 ## `add_material_function_output`
 
+*Additive.*
+
 Add a UMaterialExpressionFunctionOutput node to a material function.          '/Game/MyGame/MF_Example.MF_Example'
 
 | Parameter | Type | Required | Description |
@@ -79,6 +91,8 @@ Add a UMaterialExpressionFunctionOutput node to a material function.          '/
 **Returns:** `{ function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool }`
 
 ## `clear_collection_params`
+
+*Destructive, idempotent.*
 
 Clear all parameters of a given type from a Material Parameter Collection
 
@@ -91,6 +105,8 @@ Clear all parameters of a given type from a Material Parameter Collection
 
 ## `clear_material_parameter_overrides`
 
+*Destructive, idempotent.*
+
 Clear all parameter overrides on a Material Instance Constant.  Resets all scalar, vector, and texture parameter values to their defaults (inherited from the parent material).
 
 | Parameter | Type | Required | Description |
@@ -100,6 +116,8 @@ Clear all parameter overrides on a Material Instance Constant.  Resets all scala
 **Returns:** `{ material_instance_path: string, cleared: bool }`
 
 ## `clear_mpci_parameter_overrides`
+
+*Destructive, idempotent.*
 
 Force the world's MPCI back to the parent's default values
 
@@ -112,6 +130,8 @@ Force the world's MPCI back to the parent's default values
 
 ## `compile_material`
 
+*Destructive.*
+
 Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: refreshes its child material instances and the viewports and marks the package dirty, without saving. recompiled is always true and does not report shader errors. Material functions use recompile_material_function.
 
 | Parameter | Type | Required | Description |
@@ -121,6 +141,8 @@ Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: 
 **Returns:** `{ material: string, recompiled: bool }`
 
 ## `connect_material_expressions`
+
+*Destructive.*
 
 Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_expressions / get_material_graph_info, then compile and check get_material_stats.
 
@@ -136,6 +158,8 @@ Wire one material node's output pin into another node's input pin -- the call th
 
 ## `connect_material_function_pins`
 
+*Destructive.*
+
 Wire two material expression nodes inside a UMaterialFunction graph by name.
 
 | Parameter | Type | Required | Description |
@@ -150,6 +174,8 @@ Wire two material expression nodes inside a UMaterialFunction graph by name.
 
 ## `connect_substrate_slab_to_material`
 
+*Destructive.*
+
 Connect the Slab BSDF output to the material's Front Material input.  GATED by Substrate: when Substrate is disabled this returns a clear error ("Substrate disabled: cannot connect slab to Front Material...") because the Front Material input is only meaningful with Substrate enabled. When enabled, connects via ConnectMaterialProperty(MP_FrontMaterial) and recompiles.
 
 | Parameter | Type | Required | Description |
@@ -159,6 +185,8 @@ Connect the Slab BSDF output to the material's Front Material input.  GATED by S
 **Returns:** `{ material_path: string, slab_node_id: string, connected_to: string, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string } | (error: "Substrate disabled: ...")`
 
 ## `connect_to_material_output`
+
+*Destructive.*
 
 Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
 
@@ -173,6 +201,8 @@ Wire one output of an expression node into a main input of a UMaterial asset (Ba
 
 ## `copy_material_instance_params`
 
+*Additive.*
+
 Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_static_switch). Read the copied counts in the reply and verify with get_material_all_parameters; diff_material_instances shows what still differs.
 
 | Parameter | Type | Required | Description |
@@ -184,6 +214,8 @@ Bulk-copy every scalar, vector and texture OVERRIDE from one material instance t
 
 ## `copy_mid_params_from_source`
 
+*Additive.*
+
 Copy all parameter values from a source material into a Material Instance Dynamic.
 
 | Parameter | Type | Required | Description |
@@ -194,6 +226,8 @@ Copy all parameter values from a source material into a Material Instance Dynami
 **Returns:** `{ mid_object_path, source_material_path, source_material_name, copied }`
 
 ## `create_dynamic_material_on_actor`
+
+*Additive.*
 
 Create a component-owned Material Instance Dynamic on a scene actor
 
@@ -207,6 +241,8 @@ Create a component-owned Material Instance Dynamic on a scene actor
 
 ## `create_material`
 
+*Additive.*
+
 Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance / create_material_instance_constant when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
 
 | Parameter | Type | Required | Description |
@@ -217,6 +253,8 @@ Create a new base material asset (UMaterial) -- the graph-owning master whose pa
 **Returns:** `{ material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool } -- an existing asset of that name is an error, never overwritten`
 
 ## `create_material_expression`
+
+*Additive.*
 
 Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output. The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_expressions and get_material_stats, not with the success flag.
 
@@ -231,6 +269,8 @@ Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.
 
 ## `create_material_function`
 
+*Additive, idempotent.*
+
 Create a UMaterialFunction asset at package_path/name through the editor factory, exposed to the function library, and save it. Idempotent: an existing function is returned untouched with already_exists=true; another asset class at that path is an error. Returns function_path, num_inputs, num_outputs and saved.
 
 | Parameter | Type | Required | Description |
@@ -242,6 +282,8 @@ Create a UMaterialFunction asset at package_path/name through the editor factory
 **Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists: bool? }`
 
 ## `create_material_function_expression`
+
+*Additive.*
 
 Create a new UMaterialExpression node inside a UMaterialFunction's internal graph (same shape as create_material_expression, scoped to a function instead of a material). Use connect_material_function_pins to wire it and recompile_material_function to recompile.
 
@@ -256,6 +298,8 @@ Create a new UMaterialExpression node inside a UMaterialFunction's internal grap
 
 ## `create_material_function_instance`
 
+*Additive.*
+
 Create a UMaterialFunctionInstance (asset, with parent set) and save it.
 
 | Parameter | Type | Required | Description |
@@ -267,6 +311,8 @@ Create a UMaterialFunctionInstance (asset, with parent set) and save it.
 **Returns:** `{ asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool }`
 
 ## `create_material_instance`
+
+*Additive, idempotent.*
 
 Create a material instance (MIC) from a parent material -- the cheap, non-destructive way to re-skin a vendor or engine material: the parent stays untouched and updatable while only your overrides are stored, and no new shader is compiled. Idempotent (already_exists=true when it is already there). Same operation as create_material_instance_constant, which takes a single full asset path instead of separate folder and name. Tune it with set_material_instance_param_override, and remember static switches inherit from the parent and are set separately.
 
@@ -280,6 +326,8 @@ Create a material instance (MIC) from a parent material -- the cheap, non-destru
 
 ## `create_material_instance_constant`
 
+*Additive, idempotent.*
+
 Create a material instance (MIC) asset under a /Game path, optionally parented to a base material on creation. The right way to re-skin a vendor or engine material: the instance is yours, the parent stays untouched and updatable, and only the parameters you override are stored. Idempotent -- an existing asset comes back with already_existed=true. Same operation as create_material_instance, which addresses the target by folder plus name instead of a full path.
 
 | Parameter | Type | Required | Description |
@@ -292,6 +340,8 @@ Create a material instance (MIC) asset under a /Game path, optionally parented t
 
 ## `create_material_instance_dynamic`
 
+*Additive.*
+
 Create a runtime-only Material Instance Dynamic (MID) from a parent material
 
 | Parameter | Type | Required | Description |
@@ -302,6 +352,8 @@ Create a runtime-only Material Instance Dynamic (MID) from a parent material
 **Returns:** `{ mid_object_path, mid_name, parent_material_path, parent_material_name, created }`
 
 ## `create_material_layer`
+
+*Additive, idempotent.*
 
 Creates a UMaterialFunctionMaterialLayer asset (usage MaterialLayer, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
 
@@ -314,6 +366,8 @@ Creates a UMaterialFunctionMaterialLayer asset (usage MaterialLayer, exposed to 
 
 ## `create_material_layer_blend`
 
+*Additive, idempotent.*
+
 Creates a UMaterialFunctionMaterialLayerBlend asset (usage MaterialLayerBlend, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
 
 | Parameter | Type | Required | Description |
@@ -324,6 +378,8 @@ Creates a UMaterialFunctionMaterialLayerBlend asset (usage MaterialLayerBlend, e
 **Returns:** `{ asset_path: string, name: string, class: string, usage: string, created: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `create_material_parameter_collection`
+
+*Additive, idempotent.*
 
 Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned with created=false and already_exists=true, while another asset type at that path is an error. Returns collection_path, scalar_count, vector_count and saved.
 
@@ -336,6 +392,8 @@ Create a UMaterialParameterCollection asset at package_path/name and save it to 
 
 ## `create_material_parameter_collection_instance`
 
+*Additive.*
+
 Get or create a transient MPCI on the target world
 
 | Parameter | Type | Required | Description |
@@ -346,6 +404,8 @@ Get or create a transient MPCI on the target world
 **Returns:** `{ collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }`
 
 ## `create_material_variant`
+
+*Additive.*
 
 Create a material instance from a base material AND apply a dict of parameter overrides in the same call -- one shot for "same material, different colour/roughness/switch", instead of create_material_instance followed by N set calls. The overrides dict accepts scalars, vector objects and static switch booleans. Addresses the base by NAME rather than path, so resolve an ambiguous name first; check applied_overrides_count against what you sent, and re-read with get_material_all_parameters, since a name that does not exist on the parent is simply not applied.
 
@@ -359,6 +419,8 @@ Create a material instance from a base material AND apply a dict of parameter ov
 
 ## `create_post_process_material`
 
+*Additive.*
+
 Create a UMaterial configured as a post-process material (MD_PostProcess).
 
 | Parameter | Type | Required | Description |
@@ -369,6 +431,8 @@ Create a UMaterial configured as a post-process material (MD_PostProcess).
 **Returns:** `{ material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, saved: bool }`
 
 ## `create_substrate_slab_node`
+
+*Additive, idempotent.*
 
 Add a Substrate Slab BSDF node to a UMaterial asset.  Performs a real CreateMaterialExpression on the material graph and saves the package. Idempotent: reuses an existing slab node on re-run. Node creation succeeds even when Substrate is disabled (substrate_enabled=false), but the material will not compile/render until Substrate is enabled and the editor restarts.
 
@@ -382,6 +446,8 @@ Add a Substrate Slab BSDF node to a UMaterial asset.  Performs a real CreateMate
 
 ## `create_subsurface_profile`
 
+*Additive, idempotent.*
+
 Create a USubsurfaceProfile data asset (NewObject + save).  Idempotent: if the asset already exists it is loaded and returned.
 
 | Parameter | Type | Required | Description |
@@ -392,6 +458,8 @@ Create a USubsurfaceProfile data asset (NewObject + save).  Idempotent: if the a
 **Returns:** `{ name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool }`
 
 ## `delete_material_expression`
+
+*Destructive.*
 
 Delete ONE node from a material graph by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_expressions until the count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag.
 
@@ -404,6 +472,8 @@ Delete ONE node from a material graph by name. Deliberately one at a time, and t
 
 ## `delete_material_function`
 
+*Destructive.*
+
 Force-delete the asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check and no class check (any asset there goes), open editors close and undo history may be cleared. Permanent. Returns deleted; success stays true when deleted is false, so read it.
 
 | Parameter | Type | Required | Description |
@@ -413,6 +483,8 @@ Force-delete the asset at material_function_path with UEditorAssetLibrary::Delet
 **Returns:** `{ material_function_path: string, deleted: bool }`
 
 ## `delete_material_function_input`
+
+*Destructive, idempotent.*
 
 Delete a UMaterialExpressionFunctionInput node from a material function (inverse of add_material_function_input).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
 
@@ -425,6 +497,8 @@ Delete a UMaterialExpressionFunctionInput node from a material function (inverse
 
 ## `delete_material_function_output`
 
+*Destructive, idempotent.*
+
 Delete a UMaterialExpressionFunctionOutput node from a material function (inverse of add_material_function_output).  Located by node_id via the function's own expression list. Idempotent: an already-absent node_id returns { deleted:false, already_absent:true } as success, not an error.
 
 | Parameter | Type | Required | Description |
@@ -436,6 +510,8 @@ Delete a UMaterialExpressionFunctionOutput node from a material function (invers
 
 ## `detect_substrate_enabled`
 
+*Read-only.*
+
 Report whether Substrate (Strata) materials are enabled in this editor.  Always works. Returns substrate_enabled (from Substrate::IsSubstrateEnabled), the r.Substrate cvar value, and a note when disabled. Enabling Substrate requires editing config and restarting the editor.
 
 No parameters.
@@ -443,6 +519,8 @@ No parameters.
 **Returns:** `{ substrate_enabled: bool, r_substrate_cvar: int, note?: string, detected: bool }`
 
 ## `diff_material_instances`
+
+*Read-only.*
 
 Diff two Material Instance Constants: what side B overrides differ from side A (parent + scalar/vector/texture/static-switch overrides + material layer stack). Answers "what did this fork change vs its parent (or the original)". Read-only; nothing is saved. Editor-only.
 
@@ -454,6 +532,8 @@ Diff two Material Instance Constants: what side B overrides differ from side A (
 **Returns:** `{ material_instance_path_a: string, material_instance_path_b: string, parent: {a, b, same}, scalars: {changed: [{name, association?, layer_index?, value_a, value_b}], only_in_a: [{name, value}], only_in_b: [{name, value}], changed_count, only_in_a_count, only_in_b_count}, vectors: {changed: [{name, value_a:{r,g,b,a}, value_b:{r,g,b,a}}], only_in_a, only_in_b, ...counts}, textures: {changed: [{name, value_a, value_b}], only_in_a, only_in_b, ...counts}, static_switches: {changed: [{name, value_a, value_b}], only_in_a, only_in_b, ...counts}, layer_stack: {layer_count_a, layer_count_b, blend_count_a, blend_count_b, layer_diffs: [{index, function_a, function_b}], blend_diffs: [{index, function_a, function_b}]}, total_differences: int, identical: bool }`
 
 ## `disconnect_material_expressions`
+
+*Destructive, idempotent.*
 
 Disconnect an input of a material expression (inverse of connect_material_expressions).  Idempotent: an input that is already disconnected returns already_disconnected=true (still success — the expression exists, there simply was no connection to break).
 
@@ -467,6 +547,8 @@ Disconnect an input of a material expression (inverse of connect_material_expres
 
 ## `disconnect_to_material_output`
 
+*Destructive, idempotent.*
+
 Disconnect a material output property (inverse of connect_to_material_output).  Idempotent: an already-disconnected property returns already_disconnected=true (still success — the output slot always resolves to a valid input, so false is unambiguously "nothing was connected", never an error).
 
 | Parameter | Type | Required | Description |
@@ -477,6 +559,8 @@ Disconnect a material output property (inverse of connect_to_material_output).  
 **Returns:** `{ material: string, output_property: string, disconnected: bool, already_disconnected: bool }`
 
 ## `duplicate_material_expression`
+
+*Additive.*
 
 Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count.
 
@@ -490,6 +574,8 @@ Copy one expression node of a UMaterial asset into the same material, optionally
 
 ## `duplicate_mpc`
 
+*Additive.*
+
 Duplicate a Material Parameter Collection asset, parameters included with their names, Ids and defaults, to package_path/new_name and save the copy. Refuses when the target already exists. Returns collection_path, scalar_count, vector_count, saved and save_error.
 
 | Parameter | Type | Required | Description |
@@ -502,6 +588,8 @@ Duplicate a Material Parameter Collection asset, parameters included with their 
 
 ## `get_collection_info`
 
+*Read-only.*
+
 Read every parameter of a Material Parameter Collection asset: scalar_params (name, default, id), vector_params (name, id, default object and default_rgba), scalar_count, vector_count and total_count. Read-only; get_collection_param_info reads one parameter, get_mpci_info the live per-world values.
 
 | Parameter | Type | Required | Description |
@@ -511,6 +599,8 @@ Read every parameter of a Material Parameter Collection asset: scalar_params (na
 **Returns:** `{ collection_path: string, collection_name: string, collection_class: string, scalar_params: [object], vector_params: [object], scalar_count: int, vector_count: int, total_count: int }`
 
 ## `get_collection_param_info`
+
+*Read-only.*
 
 Read one parameter of a Material Parameter Collection asset: id, index in its array and default (default_value for a scalar, an RGBA default object for a vector). Read-only; it searches only the array param_type selects and errors when the name is not there.
 
@@ -524,6 +614,8 @@ Read one parameter of a Material Parameter Collection asset: id, index in its ar
 
 ## `get_material_all_parameters`
 
+*Read-only.*
+
 What can I tune on this material without recompiling it: EVERY scalar, vector and texture parameter the material or its parent exposes, each with its effective value, layer association and layer index. This is the contract, and the one to prefer over get_material_instance_params, which only shows the subset an instance already overrode and so makes untouched parameters look unavailable. Works on a base material or an instance. Covers scalar/vector/texture ONLY -- static switches are a separate list (get_material_static_switch_parameters) and they are what decide whether whole shader branches run at all.
 
 | Parameter | Type | Required | Description |
@@ -534,6 +626,8 @@ What can I tune on this material without recompiling it: EVERY scalar, vector an
 **Returns:** `{ material_instance_path: string, parameters: [{name, type, association, layer_index, value?}], parameter_count: int }`
 
 ## `get_material_default_parameter`
+
+*Read-only.*
 
 Read the RESOLVED default value of a named parameter on the base UMaterial graph, with an honest found flag.  Pairs with set_material_node_param (ParameterName + DefaultValue) which is a writer-without-reader.  The engine getters return a default (0 / black / null / false) BOTH when the parameter holds that value AND when it does not exist; this command uses the bool-returning UMaterial::Get*ParameterDefaultValue family to distinguish them, returning found=false (NOT a masquerading default) when the parameter is absent.
 
@@ -547,6 +641,8 @@ Read the RESOLVED default value of a named parameter on the base UMaterial graph
 
 ## `get_material_expressions`
 
+*Read-only.*
+
 List every node in a material's graph with its name, class and description -- the census that tells you what a material is built from, and the count oracle when deleting nodes one by one (delete until it reaches 0). Also the way to spot the duplicate parameter nodes a partial bulk-delete leaves behind, which no parameter listing shows because duplicates collapse by name. Nodes only: for the WIRING between them use get_material_graph_info, and note this works on a UMaterial, not a UMaterialFunction (the Python equivalent throws on one).
 
 | Parameter | Type | Required | Description |
@@ -556,6 +652,8 @@ List every node in a material's graph with its name, class and description -- th
 **Returns:** `{ material_path: string, material_name: string, expressions: [{ name, class, class_path, description }], expression_count: int, success: bool }`
 
 ## `get_material_function_graph`
+
+*Read-only.*
 
 Enumerate a UMaterialFunction's internal expression graph: every UMaterialExpression node plus the FExpressionInput connections between them (same shape as get_material_graph_info, scoped to a function instead of a material).
 
@@ -567,6 +665,8 @@ Enumerate a UMaterialFunction's internal expression graph: every UMaterialExpres
 
 ## `get_material_function_inputs`
 
+*Read-only.*
+
 List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs. Read-only. Function instances are not accepted; for the whole node graph use get_material_function_graph.
 
 | Parameter | Type | Required | Description |
@@ -576,6 +676,8 @@ List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: no
 **Returns:** `{ material_function_path: string, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }`
 
 ## `get_material_graph_info`
+
+*Read-only.*
 
 Read the full expression graph of a UMaterial (nodes + connections).  Enumerates UMaterial::GetExpressions() and walks each expression's FExpressionInput Inputs[] array. For every connected input, the connection is also flattened into the top-level connections[] list for easy graph-walking.
 
@@ -587,6 +689,8 @@ Read the full expression graph of a UMaterial (nodes + connections).  Enumerates
 
 ## `get_material_instance_base_overrides`
 
+*Read-only.*
+
 Read a material instance's base property overrides: blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. These are the surface-level settings that decide whether something renders opaque, masked or translucent, and they are separate from parameters -- so a material that looks wrong despite correct parameters is often a blend-mode override. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored. set_material_instance_base_overrides writes them.
 
 | Parameter | Type | Required | Description |
@@ -596,6 +700,8 @@ Read a material instance's base property overrides: blend mode, two-sided, shadi
 **Returns:** `{ material_instance_path: string, override_blend_mode: bool, blend_mode: string, override_two_sided: bool, two_sided: bool, override_shading_model: bool, shading_model: string, override_opacity_mask_clip_value: bool, opacity_mask_clip_value: float }`
 
 ## `get_material_instance_param_overridden`
+
+*Read-only.*
 
 Is this parameter set on the INSTANCE, or just inherited from the parent? Returns the override flag for one named parameter -- the discriminator that a plain value read cannot give you, since an inherited value and a locally-set identical value read the same. Use it to confirm a write actually landed on the child (and, in a read-only vendor material, to prove you edited your instance and not the library asset). Editor-only.
 
@@ -609,6 +715,8 @@ Is this parameter set on the INSTANCE, or just inherited from the parent? Return
 
 ## `get_material_instance_params`
 
+*Read-only.*
+
 List the parameter values a material instance has actually OVERRIDDEN (scalars, vectors, textures) -- it walks the instance's own override arrays, so it answers "what has been calibrated here", NOT "what can I tune". Two omissions to keep in mind: it never returns STATIC SWITCH parameters, which are the flags that switch whole shader branches on or off (an instance can read perfectly green and still render without a layer because a switch is false in the parent), and it hides every parameter the parent exposes but this instance has not touched -- those are not hard-wired, they keep the parent's value. For the full tunable contract use get_material_all_parameters, and for the switches get_material_static_switch_parameters / get_material_instance_static_switch.
 
 | Parameter | Type | Required | Description |
@@ -619,6 +727,8 @@ List the parameter values a material instance has actually OVERRIDDEN (scalars, 
 
 ## `get_material_instance_parent`
 
+*Read-only.*
+
 Which material is this instance derived from: the parent's asset path, name and class. Use it to trace an instance back to the base material whose graph and parameter contract actually govern it -- the parent is where static switch defaults and unexposed values live, so it is the next asset to inspect when an instance behaves unexpectedly. set_material_instance_parent changes it.
 
 | Parameter | Type | Required | Description |
@@ -628,6 +738,8 @@ Which material is this instance derived from: the parent's asset path, name and 
 **Returns:** `{ material_instance_path: string, parent_material_path: string, parent_material_name: string, parent_material_class: string }`
 
 ## `get_material_instance_static_component_mask`
+
+*Read-only.*
 
 Read a static component-mask parameter (the R/G/B/A channel checkboxes) on a material instance -- which channels of a packed mask/ORM texture the shader actually samples. Reading the wrong channel is a classic silent look bug: nothing errors, the surface is just uniformly wrong. Supports Global / Layer / Blend association with a layer index. set_material_instance_static_component_mask writes it. Editor-only.
 
@@ -642,6 +754,8 @@ Read a static component-mask parameter (the R/G/B/A channel checkboxes) on a mat
 
 ## `get_material_instance_static_switch`
 
+*Read-only.*
+
 Read a static-switch (static bool) parameter value from a Material Instance Constant (via UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue). Editor-only.
 
 | Parameter | Type | Required | Description |
@@ -655,6 +769,8 @@ Read a static-switch (static bool) parameter value from a Material Instance Cons
 
 ## `get_material_layer_info`
 
+*Read-only.*
+
 Reads a material function asset (layer, blend or plain function) without changing it. Returns asset_path, class, usage ("MaterialLayer", "MaterialLayerBlend" or "Default"), num_inputs, num_outputs, num_expressions, and is_layer and is_blend (from the class or the usage).
 
 | Parameter | Type | Required | Description |
@@ -664,6 +780,8 @@ Reads a material function asset (layer, blend or plain function) without changin
 **Returns:** `{ asset_path: string, class: string, usage: string, num_inputs: int, num_outputs: int, num_expressions: int, is_layer: bool, is_blend: bool }`
 
 ## `get_material_layer_parameter`
+
+*Read-only.*
 
 Read one parameter's value scoped to a specific LAYER of a layered material instance (by zero-based layer_index), with a found flag. The read-back oracle for set_material_layer_parameter, and the way to tell which layer a value actually belongs to -- get_material_all_parameters lists every layer's parameters together with their association, which is broader but noisier when you already know the slot.
 
@@ -678,6 +796,8 @@ Read one parameter's value scoped to a specific LAYER of a layered material inst
 
 ## `get_material_layer_stack`
 
+*Read-only.*
+
 Read a material's layer stack: the layer functions and blend functions it uses, in order, with has_layers telling you whether the material is layered at all. Check this before any set_material_layer_parameter call -- on a non-layered material the layer indices mean nothing, and here is where you learn which index is which surface.
 
 | Parameter | Type | Required | Description |
@@ -687,6 +807,8 @@ Read a material's layer stack: the layer functions and blend functions it uses, 
 **Returns:** `{ material_instance_path: string, layers: [{name, function_path}], blends: [{name, function_path}], layer_count: int, blend_count: int, has_layers: bool }`
 
 ## `get_material_param_info`
+
+*Read-only.*
 
 Read ONE named parameter's effective value off a material instance (param_type scalar | vector | texture), with a found flag so a misspelled name is distinguishable from a zero value. The cheap targeted read-back after set_material_instance_param_override -- use get_material_all_parameters when you want the whole list, and get_material_instance_param_overridden to tell "inherited from the parent" from "locally overridden", which this does not.
 
@@ -700,6 +822,8 @@ Read ONE named parameter's effective value off a material instance (param_type s
 
 ## `get_material_physical_material`
 
+*Read-only.*
+
 Which physical material a material is linked to -- what decides footstep sounds, impact effects, friction and surface type when something hits this surface. Reads the RAW field with no engine-default fallback, so an empty path means "nothing authored here" and the engine default applies at runtime; that distinction is exactly what you want when auditing why a surface sounds wrong. set_material_physical_material writes it.
 
 | Parameter | Type | Required | Description |
@@ -709,6 +833,8 @@ Which physical material a material is linked to -- what decides footstep sounds,
 **Returns:** `{ material_path: string, physical_material_path: string, success: bool }`
 
 ## `get_material_static_switch_parameters`
+
+*Read-only.*
 
 List the STATIC SWITCH parameter names a material or instance exposes -- the on/off flags that compile whole branches of the shader in or out (beach, snow, detail normals, grass output). Always check these when a material looks correctly configured and still renders wrong: get_material_instance_params does not show them at all, so an instance with every texture and scalar right can still be missing a feature because a switch is false in the parent. Names only; read a value with get_material_instance_static_switch and write it with set_material_instance_static_switch. Editor-only.
 
@@ -720,6 +846,8 @@ List the STATIC SWITCH parameter names a material or instance exposes -- the on/
 
 ## `get_material_stats`
 
+*Read-only.*
+
 Read PER-ASSET shader complexity for a material or material instance (instruction counts, sampler/texture-sample counts) -- the numbers the Material Editor's Stats panel shows, unlike get_shader_info (project-wide/global). Read-only: does not Modify()/dirty the asset. Render-adjacent: forces synchronous shader compilation on the FIRST call for a given material (UMaterialEditingLibrary::GetStatistics blocks on FMaterialResource::FinishCompilation); subsequent calls are fast once the shader map is cached. Works for both UMaterial and UMaterialInstance (UMaterialInterface's GetMaterialResource is virtual/overridden on both).
 
 | Parameter | Type | Required | Description |
@@ -730,6 +858,8 @@ Read PER-ASSET shader complexity for a material or material instance (instructio
 
 ## `get_material_usage`
 
+*Read-only.*
+
 What would I break if I changed this material: every asset that references it, bucketed by kind (static mesh, skeletal mesh, blueprint, level, other) with counts, plus the material's own blend mode and two-sided / masked / translucent / opaque flags. The impact check before editing or deleting a shared material. Note it takes a material NAME, not a path, so an ambiguous name can resolve to the wrong asset -- confirm with resolve_asset_by_name first. Nothing to do with get_material_usage_flag, which is about permitted geometry types.
 
 | Parameter | Type | Required | Description |
@@ -739,6 +869,8 @@ What would I break if I changed this material: every asset that references it, b
 **Returns:** `{ material_name: string, material_class: string, material_category: string, material_tooltip: string, material_display_name: string, usage: [{package_name, asset_name, asset_class, asset_path, usage_type, usage_category, asset_category, asset_tooltip, asset_display_name}], usage_count: int, static_mesh_usage_count: int, skeletal_mesh_usage_count: int, blueprint_usage_count: int, level_usage_count: int, other_usage_count: int, material_has_referencers: bool, material_is_two_sided: bool, material_is_masked: bool, material_is_translucent: bool, material_is_opaque: bool, blend_mode: string }`
 
 ## `get_material_usage_flag`
+
+*Read-only.*
 
 Is this material allowed to be used on that kind of geometry? Reads one EMaterialUsage flag (SkeletalMesh, InstancedStaticMeshes, Niagara, SplineMesh, ...) on a base material. The check to make when a material renders fine on a static mesh and comes out as the default grey checker on a skeletal mesh or an instanced mesh -- a missing usage flag is exactly that symptom. Accepts the name with or without the MATUSAGE_ prefix; set_material_usage_flag enables it (and forces a shader recompile).
 
@@ -751,6 +883,8 @@ Is this material allowed to be used on that kind of geometry? Reads one EMateria
 
 ## `get_mid_all_params`
 
+*Read-only.*
+
 Get all parameters and their current values from a Material Instance Dynamic
 
 | Parameter | Type | Required | Description |
@@ -760,6 +894,8 @@ Get all parameters and their current values from a Material Instance Dynamic
 **Returns:** `{ name, value, r, g, b, a, texture_path, texture_name, mid_object_path, mid_name, parent_material, scalar_params, vector_params, texture_params, scalar_count, vector_count, texture_count }`
 
 ## `get_mpci_info`
+
+*Read-only.*
 
 Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Read-only, never creates the instance; scalar_override_count and vector_override_count are only the parameter counts.
 
@@ -772,6 +908,8 @@ Read the transient Material Parameter Collection Instance of one collection on a
 
 ## `inspect_material_instance_constant`
 
+*Read-only.*
+
 One-call overview of a material instance: parent material and class, plus COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks. A triage read that tells you which of the detailed tools to reach for next -- it returns counts, not values, so it can say "there are 14 static switches here" but never which ones are on. For values use get_material_all_parameters, get_material_instance_static_switch and get_material_instance_base_overrides.
 
 | Parameter | Type | Required | Description |
@@ -782,6 +920,8 @@ One-call overview of a material instance: parent material and class, plus COUNTS
 
 ## `recompile_material_function`
 
+*Destructive.*
+
 Recompile a material function, layer or function instance (UpdateMaterialFunction): loaded materials using it recompile and dependent function instances are marked dirty but not saved, then the function itself is saved; success requires that save. recompiled is always true, not a shader-error report.
 
 | Parameter | Type | Required | Description |
@@ -791,6 +931,8 @@ Recompile a material function, layer or function instance (UpdateMaterialFunctio
 **Returns:** `{ material_function_path: string, function_class: string, recompiled: bool, saved: bool }`
 
 ## `regenerate_collection_param_id`
+
+*Destructive.*
 
 Assign a new random FGuid Id to one parameter of a Material Parameter Collection asset and save it; returns new_id. It searches only the array param_type selects (default scalar) and errors when the name is not there.
 
@@ -804,6 +946,8 @@ Assign a new random FGuid Id to one parameter of a Material Parameter Collection
 
 ## `remove_collection_param`
 
+*Destructive.*
+
 Remove a parameter from a Material Parameter Collection by name
 
 | Parameter | Type | Required | Description |
@@ -815,6 +959,8 @@ Remove a parameter from a Material Parameter Collection by name
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, removed: bool, scalar_count: int, vector_count: int, saved: bool }`
 
 ## `rename_collection_param`
+
+*Destructive.*
 
 Rename one parameter of a Material Parameter Collection asset, keeping its Id, and save it. Refuses when new_name is already used in the same array, and errors when param_name is not in the array param_type selects (default scalar).
 
@@ -829,6 +975,8 @@ Rename one parameter of a Material Parameter Collection asset, keeping its Id, a
 
 ## `set_collection_param_default`
 
+*Destructive, idempotent.*
+
 Set the default of an existing scalar or vector parameter of a Material Parameter Collection asset and save it: a scalar takes scalar_value, a vector takes vector [r, g, b, a]. Errors when neither array has the name or the needed value is missing.
 
 | Parameter | Type | Required | Description |
@@ -842,6 +990,8 @@ Set the default of an existing scalar or vector parameter of a Material Paramete
 
 ## `set_material_domain`
 
+*Destructive, idempotent.*
+
 Set a material's domain (EMaterialDomain) and recompile it.          'LightFunction', 'Volume'
 
 | Parameter | Type | Required | Description |
@@ -852,6 +1002,8 @@ Set a material's domain (EMaterialDomain) and recompile it.          'LightFunct
 **Returns:** `{ material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool }`
 
 ## `set_material_function_input_props`
+
+*Destructive, idempotent.*
 
 Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_inputs.
 
@@ -870,6 +1022,8 @@ Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_
 
 ## `set_material_function_instance_parent`
 
+*Destructive, idempotent.*
+
 Re-parent a UMaterialFunctionInstance asset to another material function or function instance in one undoable transaction, then save it; success requires the save. Returns old_parent and new_parent, read back from the asset ("(none)" when empty).
 
 | Parameter | Type | Required | Description |
@@ -880,6 +1034,8 @@ Re-parent a UMaterialFunctionInstance asset to another material function or func
 **Returns:** `{ instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool }`
 
 ## `set_material_function_output_props`
+
+*Destructive, idempotent.*
 
 Set properties on an existing UMaterialExpressionFunctionOutput (located by node_id).  Partial update (idempotent). ValidateName is re-run when output_name changes.
 
@@ -895,6 +1051,8 @@ Set properties on an existing UMaterialExpressionFunctionOutput (located by node
 
 ## `set_material_instance_base_overrides`
 
+*Destructive, idempotent.*
+
 Set one or more base property overrides (BasePropertyOverrides) on a Material Instance Constant. Each provided axis sets BOTH its bOverride_ flag and value; omitted axes are left untouched. Persists to the asset.
 
 | Parameter | Type | Required | Description |
@@ -909,6 +1067,8 @@ Set one or more base property overrides (BasePropertyOverrides) on a Material In
 
 ## `set_material_instance_param`
 
+*Destructive, idempotent.*
+
 Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
 
 | Parameter | Type | Required | Description |
@@ -921,6 +1081,8 @@ Set a scalar, vector, texture or static-switch global parameter on a Material In
 **Returns:** `{ instance: string, instance_path: string, param_name: string, param_type: string, value_format?: string, set: bool, value_after: number|object|string|bool|null, overridden_after: bool, value_requested: number|object|string|bool, requested: {...} }`
 
 ## `set_material_instance_param_override`
+
+*Destructive, idempotent.*
 
 Toggle the per-parameter override flag on a Material Instance Constant (any of the 11 parameter types, including static switch). bOverride=true keeps/enables the local override; bOverride=false REVERTS the parameter to the parent material's value (removes the override). Runs UpdateMaterialInstance and persists. Returns honestly: success=false when the parameter is not found on the instance. Editor-only.
 
@@ -935,6 +1097,8 @@ Toggle the per-parameter override flag on a Material Instance Constant (any of t
 
 ## `set_material_instance_parent`
 
+*Destructive, idempotent.*
+
 Re-parent a material instance onto a different base material -- how you swap an instance from a vendor master to your own without recreating it and re-pointing every referencer. Overrides whose parameter names do not exist on the new parent become orphaned and silently stop applying, so re-read with get_material_all_parameters afterwards and expect to re-check the static switches, whose defaults come from the new parent.
 
 | Parameter | Type | Required | Description |
@@ -945,6 +1109,8 @@ Re-parent a material instance onto a different base material -- how you swap an 
 **Returns:** `{ material_instance_path: string, old_parent: string, new_parent: string, changed: bool }`
 
 ## `set_material_instance_static_component_mask`
+
+*Destructive, idempotent.*
 
 Set a static component-mask (R/G/B/A bools) parameter override on a Material Instance Constant, rebuild the static permutation and persist. Reads back via GetParameterValue. Editor-only.
 
@@ -963,6 +1129,8 @@ Set a static component-mask (R/G/B/A bools) parameter override on a Material Ins
 
 ## `set_material_instance_static_switch`
 
+*Destructive, idempotent.*
+
 Set a static-switch (static bool) parameter override on a Material Instance Constant, then rebuild the static permutation and persist. Reads the value back via the getter (the engine value-setter wrapper always returns false, so its return is never trusted). Editor-only.
 
 | Parameter | Type | Required | Description |
@@ -976,6 +1144,8 @@ Set a static-switch (static bool) parameter override on a Material Instance Cons
 **Returns:** `{ material_instance_path: string, parameter_name: string, association: string, requested_value: bool, value: bool, found: bool, saved: bool }`
 
 ## `set_material_layer_parameter`
+
+*Destructive, idempotent.*
 
 Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_param_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_layer_parameter.
 
@@ -991,6 +1161,8 @@ Write a scalar / vector / texture parameter scoped to ONE layer of a layered mat
 
 ## `set_material_layer_stack`
 
+*Destructive, idempotent.*
+
 Define which material-layer and blend functions a layered material instance stacks, in order -- how you compose a surface (base + dirt + snow) out of reusable layer functions instead of editing the base material graph. Order is significant and layers are addressed downstream by index (set_material_layer_parameter), so re-stacking renumbers existing per-layer values. Read the result back with get_material_layer_stack.
 
 | Parameter | Type | Required | Description |
@@ -1002,6 +1174,8 @@ Define which material-layer and blend functions a layered material instance stac
 **Returns:** `{ material_instance_path: string, layer_count: int, blend_count: int, success: bool }`
 
 ## `set_material_node_param`
+
+*Destructive, idempotent.*
 
 Set a value/property on a material expression node (e.g. a Constant value or parameter name).
 
@@ -1016,6 +1190,8 @@ Set a value/property on a material expression node (e.g. a Constant value or par
 
 ## `set_material_physical_material`
 
+*Destructive, idempotent.*
+
 Link (or clear) the UPhysicalMaterial on a UMaterial asset and persist it to disk.  Idempotent: re-setting the same phys-mat returns already_set=true.  An empty/omitted physical_material_path CLEARS the link (sets it to null).
 
 | Parameter | Type | Required | Description |
@@ -1026,6 +1202,8 @@ Link (or clear) the UPhysicalMaterial on a UMaterial asset and persist it to dis
 **Returns:** `{ material_path: string, physical_material_path: string, already_set: bool, saved: bool, save_error?: string, success: bool }`
 
 ## `set_material_usage_flag`
+
+*Destructive, idempotent.*
 
 Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist it to disk.  Idempotent: the engine setter no-ops when the flag already matches (already_set=true).  Recompiles shaders for the affected usage.
 
@@ -1039,6 +1217,8 @@ Enable or disable a usage flag (EMaterialUsage) on a UMaterial asset and persist
 
 ## `set_mid_scalar_param`
 
+*Destructive, idempotent.*
+
 Set a scalar parameter value on a Material Instance Dynamic.
 
 | Parameter | Type | Required | Description |
@@ -1051,6 +1231,8 @@ Set a scalar parameter value on a Material Instance Dynamic.
 
 ## `set_mid_texture_param`
 
+*Destructive, idempotent.*
+
 Set a texture parameter value on a Material Instance Dynamic
 
 | Parameter | Type | Required | Description |
@@ -1062,6 +1244,8 @@ Set a texture parameter value on a Material Instance Dynamic
 **Returns:** `{ mid_path, parameter_name, old_texture_path, new_texture_path, requested_texture_path, set }`
 
 ## `set_mid_vector_param`
+
+*Destructive, idempotent.*
 
 Set a vector/color parameter value on a Material Instance Dynamic.
 
@@ -1078,6 +1262,8 @@ Set a vector/color parameter value on a Material Instance Dynamic.
 
 ## `set_mpci_parent_collection`
 
+*Destructive, idempotent.*
+
 Rebind the world's MPCI to a different parent collection
 
 | Parameter | Type | Required | Description |
@@ -1088,6 +1274,8 @@ Rebind the world's MPCI to a different parent collection
 **Returns:** `{ collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }`
 
 ## `set_mpci_scalar_parameter_value`
+
+*Destructive, idempotent.*
 
 Override a scalar parameter value on the world's MPCI
 
@@ -1101,6 +1289,8 @@ Override a scalar parameter value on the world's MPCI
 **Returns:** `{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string }`
 
 ## `set_mpci_vector_parameter_value`
+
+*Destructive, idempotent.*
 
 Override a vector parameter value on the world's MPCI
 
@@ -1119,6 +1309,8 @@ Override a vector parameter value on the world's MPCI
 
 ## `set_substrate_slab_scalar`
 
+*Destructive, idempotent.*
+
 Drive a Substrate Slab BSDF scalar pin with a Constant node.  Creates a Constant expression set to `value` and connects it to the named slab pin (e.g. Roughness, F0, DiffuseAlbedo, Anisotropy). Works regardless of whether Substrate is enabled. Requires create_substrate_slab_node first.
 
 | Parameter | Type | Required | Description |
@@ -1130,6 +1322,8 @@ Drive a Substrate Slab BSDF scalar pin with a Constant node.  Creates a Constant
 **Returns:** `{ material_path: string, slab_node_id: string, constant_node_id: string, pin_name: string, value: number, connected: bool, substrate_enabled: bool, r_substrate_cvar: int, note?: string }`
 
 ## `swap_material_layer_parameters`
+
+*Destructive.*
 
 Exchange two layer slots on a layered material instance -- reorder which surface sits above which without rebuilding the whole stack with set_material_layer_stack. Every per-layer parameter moves with the slot, so any index you recorded earlier now points at the other layer; re-read get_material_layer_stack afterwards.
 

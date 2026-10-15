@@ -37,6 +37,7 @@ from collections import defaultdict, OrderedDict
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _paths  # noqa: E402
+import tool_hints  # noqa: E402
 
 HANDLER_GLOB = os.path.join(_paths.COMMANDS_DIR, "**", "*.cpp")
 # The plugin's MCP server (Mcp/McpToolCatalog.cpp) reads this file at startup.
@@ -304,7 +305,8 @@ def find_truncated_annotations(text: str) -> list[tuple[str, str, int, str]]:
         if not ANNOTATION_OTHER_RE.match(nxt):
             return False
         if (ANNOTATION_PARAM_RE.match(nxt) or ANNOTATION_RETURNS_RE.match(nxt)
-                or ANNOTATION_MARKER_RE.match(nxt) or ANNOTATION_DOMAIN_RE.match(nxt)):
+                or ANNOTATION_MARKER_RE.match(nxt) or ANNOTATION_DOMAIN_RE.match(nxt)
+                or tool_hints.HINTS_LINE_RE.match(nxt)):
             return False
         return nxt.strip() not in ("//", "//---", "// ---")
 
@@ -1005,6 +1007,24 @@ def build(args) -> int:
     if trunc_warns and (args.check or args.strict):
         print(f"FAIL: {len(trunc_warns)} annotations silently lose part of their text.")
         return 2
+
+    # 5a) The MCP tool annotations (readOnlyHint, destructiveHint, idempotentHint,
+    # openWorldHint), derived from each command's code and verb by Tools/tool_hints.py.
+    entries = {e["name"]: e for lst in by_domain.values() for e in lst}
+    hints, hint_errors = tool_hints.classify_catalog(entries)
+    for name, entry in entries.items():
+        entry["annotations"] = hints[name]
+    if hint_errors:
+        print(f"--- TOOL HINTS ({len(hint_errors)}) ---")
+        for e in hint_errors:
+            print(f"  {e}")
+        print(f"FAIL: {len(hint_errors)} @hints the code contradicts or the parser does not know.")
+        return 2
+    print("--- TOOL HINTS: controls ---")
+    if not tool_hints.run_controls(hints):
+        print("FAIL: a tool_hints control is refuted; the scan cannot be trusted.")
+        return 2
+    print()
 
     domains_list = [
         {"domain": d, "commands": lst}

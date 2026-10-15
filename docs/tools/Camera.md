@@ -6,6 +6,8 @@
 
 ## `add_camera_component`
 
+*Additive.*
+
 Add or configure a UCameraComponent on an existing actor, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor.
 
 | Parameter | Type | Required | Description |
@@ -29,6 +31,8 @@ Add or configure a UCameraComponent on an existing actor, optionally attaching i
 
 ## `add_camera_node_child`
 
+*Destructive, idempotent.*
+
 Populates the Children of a composite rig node (the rig RootNode must be a UArrayCameraNode ("Sequence"); set it via set_camera_rig_root_node node_type=ArrayCameraNode). Creates a new UCameraNode of child_node_type outered to the rig and appends it. Idempotent via optional index: index&lt;Children.Num() REPLACES that slot instead of appending. Gameplay Camera System is EXPERIMENTAL (plugin GameplayCameras).
 
 | Parameter | Type | Required | Description |
@@ -41,6 +45,8 @@ Populates the Children of a composite rig node (the rig RootNode must be a UArra
 
 ## `add_gameplay_camera_component`
 
+*Additive, idempotent.*
+
 Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Idempotent. Note: activation needs a running game/PIE and is out of scope here.
 
 | Parameter | Type | Required | Description |
@@ -51,6 +57,8 @@ Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Ide
 **Returns:** `{ actor_name, component_name, already_existed, camera_asset_path, camera_set }`
 
 ## `add_spring_arm`
+
+*Additive.*
 
 Add or configure a USpringArmComponent on an existing actor (camera boom / third-person follow distance / lag / collision probe).
 
@@ -77,6 +85,8 @@ Add or configure a USpringArmComponent on an existing actor (camera boom / third
 
 ## `build_camera_rig`
 
+*Destructive.*
+
 Builds a UCameraRigAsset (UCameraRigAsset::BuildCameraRig) and reports the resulting build status.
 
 | Parameter | Type | Required | Description |
@@ -86,6 +96,8 @@ Builds a UCameraRigAsset (UCameraRigAsset::BuildCameraRig) and reports the resul
 **Returns:** `{ camera_rig_path, built, build_status }`
 
 ## `create_camera`
+
+*Additive.*
 
 Spawn a new camera actor in the editor world with optional initial transform.
 
@@ -99,6 +111,8 @@ Spawn a new camera actor in the editor world with optional initial transform.
 
 ## `create_camera_asset`
 
+*Additive.*
+
 Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged (already_existed:true), another asset class there is an error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
 
 | Parameter | Type | Required | Description |
@@ -110,6 +124,8 @@ Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_p
 
 ## `create_camera_rig_asset`
 
+*Additive, idempotent.*
+
 Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (returns the existing asset).
 
 | Parameter | Type | Required | Description |
@@ -120,6 +136,8 @@ Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (re
 **Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
 
 ## `create_camera_rig_crane`
+
+*Additive.*
 
 Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitch, yaw and arm length; it is always labelled "CameraRigCrane_MCP", so address it later by the returned internal_name. Returns location and the read-back crane values; the level is not saved.
 
@@ -134,6 +152,8 @@ Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitc
 
 ## `create_camera_rig_rail`
 
+*Additive.*
+
 Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 points the rail is rebuilt as a straight 500-unit line along local X. Always labelled "CameraRigRail_MCP", so address it by the returned internal_name, e.g. in set_camera_rig_rail_position. Not saved.
 
 | Parameter | Type | Required | Description |
@@ -144,6 +164,8 @@ Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 po
 **Returns:** `{ actor_name: string, internal_name: string, location: [number, number, number], num_spline_points: number, success: bool }`
 
 ## `create_camera_shake_blueprint`
+
+*Additive, idempotent.*
 
 Create a Blueprint asset parented to UCameraShakeBase, compile and save it.  UCameraShakeBase is abstract but Blueprintable; the generated Blueprint subclass is concrete. Idempotent: if the asset already exists it is loaded and returned.
 
@@ -156,6 +178,8 @@ Create a Blueprint asset parented to UCameraShakeBase, compile and save it.  UCa
 
 ## `get_camera_asset_info`
 
+*Read-only.*
+
 Reports a UCameraAsset's director and, for a SingleCameraDirector, the rig it runs. Read-only.
 
 | Parameter | Type | Required | Description |
@@ -165,6 +189,8 @@ Reports a UCameraAsset's director and, for a SingleCameraDirector, the rig it ru
 **Returns:** `{ camera_asset_path, has_director, director_class, camera_rig_path }`
 
 ## `get_camera_fov`
+
+*Read-only.*
 
 Retrieve the current field of view (FOV) of a camera.
 
@@ -176,6 +202,8 @@ Retrieve the current field of view (FOV) of a camera.
 
 ## `get_camera_post_process`
 
+*Read-only.*
+
 Read the overridden PostProcessSettings off a camera actor's camera component: only the fields whose bOverride_* companion is on are returned (those actually contributing). Mirrors set_camera_post_process's field set. Pure reader.
 
 | Parameter | Type | Required | Description |
@@ -185,6 +213,8 @@ Read the overridden PostProcessSettings off a camera actor's camera component: o
 **Returns:** `{ actor_name: string, post_process_blend_weight: number, overridden_count: int, settings: object (overridden field -> value; scalars as numbers, wheels as [R,G,B,master], scene_color_tint as [R,G,B,A]) }`
 
 ## `get_camera_rig_nodes`
+
+*Read-only.*
 
 Reports a camera rig's RootNode class and its camera-parameter fields (name + value), plus, for a composite ArrayCameraNode root, its Children (index + class). Read-only.
 
@@ -196,6 +226,8 @@ Reports a camera rig's RootNode class and its camera-parameter fields (name + va
 
 ## `get_camera_transform`
 
+*Read-only.*
+
 Read the world location and rotation of a camera actor (ACameraActor or CineCameraActor) in the editor world, found by object name or label (case-insensitive, first match). Returns location [X, Y, Z] and rotation [Pitch, Yaw, Roll] in degrees; set_camera_transform is the writer.
 
 | Parameter | Type | Required | Description |
@@ -205,6 +237,8 @@ Read the world location and rotation of a camera actor (ACameraActor or CineCame
 **Returns:** `{ camera_name: string, location: [number, number, number], rotation: [number, number, number] }`
 
 ## `get_cameras`
+
+*Read-only.*
 
 List all camera actors in the editor world with their transform and FOV.
 
@@ -216,6 +250,8 @@ List all camera actors in the editor world with their transform and FOV.
 
 ## `get_cine_camera_settings`
 
+*Read-only.*
+
 Read the full cine-camera configuration off a CineCameraActor's CineCameraComponent: filmback (sensor size/offsets/aspect + preset), lens (focal/f-stop range, squeeze, blades, preset), focus (method/manual distance/offset/smoothing) and the current focal length / aperture / focus distance. Pure reader; mutates nothing.
 
 | Parameter | Type | Required | Description |
@@ -226,6 +262,8 @@ Read the full cine-camera configuration off a CineCameraActor's CineCameraCompon
 
 ## `list_camera_node_types`
 
+*Read-only.*
+
 Lists all concrete UCameraNode subclasses usable in a camera rig. Read-only reflection (GetDerivedClasses).
 
 No parameters.
@@ -233,6 +271,8 @@ No parameters.
 **Returns:** `{ base_class, count, types:[{name, path}] }`
 
 ## `set_camera_asset_director`
+
+*Destructive, idempotent.*
 
 Wires a USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsset (the "one rig" director). Verified via GetCameraDirector read-back.
 
@@ -245,6 +285,8 @@ Wires a USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsse
 
 ## `set_camera_fov`
 
+*Destructive, idempotent.*
+
 Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_camera_fov reads it.
 
 | Parameter | Type | Required | Description |
@@ -256,6 +298,8 @@ Set the field of view (degrees, above 0 up to 180) of the camera component of an
 
 ## `set_camera_node_parameters`
 
+*Destructive, idempotent.*
+
 Sets parameters on a camera rig's RootNode by reflection. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back.
 
 | Parameter | Type | Required | Description |
@@ -266,6 +310,8 @@ Sets parameters on a camera rig's RootNode by reflection. FXxxCameraParameter pr
 **Returns:** `{ camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
 ## `set_camera_post_process`
+
+*Destructive, idempotent.*
 
 Write PostProcessSettings on a camera actor's camera component (plain or cine) by field presence, turning on each field's bOverride_* companion so it takes effect (like a PostProcess Volume). Supplied fields only; scalars are numbers, color-grading wheels are [R,G,B,master] arrays, scene_color_tint is [R,G,B,A]. Absolute + idempotent. Forces PostProcessBlendWeight>0 and marks the render state dirty.
 
@@ -300,6 +346,8 @@ Write PostProcessSettings on a camera actor's camera component (plain or cine) b
 
 ## `set_camera_rig_rail_position`
 
+*Destructive, idempotent.*
+
 Set the camera position along a CameraRig_Rail (0.0 = start, 1.0 = end).
 
 | Parameter | Type | Required | Description |
@@ -311,6 +359,8 @@ Set the camera position along a CameraRig_Rail (0.0 = start, 1.0 = end).
 
 ## `set_camera_rig_root_node`
 
+*Destructive, idempotent.*
+
 Sets a UCameraRigAsset's RootNode to a new node of the given UCameraNode subclass.
 
 | Parameter | Type | Required | Description |
@@ -321,6 +371,8 @@ Sets a UCameraRigAsset's RootNode to a new node of the given UCameraNode subclas
 **Returns:** `{ camera_rig_path, node_type, node_class, root_set }`
 
 ## `set_camera_transform`
+
+*Destructive, idempotent.*
 
 Update the location and/or rotation of an existing camera.
 
@@ -334,6 +386,8 @@ Update the location and/or rotation of an existing camera.
 
 ## `set_cine_camera_aperture`
 
+*Destructive, idempotent.*
+
 Set the aperture (f-stop) on a CineCameraActor for depth-of-field control.
 
 | Parameter | Type | Required | Description |
@@ -344,6 +398,8 @@ Set the aperture (f-stop) on a CineCameraActor for depth-of-field control.
 **Returns:** `{ camera_actor_name: string, aperture: number, success: bool }`
 
 ## `set_cine_camera_filmback`
+
+*Destructive, idempotent.*
 
 Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-world actor found by name or label; sensor offsets are reset to 0. No undo transaction, nothing saved. Returns the read-back sensor_width, sensor_height and aspect_ratio; success is false when they do not match.
 
@@ -357,6 +413,8 @@ Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-wo
 
 ## `set_cine_camera_focal_length`
 
+*Destructive, idempotent.*
+
 Set the focal length (mm) on a CineCameraActor's CineCameraComponent.
 
 | Parameter | Type | Required | Description |
@@ -367,6 +425,8 @@ Set the focal length (mm) on a CineCameraActor's CineCameraComponent.
 **Returns:** `{ camera_actor_name: string, focal_length: number, horizontal_fov: number, vertical_fov: number, success: bool }`
 
 ## `set_cine_camera_focus`
+
+*Destructive, idempotent.*
 
 Replace the focus settings of the CineCameraComponent on an editor-world actor found by name or label: method, manual focus distance and smoothing; other focus fields, including the tracked actor, reset to defaults. Returns the read-back focus_method and focus_distance; no undo, nothing saved.
 
@@ -380,6 +440,8 @@ Replace the focus settings of the CineCameraComponent on an editor-world actor f
 **Returns:** `{ camera_actor_name: string, focus_method: string, focus_distance: number, success: bool }`
 
 ## `set_cine_camera_lens`
+
+*Destructive, idempotent.*
 
 Replace the lens limits of the CineCameraComponent on an editor-world actor found by name or label: focal length and f-stop ranges plus blade count; minimum focus distance resets to 0 and squeeze factor to 1. Returns the read-back focal range; no undo, nothing saved.
 

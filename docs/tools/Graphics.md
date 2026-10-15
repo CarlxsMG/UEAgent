@@ -6,6 +6,8 @@
 
 ## `get_decal_info`
 
+*Read-only.*
+
 Read the full UDecalComponent state (size, sort order, fade screen size, fade-out/in timing, color, material) of a named DecalActor.
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Read the full UDecalComponent state (size, sort order, fade screen size, fade-ou
 **Returns:** `{ actor_label: string, actor_name: string, decal_size_x: float, decal_size_y: float, decal_size_z: float, sort_order: int, fade_screen_size: float, fade_start_delay: float, fade_duration: float, fade_in_start_delay: float, fade_in_duration: float, destroy_owner_after_fade: bool, r: float, g: float, b: float, a: float, decal_material: string }`
 
 ## `set_decal_color`
+
+*Destructive, idempotent.*
 
 Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). No undo, dirty flag or save; returns the resulting r, g, b, a.
 
@@ -27,6 +31,8 @@ Set DecalColor on an editor-world ADecalActor found by label; it only shows if t
 
 ## `set_decal_destroy_owner_after_fade`
 
+*Destructive, idempotent.*
+
 Toggle the bDestroyOwnerAfterFade bit on a UDecalComponent. The existing set_decal_fade cmd always passes DestroyOwnerAfterFade=true to SetFadeOut; this cmd lets callers flip it independently and read it back. Implementation: writes the FadeOut triad through SetFadeOut(start, duration, destroy) using the current FadeStartDelay/FadeDuration so the other two fields are preserved.
 
 | Parameter | Type | Required | Description |
@@ -37,6 +43,8 @@ Toggle the bDestroyOwnerAfterFade bit on a UDecalComponent. The existing set_dec
 **Returns:** `{ actor_label: string, destroy_owner_after_fade: bool, fade_start_delay: float, fade_duration: float }`
 
 ## `set_decal_fade`
+
+*Destructive, idempotent.*
 
 Set a UDecalComponent's fade-out/fade-in timing fields on a named DecalActor.  Writes the EditAnywhere fields directly (mirrors the details panel) so values round-trip exactly, avoiding SetFadeOut's global fade-scale CVar and SetLifeSpan side effect.  Only provided fields change (partial, idempotent).
 
@@ -53,6 +61,8 @@ Set a UDecalComponent's fade-out/fade-in timing fields on a named DecalActor.  W
 
 ## `set_decal_fade_in`
 
+*Destructive, idempotent.*
+
 Set the FadeInStartDelay and FadeInDuration on a UDecalComponent via UDecalComponent::SetFadeIn (the existing SetFadeOut cmd only sets the *out* fields; this cmd sets the *in* pair).
 
 | Parameter | Type | Required | Description |
@@ -65,6 +75,8 @@ Set the FadeInStartDelay and FadeInDuration on a UDecalComponent via UDecalCompo
 
 ## `set_decal_fade_screen_size`
 
+*Destructive, idempotent.*
+
 Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below which the decal fades out).  The writer for the value get_decal_info already reads.
 
 | Parameter | Type | Required | Description |
@@ -76,6 +88,8 @@ Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below whic
 
 ## `set_decal_material`
 
+*Destructive, idempotent.*
+
 Assign a UMaterialInterface to the UDecalComponent on a named DecalActor.
 
 | Parameter | Type | Required | Description |
@@ -86,6 +100,8 @@ Assign a UMaterialInterface to the UDecalComponent on a named DecalActor.
 **Returns:** `{ actor_label: string, material_path: string }`
 
 ## `set_decal_size`
+
+*Destructive, idempotent.*
 
 Set the DecalSize half-extent on a UDecalComponent parented under a DecalActor.
 
@@ -101,6 +117,8 @@ Set the DecalSize half-extent on a UDecalComponent parented under a DecalActor.
 
 ## `set_decal_sort_order`
 
+*Destructive, idempotent.*
+
 Set the SortOrder int on a UDecalComponent (lower draws first within the same decal bucket).
 
 | Parameter | Type | Required | Description |
@@ -111,6 +129,8 @@ Set the SortOrder int on a UDecalComponent (lower draws first within the same de
 **Returns:** `{ actor_label: string, sort_order: int }`
 
 ## `spawn_decal_actor`
+
+*Additive.*
 
 Spawns a DecalActor into the editor world.  If material_path loads as a UMaterialInterface it is assigned to the UDecalComponent (SetDecalMaterial). Size may be a uniform number or an [x, y, z] half-extent applied to DecalSize (read back).
 

@@ -6,6 +6,8 @@
 
 ## `add_field_node`
 
+*Additive.*
+
 Author a field command node into a UFieldSystem and persist it.  Builds a transient authoring field U-node (selected by node_type), resolves the physics target to an EFieldPhysicsType, constructs the runtime FFieldSystemCommand via FFieldObjectCommands::CreateFieldCommand, appends it to UFieldSystem.Commands, and saves the asset.  node_type accepts "RadialFalloff", "PlaneFalloff", "BoxFalloff", "WaveScalar", "UniformScalar", "NoiseField", "UniformInteger", "RadialIntMask", "UniformVector", "RadialVector", "RotatedRadialVector", "RandomVector". Vector nodes pair with vector targets (LinearVelocity/LinearForce); scalar with strain/threshold; integer with state (DynamicState).  target is a physics target attribute name like "LinearVelocity", "ExternalClusterStrain", "DynamicState".  falloff_type accepts "Inverse", "Squared", "Logarithmic", or "None". Defaults to "Linear".
 
 | Parameter | Type | Required | Description |
@@ -34,6 +36,8 @@ Author a field command node into a UFieldSystem and persist it.  Builds a transi
 
 ## `add_geometry_collection_source`
 
+*Additive.*
+
 Append an additional StaticMesh source to an existing geometry collection
 
 | Parameter | Type | Required | Description |
@@ -45,6 +49,8 @@ Append an additional StaticMesh source to an existing geometry collection
 **Returns:** `{ geometry_collection_path: string, source_mesh_path: string, num_sources: int, num_materials: int, success: bool }`
 
 ## `add_impulse_to_actor`
+
+*Additive.*
 
 Kick a physics body: apply an impulse (or, with vel_change, a mass-independent velocity change) to an actor's primitive component, optionally at a world location for torque via AddImpulseAtLocation, or on a named skeletal bone. Acts on the EDITOR world, where nothing is simulating unless the component has simulate_physics on -- so on a resting editor actor this is a no-op that still reports applied:true; verify with a transform re-read, and for gameplay-time forces drive it in PIE.
 
@@ -61,6 +67,8 @@ Kick a physics body: apply an impulse (or, with vel_change, a mass-independent v
 
 ## `add_instanced_static_mesh_component`
 
+*Additive, idempotent.*
+
 Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_ism_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.
 
 | Parameter | Type | Required | Description |
@@ -71,6 +79,8 @@ Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so y
 **Returns:** `{ actor_name: string, component_name: string, component_class: string, num_instances: int, already_existed: bool }`
 
 ## `add_ism_instance`
+
+*Additive.*
 
 Place one more instance of an InstancedStaticMeshComponent's mesh at a world transform -- the cheap way to scatter many copies of a mesh (rocks, props, vegetation) without spawning an actor each. Pair it with add_instanced_static_mesh_component to create the component first. Prefer this route over the foliage tools: scatter_foliage_in_box and add_foliage_instances both CRASH the editor in this build, and an ISM is the same code path a foliage actor and PCG use anyway.
 
@@ -87,6 +97,8 @@ Place one more instance of an InstancedStaticMeshComponent's mesh at a world tra
 
 ## `add_physics_asset_constraint`
 
+*Additive, idempotent.*
+
 Author a ragdoll constraint (joint) inside a UPhysicsAsset between two bones.  Creates a UPhysicsConstraintTemplate via FPhysicsAssetUtils::CreateNewConstraint (idempotent by name — re-using a name returns the existing joint), sets the child/parent bones and a Limited swing+twist cone, and snaps the joint frames to the bones' default relative transform when BOTH bones exist in the preview-mesh skeleton (skipped honestly otherwise, since the engine fatal-checks an unknown bone).  Refine motions/limits afterwards with set_physics_asset_constraint_limits.
 
 | Parameter | Type | Required | Description |
@@ -100,6 +112,8 @@ Author a ragdoll constraint (joint) inside a UPhysicsAsset between two bones.  C
 
 ## `add_simple_collision_to_static_mesh`
 
+*Additive.*
+
 Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bounds of a UStaticMesh to its BodySetup and saves the mesh; a mesh outside /Game is first duplicated to dest_path. Not idempotent: each call adds one more (clear them with remove_static_mesh_collision).
 
 | Parameter | Type | Required | Description |
@@ -112,6 +126,8 @@ Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bou
 
 ## `clear_ism_instances`
 
+*Destructive, idempotent.*
+
 Wipe ALL instances from an InstancedStaticMeshComponent in one call (the component itself stays). Use it to reset a scatter before re-running it, rather than looping remove_ism_instance. Returns the post-clear num_instances, which should be 0.
 
 | Parameter | Type | Required | Description |
@@ -122,6 +138,8 @@ Wipe ALL instances from an InstancedStaticMeshComponent in one call (the compone
 **Returns:** `{ cleared: bool, num_instances: int }`
 
 ## `cluster_geometry_collection`
+
+*Destructive.*
 
 Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it. Returns the cluster count used and the transform counts before and after; the call fails when no cluster was added (a collection that is not fractured into several pieces has nothing to group) or when the save fails.
 
@@ -135,6 +153,8 @@ Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting
 
 ## `compute_gc_proximity`
 
+*Destructive.*
+
 Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place and saves it; undoable. Returns proximity_pairs (unordered pairs of neighboring pieces, from a precise proximity pass), transform_count, success and saved; fails when the save fails. Afterwards get_gc_hierarchy_info reports proximity_computed true.
 
 | Parameter | Type | Required | Description |
@@ -144,6 +164,8 @@ Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place
 **Returns:** `{ geometry_collection_path: string, proximity_pairs: int, transform_count: int, success: bool, saved: bool }`
 
 ## `create_field_system_asset`
+
+*Additive, idempotent.*
 
 Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset already exists it is loaded and the same payload shape is returned. Otherwise a new UFieldSystem is created, registered with the asset registry, and saved to disk.
 
@@ -156,6 +178,8 @@ Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset 
 
 ## `create_geometry_collection`
 
+*Destructive.*
+
 Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; created false, rebuilt true). A source_mesh_path that does not load as a StaticMesh is an error, checked before anything is touched. Succeeds only when the package reaches disk; a failed save leaves the collection in memory only (saved false, save_error).
 
 | Parameter | Type | Required | Description |
@@ -167,6 +191,8 @@ Creates a UGeometryCollection asset at package_path/name, optionally filled from
 **Returns:** `{ asset_path: string, geometry_collection_name: string, num_materials: int, num_transforms: int, created: bool, rebuilt: bool, saved: bool, save_error: string? }`
 
 ## `create_physical_material`
+
+*Additive, idempotent.*
 
 Create and save a UPhysicalMaterial asset, optionally setting surface/object properties.  Idempotent: if the asset already exists it is loaded, any provided values are re-applied, and a stable payload is returned.
 
@@ -182,6 +208,8 @@ Create and save a UPhysicalMaterial asset, optionally setting surface/object pro
 
 ## `create_physics_asset`
 
+*Additive.*
+
 Creates a UPhysicsAsset at package_path/name, generating bodies and constraints from a skeletal mesh, sets that mesh as its preview mesh and saves it; the mesh is not pointed at the new asset. An existing one there is returned unchanged. Returns bodies, constraints, skeleton_bones, bodies_generated, saved.
 
 | Parameter | Type | Required | Description |
@@ -193,6 +221,8 @@ Creates a UPhysicsAsset at package_path/name, generating bodies and constraints 
 **Returns:** `{ package_path, already_existed, created, saved, bodies_generated, generation_message, save_error }`
 
 ## `fracture_geometry_collection`
+
+*Destructive.*
 
 Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it. num_fractures is the number of new pieces, measured as the transforms the fracture added; the call fails when it added none (an empty collection, or a chance_to_fracture that skipped every piece) or when the save fails. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
 
@@ -209,6 +239,8 @@ Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, usi
 
 ## `get_actor_bounds`
 
+*Read-only.*
+
 Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use overlap_scene/raycast_scene with a `world` selector.
 
 | Parameter | Type | Required | Description |
@@ -221,6 +253,8 @@ Measure how BIG an actor really is: its aggregate world-space bounding box (orig
 
 ## `get_collision_info`
 
+*Read-only.*
+
 Read ONE placed primitive component's collision setup and physics state: collision enabled mode, per-channel responses (WorldStatic / WorldDynamic / Pawn / PhysicsBody), overlap and hit event flags, simulate-physics, mobility, and the physical material with its friction / restitution / density. The tool to answer "why does this not block / not overlap" without writing Python. Two limits from the code: it searches by component NAME across the world's actors but only inspects each actor's FIRST primitive component, so a secondary component (a second collider, a trigger next to a mesh) reports "not found" even though it exists; and it reads the component's live responses, NOT the profile definition -- for the profile itself use get_collision_profile (which is blind to +EditProfiles overrides), and prove a channel really blocks with raycast_scene.
 
 | Parameter | Type | Required | Description |
@@ -230,6 +264,8 @@ Read ONE placed primitive component's collision setup and physics state: collisi
 **Returns:** `{ component_name: string, collision_info_found: bool, collision_info_message: string, collision_enabled: string, collision_type: string, collision_response: string, collision_enabled_state: string, collision_generate_overlap_events: bool, collision_generate_hit_events: bool, collision_simulate_physics: bool, collision_mobility: string, collision_response_world_static: string, collision_response_world_dynamic: string, collision_response_pawn: string, collision_response_physics_body: string, physics_material_is_default: bool, physics_material_name: string, physics_material_path: string, physics_material_surface_type: string, physics_material_friction: float, physics_material_restitution: float, physics_material_density: float, physics_material_raise_mass_to_power: float, physics_material_linear_damping: float (body), physics_material_angular_damping: float (body), physics_material_mass_scale: float (body) }`
 
 ## `get_field_system_info`
+
+*Read-only.*
 
 Read the field commands authored in a UFieldSystem asset, in order: each with physics_type, target_attribute, command_name and max_magnitude (not its node graph), plus command_count. Read-only; the array index is what remove_field_node takes, and add_field_node authors new commands.
 
@@ -241,6 +277,8 @@ Read the field commands authored in a UFieldSystem asset, in order: each with ph
 
 ## `get_gc_hierarchy_info`
 
+*Read-only.*
+
 Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_indices, and per bone its level, name and simulation type ("Rigid", "Clustered" or "None"), plus proximity_computed. Generates the Level attribute in memory if needed, without saving. For parent indices use list_geometry_collection_bones.
 
 | Parameter | Type | Required | Description |
@@ -251,6 +289,8 @@ Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_i
 
 ## `get_geometry_collection_info`
 
+*Read-only.*
+
 Reads a UGeometryCollection asset without changing it: material, source and damage-threshold counts, damage model ("Threshold", "MaterialStrength" or "Unknown"), mass settings and element counts (transforms, vertices, faces, geometry; 0 without collection data). Use get_gc_hierarchy_info for the bone tree.
 
 | Parameter | Type | Required | Description |
@@ -260,6 +300,8 @@ Reads a UGeometryCollection asset without changing it: material, source and dama
 **Returns:** `{ asset_path: string, num_materials: int, num_geometry_sources: int, damage_model: string, num_damage_thresholds: int, is_empty: bool, num_transforms: int, num_vertices: int, num_faces: int, num_geometry: int, mass: float, mass_as_density: bool, minimum_mass_clamp: float, density_from_physics_material: bool, has_physics_material: bool }`
 
 ## `get_ism_instance_info`
+
+*Read-only.*
 
 Count the instances in an InstancedStaticMeshComponent, or read one instance's transform (location / rotation / scale) and per-instance custom data floats. Two modes from one call: omit instance_index for COUNT mode (num_instances + num_custom_data_floats -- the oracle for "did my scatter actually place anything"), pass it for per-instance mode. Reads the component in the editor world, so it needs no PIE.
 
@@ -274,6 +316,8 @@ Count the instances in an InstancedStaticMeshComponent, or read one instance's t
 
 ## `get_physics_asset_info`
 
+*Read-only.*
+
 Read a UPhysicsAsset's body count, constraint count, and bound skeletal mesh.
 
 | Parameter | Type | Required | Description |
@@ -283,6 +327,8 @@ Read a UPhysicsAsset's body count, constraint count, and bound skeletal mesh.
 **Returns:** `success or error payload`
 
 ## `get_physics_constraint_info`
+
+*Read-only.*
 
 Read the full authored configuration of a world APhysicsConstraintActor's UPhysicsConstraintComponent: identity + wired bodies/bones, linear/angular limits (with motion types), linear/angular drives (motors) with targets, breakable thresholds, projection, and collision/dominance flags.  Read-only complement of spawn_physics_constraint / set_constraint_limits / set_physics_constraint_drives; returns the serialized template, not live simulation state (no motor torque/broken/force values, which are 0 outside PIE).
 
@@ -294,6 +340,8 @@ Read the full authored configuration of a world APhysicsConstraintActor's UPhysi
 
 ## `get_physics_settings`
 
+*Read-only.*
+
 One-shot physics census of the current world: UPhysicsSettings substepping/delta-time values, world gravity_z, and a walk of every actor counting collision-enabled vs disabled, simulating bodies, mobility split and mass totals, plus a heuristic quality label and a recommendations list. Use it for a broad "what is the physics state of this level" sweep instead of hand-writing the actor loop in Python; for ONE component's collision use get_collision_info, and to change gravity use set_world_gravity / set_physics_gravity. Read the numbers with three caveats visible in the code: physics_engine is a hardcoded "PhysX" literal (UE5 actually runs Chaos), the walk takes only the FIRST primitive component per actor so multi-component actors are undercounted, and generate_hit_events is always 0 (never populated).
 
 No parameters.
@@ -301,6 +349,8 @@ No parameters.
 **Returns:** `{ physics_settings_found: bool, physics_engine: string (hardcoded "PhysX"), physics_quality: string (heuristic from max_physics_delta_time), max_physics_delta_time, max_substep_delta_time, max_substeps, world_name, world_gravity_z, world_gravity_enabled, per-component counts (collision enabled/disabled, simulating, static/stationary/movable, overlap events), mass totals (only simulating bodies contribute), recommendations: [string], complexity score }`
 
 ## `get_scene_bounds`
+
+*Read-only.*
 
 How big is the LEVEL: one world-space bounding box aggregated over every level-bounds-relevant actor in the editor world (persistent level plus any loaded streamed levels), or over an explicit subset if you pass actor_names. Use it for map extents / where-is-everything questions; use get_actor_bounds for a single actor. Note it only sees LOADED actors, so on a World-Partition map an unloaded region contributes nothing and the box reads smaller than the map.
 
@@ -312,6 +362,8 @@ How big is the LEVEL: one world-space bounding box aggregated over every level-b
 
 ## `list_geometry_collection_bones`
 
+*Read-only.*
+
 Walk the bone list of a UGeometryCollection. Reads FTransformCollection typed attributes.
 
 | Parameter | Type | Required | Description |
@@ -321,6 +373,8 @@ Walk the bone list of a UGeometryCollection. Reads FTransformCollection typed at
 **Returns:** `{ geometry_collection_path, transform_count, root_count, bones: [{name, parent, sim_type}] }`
 
 ## `overlap_scene`
+
+*Read-only.*
 
 Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
 
@@ -339,6 +393,8 @@ Sphere / box / capsule overlap query against the world: "what is inside this vol
 
 ## `plane_cut_fracture`
 
+*Destructive.*
+
 Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the cut added; the call fails when it added none (an empty collection, or planes that miss every piece) or when the save fails.
 
 | Parameter | Type | Required | Description |
@@ -352,6 +408,8 @@ Cuts all transforms of a UGeometryCollection asset with num_planes random planes
 **Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool, save_error: string? }`
 
 ## `raycast_scene`
+
+*Read-only.*
 
 Line trace / raycast the world and get a REAL JSON hit result -- what actor and component was hit, impact point, normal and distance -- instead of the UE export-text FHitResult blob that call_function on a line-trace UFUNCTION returns, so no Python parsing is needed. Accepts a `world` selector (editor / server / client / pie:N), which matters twice: an EDITOR-world trace does not hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene) and reads as a clean miss, and in co-op a miss on the client world looks identical to a missing collider -- pass "server" or "pie:N" so a hit:false is interpretable. Also the honest way to prove a custom collision CHANNEL blocks: trace the same segment on a known-good channel (Visibility) and on the new one and compare actor/component/Z/distance, because get_collision_profile does not see +EditProfiles overrides.
 
@@ -369,6 +427,8 @@ Line trace / raycast the world and get a REAL JSON hit result -- what actor and 
 
 ## `remove_field_node`
 
+*Destructive, idempotent.*
+
 Remove a field command node from a UFieldSystem by index and persist.  Inverse of add_field_node: selects the FFieldSystemCommand at the given index in UFieldSystem.Commands, removes it (RemoveAt frees the command's owned RootNode graph), and saves the asset.  Idempotent: an out-of-range index is a clean no-op (removed:false, note:"index out of range") so re-running after the node is already gone is safe.
 
 | Parameter | Type | Required | Description |
@@ -379,6 +439,8 @@ Remove a field command node from a UFieldSystem by index and persist.  Inverse o
 **Returns:** `{ field_system_path: string, removed: bool, removed_index?: int, removed_target?: string, command_count: int, success: bool, saved?: bool, save_error?: string, note?: string }`
 
 ## `remove_geometry_collection_source`
+
+*Destructive.*
 
 Remove a StaticMesh source reference from an existing geometry collection (inverse of add_geometry_collection_source; drops the GeometrySource entry only, does NOT re-fracture the core geometry)
 
@@ -392,6 +454,8 @@ Remove a StaticMesh source reference from an existing geometry collection (inver
 
 ## `remove_ism_instance`
 
+*Destructive.*
+
 Delete ONE instance from an InstancedStaticMeshComponent by index. Indices shift after a removal, so remove from the highest index down when deleting several; to empty the component entirely use clear_ism_instances instead. Re-read num_instances from the reply (or get_ism_instance_info) as the oracle -- removed:true alone is not proof of the final count.
 
 | Parameter | Type | Required | Description |
@@ -403,6 +467,8 @@ Delete ONE instance from an InstancedStaticMeshComponent by index. Indices shift
 **Returns:** `{ removed: bool, num_instances: int }`
 
 ## `remove_physics_asset_constraint`
+
+*Destructive, idempotent.*
 
 Remove a ragdoll constraint (joint) from a UPhysicsAsset — the inverse of add_physics_asset_constraint.  Resolves the joint by constraint_name (preferred) or constraint_index and deletes it via FPhysicsAssetUtils::DestroyConstraint (the same ConstraintSetup.RemoveAt the PhAT editor runs).  Idempotent: an already-absent constraint returns removed:false/already_absent:true with success (no mutation, no save).
 
@@ -416,6 +482,8 @@ Remove a ragdoll constraint (joint) from a UPhysicsAsset — the inverse of add_
 
 ## `remove_static_mesh_collision`
 
+*Destructive, idempotent.*
+
 Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true.
 
 | Parameter | Type | Required | Description |
@@ -427,6 +495,8 @@ Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the
 
 ## `set_actor_physical_material`
 
+*Destructive, idempotent.*
+
 Set the body physical-material override on an actor's primitive (static-mesh) component.  Calls UPrimitiveComponent::SetPhysMaterialOverride and reads the override back.
 
 | Parameter | Type | Required | Description |
@@ -437,6 +507,8 @@ Set the body physical-material override on an actor's primitive (static-mesh) co
 **Returns:** `{ actor_name: string, component_name: string, physical_material_path: string, physical_material_name: string, applied_material_name?: string, verified: bool, applied: bool }`
 
 ## `set_constraint_limits`
+
+*Destructive, idempotent.*
 
 Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComponent and read back.  Providing a limit sets that axis to a Limited motion type with the given size (linear is shared across X/Y/Z; swing/twist are in degrees).
 
@@ -451,6 +523,8 @@ Set linear/angular limits on a physics-constraint actor's UPhysicsConstraintComp
 **Returns:** `{ constraint_actor_name: string, constraint_component: string, linear_limit: number, linear_x_motion: string, linear_y_motion: string, linear_z_motion: string, swing1_limit: number, swing1_motion: string, swing2_limit: number, swing2_motion: string, twist_limit: number, twist_motion: string, linear_applied: bool, swing1_applied: bool, swing2_applied: bool, twist_applied: bool, updated: bool }`
 
 ## `set_gc_connection_settings`
+
+*Destructive, idempotent.*
 
 Configure clustering and connection-graph settings on a Geometry Collection
 
@@ -467,6 +541,8 @@ Configure clustering and connection-graph settings on a Geometry Collection
 
 ## `set_geometry_collection_damage`
 
+*Destructive, idempotent.*
+
 Configure the damage model and thresholds on a geometry collection
 
 | Parameter | Type | Required | Description |
@@ -478,6 +554,8 @@ Configure the damage model and thresholds on a geometry collection
 **Returns:** `{ geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool }`
 
 ## `set_geometry_collection_mass`
+
+*Destructive, idempotent.*
 
 Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, minimum_mass_clamp, density_from_physics_material), only for the fields given, then saves it; undoable. Returns the four values as stored, success, saved; fails when the save fails. Read them back with get_geometry_collection_info.
 
@@ -492,6 +570,8 @@ Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, 
 **Returns:** `{ geometry_collection_path: string, mass: float, mass_as_density: bool, minimum_mass_clamp: float, density_from_physics_material: bool, success: bool, saved: bool }`
 
 ## `set_physical_material_properties`
+
+*Destructive, idempotent.*
 
 Load a UPhysicalMaterial, set surface/object properties, save, and read back (read-modify-write; only provided fields change; idempotent set-to-fixed-value).
 
@@ -512,6 +592,8 @@ Load a UPhysicalMaterial, set surface/object properties, save, and read back (re
 **Returns:** `{ physical_material_path: string, friction: number, static_friction: number, restitution: number, density: number, friction_combine_mode: string, override_friction_combine_mode: bool, restitution_combine_mode: string, override_restitution_combine_mode: bool, surface_type: string, raise_mass_to_power: number, sleep_linear_velocity_threshold: number, sleep_angular_velocity_threshold: number, friction_applied: bool, static_friction_applied: bool, restitution_applied: bool, density_applied: bool, friction_combine_mode_applied: bool, restitution_combine_mode_applied: bool, surface_type_applied: bool, raise_mass_to_power_applied: bool, sleep_linear_velocity_threshold_applied: bool, sleep_angular_velocity_threshold_applied: bool, updated: bool }`
 
 ## `set_physics_asset_constraint_drives`
+
+*Destructive, idempotent.*
 
 Set a UPhysicsAsset constraint's drives (linear + angular motors), breakable thresholds, and projection — the "behavior beyond limits" (read-modify-write; only provided fields change; idempotent set-to-fixed-value).  Authoring-only: the values persist into the asset (the live motor effect is observed in PIE/sim).
 
@@ -547,6 +629,8 @@ Set a UPhysicsAsset constraint's drives (linear + angular motors), breakable thr
 
 ## `set_physics_asset_constraint_limits`
 
+*Destructive, idempotent.*
+
 Set the linear/angular motion types and limits of an existing constraint inside a UPhysicsAsset (read-modify-write: only the axes you provide change).  Angular limits are in degrees; the linear limit is a single value shared across X/Y/Z (cm).  Each *_motion is Free|Limited|Locked; providing a *_limit without its motion implies Limited on that axis.  Idempotent (set-to-fixed-value).
 
 | Parameter | Type | Required | Description |
@@ -568,6 +652,8 @@ Set the linear/angular motion types and limits of an existing constraint inside 
 
 ## `set_physics_body_advanced_properties`
 
+*Destructive, idempotent.*
+
 Writes only the given advanced FBodyInstance fields (damping, mass scale, inertia scale, COM nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or bone_name, and saves it. Fails when no field is given. Returns the authored values read back, applied_count, saved.
 
 | Parameter | Type | Required | Description |
@@ -587,6 +673,8 @@ Writes only the given advanced FBodyInstance fields (damping, mass scale, inerti
 
 ## `set_physics_body_properties`
 
+*Destructive, idempotent.*
+
 Set FBodyInstance / UBodySetup properties on one body of a physics asset
 
 | Parameter | Type | Required | Description |
@@ -600,6 +688,8 @@ Set FBodyInstance / UBodySetup properties on one body of a physics asset
 **Returns:** `{ physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, updated, saved, save_error }`
 
 ## `set_physics_constraint_drives`
+
+*Destructive, idempotent.*
 
 Set linear/angular drives (motors), breakable thresholds, projection, and collision/dominance on a world APhysicsConstraintActor's UPhysicsConstraintComponent — the "behavior beyond limits" (read-modify-write; only provided fields change; idempotent set-to-fixed-value).  Authoring-only: the values are written into the component's serialized ConstraintInstance template and persist; the live motor torque is only applied while simulating (PIE).  Distinct from the UPhysicsAsset constraint drives (set_physics_asset_constraint_drives), which author a ragdoll joint inside an asset.
 
@@ -636,6 +726,8 @@ Set linear/angular drives (motors), breakable thresholds, projection, and collis
 
 ## `set_static_mesh_convex_collision`
 
+*Destructive, idempotent.*
+
 Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the "Auto Convex Collision" editor action) via UStaticMeshEditorSubsystem::SetConvexDecompositionCollisionsWithNotification.  The subsystem removes any existing collision first, so this is idempotent (re-running replaces, never duplicates).  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns false honestly on bad input (no valid mesh description / not on the game thread / under PIE) — surfaced as a CLEAN error, never a fake success.
 
 | Parameter | Type | Required | Description |
@@ -650,6 +742,8 @@ Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the
 
 ## `set_static_mesh_kdop_collision`
 
+*Destructive, idempotent.*
+
 Add a K-DOP (discrete-oriented-polytope) simple collision hull to a UStaticMesh via UStaticMeshEditorSubsystem::AddSimpleCollisionsWithNotification (the "Add K-DOP Simplified Collision" editor action).  shape is one of NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26.  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns a negative index on failure — surfaced as a CLEAN error.
 
 | Parameter | Type | Required | Description |
@@ -661,6 +755,8 @@ Add a K-DOP (discrete-oriented-polytope) simple collision hull to a UStaticMesh 
 **Returns:** `{ static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, saved, save_error? }`
 
 ## `set_vehicle_wheel_setup`
+
+*Destructive, idempotent.*
 
 Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups array (wheel class, bone, offset) by index. USE THIS RATHER THAN the generic set_property_value / set_properties, which cannot reliably write the wheel class: it is a TSubclassOf nested in a struct nested in an array, and the generic path only FINDS an already-loaded class instead of loading it. This tool resolves the class explicitly and writes the whole struct element, growing the array to fit if wheel_index is past the end. READING them back needs no special tool -- the generic get_properties / get_property_value already resolves nested object refs correctly.
 
@@ -675,6 +771,8 @@ Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups arr
 **Returns:** `{ actor_name: string, wheel_index: int, wheel_class: string, bone_name: string, additional_offset: {x,y,z}, num_wheels: int }`
 
 ## `slice_fracture`
+
+*Destructive.*
 
 Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. new_fracture_count is the number of new pieces, measured as the transforms the slicing added; the call fails when it added none (an empty collection, or all three slice counts 0) or when the save fails.
 
@@ -691,6 +789,8 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 
 ## `spawn_field_system_actor`
 
+*Additive.*
+
 Spawn an AFieldSystemActor in the editor world and assign a UFieldSystem.  Spawns the actor at the given location, assigns the asset via UFieldSystemComponent::SetFieldSystem, and sets the actor label.
 
 | Parameter | Type | Required | Description |
@@ -703,6 +803,8 @@ Spawn an AFieldSystemActor in the editor world and assign a UFieldSystem.  Spawn
 
 ## `spawn_physics_constraint`
 
+*Additive.*
+
 Spawn an APhysicsConstraintActor in the editor world, optionally wiring the two constrained actors.
 
 | Parameter | Type | Required | Description |
@@ -714,6 +816,8 @@ Spawn an APhysicsConstraintActor in the editor world, optionally wiring the two 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, constraint_component: string, actor1_wired: bool, actor2_wired: bool, constraint_actor1?: string, constraint_actor2?: string, spawned: bool }`
 
 ## `update_ism_instance_transform`
+
+*Destructive.*
 
 Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
 

@@ -74,10 +74,12 @@ The tools are C++ functions, and what a client sees is generated from them:
 - each tool's description and parameters are the `// MCP:` and `@param` annotations above its
   function;
 - `Tools/codegen_command_catalog.py` reads the annotations and the route tables and writes
-  `Resources/command_catalog.json`;
+  `Resources/command_catalog.json`, with each tool's MCP `annotations` (read-only, destructive,
+  idempotent, open world), which `Tools/tool_hints.py` derives from the code the tool runs and its
+  verb: a reader whose code saves, compiles or writes a file is not read-only;
 - at startup, `Mcp/McpToolCatalog` builds the `tools/list` schemas from that file (closed enums, the
-  `force` parameter of the tools PIE refuses, the aliases, the rotation object form) and the compact
-  list of `Mcp/McpMetaTools`;
+  `force` parameter of the tools PIE refuses, the aliases, the rotation object form), appends each
+  tool's `@returns` shape to its description, and builds the compact list of `Mcp/McpMetaTools`;
 - other generators derive the tables the C++ includes from the handlers: the parameters each tool
   reads (so an unknown one is reported in `unknown_params`), the aliases and the tools PIE refuses.
   The `set_`/`get_<x>_properties` pairs are generated from the descriptors in

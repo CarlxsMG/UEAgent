@@ -6,6 +6,8 @@
 
 ## `flush_net_dormancy`
 
+*Destructive.*
+
 Call AActor::FlushNetDormancy, which makes a dormant replicated actor send its state again, on an editor-world actor found by label. The editor world has no net driver, so nothing is sent and PIE is never reached, but DORM_Initial still becomes DORM_DormantAll. flushed is always true.
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Call AActor::FlushNetDormancy, which makes a dormant replicated actor send its s
 **Returns:** `{ actor_name, flushed }`
 
 ## `force_net_update`
+
+*Destructive.*
 
 Call AActor::ForceNetUpdate on an editor-world actor found by label, which asks a net driver to replicate it on its next update. The editor world has no net driver, so nothing is sent and a PIE session is never reached; forced is always true.
 
@@ -26,6 +30,8 @@ Call AActor::ForceNetUpdate on an editor-world actor found by label, which asks 
 
 ## `get_actor_net_cull_distance`
 
+*Read-only.*
+
 Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It returns BOTH forms: net_cull_distance_squared, which is how UE 5.8 actually stores it (AActor::NetCullDistanceSquared), and net_cull_distance_cm, the plain linear distance -- so you never have to remember which one you are looking at.
 
 | Parameter | Type | Required | Description |
@@ -35,6 +41,8 @@ Read an actor's net cull distance (read-side of set_actor_net_cull_distance). It
 **Returns:** `{ actor_name, net_cull_distance_squared, net_cull_distance_cm }`
 
 ## `get_actor_net_update_frequency`
+
+*Read-only.*
 
 Read NetUpdateFrequency and MinNetUpdateFrequency (Hz) of an editor-world actor found by label. Read-only; reads the placed instance, not a PIE copy. The reply actor_name is the engine object name. Writer: set_actor_net_update_frequency.
 
@@ -46,6 +54,8 @@ Read NetUpdateFrequency and MinNetUpdateFrequency (Hz) of an editor-world actor 
 
 ## `get_actor_replication_info`
 
+*Read-only.*
+
 Read replication settings for an editor-world actor (replicates, replicate_movement via reflection, frequencies, dormancy, role).
 
 | Parameter | Type | Required | Description |
@@ -55,6 +65,8 @@ Read replication settings for an editor-world actor (replicates, replicate_movem
 **Returns:** `{ actor_label: string, class_name: string, replicates: bool, replicate_movement: bool, net_update_frequency: float, min_net_update_frequency: float, net_cull_distance_squared: float, net_dormancy: string, role: string }`
 
 ## `get_net_priority`
+
+*Read-only.*
 
 Read NetPriority, the relative replication priority when bandwidth is short, of an editor-world actor found by label. Read-only; reads the placed instance, not a PIE copy. Engine defaults: 1.0 for actors, 3.0 for pawns. Writer: set_net_priority.
 
@@ -66,6 +78,8 @@ Read NetPriority, the relative replication priority when bandwidth is short, of 
 
 ## `get_net_role`
 
+*Read-only.*
+
 Read LocalRole and RemoteRole (number and ENetRole name) of an editor-world actor found by label. Read-only; it reads the placed instance, not a PIE server or client copy, so it shows the authoring-time roles.
 
 | Parameter | Type | Required | Description |
@@ -75,6 +89,8 @@ Read LocalRole and RemoteRole (number and ENetRole name) of an editor-world acto
 **Returns:** `{ actor_name, local_role, local_role_name, remote_role, remote_role_name }`
 
 ## `set_actor_net_cull_distance`
+
+*Destructive, idempotent.*
 
 Set AActor::NetCullDistanceSquared for an editor-world actor (accepts the linear distance in cm).
 
@@ -87,6 +103,8 @@ Set AActor::NetCullDistanceSquared for an editor-world actor (accepts the linear
 
 ## `set_actor_net_dormancy`
 
+*Destructive, idempotent.*
+
 Set NetDormancy on an editor-world actor found by label (AActor::SetNetDormancy). Only that placed instance changes; it is not marked dirty and nothing is saved. dormancy in the reply is the parsed enum name (e.g. DORM_DormantAll), not a read-back: use get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
@@ -97,6 +115,8 @@ Set NetDormancy on an editor-world actor found by label (AActor::SetNetDormancy)
 **Returns:** `{ actor_label: string, dormancy: string }`
 
 ## `set_actor_net_update_frequency`
+
+*Destructive, idempotent.*
 
 Set AActor::NetUpdateFrequency (and optionally MinNetUpdateFrequency) for an editor-world actor.
 
@@ -110,6 +130,8 @@ Set AActor::NetUpdateFrequency (and optionally MinNetUpdateFrequency) for an edi
 
 ## `set_actor_replicate_movement`
 
+*Destructive, idempotent.*
+
 Set bReplicateMovement on an editor-world actor found by label (AActor::SetReplicateMovement). Only that placed instance changes, not its class defaults; it is not marked dirty and nothing is saved. replicate_movement echoes the request; read back with get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
@@ -121,6 +143,8 @@ Set bReplicateMovement on an editor-world actor found by label (AActor::SetRepli
 
 ## `set_actor_replicates`
 
+*Destructive, idempotent.*
+
 Set bReplicates on an editor-world actor found by label (AActor::SetReplicates, which also sets RemoteRole). Only that placed instance changes, not its class defaults; it is not marked dirty and nothing is saved. replicates echoes the request; read back with get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
@@ -131,6 +155,8 @@ Set bReplicates on an editor-world actor found by label (AActor::SetReplicates, 
 **Returns:** `{ actor_label: string, replicates: bool }`
 
 ## `set_net_priority`
+
+*Destructive, idempotent.*
 
 Write NetPriority, the relative replication priority when bandwidth is short, on an editor-world actor found by label. Only that placed instance changes; it is not marked dirty or saved. priority is read back after the write. Engine defaults: 1.0 for actors, 3.0 for pawns.
 

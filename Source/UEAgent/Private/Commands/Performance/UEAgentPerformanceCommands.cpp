@@ -354,6 +354,7 @@ TSharedPtr<FJsonObject> HandleGetMemoryUsage(const TSharedPtr<FJsonObject>& Para
 
 // MCP:frame_timing - Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bottleneck verdict with an actionable hint.
 //   @returns { frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced"|"no-data", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict "no-data" when they all do) and note warns of it; otherwise note is empty.
+//   @hints read-only
 //   NOTE (impl): frame_ms is FApp::GetDeltaTime() * 1000, and gpu_ms is RHIGetGPUFrameCycles converted to ms.
 TSharedPtr<FJsonObject> HandleFrameTiming(const TSharedPtr<FJsonObject>& Params)
 {

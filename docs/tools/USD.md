@@ -6,6 +6,8 @@
 
 ## `add_usd_internal_reference`
 
+*Additive.*
+
 Add an internal reference composition arc (references another prim inside the SAME stage; no asset_path needed).
 
 | Parameter | Type | Required | Description |
@@ -18,6 +20,8 @@ Add an internal reference composition arc (references another prim inside the SA
 **Returns:** `{ stage_name: string, prim_path: string, target_prim_path: string, added: bool, position: string, errors: [string]? }`
 
 ## `add_usd_payload`
+
+*Additive.*
 
 Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded by the stage unless an explicit Load rule says so).
 
@@ -33,6 +37,8 @@ Add a payload composition arc to a prim (load-on-demand; payloads are NOT loaded
 
 ## `add_usd_reference`
 
+*Additive.*
+
 Add an external reference composition arc to a prim (asset_path -> target prim, optionally re-targeted by prim_path_for_target).
 
 | Parameter | Type | Required | Description |
@@ -46,6 +52,8 @@ Add an external reference composition arc to a prim (asset_path -> target prim, 
 **Returns:** `{ stage_name: string, prim_path: string, asset_path: string, added: bool, position: string, errors: [string]? }`
 
 ## `add_usd_variant`
+
+*Additive, idempotent.*
 
 Add a new variant to an existing variant set at the requested list position; idempotent (returns already_existed:true when the variant is already present)
 
@@ -61,6 +69,8 @@ Add a new variant to an existing variant set at the requested list position; ide
 
 ## `add_usd_variant_set`
 
+*Additive, idempotent.*
+
 Author a new (empty) variant set on a prim at the requested list position; idempotent (returns already_existed:true when the set is already present)
 
 | Parameter | Type | Required | Description |
@@ -74,6 +84,8 @@ Author a new (empty) variant set on a prim at the requested list position; idemp
 
 ## `apply_usd_prim_schema`
 
+*Destructive.*
+
 Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a registered USD stage, on the current edit target. Checks CanApplyAPI first: a schema that cannot apply returns applied=false with the USD reason in why_not instead of an error. Not saved to disk.
 
 | Parameter | Type | Required | Description |
@@ -85,6 +97,8 @@ Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a regi
 **Returns:** `{ applied: bool, schema_name: string, why_not?: string }`
 
 ## `clear_usd_attribute`
+
+*Destructive, idempotent.*
 
 Clear authored values of a USD attribute on a prim of an open stage: with time, only the sample at that time code; without it, the default value and every time sample. Edits the stage in memory; save_usd_stage writes it. Returns present and cleared, present false when the attribute is missing.
 
@@ -99,6 +113,8 @@ Clear authored values of a USD attribute on a prim of an open stage: with time, 
 
 ## `clear_usd_references`
 
+*Destructive, idempotent.*
+
 Remove every reference from a prim's reference list (irreversible — there is no "undo" in USD composition authoring).
 
 | Parameter | Type | Required | Description |
@@ -109,6 +125,8 @@ Remove every reference from a prim's reference list (irreversible — there is n
 **Returns:** `{ stage_name: string, prim_path: string, cleared: bool, errors: [string]? }`
 
 ## `clear_usd_variant_selection`
+
+*Destructive, idempotent.*
 
 Clear the active variant selection on a variant set (leaves the set and its variants intact — only the selection arc is removed); HasVariantSet guard
 
@@ -122,6 +140,8 @@ Clear the active variant selection on a variant set (leaves the set and its vari
 
 ## `close_usd_stage`
 
+*Destructive, idempotent.*
+
 Close a USD stage by its LLM-facing stage_name.  Removes the stage from the LLM-facing UEAgent::UsdRegistry::GStageNameCache AND calls UnrealUSDWrapper::EraseStageFromCache on it — this is the ONLY way to release a memory stage (memory stages are never closed automatically, even on editor shutdown). If stage_name is not in the cache the call returns success with a note rather than an error (idempotent — closing an already-closed stage is a no-op). The 'removed_from_cache' field reports whether the stage was actually present in the UnrealUSDWrapper stage cache at close time.
 
 | Parameter | Type | Required | Description |
@@ -131,6 +151,8 @@ Close a USD stage by its LLM-facing stage_name.  Removes the stage from the LLM-
 **Returns:** `{ stage_name: string, closed: bool, was_in_cache: bool, removed_from_cache: bool, note: string? }`
 
 ## `create_usd_attribute`
+
+*Additive.*
 
 Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value.
 
@@ -145,6 +167,8 @@ Create an attribute of a given USD type on a prim of an open stage, or return th
 
 ## `create_usd_stage`
 
+*Additive.*
+
 Create a new USD stage (either on-disk or in-memory).  When file_path is provided, UnrealUSDWrapper::NewStage(FilePath) creates a root layer file at that path and opens it as a stage. When file_path is omitted or empty, NewStage() (no args) creates a memory-only stage — this is the only way to author a USD stage that is NOT persisted to disk; the only way to clean it up is close_usd_stage. The new stage is always added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under stage_name (default "Untitled"), so subsequent calls can refer to it by name. The returned identifier is the root layer's USD identifier (real path for on-disk; an anonymous "anon:0x..." handle for memory stages).
 
 | Parameter | Type | Required | Description |
@@ -155,6 +179,8 @@ Create a new USD stage (either on-disk or in-memory).  When file_path is provide
 **Returns:** `{ stage_name: string, file_path: string, memory: bool, identifier: string, real_path: string, dirty: bool, is_valid: bool, errors: [string]? }`
 
 ## `create_usd_stage_actor`
+
+*Additive.*
 
 Spawn an AUsdStageActor into the editor's current world (or return the existing one).  Each editor world has at most one AUsdStageActor (USDStage is single-instance per world); when one already exists the tool returns already_existed:true with its current actor_path instead of failing. Spawn uses a uniquely-named FName based on the user-supplied name parameter so re-runs with the same name pick up the existing actor cleanly. Requires a live editor world — honest-gated.
 
@@ -167,6 +193,8 @@ Spawn an AUsdStageActor into the editor's current world (or return the existing 
 **Returns:** `{ actor_path: string, already_existed: bool, name: string }`
 
 ## `define_usd_prim`
+
+*Additive.*
 
 Define (or re-author) a prim at the given path with a USD type
 
@@ -181,6 +209,8 @@ Define (or re-author) a prim at the given path with a USD type
 
 ## `flatten_usd_stage`
 
+*Destructive.*
+
 Export a flattened copy of the stage to a .usd/.usda/.usdc/.usdz file (the file writer is chosen by the extension).  Wraps UE::FUsdStage::Export(OutputPath, bAddSourceFileComment, FileFormatArguments) — does NOT alter the in-memory stage. When add_source_file_comment is true (default) the flattened file includes a comment header noting the source file (useful for provenance). The returned 'exported' field reports pxr::'s bool return — false means the file writer could not write the requested path (e.g. invalid extension, permission denied). Realistic gotcha: stage.Export() requires the stage NOT be in a restricted-edit state — under headless cov this is not an issue, but in-editor it can be during PIE.
 
 | Parameter | Type | Required | Description |
@@ -193,6 +223,8 @@ Export a flattened copy of the stage to a .usd/.usda/.usdc/.usdz file (the file 
 
 ## `get_usd_attribute_time_samples`
 
+*Read-only.*
+
 List the time codes at which a USD attribute on a prim of an open stage has authored time samples, without changing the stage. Returns time_samples, count and present; a missing attribute is not an error but present false with an empty list.
 
 | Parameter | Type | Required | Description |
@@ -204,6 +236,8 @@ List the time codes at which a USD attribute on a prim of an open stage has auth
 **Returns:** `{ prim_path: string, attr_name: string, time_samples: [number], count: int }`
 
 ## `get_usd_attribute_value`
+
+*Read-only.*
 
 Read a USD attribute's value at a time code
 
@@ -218,6 +252,8 @@ Read a USD attribute's value at a time code
 
 ## `get_usd_generated_assets`
 
+*Read-only.*
+
 Resolve the transient assets (UStaticMesh, USkeletalMesh, UMaterial, etc.) generated by the stage actor for a given prim path.  Wraps AUsdStageActor::GetGeneratedAssets(prim_path). Returns an empty assets array (count:0) when the prim has no generated assets — NOT an error. A prim may produce multiple assets (e.g. a skinned mesh produces USkeletalMesh + USkeleton + UPhysicsAsset).
 
 | Parameter | Type | Required | Description |
@@ -228,6 +264,8 @@ Resolve the transient assets (UStaticMesh, USkeletalMesh, UMaterial, etc.) gener
 **Returns:** `{ actor_path: string, prim_path: string, assets: [string], count: int }`
 
 ## `get_usd_generated_component`
+
+*Read-only.*
 
 Resolve a transient USceneComponent generated by the stage actor for a given prim path.  Wraps AUsdStageActor::GetGeneratedComponent(prim_path). Returns present:false (NOT an error) when the path is invalid or the prim has no generated component — the LLM can pivot on this cleanly. When present, also returns component_class (the runtime UClass name).
 
@@ -240,6 +278,8 @@ Resolve a transient USceneComponent generated by the stage actor for a given pri
 
 ## `get_usd_layer_info`
 
+*Read-only.*
+
 Read metadata for a single layer in the stage's stack (identifier, real path, dirty/muted flags, sublayer paths).
 
 | Parameter | Type | Required | Description |
@@ -251,6 +291,8 @@ Read metadata for a single layer in the stage's stack (identifier, real path, di
 
 ## `get_usd_prim_info`
 
+*Read-only.*
+
 Read one prim of a registered USD stage: name, type_name, active, parent_path, direct children_count, applied_schemas, variant_sets and an is_a map for nine common types (Xform, Mesh, Cube, Scope, Camera, four lights). A missing prim returns is_valid=false with a note, not an error. Read-only.
 
 | Parameter | Type | Required | Description |
@@ -261,6 +303,8 @@ Read one prim of a registered USD stage: name, type_name, active, parent_path, d
 **Returns:** `{ name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool, parent_path: string, children_count: number, applied_schemas: [string], variant_sets: [string], is_a: { Xform, Mesh, Cube, Scope, Camera, DistantLight, SphereLight, RectLight, MeshLight: bool } }, or { prim_path, is_valid: false, note } when the prim does not exist`
 
 ## `get_usd_prim_metadata`
+
+*Read-only.*
 
 Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return; unsupported value types become a placeholder string. Read-only.
 
@@ -274,6 +318,8 @@ Read the metadata of a prim on a registered USD stage: one key (present plus val
 
 ## `get_usd_stage_actor_info`
 
+*Read-only.*
+
 Read live metadata from an AUsdStageActor.  Returns the root layer identifier + real path from the actor's currently-open UE::FUsdStage (via GetUsdStage()), the integer EUsdStageState (0=Closed, 1=Opened, 2=OpenedAndLoaded), the presence of a generated ULevelSequence (a non-null GetLevelSequence()), and the count of USceneComponents the actor has spawned (via GetComponents()). All read-only.
 
 | Parameter | Type | Required | Description |
@@ -283,6 +329,8 @@ Read live metadata from an AUsdStageActor.  Returns the root layer identifier + 
 **Returns:** `{ actor_path: string, root_layer: string, real_path: string, stage_state: int, stage_state_name: string, has_level_sequence: bool, generated_component_count: int, has_isolated_stage: bool, errors: [string]? }`
 
 ## `get_usd_stage_info`
+
+*Read-only.*
 
 Read metadata about a USD stage: root layer identifier, real path, dirty flag, timecode range (start/end), frames-per-second, total prim count (recursive) and layer-stack depth (includes session layers when include_session_layers is true).  Resolves stage_name via the LLM-facing UEAgent::UsdRegistry::GStageNameCache first, then falls back to treating stage_name as a file path and auto-opening it (LoadAll, use cache). Returns 'resolution' as one of "cache_hit" / "auto_opened" so the caller knows which path served the stage.
 
@@ -294,6 +342,8 @@ Read metadata about a USD stage: root layer identifier, real path, dirty flag, t
 **Returns:** `{ stage_name: string, resolution: string, identifier: string, real_path: string, dirty: bool, start_time: number, end_time: number, frames_per_second: number, prim_count: int, layer_stack_count: int, has_start_time: bool, has_end_time: bool, has_fps: bool, errors: [string]? }`
 
 ## `get_usd_variant_set_info`
+
+*Read-only.*
 
 Read the variant names and current selection for a single variant set on a prim
 
@@ -307,6 +357,8 @@ Read the variant names and current selection for a single variant set on a prim
 
 ## `insert_usd_sublayer`
 
+*Additive, idempotent.*
+
 Add a sublayer path to the stage's root layer's composition stack (idempotent — re-running with the same path returns already_present without erroring).
 
 | Parameter | Type | Required | Description |
@@ -318,6 +370,8 @@ Add a sublayer path to the stage's root layer's composition stack (idempotent �
 **Returns:** `{ stage_name: string, sublayer_path: string, index: int, inserted: bool, already_present: bool, new_count: int, saved: bool, errors: [string]? }`
 
 ## `isolate_usd_layer`
+
+*Destructive.*
 
 Enter isolated mode by replacing the actor's displayed stage with a new stage rooted at one of the sublayers of the current layer stack.  Wraps AUsdStageActor::IsolateLayer(Layer, b_load_usd_stage). The layer_index selects into Stage.GetLayerStack(true) — index 0 is the root layer, >0 are sublayers. When b_load_usd_stage is true (default) assets, actors and components are regenerated from the isolated stage; when false the isolation is structural only.
 
@@ -331,6 +385,8 @@ Enter isolated mode by replacing the actor's displayed stage with a new stage ro
 
 ## `list_usd_file_formats`
 
+*Read-only.*
+
 List the USD file format extensions the engine supports, with optional human-readable descriptions.  Always returns the native set ("usd"/"usda"/"usdc"/"usdz") and the full supported set (native + third-party USD plugin extensions like "abc" from usdAbc). When include_descriptions is true, also calls AddUsdImportFileFormatDescriptions to populate the human-readable per-extension description strings (e.g. "usdc; Universal Scene Description binary files").
 
 | Parameter | Type | Required | Description |
@@ -340,6 +396,8 @@ List the USD file format extensions the engine supports, with optional human-rea
 **Returns:** `{ native_formats: [string], supported_formats: [string], native_count: int, supported_count: int, descriptions: [{format: string, description: string}]? }`
 
 ## `list_usd_prim_attributes`
+
+*Read-only.*
 
 List every attribute of a prim on an open USD stage without changing it. Returns count and attributes [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}]; has_value also counts fallback values, has_authored_value only authored opinions.
 
@@ -351,6 +409,8 @@ List every attribute of a prim on an open USD stage without changing it. Returns
 **Returns:** `{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }`
 
 ## `list_usd_prims`
+
+*Read-only.*
 
 List the prims under one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count: its direct children, or with recursive=true its whole subtree in depth-first order. Only active, loaded, defined, non-abstract prims appear, and instance proxies are not traversed. Read-only.
 
@@ -364,6 +424,8 @@ List the prims under one prim (default the pseudo root "/") on a registered USD 
 
 ## `list_usd_stage_layers`
 
+*Read-only.*
+
 List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer identifier, real_path, is_muted and dirty, plus count and any captured USD errors. An unregistered stage_name is an error; get_usd_layer_info details one layer by index.
 
 | Parameter | Type | Required | Description |
@@ -375,6 +437,8 @@ List the layer stack of a USD stage opened with open_usd_stage or create_usd_sta
 
 ## `list_usd_stages`
 
+*Read-only.*
+
 Enumerate every stage currently in the UnrealUSDWrapper stage cache (shared across C++ + Python).  Returns one entry per cached stage with the root layer identifier, real path and dirty flag. It reads the engine's stage cache directly, so it also lists the stages opened outside these tools (Python USD scripts, the editor's USD importer). Each entry's 'stage_name' is the name the stage was opened under through these tools; it is empty for a stage they did not open.
 
 No parameters.
@@ -382,6 +446,8 @@ No parameters.
 **Returns:** `{ stages: [{stage_name: string, identifier: string, real_path: string, dirty: bool}], count: int }`
 
 ## `list_usd_variant_sets`
+
+*Read-only.*
 
 List every variant set authored on a prim, plus the current selection for each set (selections map may be empty when no selection is authored)
 
@@ -394,6 +460,8 @@ List every variant set authored on a prim, plus the current selection for each s
 
 ## `mute_usd_layer`
 
+*Destructive.*
+
 Toggle mute state on a set of layers by their identifiers (mute + unmute are passed in the same call — pxr:: applies them atomically).
 
 | Parameter | Type | Required | Description |
@@ -405,6 +473,8 @@ Toggle mute state on a set of layers by their identifiers (mute + unmute are pas
 **Returns:** `{ stage_name: string, muted: [string], unmuted: [string], errors: [string]? }`
 
 ## `open_usd_stage`
+
+*Destructive.*
 
 Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage with caching and force-reload controls. When use_stage_cache is true (default) and the file is already open in the UnrealUSDWrapper stage cache, the existing stage is returned. When force_reload is true, all local layers are forced-reloaded from disk (useful when the file was modified by another tool since the last open). The opened stage is added to the LLM-facing UEAgent::UsdRegistry::GStageNameCache under either the explicit stage_name or a derived one (basename without extension). The stage_id returned is the root layer's USD identifier — a stable string handle useful as a unique reference across follow-up commands.
 
@@ -420,6 +490,8 @@ Open an existing USD stage from a file path.  Wraps UnrealUSDWrapper::OpenStage 
 
 ## `override_usd_prim`
 
+*Destructive.*
+
 Create (or retrieve) an Over specifier at the given path
 
 | Parameter | Type | Required | Description |
@@ -430,6 +502,8 @@ Create (or retrieve) an Over specifier at the given path
 **Returns:** `{ prim_path: string, is_valid: bool }`
 
 ## `remove_usd_attribute`
+
+*Destructive.*
 
 Remove a USD attribute (or any property) from a prim
 
@@ -443,6 +517,8 @@ Remove a USD attribute (or any property) from a prim
 
 ## `remove_usd_prim`
 
+*Destructive.*
+
 Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_active with active=false is the reversible way to hide a prim. Not saved to disk.
 
 | Parameter | Type | Required | Description |
@@ -453,6 +529,8 @@ Remove a prim and its subtree from the current edit target layer of a registered
 **Returns:** `{ removed: bool, prim_path: string }`
 
 ## `remove_usd_prim_schema`
+
+*Destructive.*
 
 Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim of a registered USD stage, on the current edit target. A schema the prim does not have returns removed=false and was_applied=false instead of an error. Not saved to disk; inverse of apply_usd_prim_schema.
 
@@ -466,6 +544,8 @@ Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim o
 
 ## `remove_usd_sublayer`
 
+*Destructive.*
+
 Remove a sublayer by index from the stage's root layer's composition stack.
 
 | Parameter | Type | Required | Description |
@@ -477,6 +557,8 @@ Remove a sublayer by index from the stage's root layer's composition stack.
 
 ## `save_usd_stage`
 
+*Destructive.*
+
 Save a USD stage's root layer to disk.  Wraps UE::FSdfLayer::Save(force) on the resolved stage's root layer. When force is false (default) and the root layer is clean, Save is a no-op and returns false — this is the USD-spec behavior and is reported honestly via 'saved:false' rather than as an error. Use force=true to re-write a clean layer (rare — typically only when a downstream tool requires a specific mtime).
 
 | Parameter | Type | Required | Description |
@@ -487,6 +569,8 @@ Save a USD stage's root layer to disk.  Wraps UE::FSdfLayer::Save(force) on the 
 **Returns:** `{ stage_name: string, resolution: string, saved: bool, dirty: bool, force: bool, real_path: string, errors: [string]? }`
 
 ## `set_usd_attribute_value`
+
+*Destructive, idempotent.*
 
 Author a value on a USD attribute (creating it if missing)
 
@@ -503,6 +587,8 @@ Author a value on a USD attribute (creating it if missing)
 
 ## `set_usd_edit_target`
 
+*Destructive, idempotent.*
+
 Point the stage's edit target at a specific layer in the stack (mutations after this call land on the chosen layer, not the root).
 
 | Parameter | Type | Required | Description |
@@ -513,6 +599,8 @@ Point the stage's edit target at a specific layer in the stack (mutations after 
 **Returns:** `{ stage_name: string, layer_index: int, edit_target: string, edit_target_real_path: string, errors: [string]? }`
 
 ## `set_usd_prim_active`
+
+*Destructive, idempotent.*
 
 Activate or deactivate an existing prim on a registered USD stage (active metadata on the current edit target). An inactive prim and its subtree leave composition but stay addressable, the reversible alternative to remove_usd_prim. Returns active and set; not saved to disk.
 
@@ -526,6 +614,8 @@ Activate or deactivate an existing prim on a registered USD stage (active metada
 
 ## `set_usd_prim_display_name`
 
+*Destructive, idempotent.*
+
 Author the displayName metadata (a UI label; the prim name does not change) on an existing prim of a registered USD stage, at the current edit target. An empty string is written as an empty displayName, not cleared. Returns display_name and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
@@ -538,6 +628,8 @@ Author the displayName metadata (a UI label; the prim name does not change) on a
 
 ## `set_usd_prim_instanceable`
 
+*Destructive, idempotent.*
+
 Set or clear the instanceable metadata (USD native instancing) of an existing prim on a registered USD stage, at the current edit target. Returns instanceable (the requested value, or the current one when the write fails) and set. Not saved to disk.
 
 | Parameter | Type | Required | Description |
@@ -549,6 +641,8 @@ Set or clear the instanceable metadata (USD native instancing) of an existing pr
 **Returns:** `{ instanceable: bool, prim_path: string }`
 
 ## `set_usd_prim_metadata`
+
+*Destructive, idempotent.*
 
 Author one metadata field (e.g. "comment", "documentation", "kind") on an existing prim of a registered USD stage, at the current edit target. USD returns set=false when the value type does not match the field type; the reply echoes the converted value. Not saved to disk.
 
@@ -563,6 +657,8 @@ Author one metadata field (e.g. "comment", "documentation", "kind") on an existi
 
 ## `set_usd_prim_specifier`
 
+*Destructive, idempotent.*
+
 Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. Caveat: an unrecognized value is silently applied as "Def" and the reply echoes the input, not the applied specifier. Returns specifier and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
@@ -574,6 +670,8 @@ Change the specifier ("Def", "Over" or "Class") of an existing prim on a registe
 **Returns:** `{ set: bool, specifier: string }`
 
 ## `set_usd_prim_type`
+
+*Destructive, idempotent.*
 
 Change the typeName of an existing prim on a registered USD stage (define_usd_prim creates new ones), at the current edit target. The name is written as given, not checked against the schema registry. Returns type_name and set; not saved to disk.
 
@@ -587,6 +685,8 @@ Change the typeName of an existing prim on a registered USD stage (define_usd_pr
 
 ## `set_usd_stage_actor_root_layer`
 
+*Destructive, idempotent.*
+
 Assign a USD file as the actor's root layer and transition the stage state.  Wraps AUsdStageActor::SetRootLayer(path) followed by AUsdStageActor::SetStageState(state). SetStageState(OpenedAndLoaded) triggers level-sequence regeneration — this can take a noticeable amount of time on large stages, so the cov harness may observe a transient 'rebuilding' state via follow-up get_usd_stage_actor_info calls. The tool does NOT verify the file exists on disk — SetRootLayer stores the path; the actual load happens during SetStageState(OpenedAndLoaded). When root_layer_path is empty, the existing root layer is preserved.
 
 | Parameter | Type | Required | Description |
@@ -598,6 +698,8 @@ Assign a USD file as the actor's root layer and transition the stage state.  Wra
 **Returns:** `{ actor_path: string, root_layer_path: string, stage_state: string }`
 
 ## `set_usd_stage_time_range`
+
+*Destructive, idempotent.*
 
 Set a USD stage's start/end time codes and optionally its frames-per-second, then save the root layer (idempotent — no-op when !dirty).  Both start_time and end_time are required and are written via UE::FUsdStage::SetStartTimeCode / SetEndTimeCode (which write to the stage's root layer metadata). When frames_per_second > 0, also calls SetFramesPerSecond. The Save() at the end is force=false so a layer that wasn't actually mutated by the Set* calls will not produce an unnecessary write.
 
@@ -612,6 +714,8 @@ Set a USD stage's start/end time codes and optionally its frames-per-second, the
 
 ## `set_usd_variant_selection`
 
+*Destructive, idempotent.*
+
 Set the active variant for a variant set; HasVariantSet guard prevents the FUsdVariantSet from going invalid when the set is missing
 
 | Parameter | Type | Required | Description |
@@ -624,6 +728,8 @@ Set the active variant for a variant set; HasVariantSet guard prevents the FUsdV
 **Returns:** `{ prim_path: string, variant_set_name: string, variant_name: string, set: bool }`
 
 ## `usd_module_status`
+
+*Read-only.*
 
 Probe whether the USDCore plugin is loaded and what file formats USD can read/write.  Calls UnrealUSDWrapper::GetNativeFileFormats (expected to include "usd", "usda", "usdc", "usdz") and UnrealUSDWrapper::GetAllSupportedFileFormats (which also includes extensions from third-party USD plugins like Alembic "abc"). A zero count on either means USDCore did not load.
 

@@ -6,6 +6,8 @@
 
 ## `add_ai_stimuli_source`
 
+*Additive, idempotent.*
+
 Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a source for the supplied AISense (default Sight). Idempotent: re-run returns the existing component.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a sou
 **Returns:** `{ actor_name: string, component_name: string, sense: string, registered: bool, already_existed: bool }`
 
 ## `configure_ai_sight_radius`
+
+*Destructive, idempotent.*
 
 Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
 
@@ -29,6 +33,8 @@ Set SightRadius and LoseSightRadius (default sight_radius times 1.5) on the sigh
 
 ## `create_ai_controller_blueprint`
 
+*Additive, idempotent.*
+
 Create a Blueprint asset parented to AAIController, compile and save it.  Idempotent: if the asset already exists it is loaded and returned.
 
 | Parameter | Type | Required | Description |
@@ -40,6 +46,8 @@ Create a Blueprint asset parented to AAIController, compile and save it.  Idempo
 
 ## `get_actor_team`
 
+*Read-only.*
+
 Reads the native FGenericTeamId assigned to an actor (or its Controller, for a Pawn possessed by an AAIController). Returns the engine-reserved NoTeam id (255) if neither the actor nor its Controller implements IGenericTeamAgentInterface.
 
 | Parameter | Type | Required | Description |
@@ -49,6 +57,8 @@ Reads the native FGenericTeamId assigned to an actor (or its Controller, for a P
 **Returns:** `{ actor_name, team_id, resolved_on: "actor"|"controller"|"none", is_no_team }`
 
 ## `get_ai_perceived_actors`
+
+*Read-only.*
 
 List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an AIController, currently perceives by any sense, without changing anything. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns count and perceived [{actor_name}]; no last-sensed time is included.
 
@@ -60,6 +70,8 @@ List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an
 
 ## `set_actor_team`
 
+*Destructive, idempotent.*
+
 Assigns a native FGenericTeamId to an actor via IGenericTeamAgentInterface, falling back to the actor's Controller when the actor itself doesn't implement the interface (e.g. an ACharacter possessed by an AAIController — the only class implementing it in vanilla UE 5.8). Refreshes any UAIPerceptionComponent listeners on the resolved agent so Sight/Hearing/Touch affiliation filtering (cached at listener-update time) reflects the new team immediately.
 
 | Parameter | Type | Required | Description |
@@ -70,6 +82,8 @@ Assigns a native FGenericTeamId to an actor via IGenericTeamAgentInterface, fall
 **Returns:** `{ actor_name, team_id, applied, resolved_on: "actor"|"controller", perception_listeners_refreshed }`
 
 ## `set_native_team_attitude`
+
+*Destructive, idempotent.*
 
 Installs (once per process) a custom FGenericTeamId::AttitudeSolver backed by an MCP-owned symmetric table, then records the pairwise attitude for team_a/team_b. Pairs not explicitly set fall back to the engine's own default (same team -> Friendly, else Hostile). This drives the engine's own AI Perception affiliation filtering (Sight/Hearing/Touch DetectionByAffiliation), which reads FGenericTeamId::GetAttitude directly.
 

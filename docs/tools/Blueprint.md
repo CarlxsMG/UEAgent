@@ -6,6 +6,8 @@
 
 ## `add_actor_begin_overlap_event`
 
+*Additive, idempotent.*
+
 Add a real AActor event OVERRIDE node (bOverrideFunction set, so it is not an eclipsed stub) -- ReceiveActorBeginOverlap by default, or any other AActor event via event_name (ReceiveActorEndOverlap, ReceiveHit, ReceiveBeginPlay...) -- and compile. Idempotent: an existing override of that event in the graph is returned with already_exists:true. It only reaches events declared on the ACTOR; for a component's delegate use add_component_bound_event, and for an interface member use override_interface_member.
 
 | Parameter | Type | Required | Description |
@@ -20,6 +22,8 @@ Add a real AActor event OVERRIDE node (bOverrideFunction set, so it is not an ec
 **Returns:** `{ node_id, class, title, pins:[...the event's output params...], blueprint_name, graph_name, event_name, is_override, already_exists? } -- is_override:true is what distinguishes a live override from a dead look-alike; already_exists is only present when an existing node was reused.`
 
 ## `add_ai_perception_sense`
+
+*Additive, idempotent.*
 
 Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blueprint, creating the config as an Instanced subobject of the template so it persists with the asset, and saving the package. Idempotent: ConfigureSense dedups by config class, so re-calling with the same sense_type UPDATES the existing config in place instead of stacking a second one. Only "sight" and "hearing" are supported (no damage, touch or team senses). It authors the TEMPLATE only -- whether the AI actually perceives anything is a live-PIE question this cannot answer; read the authored result back with get_ai_perception_senses.
 
@@ -41,6 +45,8 @@ Configure a sight or hearing sense on an AIPerceptionComponent TEMPLATE of a Blu
 
 ## `add_blueprint_function`
 
+*Destructive.*
+
 Create a NEW function graph on a Blueprint, or with override=true a real OVERRIDE of an inherited/interface member (delegated to implement_interface_function, so an event-shape member becomes an event override node and a value-returning one an override graph). It REFUSES rather than guessing: a name that collides with an overridable inherited function errors with a hint instead of silently creating a "&lt;name>_0" shadow, and an EVENT-shape member already shadowed by a local function graph errors telling you to remove that graph first. The new graph does not exist in the generated class until compile_blueprint, so compile BEFORE add_function_parameter or any node that calls it -- otherwise a build_blueprint_graph step fails with "Function not found" and rolls the whole batch back.
 
 | Parameter | Type | Required | Description |
@@ -52,6 +58,8 @@ Create a NEW function graph on a Blueprint, or with override=true a real OVERRID
 **Returns:** `{ blueprint_name: string, function_name: string, graph_name: string, success: bool [, kind, already_existed, node_id, already_exists, is_interface_function, note] } -- with override=true the payload is implement_interface_function's (kind='function'|'event', graph_name or node_id). success:true can come back WITHOUT the graph actually appearing, so confirm with get_blueprint_functions before wiring it.`
 
 ## `add_blueprint_variable`
+
+*Additive.*
 
 Add a MEMBER variable to a Blueprint (add_function_local_variable is the function-scoped twin), then read/write it with add_graph_node node_type=variable_get/variable_set. TRAP 1: the variable is born NOT editable per instance -- placing the actor and writing that variable fails with "cannot be edited on instances" -- and get_blueprint_variables reports instance_editable:true anyway; fix it with set_bp_variable_metadata(instance_editable=true). TRAP 2: on a class that ALREADY has actors placed in a level, those instances keep the value of the first compile, so a default set afterwards never reaches them -- verify on the instances, not on the CDO.
 
@@ -67,6 +75,8 @@ Add a MEMBER variable to a Blueprint (add_function_local_variable is the functio
 
 ## `add_branch_node`
 
+*Additive.*
+
 Add a Branch (if/then/else) node -- pins 'execute', 'Condition', 'then' (true), 'else' (false) -- AND compile the Blueprint as a side effect. add_graph_node node_type="branch" creates the identical node without compiling, which is what you want inside a build_blueprint_graph batch; use this one when a standalone compile is wanted anyway. Leaving 'else' unwired is legitimate and lint_blueprint_graph will not flag it, except inside a function that returns a value (function_exit_without_return).
 
 | Parameter | Type | Required | Description |
@@ -80,6 +90,8 @@ Add a Branch (if/then/else) node -- pins 'execute', 'Condition', 'then' (true), 
 **Returns:** `{ node_id, class, title, pins:[execute, Condition, then, else], blueprint_name, graph_name }`
 
 ## `add_break_struct_node`
+
+*Additive.*
 
 Create a Break Struct node with ONE OUTPUT PIN PER MEMBER of the struct (Blueprint-defined structs included) and return them all, so each field can be read out with connect_pins without a follow-up read. Same node as add_graph_node node_type="break_struct", but reconstructed after creation so the per-member pins are refreshed from the struct. Inverse: add_make_struct_node. Does NOT compile.
 
@@ -96,6 +108,8 @@ Create a Break Struct node with ONE OUTPUT PIN PER MEMBER of the struct (Bluepri
 
 ## `add_broadcast_node`
 
+*Additive.*
+
 Add the node that BROADCASTS (fires) an event dispatcher on self -- own or inherited -- with one input pin per signature parameter, so listeners run. Does NOT compile. The dispatcher must already exist in the compiled class (add_event_dispatcher then compile_blueprint), and its parameter pins only appear after set_event_dispatcher_signature. The opposite direction (LISTENING) is add_graph_node node_type="add_delegate" for self, add_object_bound_event for another object's dispatcher.
 
 | Parameter | Type | Required | Description |
@@ -110,6 +124,8 @@ Add the node that BROADCASTS (fires) an event dispatcher on self -- own or inher
 **Returns:** `{ node_id, class, title, pins:[execute, then, one input per signature param], blueprint_name, graph_name, dispatcher_name } -- an empty parameter list means the dispatcher has no signature yet.`
 
 ## `add_call_library_function`
+
+*Additive.*
 
 Add a call node for a STATIC library function -- an engine library by name (KismetMathLibrary, KismetSystemLibrary, GameplayStatics, KismetStringLibrary, or any other /Script/Engine class) or a USER BlueprintFunctionLibrary by asset path -- and compile. Prefer add_graph_node node_type="call_function" when the target is a member function of an actor/component. Plan the wiring with get_function_pins, which returns the exact pin names WITHOUT creating anything. TRAP inside build_blueprint_graph: the parameter is 'function_library'; passing 'class_name' fails only THAT step ("Missing required parameter: function_library") while the batch continues, leaving every connection that needed the node reporting "Target node not found".
 
@@ -127,6 +143,8 @@ Add a call node for a STATIC library function -- an engine library by name (Kism
 
 ## `add_cast_node`
 
+*Additive.*
+
 Add an IMPURE Cast To &lt;Class> node (exec in, Cast Succeeded / Cast Failed out) and compile the Blueprint. Same node as add_graph_node node_type="cast", which does NOT compile -- use that one inside a build_blueprint_graph batch. Skip the cast entirely when it only exists to type a GetComponentByClass result: add_get_component_by_class_node returns a ReturnValue pin already typed to the component class.
 
 | Parameter | Type | Required | Description |
@@ -142,6 +160,8 @@ Add an IMPURE Cast To &lt;Class> node (exec in, Cast Succeeded / Cast Failed out
 **Returns:** `{ node_id, class, title, pins:[...], blueprint_name, graph_name, cast_to } -- the node WITH its pins ('execute', 'Object', 'then'/Cast Succeeded, 'CastFailed', 'As<Class>'), so it can be wired without a follow-up read.`
 
 ## `add_comment_node`
+
+*Destructive.*
 
 Add a resizable comment box (UEdGraphNode_Comment) to a graph. KNOWN BUG: the 'text' parameter is LOST -- the comment is assigned before the node is finalized and the engine's PostPlacedNewNode then overwrites it, so every box created this way reads "Comment"; the returned "comment" field is the oracle and there is no MCP way to fix it (write the rationale in the system's docs instead, and delete the empty box). It also has NO pins, so a pin_defaults entry aimed at it breaks a whole build_blueprint_graph batch.
 
@@ -160,6 +180,8 @@ Add a resizable comment box (UEdGraphNode_Comment) to a graph. KNOWN BUG: the 't
 
 ## `add_component_bound_event`
 
+*Additive, idempotent.*
+
 Bind a multicast delegate OF ONE OF THIS BLUEPRINT'S OWN COMPONENTS (OnComponentBeginOverlap, OnComponentHit, a vendor component's dispatcher...) to a generated handler event in the event graph -- the editor's component-event flow -- then compile and re-check that the binding registered (bound). ALSO WORKS ON A WIDGET BLUEPRINT: pass the WBP and a WIDGET's name as component_name to wire a Button's OnClicked, a Slider's OnValueChanged, a CheckBox's OnCheckStateChanged -- exactly what the Designer's "+ OnClicked" green button does, and the only headless route to it (bound:true, with a BndEvt__..._OnButtonClickedEvent created). A UMG widget is not an SCS component but IS a property of the generated class, which is all this needs. Idempotent: an identical binding is returned instead of duplicated. The Blueprint must already be compiled, since the component/widget has to exist as a property of the generated class. For a dispatcher on an object that is NOT self and NOT one of its components, use add_object_bound_event; for one on SELF, add_graph_node node_type="add_delegate".
 
 | Parameter | Type | Required | Description |
@@ -175,6 +197,8 @@ Bind a multicast delegate OF ONE OF THIS BLUEPRINT'S OWN COMPONENTS (OnComponent
 **Returns:** `{ node_id, class, title, pins:[...the delegate's params as OUTPUT pins...], blueprint_name, graph_name, component_name, delegate, custom_function_name, bound, already_exists? } -- bound is a post-compile re-lookup (the real oracle); already_exists is only present when an existing binding was reused.`
 
 ## `add_component_to_blueprint`
+
+*Additive.*
 
 Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) with an optional relative transform and parent, then compile. TRAP 1: on a CHILD Blueprint whose scene root is INHERITED, a SCENE component can end up written into the PARENT's SCS (source:"inherited", owner_class = the parent) -- which silently edits a vendor/library asset; non-scene ActorComponents land correctly on the child. TRAP 2: a scene component of a BLUEPRINT class, or one given a location, can report success without persisting and then materialize LATER as a duplicate. Both have the same oracle: get_blueprint_scs_tree right after, checking owner_class and source of the new node -- never the return value.
 
@@ -194,6 +218,8 @@ Add a component to a Blueprint's SCS (engine class or a Blueprint AC_* class) wi
 
 ## `add_custom_event_node`
 
+*Additive, idempotent.*
+
 Add a NEW Custom Event node (an entry point you invent, not an override of anything) and compile. Idempotent by name: an existing custom event with that name in the graph is returned with already_existed:true, because re-adding one compiles into "more than one function with the same name" and breaks the Blueprint. HARD LIMIT: a custom event cannot be given PARAMETERS -- add_function_parameter answers "Function graph not found" and there is no other route -- so anything that needs arguments (an RPC in particular) must be a function instead. To override an inherited/interface event use override_interface_member.
 
 | Parameter | Type | Required | Description |
@@ -208,6 +234,8 @@ Add a NEW Custom Event node (an entry point you invent, not an override of anyth
 **Returns:** `{ node_id, class, title, pins:[...], blueprint_name, graph_name, event_name, node_title, already_existed } -- the node WITH its pins ('then' and the delegate output), ready for connect_pins. already_existed is only present when an existing event was reused.`
 
 ## `add_enhanced_input_action_node`
+
+*Additive.*
 
 Add an Enhanced Input action event node (UK2Node_EnhancedInputAction) bound to a UInputAction asset. Unlike add_input_action_event_node -- which creates the LEGACY UK2Node_InputAction that does NOT fire under Enhanced Input -- this node exposes the real ETriggerEvent exec pins (Triggered/Started/Ongoing/Canceled/Completed) that fire from the Enhanced Input pipeline. Use this instead of polling IsInputKeyDown in a timer; it is rebind-aware (bound to the InputAction asset, not a raw key).
 
@@ -224,6 +252,8 @@ Add an Enhanced Input action event node (UK2Node_EnhancedInputAction) bound to a
 
 ## `add_event_dispatcher`
 
+*Additive.*
+
 Create an event dispatcher (multicast delegate) on a Blueprint: adds BOTH the delegate member variable and its signature graph, the way the editor's "+ Event Dispatcher" does. It starts with NO parameters -- give it a signature with set_event_dispatcher_signature. Everything downstream needs the class REGENERATED first, so compile_blueprint before add_broadcast_node (to fire it) or add_graph_node node_type="add_delegate" / add_object_bound_event (to listen).
 
 | Parameter | Type | Required | Description |
@@ -234,6 +264,8 @@ Create an event dispatcher (multicast delegate) on a Blueprint: adds BOTH the de
 **Returns:** `{ blueprint_name, dispatcher_name, created } -- created is always true on success; confirm with get_event_dispatchers.`
 
 ## `add_function_local_variable`
+
+*Additive.*
 
 Add a variable scoped to ONE function graph (interface-override graphs included), instead of a class member like add_blueprint_variable -- use it for scratch state that no other graph should see. Reach it from the graph with add_graph_node node_type=variable_get/variable_set and scope="local" (the default scope="auto" already prefers a local over a member of the same name).
 
@@ -249,6 +281,8 @@ Add a variable scoped to ONE function graph (interface-override graphs included)
 
 ## `add_function_parameter`
 
+*Additive.*
+
 Add an input or output (return) parameter to an existing Blueprint FUNCTION graph -- interface-override graphs included -- and reconstruct its Entry/Result node. TWO HARD LIMITS, both silent-ish: it cannot create an ARRAY parameter (there is no is_array; the param comes out SCALAR with success), so redesign the signature to read the array where it lives; and it cannot reach a CUSTOM EVENT ("Function graph not found"), so a Server/Client RPC WITH arguments must be authored as a function plus set_bp_function_rpc. On a Blueprint just given a new function, compile_blueprint between creation and this call.
 
 | Parameter | Type | Required | Description |
@@ -262,6 +296,8 @@ Add an input or output (return) parameter to an existing Blueprint FUNCTION grap
 **Returns:** `{ blueprint_name, function_name, param_name, param_type, is_output } -- param_name is the pin name actually created (uniquified). Verify with get_graph_nodes at compact=false: compact hides the new, still-unlinked pin and makes it look like nothing was created.`
 
 ## `add_get_component_by_class_node`
+
+*Additive.*
 
 Add a GetComponentByClass node BORN TYPED: the ComponentClass pin is set before the node is reconstructed, so ReturnValue comes out as that component class instead of the generic ActorComponent and no cast is needed. Use it instead of add_graph_node + a pin_defaults entry: inside build_blueprint_graph the defaults are applied AFTER the connections, so a still-generic node fails to connect ("Actor Component Object Reference is not compatible with ...") and, with stop_on_error's default true, takes the whole batch down with it.
 
@@ -277,6 +313,8 @@ Add a GetComponentByClass node BORN TYPED: the ComponentClass pin is set before 
 **Returns:** `{ node_id, class, title, pins:[...], blueprint_name, graph_name, component_class, return_pin_type } -- return_pin_type is the ORACLE: if it does not name the requested component class, the pin stayed generic and connecting it will fail.`
 
 ## `add_graph_node`
+
+*Additive.*
 
 Create ONE node in a Blueprint's event/function graph (node_type selects the kind) and return it WITH its freshly allocated pins, so connect_pins / set_pin_default_value can wire it immediately without a follow-up get_graph_nodes. Use build_blueprint_graph instead when several nodes must be created AND wired in a single undo transaction, and get_function_pins to learn a call_function's pin names BEFORE creating anything. node_type='event' creates a REAL override (the declaring interface/parent class is resolved automatically and bOverrideFunction is set; target_class is ignored here) and fails loudly for a name that is not an overridable event -- an interface method WITH a return value is not an event, use implement_interface_function.
 
@@ -306,6 +344,8 @@ Create ONE node in a Blueprint's event/function graph (node_type selects the kin
 
 ## `add_input_action_event_node`
 
+*Additive.*
+
 Add the LEGACY action-mapping event node (UK2Node_InputAction) bound to an action mapping NAME, and compile. WARNING: this node does NOT fire under Enhanced Input, which is what UE5 projects use -- it compiles clean and simply never runs. For an Enhanced Input action asset use add_enhanced_input_action_node, whose Triggered/Started/Completed pins actually execute. Only reach for this one on a project still using the legacy input mappings.
 
 | Parameter | Type | Required | Description |
@@ -320,6 +360,8 @@ Add the LEGACY action-mapping event node (UK2Node_InputAction) bound to an actio
 **Returns:** `{ node_id, class, title, pins:[Pressed, Released, Key], blueprint_name, graph_name, input_action_name, node_class } -- node_class should read K2Node_InputAction (the legacy node); nothing here proves the mapping exists.`
 
 ## `add_macro_instance_node`
+
+*Additive.*
 
 Instantiate a macro from a macro LIBRARY asset ("/Game/Lib/ML_X.ML_X:MyMacro", or the library path plus macro_graph) -- the only way to reach a third-party or project macro library, since add_graph_node's macro aliases (foreach, do_once, gate, is_valid...) only look inside the engine StandardMacros. With no library path it falls back to this Blueprint's own MacroGraphs and then StandardMacros. Does NOT compile. Its pins start WILDCARD and only re-type once something is connected, which connect_pins handles by reconstructing the node.
 
@@ -337,6 +379,8 @@ Instantiate a macro from a macro LIBRARY asset ("/Game/Lib/ML_X.ML_X:MyMacro", o
 
 ## `add_make_struct_node`
 
+*Additive.*
+
 Create a Make Struct node with ONE INPUT PIN PER EDITABLE MEMBER of the struct (Blueprint-defined structs included) and return them all, so the struct can be filled with set_pin_default_value / connect_pins without a follow-up read. Same node as add_graph_node node_type="make_struct", but reconstructed after creation so the per-member pins are refreshed from the struct. Inverse: add_break_struct_node. Does NOT compile.
 
 | Parameter | Type | Required | Description |
@@ -351,6 +395,8 @@ Create a Make Struct node with ONE INPUT PIN PER EDITABLE MEMBER of the struct (
 **Returns:** `{ node_id, pins:[...one input pin per struct member + the struct output...], blueprint_name, graph_name, struct_type }`
 
 ## `add_object_bound_event`
+
+*Additive.*
 
 Bind a BlueprintAssignable event dispatcher of an EXTERNAL object (not self, not a component) to a handler custom event -- the editor's right-click "Assign" flow (FEdGraphSchemaAction_K2AssignDelegate). Use this to react to a dispatcher on a widget/actor instance held in a variable (e.g. a UMG widget's "On Radial Menu Item Selected"): it spawns a UK2Node_AddDelegate bound to target_class' dispatcher with its self/target pin LEFT UNCONNECTED (you wire the instance) and a UK2Node_CustomEvent whose OUTPUT pins mirror the dispatcher's params (e.g. the segment-data struct), already wired to the AddDelegate's Delegate pin. Unlike the add_delegate node_type (self-context only), this reaches a dispatcher on a foreign class. Does NOT compile the Blueprint (mirrors the engine action); compile afterward.
 
@@ -369,6 +415,8 @@ Bind a BlueprintAssignable event dispatcher of an EXTERNAL object (not self, not
 
 ## `add_parent_call_node`
 
+*Additive.*
+
 Add a "Parent: &lt;Function>" node that calls the parent-class implementation of an overridden function/event -- the second half of the child-first shape "Event X -> Parent: X -> our logic" that keeps a vendor base class working while the child adds behaviour. Searches the WHOLE ancestor chain, not just the immediate parent. Does NOT compile, and IS allowed inside build_blueprint_graph, so the event + super + logic can be built in one transaction.
 
 | Parameter | Type | Required | Description |
@@ -384,6 +432,8 @@ Add a "Parent: &lt;Function>" node that calls the parent-class implementation of
 
 ## `add_reroute_node`
 
+*Additive.*
+
 Add a reroute/knot node: pure layout, it re-emits whatever is wired into it and changes no behaviour. Does NOT compile. Note when reading graphs back: get_graph_nodes with compact=true excludes knots by default, so a chain that looks broken there may simply route through one -- re-read with exclude_classes=[].
 
 | Parameter | Type | Required | Description |
@@ -397,6 +447,8 @@ Add a reroute/knot node: pure layout, it re-emits whatever is wired into it and 
 **Returns:** `{ node_id, class, title, pins:[...wildcard in/out until wired...], blueprint_name, graph_name }`
 
 ## `add_select_node`
+
+*Additive.*
 
 Create a Select node with the RIGHT NUMBER OF OPTION PINS: pass option_count to grow beyond the built-in 2, or an enum in enum_path so one option pin is generated per enum entry and the Index pin becomes that enum. add_graph_node node_type="select" only ever makes the plain 2-option wildcard version. The response names the index pin, the return pin and every option pin, so the branches can be wired without a follow-up read. Its pins stay WILDCARD until something is connected (connect_pins reconstructs the node to re-type them).
 
@@ -415,6 +467,8 @@ Create a Select node with the RIGHT NUMBER OF OPTION PINS: pass option_count to 
 
 ## `add_sequence_node`
 
+*Additive.*
+
 Add a Sequence node that fires its outputs in order, spawned with its default two 'Then 0'/'Then 1' pins (there is no parameter to add more), AND compile the Blueprint. add_graph_node node_type="sequence" makes the same node without compiling -- prefer that inside a build_blueprint_graph batch.
 
 | Parameter | Type | Required | Description |
@@ -428,6 +482,8 @@ Add a Sequence node that fires its outputs in order, spawned with its default tw
 **Returns:** `{ node_id, class, title, pins:[execute, Then 0, Then 1], blueprint_name, graph_name }`
 
 ## `add_timeline_to_blueprint`
+
+*Additive.*
 
 Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variable and its UK2Node_Timeline node in one call, sets a fixed length in seconds, compiles, and verifies the template really registered (timeline_created). Actor-derived Blueprints only. It does NOT author curves or tracks -- the node comes with Play/Stop/Reverse inputs and Update/Finished outputs and nothing driven; a requested name already in use is silently uniquified, so wire the RETURNED timeline_name.
 
@@ -445,6 +501,8 @@ Add a Timeline to an Actor Blueprint: creates BOTH the UTimelineTemplate variabl
 
 ## `apply_component_property_overrides`
 
+*Destructive.*
+
 Re-apply N component-property overrides on ONE Blueprint with a SINGLE compile and a SINGLE save, then verify each value against the POST-COMPILE template (what a fresh instance actually reads). ICH-aware exactly like set_blueprint_component_property: an override on a component inherited from an ancestor Blueprint is routed through this class' InheritableComponentHandler. Built for post-reparent re-authoring, where one call per override means N compiles and N chances for an ICH record not to survive.
 
 | Parameter | Type | Required | Description |
@@ -457,6 +515,8 @@ Re-apply N component-property overrides on ONE Blueprint with a SINGLE compile a
 **Returns:** `{ success, error?, data: { blueprint_name, requested_count, applied_count, verified_count, mismatched_count, failed_count, compiled, saved, save_error?, equality_predicate, results: [{ index, component_name, property_name, source, applied, apply_error?, verification_status, matches_requested, post_value, post_source, note? }], verification } }`
 
 ## `apply_material_to_blueprint`
+
+*Destructive.*
 
 Assign a material ASSET to one slot of a Blueprint component TEMPLATE (an OWN SCS node, not a placed actor) -- the persistent counterpart of set_mesh_material_color, which only builds a runtime dynamic instance. Does NOT compile and does NOT save. Actors ALREADY placed in a level keep their serialized material: change the template and the placed instances stay as they were.
 
@@ -471,6 +531,8 @@ Assign a material ASSET to one slot of a Blueprint component TEMPLATE (an OWN SC
 
 ## `attach_blueprint_component`
 
+*Destructive.*
+
 Parent an existing SCS component under another component (or the native root). The parent may be an SCS component of this Blueprint OR a NATIVE inherited scene component from a parent C++ class (e.g. ACharacter's "CharacterMesh0" or the native capsule) -- when the name is not an SCS node and is not the native root, it is resolved from the parent-class CDO and the child is parented to it natively (bIsParentComponentNative=true). This makes sockets on inherited native meshes reachable (e.g. a socket under CharacterMesh0 at "spine_4", or a ChildActor attached at "spine_2").
 
 | Parameter | Type | Required | Description |
@@ -483,6 +545,8 @@ Parent an existing SCS component under another component (or the native root). T
 **Returns:** `{ blueprint_name, component_name, parent, parent_is_native, attach_socket, already_attached }`
 
 ## `build_blueprint_graph`
+
+*Destructive.*
 
 Build several nodes, wire their pins, and set pin defaults in one pass, wrapped in a single undo transaction -- the way to author a whole graph shape without create -> get_graph_nodes -> connect round-trips (get_function_pins gives you the pin names up front). THE ORDER IS FIXED AND MATTERS: every node first, then ALL connections, then pin_defaults -- so a node whose TYPE depends on a pin default (a generic GetComponentByClass) is connected while still untyped, fails with "... is not compatible with ..." and, under stop_on_error's default true, takes the whole call down; use add_get_component_by_class_node, which is born typed. add_comment_node has no pins at all, so a pin_defaults entry aimed at one also kills the batch. Self-contained: each sub-step runs its command directly, never through the bridge (only these: add_graph_node, add_custom_event_node, add_timeline_to_blueprint, add_cast_node, add_branch_node, add_sequence_node, add_component_bound_event, add_input_action_event_node, add_enhanced_input_action_node, add_actor_begin_overlap_event, add_call_library_function, add_reroute_node, add_comment_node, add_select_node, add_make_struct_node, add_break_struct_node, add_parent_call_node, add_get_component_by_class_node, add_broadcast_node, add_object_bound_event, add_macro_instance_node). add_component_event is NOT usable here; create it with its own call.
 
@@ -499,6 +563,8 @@ Build several nodes, wire their pins, and set pin defaults in one pass, wrapped 
 
 ## `compile_blueprint`
 
+*Destructive.*
+
 Compile a Blueprint to regenerate its class, returning the REAL outcome (succeeded == zero errors) plus the error/warning counts, and with return_messages=true the per-message log with each message anchored to its node_id/graph. Required after authoring functions, variables or RPCs and before anything calls them. TRAP: num_errors:0 is not a promise the graph works -- an unresolved WILDCARD pin on an array/ForEach node can compile clean and still block PIE, and warnings (a "was pruned" node whose consumers silently read defaults) do not lower it. Read the warnings too, and get_compile_errors as a second opinion.
 
 | Parameter | Type | Required | Description |
@@ -509,6 +575,8 @@ Compile a Blueprint to regenerate its class, returning the REAL outcome (succeed
 **Returns:** `` { name: string, compiled: bool, succeeded: bool, num_errors: int, num_warnings: int } -- `compiled`/`succeeded` reflect the ACTUAL compile outcome (true iff zero errors; warnings still compile). Both the default and return_messages paths return these fields. When return_messages=true additionally { messages: [{severity: 'error'|'warning'|'note', text: string, node_id: string, node_title: string, graph_name: string}] } (node_id/node_title/graph_name are empty strings when the message is not anchored to a graph node) ``
 
 ## `connect_pins`
+
+*Destructive.*
 
 Wire one node's OUTPUT pin to another node's INPUT pin inside one Blueprint graph, type-checked by the K2 schema (an incompatible pair is returned as an error, never a silent no-op). Nodes are addressed by NodeGuid, pins by name. Either node that still carries a WILDCARD pin is reconstructed afterwards, so array / ForEach / Select pins really re-type instead of compiling into "The type of Target Array is undetermined" (which compile_blueprint reports as compiled:true). Use validate_pin_connection to test a pair without mutating, and build_blueprint_graph to create+wire in one transaction.
 
@@ -525,6 +593,8 @@ Wire one node's OUTPUT pin to another node's INPUT pin inside one Blueprint grap
 
 ## `create_actor_action_utility`
 
+*Additive.*
+
 Create, compile and save a Blueprint parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
@@ -536,6 +606,8 @@ Create, compile and save a Blueprint parented to UActorActionUtility, whose Call
 
 ## `create_asset_action_utility`
 
+*Additive.*
+
 Create, compile and save a Blueprint parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
@@ -546,6 +618,8 @@ Create, compile and save a Blueprint parented to UAssetActionUtility, whose Call
 **Returns:** `success or error payload`
 
 ## `create_blueprint`
+
+*Additive.*
 
 Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). It refuses instead of overwriting when the asset already exists on disk, and it never confirms the parent: read it back with get_blueprint_parent.
 
@@ -560,6 +634,8 @@ Create a new Blueprint asset, optionally as a child of ANY parent class -- nativ
 
 ## `create_blueprint_macro`
 
+*Additive, idempotent.*
+
 Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGraphs (a reusable snippet, not a function: macros inline at compile time and can carry multiple exec outputs). Idempotent -- an existing macro of that name is returned with already_existed:true. Fill it with add_graph_node using graph_name=&lt;macro>, then instantiate it with add_macro_instance_node (add_graph_node node_type="macro_instance" also finds the Blueprint's own macros).
 
 | Parameter | Type | Required | Description |
@@ -570,6 +646,8 @@ Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGr
 **Returns:** `{ blueprint_name, macro_name, graph_name, already_existed } -- graph_name is what to pass as graph_name / macro_graph downstream.`
 
 ## `create_editor_utility_blueprint`
+
+*Additive.*
 
 Create, compile and save an Editor Utility Blueprint at package_path/name, parented to parent_class. Returns asset_path, parent_class, created, already_existed and saved; an existing Editor Utility Blueprint there is returned unchanged and parent_class is not applied to it. Refused during PIE unless force.
 
@@ -583,6 +661,8 @@ Create, compile and save an Editor Utility Blueprint at package_path/name, paren
 
 ## `create_editor_utility_widget_blueprint`
 
+*Additive.*
+
 Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtilityWidget) with a CanvasPanel root at package_path/name. Returns asset_path, root_widget, root_widget_class, created, already_existed and saved; an existing one is returned unchanged. Open it as a tab with run_editor_utility_widget. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
@@ -594,6 +674,8 @@ Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtili
 
 ## `delete_bp_variable`
 
+*Destructive.*
+
 Remove a member variable DECLARED on this Blueprint (inherited/native variables are refused) and report whether it is really gone by re-looking it up. Nodes that still read/write it survive as broken references, so run compile_blueprint + get_compile_errors afterwards. For an event dispatcher use remove_event_dispatcher instead -- this call would drop the delegate variable and strand its signature graph.
 
 | Parameter | Type | Required | Description |
@@ -604,6 +686,8 @@ Remove a member variable DECLARED on this Blueprint (inherited/native variables 
 **Returns:** `{ blueprint_name, variable_name, deleted } -- deleted is re-checked after the removal, so false means it is still there.`
 
 ## `delete_node`
+
+*Destructive.*
 
 Delete ONE node from a graph by its NodeGuid, breaking its links; refused for nodes the editor protects (FunctionEntry, Result, tunnels). This is the cleanup for orphan nodes left behind when a build_blueprint_graph batch fails and its rollback is refused, and it is reversible (the .uasset on disk is untouched until save_asset). It does NOT compile -- follow with compile_blueprint + get_compile_errors.
 
@@ -617,6 +701,8 @@ Delete ONE node from a graph by its NodeGuid, breaking its links; refused for no
 
 ## `disconnect_pin`
 
+*Destructive.*
+
 Break ALL links on one pin of one node (there is no way to drop a single link of a multi-linked pin). Main use: clearing links that point at nodes which no longer exist after a failed or refused build_blueprint_graph rollback -- get_graph_nodes with compact=false shows those as linked_to entries with dead GUIDs. To remove the whole node instead, use delete_node.
 
 | Parameter | Type | Required | Description |
@@ -629,6 +715,8 @@ Break ALL links on one pin of one node (there is no way to drop a single link of
 **Returns:** `{ disconnected, node_id, pin_name }`
 
 ## `find_blueprint_node_references`
+
+*Read-only.*
 
 "Find in Blueprints" over MCP: locate every Blueprint NODE that references a symbol -- variable, function, event, custom event, multicast delegate, macro, timeline, cast target, component, or a class/object in a pin default -- across a content path, returning each hit's asset, graph chain, node_id, title, match_kind and RESOLVED declaring class (resolved:false = a name-only guess). READ-ONLY. THE RULE FOR READING A ZERO: matches_found:0 only measures NON-EXISTENCE when `assets_hit_prefilter_without_graph_match` comes back EMPTY -- if it names assets, the symbol's string IS in those packages, so either the real name is spelled differently or the reference lives outside a graph (component template, property default). Check coverage_complete too: a truncated, timed-out or capped scan proves nothing. Blind by construction: Level Script Blueprints inside a .umap, and C++ callers.
 
@@ -655,6 +743,8 @@ Break ALL links on one pin of one node (there is no way to drop a single link of
 
 ## `fork_class_chain`
 
+*Destructive.*
+
 One-call thin-fork + optional reparent + verify: collapses the create->reparent->verify pattern into a single call. It creates a NEW thin child Blueprint of base_class at fork_name (the seam you insert between a shared-library base and your own class), optionally tags it with the fork-origin metadata tag (project setting ForkOriginTag), saves it, and then -- only if reparent_target is given -- reparents that existing Blueprint onto the new fork through the guarded reparent_blueprint_safe path (snapshot + compile flags + post-check + rollback) and reports its verification. WARNING: no durable backup is taken -- the rollback is in-memory only, so call backup_asset yourself first if you want a rollback-to-disk safety net.
 
 | Parameter | Type | Required | Description |
@@ -671,6 +761,8 @@ One-call thin-fork + optional reparent + verify: collapses the create->reparent-
 
 ## `get_actor_material_info`
 
+*Read-only.*
+
 List the material slots of an actor PLACED IN THE EDITOR WORLD, one row per slot per StaticMeshComponent, with the material actually assigned (name, path, class) or "None". Scope limits worth knowing: it only walks UStaticMeshComponents (a skeletal mesh's slots are invisible here) and only the EDITOR world (no PIE selector), and the actor is matched by its object NAME, not its outliner label. The Blueprint-template twin is get_blueprint_material_info.
 
 | Parameter | Type | Required | Description |
@@ -680,6 +772,8 @@ List the material slots of an actor PLACED IN THE EDITOR WORLD, one row per slot
 **Returns:** `{ actor_name: string, material_slots: [{ slot, component, material_name, material_path, material_class }], total_slots: int } -- total_slots 0 means no StaticMeshComponent had slots, NOT that the actor has no materials.`
 
 ## `get_ai_perception_senses`
+
+*Read-only.*
 
 Read back the senses configured on an AIPerceptionComponent TEMPLATE of a Blueprint: for each one its config class plus the fields that matter (sight radius / lose-sight radius / peripheral angle, or hearing range) and the three affiliation filters. This is the verification step for add_ai_perception_sense. It reads the OWN SCS template, so an AIPerception component inherited from a parent Blueprint is not found, and a config class other than Sight or Hearing comes back with sense_type "unknown" and no fields.
 
@@ -692,6 +786,8 @@ Read back the senses configured on an AIPerceptionComponent TEMPLATE of a Bluepr
 
 ## `get_available_materials`
 
+*Read-only.*
+
 Enumerate material assets under a content path and return each one's name, object path, package and class -- the object path is what apply_material_to_blueprint / set_actor_material expect. One Asset Registry query on UMaterialInterface and all its subclasses (materials, material instances, project or plugin material classes); nothing is loaded, so a wide path is cheap. For one known name prefer resolve_asset_by_name.
 
 | Parameter | Type | Required | Description |
@@ -703,6 +799,8 @@ Enumerate material assets under a content path and return each one's name, objec
 
 ## `get_blueprint_component_object_path`
 
+*Read-only.*
+
 Resolve a Blueprint component's TEMPLATE archetype and return its object path, so get_property_value/set_property_value/call_function can target that component directly.
 
 | Parameter | Type | Required | Description |
@@ -713,6 +811,8 @@ Resolve a Blueprint component's TEMPLATE archetype and return its object path, s
 **Returns:** `{ object_path: string, class: string, source: 'scs'|'inherited' } -- object_path is GetPathName() (feed it to get/set_property_value); class is the component class' full path.`
 
 ## `get_blueprint_component_property`
+
+*Read-only.*
 
 Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, resolving components INHERITED from a parent/grandparent Blueprint. Read-only twin of set_blueprint_component_property: it NEVER mints an ICH override. Resolution order: own SCS template -> existing child InheritableComponentHandler override -> ancestor's declaring SCS template -> native CDO subobject. Omit property_name to dump ALL properties of the resolved template.
 
@@ -729,6 +829,8 @@ Read the EFFECTIVE default of a property on a Blueprint component TEMPLATE, reso
 
 ## `get_blueprint_components`
 
+*Read-only.*
+
 List the components this Blueprint DECLARES in its own SCS, with type, relative transform and the real hierarchy linkage (in-tree parent from the ChildNodes tree, parent_is_native for a native/inherited parent, attach_socket, children). SCOPE: own SCS only -- components inherited from a parent Blueprint or declared natively are NOT here, so a small count is not proof the actor is small. For the full picture including ancestors use get_blueprint_scs_tree (which reports what it deduplicates), and cross-check the CDO when a component must be proven to exist.
 
 | Parameter | Type | Required | Description |
@@ -738,6 +840,8 @@ List the components this Blueprint DECLARES in its own SCS, with type, relative 
 **Returns:** `{ blueprint_name: string, components: [{ name, type, is_scene_component, parent, parent_is_native, attach_socket, children:[name], location?, rotation?, scale? }], component_count: int } -- "parent" is the in-tree SCS parent, falling back to the inherited/native parent name when the node is parented outside this SCS; location/rotation/scale only appear for scene components.`
 
 ## `get_blueprint_functions`
+
+*Read-only.*
 
 List the callable graphs of a Blueprint. Enumerates the FULL graph set (UBlueprint::GetAllGraphs), not just Blueprint->FunctionGraphs: an INTERFACE override graph lives in ImplementedInterfaces[].Graphs, which FunctionGraphs alone misses (a function that exists would read as "missing"). Each entry carries graph_type so the caller can tell a plain function from an interface override, a macro or a delegate signature.
 
@@ -751,6 +855,8 @@ List the callable graphs of a Blueprint. Enumerates the FULL graph set (UBluepri
 
 ## `get_blueprint_info`
 
+*Read-only.*
+
 One cheap overview of a Blueprint: parent class, compile status, and the counts + names of its OWN components, variables, function graphs and ubergraph pages. Everything here is what THIS asset declares -- nothing inherited, and interface-override graphs are not listed. So use it to orient, and the specialists to decide: get_blueprint_scs_tree for the real component set including ancestors, get_blueprint_functions for interface/macro/delegate graphs, get_blueprint_variables for variable flags, get_graph_nodes to read a graph.
 
 | Parameter | Type | Required | Description |
@@ -760,6 +866,8 @@ One cheap overview of a Blueprint: parent class, compile status, and the counts 
 **Returns:** `{ blueprint_name: string, parent_class: string, components: [{ name, type }], component_count: int, variables: [{ name, type }], variable_count: int, functions: [{ name }], function_count: int, graphs: [{ name, type }], graph_count: int, has_event_graph: bool, event_graph_name?: string, status: string } -- parent_class is a short NAME (ambiguous between an engine class and a same-named project one), variable "type" is only the pin CATEGORY (no struct/class), and status is UpToDate/Error/Unknown.`
 
 ## `get_blueprint_material_info`
+
+*Read-only.*
 
 Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an OWN SCS node), with the material assigned to each slot or "None". This is the verification step after apply_material_to_blueprint / set_static_mesh_properties. The slot count comes from the assigned static mesh's LOD 0 sections, so with no mesh assigned it returns ZERO slots and has_static_mesh:false -- which is a missing mesh, not a missing material. For a placed actor use get_actor_material_info.
 
@@ -772,6 +880,8 @@ Read the material slots of ONE StaticMeshComponent TEMPLATE in a Blueprint (an O
 
 ## `get_blueprint_variable_detailed_info`
 
+*Read-only.*
+
 Read ONE variable's full detail: its default value, the structured type (category, sub-category object and container kind -- not just the pin category get_blueprint_variables gives you), and every checkbox of the variable Details panel -- is_instance_editable / is_expose_on_spawn / is_blueprint_read_only / is_expose_to_cinematics / is_replicated / replication_condition / save_game. This is the headless oracle for "does this variable really persist into a .sav?", which otherwise costs a co-op PIE session plus a binary grep of the slot file. save_game is reported from BOTH places the flag lives, because they disagree until you compile: `save_game` is CPF_SaveGame as AUTHORED (FBPVariableDescription::PropertyFlags, exactly what the editor checkbox writes) while `save_game_generated` is the same flag on the FProperty of the GENERATED class, which is the one the save archive consults -- so save_game:true + save_game_generated:false means MARKED BUT NOT COMPILED, and nothing will persist yet; `save_game_matches` says it in one field. Read is_replicated FIRST: replication_condition is always populated (COND_None by default) and only means anything when replication is on. `default_value` is read from the CDO when the class is compiled (`default_value_source:"cdo"`), so it does not come back EMPTY for arrays, maps and every variable of an already-compiled Blueprint. Booleans of this family are contrasted, not believed -- audit_replication is the ground truth for replication.
 
 | Parameter | Type | Required | Description |
@@ -783,6 +893,8 @@ Read ONE variable's full detail: its default value, the structured type (categor
 
 ## `get_blueprint_variables`
 
+*Read-only.*
+
 List the variables this Blueprint DECLARES (its NewVariables): name, pin category, editor category and three flags. Inherited variables, function locals and components are NOT here. THE THREE FLAGS ARE UNRELIABLE, read off the stored variable description rather than the compiled property: instance_editable checks CPF_Edit and ignores CPF_DisableEditOnInstance, so it says true for variables the editor refuses to edit per instance; expose_on_spawn checks a property flag while set_bp_variable_metadata writes the ExposeOnSpawn METADATA, so it says false for variables that DO show up as SpawnActor pins; and expose_to_cinematics is hardcoded false. Oracles: write the placed instance for editability, the spawn node's pins for exposure, get_blueprint_variable_detailed_info for type/replication.
 
 | Parameter | Type | Required | Description |
@@ -792,6 +904,8 @@ List the variables this Blueprint DECLARES (its NewVariables): name, pin categor
 **Returns:** `{ blueprint_name: string, variables: [{ name, type, category, instance_editable, expose_on_spawn, expose_to_cinematics }], variable_count: int } -- "type" is only the pin CATEGORY (e.g. "struct", "object"), not the struct or class; the three booleans are the unreliable ones described above.`
 
 ## `get_event_dispatchers`
+
+*Read-only.*
 
 List a Blueprint's event dispatchers (multicast delegates) WITH each one's full parameter signature (name, C++ type, is_output) and whether it is inherited. Read from the SKELETON class, so it reflects edits made since the last full compile. Use it before add_broadcast_node / add_object_bound_event / set_event_dispatcher_signature, whose pins mirror this signature; only the dispatchers this Blueprint DECLARES can have their signature edited.
 
@@ -804,6 +918,8 @@ List a Blueprint's event dispatchers (multicast delegates) WITH each one's full 
 
 ## `get_function_pins`
 
+*Read-only.*
+
 Preview the EXACT pins a call_function / add_call_library_function node WOULD expose for a UFunction WITHOUT creating anything: owner_class, is_pure, is_static, exec_input/exec_output ("execute"/"then", null when pure), self_pin (null when static), input_params, output_params and return_value. This is what lets a whole build_blueprint_graph (nodes + connections + pin_defaults) be written in ONE call instead of create -> get_graph_nodes -> connect round-trips. It answers "what pins would it have", NOT "can a Blueprint call it": some engine functions resolve and preview here and are still rejected by the compiler, so the oracle for callability is compile_blueprint + get_compile_errors.
 
 | Parameter | Type | Required | Description |
@@ -815,6 +931,8 @@ Preview the EXACT pins a call_function / add_call_library_function node WOULD ex
 **Returns:** `{ function_name, owner_class, is_pure, is_static, exec_input, exec_output, self_pin, input_params:[{name,type}], output_params:[{name,type}], return_value:{name,type}|null, note }`
 
 ## `get_graph_nodes`
+
+*Read-only.*
 
 Read one Blueprint graph: every node with its node_id (NodeGuid), class, title, position, comment and pins (name, direction, type, linked_to, default) -- the read that feeds connect_pins / set_pin_default_value / delete_node, and the way to see what a graph actually DOES. TRAP: compact=true drops per-pin type metadata AND omits every pin that is unlinked and default-less (plus knots and comment boxes), so a pin missing from a compact listing is NOT proof the pin does not exist -- re-read with compact=false before concluding anything about pins. Also: a bare blueprint_name that matches two assets picks one silently (pass the full path), and reading a graph under a read-only vendor root leaves that package DIRTY in memory (reload_asset_package with on_dirty="discard" cleans it).
 
@@ -831,6 +949,8 @@ Read one Blueprint graph: every node with its node_id (NodeGuid), class, title, 
 
 ## `get_node_pin_info`
 
+*Read-only.*
+
 Dump ONE node's full pin detail -- every pin's name, direction, type, linked_to and default -- plus its class, title, position and comment, addressed by NodeGuid. Use it instead of get_graph_nodes when the node is already known: the listing is always FULL fidelity (get_graph_nodes with compact=true hides unlinked default-less pins) and costs a fraction of the tokens of a whole graph.
 
 | Parameter | Type | Required | Description |
@@ -842,6 +962,8 @@ Dump ONE node's full pin detail -- every pin's name, direction, type, linked_to 
 **Returns:** `{ node_id, class, title, pos_x, pos_y, comment, pins:[{name, direction, type, linked_to, default}] }`
 
 ## `get_property_access_path`
+
+*Read-only.*
 
 Read a UK2Node_PropertyAccess node's binding Path -- the anim-Blueprint property binding (InAnimInstance.Foo, InDeltaTime...) that no ordinary pin read exposes -- as segments plus its display text_path, and say whether the leaf actually RESOLVED (a still-wildcard Value pin means the path points at nothing). Read-only; errors on any node that is not a K2Node_PropertyAccess. Writer twin: set_property_access_path.
 
@@ -855,6 +977,8 @@ Read a UK2Node_PropertyAccess node's binding Path -- the anim-Blueprint property
 
 ## `implement_interface`
 
+*Destructive.*
+
 Add a Blueprint Interface to a Blueprint's implemented list (asset path or class name). NOT idempotent: an interface already implemented comes back as an error, unlike remove_interface. It only registers the contract -- the graphs that IMPLEMENT each member are created by implement_interface_function / override_interface_member, which are also the only correct route for interface EVENTS.
 
 | Parameter | Type | Required | Description |
@@ -865,6 +989,8 @@ Add a Blueprint Interface to a Blueprint's implemented list (asset path or class
 **Returns:** `{ blueprint_name, interface, implemented } -- implemented is always true on success; failure is an error response. Confirm the member set with get_blueprint_functions (interface graphs live in ImplementedInterfaces, not FunctionGraphs).`
 
 ## `implement_interface_function`
+
+*Destructive, idempotent.*
 
 Create or resolve the graph that IMPLEMENTS an interface member (or a parent virtual) and return a graph_name you can immediately wire with get_graph_nodes / connect_pins / set_pin_default_value. It picks the right shape by itself: a member WITH a return value gets a real FUNCTION graph in ImplementedInterfaces[].Graphs -- where add_blueprint_function refuses it ("Function already exists") and an event node would be a useless return-less stub -- while an event-shape member (no return value) gets a genuine event OVERRIDE node in the event graph, with its node_id returned. Idempotent in both branches. override_interface_member is the same logic under a friendlier name/response.
 
@@ -877,6 +1003,8 @@ Create or resolve the graph that IMPLEMENTS an interface member (or a parent vir
 
 ## `lint_blueprint_graph`
 
+*Read-only.*
+
 Read-only lint of a Blueprint's graphs for four authoring bugs that COMPILE CLEAN and only show up in play: eclipsed_interface_event and custom_event_shadowing_override (a node that looks like an override and is not, so the base contract never runs), unreachable_exec_node (a node no exec chain reaches from any entry) and function_exit_without_return (a live exec path that falls off the end of a value-returning function, so the caller silently gets false/0/None). Scans ALL ubergraph + function + macro graphs by default. HONESTY LIMIT: findings:[] is NOT a clean bill of health -- by deliberate design it never flags a merely unconnected exec output, so a Branch or Is Valid with dangling outputs can pass; check linked_to yourself with get_graph_nodes (compact=false) or get_node_pin_info.
 
 | Parameter | Type | Required | Description |
@@ -888,6 +1016,8 @@ Read-only lint of a Blueprint's graphs for four authoring bugs that COMPILE CLEA
 
 ## `list_editor_utility_widgets`
 
+*Read-only.*
+
 List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.
 
 | Parameter | Type | Required | Description |
@@ -897,6 +1027,8 @@ List the Editor Utility Widget Blueprint assets under a content folder and its s
 **Returns:** `{ name, asset_path, package_name, package_path, search_path, count, widgets }`
 
 ## `list_overridable_functions`
+
+*Read-only.*
 
 Enumerate the functions/events that a Blueprint deriving from a class could override. Works on an EXISTING Blueprint (blueprint_name) or on ANY class (class_name) so the override surface can be inspected BEFORE the child exists. Gated with UEdGraphSchema_K2::CanKismetOverrideFunction -- the same predicate add_blueprint_function(override=true) enforces -- so discovery and authoring agree (a bare NativeEvent||FUNC_BlueprintEvent filter lets a parent Blueprint's *__DelegateSignature through as "overridable"). Each entry reports where the member is DECLARED and where it is last IMPLEMENTED, with is_stub, which is what distinguishes a concrete ancestor from its `_Abstract` sibling.
 
@@ -910,6 +1042,8 @@ Enumerate the functions/events that a Blueprint deriving from a class could over
 
 ## `list_scripted_action_utilities`
 
+*Read-only.*
+
 List Editor Utility Blueprints that are scripted Asset/Actor Action Utilities
 
 | Parameter | Type | Required | Description |
@@ -920,6 +1054,8 @@ List Editor Utility Blueprints that are scripted Asset/Actor Action Utilities
 
 ## `list_widget_bound_events`
 
+*Read-only.*
+
 List every event-dispatcher BINDING wired in a Blueprint, across the three node kinds that make one in practice: UK2Node_AddDelegate (from add_object_bound_event / add_graph_node node_type="add_delegate"), UK2Node_ComponentBoundEvent (from add_component_bound_event -- a component's dispatcher OR a UMG widget's, e.g. a Button's OnClicked) and UK2Node_ActorBoundEvent (a level actor's, bound from the Level Blueprint). Each entry reports which kind it is (binding_kind), what it is bound ON (bound_to: the component/widget variable, or the actor), the delegate's owner class and name, and the handler on the other end. Despite the name it works on ANY Blueprint -- but it only walks Ubergraph pages and FunctionGraphs, so a binding inside a macro or interface graph is out of scope. Run it BEFORE add_object_bound_event / add_component_bound_event: double-binding one delegate to two handlers compiles fine and silently runs BOTH. A reader that cannot see what the writer wrote is worse than no reader: a 0 reads as "not wired" and sends you to re-wire what is already there.
 
 | Parameter | Type | Required | Description |
@@ -929,6 +1065,8 @@ List every event-dispatcher BINDING wired in a Blueprint, across the three node 
 **Returns:** `{ blueprint_name, bindings:[{ graph_name, node_id, binding_kind, bound_to, delegate_owner_class, delegate_name, delegate_resolved, wired, custom_event_name, custom_event_node_id }], binding_count, kind_counts:{add_delegate,component_bound_event,actor_bound_event} } -- binding_kind names the node class behind the entry. bound_to is the component/widget variable name (component_bound_event), the actor name (actor_bound_event), or empty for add_delegate, whose target pin is left unconnected by design. delegate_resolved=false means the delegate no longer resolves live (renamed/removed). wired=false is a DANGLING add_delegate bind (its Delegate pin has no handler); the two *BoundEvent kinds ARE their own handler, so they are always wired and custom_event_name is the generated BndEvt__ function.`
 
 ## `move_node`
+
+*Destructive.*
 
 Move a node to a new [x, y] canvas position. Purely cosmetic layout: no pin, link, default or type changes, and no compile. Returns the position actually applied.
 
@@ -945,6 +1083,8 @@ Move a node to a new [x, y] canvas position. Purely cosmetic layout: no pin, lin
 
 ## `override_interface_member`
 
+*Destructive, idempotent.*
+
 Override a Blueprint interface member or parent virtual by name: an event override node (kind="event", node_id) when it returns nothing, else a function-override graph (kind="function", graph_name). Idempotent (was_already_overridden); leaves the Blueprint needing a compile, unsaved. Prefer it to hand-placed interface event nodes, which can compile yet never fire.
 
 | Parameter | Type | Required | Description |
@@ -960,6 +1100,8 @@ Override a Blueprint interface member or parent virtual by name: an event overri
 
 ## `recombine_blueprint_pin`
 
+*Destructive.*
+
 Collapse a previously split struct pin back into ONE pin (inverse of split_blueprint_pin), which is what set_pin_default_value needs before it will write a struct literal. Accepts either the parent pin's name or any of its sub-pin names; links on the sub-pins are dropped by the engine as part of recombining.
 
 | Parameter | Type | Required | Description |
@@ -972,6 +1114,8 @@ Collapse a previously split struct pin back into ONE pin (inverse of split_bluep
 **Returns:** `{ recombined } -- always true on the success path; a pin that is not split is an error response instead.`
 
 ## `reconcile_function_signature`
+
+*Destructive.*
 
 Repair a LOCAL function graph's parameter pins so they match a parent UFUNCTION -- for an override whose signature went stale after a reparent -- WITHOUT nuking the graph's downstream nodes, which is what re-creating the override by hand costs you. It diffs the parent's parameters against the function's entry/result pins: mode='add_missing' (the default) only ADDS the missing pins, so it is non-destructive and safe to run blind; mode='remove_extra' / 'mirror' also DROP pins the parent lacks, which can sever downstream connections, and are therefore gated behind force_remove=true -- without it the extra pins are merely REPORTED (partially_implemented=true).
 
@@ -987,6 +1131,8 @@ Repair a LOCAL function graph's parameter pins so they match a parent UFUNCTION 
 
 ## `remove_blueprint_component_node`
 
+*Destructive, idempotent.*
+
 Remove one or MORE SCS component nodes in a single batch (ONE compile for the whole lot), optionally promoting their children, and report the double census (flat AllNodes vs a walk of RootNodes) so descendants that go missing or become unreachable are NAMED instead of silently dropped. Same engine work as remove_component_from_blueprint; the difference is the contract for a component that is not there: this one is IDEMPOTENT (already_removed:true, no error), while remove_component_from_blueprint treats "nothing matched" as a caller error. Prefer this one in scripts that may re-run.
 
 | Parameter | Type | Required | Description |
@@ -1000,6 +1146,8 @@ Remove one or MORE SCS component nodes in a single batch (ONE compile for the wh
 
 ## `remove_blueprint_function`
 
+*Destructive.*
+
 Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by name. WARNING: It resolves more graphs than it can delete: name lookup goes through FindGraph (all graphs, interface overrides and macros included) but the delete only touches FunctionGraphs and only when bAllowDeletion is true, so an INTERFACE OVERRIDE resolves and cannot be removed. That case is a hard error naming the reason -- to change an interface override, author the signature on the INTERFACE and re-create it (add_function_parameter on the BPI_ -> compile_blueprint -> implement_interface_function). Not idempotent: a name that does not resolve is an error. TRAP when deleting to re-create: the class is NOT regenerated here, so an immediate add_blueprint_function with the same name fails with "is an inherited overridable function (declared on &lt;this very class>)" because the stale UFunction is still in the generated class -- put a compile_blueprint BETWEEN the two calls. Callers of the removed function are left broken until the next compile.
 
 | Parameter | Type | Required | Description |
@@ -1010,6 +1158,8 @@ Delete a function graph OWNED BY the Blueprint (Blueprint->FunctionGraphs) by na
 **Returns:** `{ blueprint_name: string, removed_function: string, success: bool } -- success:true means the graph is gone from Blueprint->FunctionGraphs (re-read after the delete), not merely that the call ran.`
 
 ## `remove_component_from_blueprint`
+
+*Destructive, idempotent.*
 
 Remove one or more component nodes from a Blueprint's SCS, with a DOUBLE CENSUS (flat AllNodes vs a walk of RootNodes) so collateral losses are reported instead of hidden: also_removed names descendants that went with their parent and unexpected_losses names nodes left in AllNodes but unreachable from any root. Batch-capable and that is the point -- chaining SINGLE-node calls on the same Blueprint is exactly the pattern that deletes components nobody asked for, so pass component_names and take ONE compile for the lot. A re-added component comes back with its CLASS defaults: per-instance overrides are gone and do not come back on save. "Nothing matched" is an ERROR here; remove_blueprint_component_node is the idempotent twin that reports already_removed instead.
 
@@ -1024,6 +1174,8 @@ Remove one or more component nodes from a Blueprint's SCS, with a DOUBLE CENSUS 
 
 ## `remove_event_dispatcher`
 
+*Destructive, idempotent.*
+
 Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created: the delegate member variable AND its signature graph (delete_bp_variable removes only the variable and strands the graph, which is why this exists). Idempotent -- when neither artifact is present it returns removed:false instead of erroring. Broadcast/bind nodes that referenced it are left broken: compile_blueprint + get_compile_errors after.
 
 | Parameter | Type | Required | Description |
@@ -1034,6 +1186,8 @@ Remove an event dispatcher, dropping BOTH artifacts add_event_dispatcher created
 **Returns:** `{ blueprint_name, dispatcher_name, removed } -- removed:false means nothing was there (no-op), not a failure.`
 
 ## `remove_interface`
+
+*Destructive, idempotent.*
 
 Remove an implemented Blueprint Interface (inverse of implement_interface) and, unless preserve_functions is set, DELETE the graphs that implemented it -- work is lost, so pass preserve_functions=true to keep them as ordinary Blueprint functions. Idempotent, unlike implement_interface: an interface that is not implemented returns removed:false instead of erroring.
 
@@ -1047,6 +1201,8 @@ Remove an implemented Blueprint Interface (inverse of implement_interface) and, 
 
 ## `remove_unused_variables`
 
+*Destructive.*
+
 Delete EVERY variable the engine considers unused from a Blueprint in one shot (GatherUnusedVariables + RemoveUnusedVariables) and report which ones went. Destructive and non-selective -- "unused" means no graph node reads or writes it, so a variable only touched from C++, a DataTable, a save game or a runtime name lookup counts as unused and is deleted. Preview it by comparing get_blueprint_variables before/after, or delete a specific one with delete_bp_variable.
 
 | Parameter | Type | Required | Description |
@@ -1056,6 +1212,8 @@ Delete EVERY variable the engine considers unused from a Blueprint in one shot (
 **Returns:** `{ blueprint_name: string, removed_count: int, removed_variables?: [string] } -- removed_variables is the list gathered BEFORE the removal and removed_count what the engine reported removing; when they disagree, trust neither and re-read get_blueprint_variables.`
 
 ## `rename_bp_variable`
+
+*Destructive.*
 
 Rename a member variable DECLARED on this Blueprint, KEEPING everything the delete+re-add workaround throws away: the VarGuid, the type, the default value, the category, the tooltip and the replication flags -- and, crucially, RE-WIRING every Get/Set node that reads it, in this Blueprint and in every dependent one. This is the only correct way to rename an authored variable in place (e.g. to translate its name). WARNING: it refuses a variable that has a RepNotify function: the engine's own rename opens a MODAL dialog for that case (FSuppressableWarningDialog, which does NOT honour unattended mode) and would hang the editor waiting for a click -- clear the RepNotify with set_bp_variable_replication, rename, then set it back. WARNING: dependent Blueprints are only repaired if they are LOADED: this command loads the ones the Asset Registry reports as referencers first, and reports them in `referencers_loaded`, but an asset that references it in a way the registry does not see keeps the old name silently. It does NOT create CoreRedirects, so a saved game, a DataTable cell or a Python set_editor_property that names the variable as text is NOT fixed -- grep for those. Run compile_blueprint afterwards and save_asset on this Blueprint AND on every referencer.
 
@@ -1069,6 +1227,8 @@ Rename a member variable DECLARED on this Blueprint, KEEPING everything the dele
 **Returns:** `{ blueprint_name, old_name, new_name, renamed (re-read: true only if new_name exists and old_name is gone), referencers_loaded: [string], repnotify_cleared: bool, warning? }`
 
 ## `rename_function_parameter`
+
+*Destructive.*
 
 Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of rename_bp_variable, and the only headless way to do it: add_function_parameter only ADDS, there is no remove_function_parameter, so "delete and re-add" is not even available. It renames the pin on the Entry node and on EVERY Result node of the graph, and registers a CoreRedirect so that call sites re-map themselves. That redirect is not a nicety: it is what stops this from being a PHANTOM PIN FACTORY. With the redirect, the call site's pin takes the new name AND KEEPS ITS LITERAL VALUE; renamed WITHOUT one, the old pin stays alive and ORPHANED on the caller. WARNING: that orphan is silent: it survives compiles that report num_errors:0 -- so `compile_blueprint` is NOT the oracle here. The oracle is get_graph_nodes(compact=false) on the callers, checking that NO pin still carries the old name. The redirect matches on `Class.Function.Param`, so it reaches callers that merely CALL the function (K2Node_Message included) without implementing its interface, and dependents that are not even loaded -- both of which rename_bp_variable cannot reach. It does NOT rename anything that names the parameter as TEXT (a DataTable cell, a saved game, Python). Run compile_blueprint afterwards and save_asset on this Blueprint AND on every caller. AND THE COMPILE IS NOT THE END OF IT: what reaches the .uasset is UserDefinedPins, not the EdGraphPins you read back -- a rename checked only on the latter can report renamed:true, compile at num_errors:0, be saved and COMMITTED, and still come back as the OLD name the next time the editor starts. So it also reports entry_user_pins_after/result_user_pins_after (the serialized side, legitimately EMPTY on an interface-override graph) and refuses to claim success while any UserDefinedPin still carries the old name. The end-to-end oracle is still disk: save_asset -> reload_asset_package -> get_function_pins.
 
@@ -1085,6 +1245,8 @@ Rename a PARAMETER of a Blueprint function graph -- the parameter counterpart of
 
 ## `reparent_blueprint`
 
+*Destructive.*
+
 Change a Blueprint's parent class and recompile with the editor's own reparent compile flags (delta serialization + skip-new-variable-defaults, whose absence crashes the reinstancer on Blueprints holding class-typed variables). NO snapshot and NO rollback here -- reparent_blueprint_safe adds those, and even its rollback is only PARTIAL (it restores the parent but leaves SCS components RENAMED), so after ANY failed attempt restore the .uasset with git checkout BEFORE measuring again or the leftovers read as pre-existing damage. Errors when the parent is already that class.
 
 | Parameter | Type | Required | Description |
@@ -1095,6 +1257,8 @@ Change a Blueprint's parent class and recompile with the editor's own reparent c
 **Returns:** `{ blueprint_name, old_parent, new_parent, reparented } -- reparented is set unconditionally on the success path; the real oracles are get_blueprint_parent, the component overrides (apply_component_property_overrides re-authors them) and git status of the .uasset.`
 
 ## `reparent_blueprint_safe`
+
+*Destructive.*
 
 Guarded, rollback-capable Blueprint reparent -- PREFER THIS OVER the raw reparent_blueprint, which has none of these guards. It adds: a pre-flight snapshot (parent chain, own-variable count, CDO component count); an OPTIONAL variable de-collision rename (rename_colliding_vars) for own variables whose name collides with a member the NEW parent already declares, which a plain reparent would otherwise clobber; the delta-serialization compile flags, without which a Blueprint with more than ~10 type-pinned variables CRASHES the editor during reinstancing; the same SCS-root reconciliation the Blueprint editor itself does, so a silently renamed component ("Mesh" -> "Mesh1") is reported instead of hidden; an invariant post-check (parent matches, no compile error, own-variable count did not shrink); and, on failure, an in-memory auto_rollback that restores the original parent, restores the component names and recompiles. It never saves to disk. This is a genuinely destructive multi-step transaction: run it with dry_run=true first on any real fork -- that reports the plan and the would-rename set without mutating anything.
 
@@ -1112,6 +1276,8 @@ Guarded, rollback-capable Blueprint reparent -- PREFER THIS OVER the raw reparen
 
 ## `run_asset_action_utility`
 
+*Destructive.*
+
 Run (or introspect) a scripted action on an Asset/Actor Action Utility
 
 | Parameter | Type | Required | Description |
@@ -1123,6 +1289,8 @@ Run (or introspect) a scripted action on an Asset/Actor Action Utility
 
 ## `run_editor_utility_widget`
 
+*Destructive.*
+
 Spawn and register an Editor Utility Widget Blueprint as an editor tab
 
 | Parameter | Type | Required | Description |
@@ -1132,6 +1300,8 @@ Spawn and register an Editor Utility Widget Blueprint as an editor tab
 **Returns:** `{ widget_blueprint_path, asset_path, tab_id, registration_name, registered, tab_exists, widget_spawned }`
 
 ## `set_blueprint_component_array_element`
+
+*Destructive, idempotent.*
 
 Author ONE element of a TArray property on a Blueprint component TEMPLATE (own SCS, or ICH-aware for a component inherited from an ancestor Blueprint): patch named struct members of an existing element, insert a new element at an index, or remove one. Every OTHER element is exported before and after and compared, so a whole-array rewrite that quietly loses the empty/None gaps cannot pass itself off as a targeted edit. There is deliberately NO 'move' operation.
 
@@ -1151,6 +1321,8 @@ Author ONE element of a TArray property on a Blueprint component TEMPLATE (own S
 
 ## `set_blueprint_component_collision`
 
+*Destructive, idempotent.*
+
 Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), not on a spawned actor, applying in this order: `profile` through SetCollisionProfileName (which expands the profile into the FBodyInstance response array -- a raw reflection write would set the string and leave BodyInstance inconsistent, and that is the whole reason this is a separate tool), then `collision_enabled`, then per-channel `responses`. Use it instead of set_blueprint_component_property for anything collision-shaped. Unknown channel, response or collision_enabled names are hard errors, never a silent default. Note the ORDER: a later profile would reset the per-channel responses, so responses always win here.
 
 | Parameter | Type | Required | Description |
@@ -1167,6 +1339,8 @@ Set collision on a Blueprint component TEMPLATE (own SCS or inherited via ICH), 
 
 ## `set_blueprint_component_property`
 
+*Destructive, idempotent.*
+
 Set the DEFAULT of a property on a Blueprint component TEMPLATE, including components INHERITED from an ancestor Blueprint (routed through this class' InheritableComponentHandler) or native inherited subobjects; only FRESH instances read the new value. THREE TRAPS, all with the same shape (a green return over a different reality): (1) it can drop an entire OTHER component from the Blueprint IN MEMORY while disk and git stay clean -- count get_blueprint_components before and after, and reload_asset_package(on_dirty="discard") is the cure; (2) on an OBJECT-REFERENCE property it can write None and report override_persisted:true, wiping the inherited default -- check with get_blueprint_component_overrides; (3) actors ALREADY PLACED in a level keep their serialized value, so only runtime-spawned ones change. Read the effective value with get_blueprint_component_property (the read-only twin, which never mints an override), and use apply_component_property_overrides for several writes at once.
 
 | Parameter | Type | Required | Description |
@@ -1180,6 +1354,8 @@ Set the DEFAULT of a property on a Blueprint component TEMPLATE, including compo
 
 ## `set_blueprint_function_pure`
 
+*Destructive, idempotent.*
+
 Mark a Blueprint function as PURE (or back to impure), the editor's "Pure" checkbox: a pure function has no exec pins and is re-evaluated wherever its output is read. REQUIRED to finish a UMG property binding -- FDelegateEditorBinding::IsBindingValid refuses any function that is not FUNC_BlueprintPure or const, so add_widget_property_binding will report valid:false until this has been run on the function. The counterpart reader is get_blueprint_functions_list's is_pure, which reads the same flag off the same UK2Node_FunctionEntry. WARNING: Turning a function pure REMOVES its exec pins: any existing wire into or out of them is dropped by the reconstruct, so do this BEFORE building the function's body, not after.
 
 | Parameter | Type | Required | Description |
@@ -1192,6 +1368,8 @@ Mark a Blueprint function as PURE (or back to impure), the editor's "Pure" check
 
 ## `set_bp_class_replication`
 
+*Destructive, idempotent.*
+
 Set class-level ACTOR replication on a Blueprint's CDO (bReplicates, optionally bAlwaysRelevant), compile, and read the values back off the RE-FETCHED post-compile CDO. Actor Blueprints only: a component Blueprint is refused (component replication is set_component_replication). Related reader trap: audit_replication's class_replicates reads the ACTOR flag, so it reports false for every component Blueprint whatever its CDO says.
 
 | Parameter | Type | Required | Description |
@@ -1203,6 +1381,8 @@ Set class-level ACTOR replication on a Blueprint's CDO (bReplicates, optionally 
 **Returns:** `{ blueprint_name, replicates, always_relevant_set, always_relevant } -- values re-read from the CDO after compiling; always_relevant is only present when it was requested.`
 
 ## `set_bp_function_rpc`
+
+*Destructive, idempotent.*
 
 Turn a Blueprint FUNCTION into an RPC (rpc_type Server / Client / NetMulticast, or NotReplicated to undo it, plus reliable), then compile and read the FUNC_Net* flags back off the entry node. This is the ONLY headless way to author an RPC THAT TAKES ARGUMENTS: add_function_parameter cannot reach a custom event, so build the RPC as add_blueprint_function -> compile_blueprint -> add_function_parameter -> here. Engine limits that follow: a replicated function cannot return a value and cannot host latent nodes (put a Delay in a separate, parameterless custom event).
 
@@ -1217,6 +1397,8 @@ Turn a Blueprint FUNCTION into an RPC (rpc_type Server / Client / NetMulticast, 
 
 ## `set_bp_variable_default`
 
+*Destructive, idempotent.*
+
 Set the default value of a variable DECLARED on this Blueprint: writes the live CDO and mirrors the result back into the serialized variable description so it survives save/reload. LIMIT (not a lie, a hard boundary): it CANNOT touch an INHERITED variable -- it answers "Variable 'X' is not declared on this blueprint" -- so the "child that only overrides a parent default" pattern needs the CDO route (execute_python + set_editor_property + compile_blueprint + save). And on a class with actors already placed in a level, the placed instances keep their serialized value: verify on the instances, never on the CDO.
 
 | Parameter | Type | Required | Description |
@@ -1228,6 +1410,8 @@ Set the default value of a variable DECLARED on this Blueprint: writes the live 
 **Returns:** `{ blueprint_name, variable_name, default_value, roundtrip_verified } -- default_value is re-exported from the CDO after the write, so it is the real stored value. WARNING: roundtrip_verified:false means the exported text does NOT re-import into the type (e.g. FGameplayTagContainer): the CDO holds the right value and the compiler's property copy carries it, but the serialized description was deliberately left empty because feeding an unparseable string back through a Full compile ZEROES the default. Verify that variable on the CDO after compiling, and prefer wiring it in the graph if it must survive a fresh regeneration.`
 
 ## `set_bp_variable_metadata`
+
+*Destructive, idempotent.*
 
 Set the editor-facing checkboxes and text of an existing Blueprint variable: instance_editable (per-instance editability), save_game (CPF_SaveGame -- whether the variable goes into a .sav), expose_on_spawn (adds the variable as a pin on SpawnActor), category and tooltip. Only the fields present are touched; passing none is an error. This is the fix for a variable created by add_blueprint_variable, which is born NOT instance-editable while the readers report it as editable. Variable must be declared on THIS Blueprint; on a library variable the answer is a child class of your own, not this call. WARNING: this call does NOT compile: it structurally-modifies the Blueprint, which regenerates the SKELETON only, so a save_game just written is authored but NOT yet on the generated class the save archive reads -- the response says so in save_game_needs_compile, and the loop that finishes the job is compile_blueprint -> save_asset -> get_blueprint_variable_detailed_info and check save_game_generated.
 
@@ -1245,6 +1429,8 @@ Set the editor-facing checkboxes and text of an existing Blueprint variable: ins
 
 ## `set_bp_variable_replication`
 
+*Destructive, idempotent.*
+
 Set a Blueprint variable's replication mode -- None / Replicated / RepNotify (RepNotify also creates the OnRep_&lt;Variable> function graph if missing) -- then compiles and reads CPF_Net/CPF_RepNotify back. TRAP: the full green report can come back WITHOUT the flag surviving into the generated class (a variable reported is_replicated:true that never replicates; re-running this same call fixes it). The ground truth is audit_replication (its payload's replicated_variables list), then compile and re-audit -- never this return, and never one client alone.
 
 | Parameter | Type | Required | Description |
@@ -1256,6 +1442,8 @@ Set a Blueprint variable's replication mode -- None / Replicated / RepNotify (Re
 **Returns:** `{ blueprint_name, variable_name, mode, is_replicated, is_rep_notify, rep_notify_func, property_flags } -- read back from the variable's flags after compiling, which is necessary but NOT sufficient (see the trap above).`
 
 ## `set_component_replication`
+
+*Destructive, idempotent.*
 
 Set bReplicates on ONE SCS component TEMPLATE of a Blueprint (the archetype, not a spawned actor's instance), compile, and read it back off the template. It governs the component's own PROPERTY replication; note that a component declared in the SCS already routes its RPCs through its stable network name WITHOUT this flag (a component added at RUNTIME does not, and loses them). For the owning actor use set_bp_class_replication.
 
@@ -1269,6 +1457,8 @@ Set bReplicates on ONE SCS component TEMPLATE of a Blueprint (the archetype, not
 
 ## `set_event_dispatcher_signature`
 
+*Destructive, idempotent.*
+
 Add to (mode="add", the idempotent default) or rewrite (mode="replace") the parameter list of a dispatcher this Blueprint OWNS -- inherited dispatchers have no local signature graph and are refused with the list of owned ones. Every requested type is resolved BEFORE anything is mutated, so a bad type aborts cleanly. The parameters become the OUTPUT pins of every bound handler and the INPUT pins of add_broadcast_node; existing nodes keep stale pins until compile_blueprint reconstructs them.
 
 | Parameter | Type | Required | Description |
@@ -1281,6 +1471,8 @@ Add to (mode="add", the idempotent default) or rewrite (mode="replace") the para
 **Returns:** `{ blueprint_name, dispatcher_name, mode, added: [string], params: [ { name, type } ], param_count }`
 
 ## `set_mesh_material_color`
+
+*Destructive, idempotent.*
 
 Tint one material slot of a Blueprint component template by creating a DYNAMIC material instance (MID) over the current or given material, setting one vector parameter, and assigning the MID to the slot. A MID is a RUNTIME object, so this is a quick preview, NOT the way to author a change that must survive save/reload -- for a persistent tint make a MaterialInstanceConstant and assign it with apply_material_to_blueprint. A parameter_name the material does not declare is accepted silently and simply does nothing.
 
@@ -1297,6 +1489,8 @@ Tint one material slot of a Blueprint component template by creating a DYNAMIC m
 
 ## `set_physics_properties`
 
+*Destructive, idempotent.*
+
 Set simulate-physics, mass override, linear and angular damping on ONE primitive component TEMPLATE of a Blueprint (an OWN SCS node only -- inherited components are not found here, and it is the template, not a placed actor). Only the fields present are touched. It does NOT compile and does NOT save. For any other property of a component template use set_blueprint_component_property, which is ICH-aware and reaches inherited components.
 
 | Parameter | Type | Required | Description |
@@ -1311,6 +1505,8 @@ Set simulate-physics, mass override, linear and angular damping on ONE primitive
 **Returns:** `{ component: string } -- just the component name back. NOTHING is read back, so verify with get_blueprint_component_property on each property you set.`
 
 ## `set_pin_default_value`
+
+*Destructive, idempotent.*
 
 Write the literal default of an UNCONNECTED input pin and return the value read BACK off the pin. Struct pins are canonicalized: a bare GameplayTag name becomes (TagName="X") and an UNREGISTERED tag is rejected up front instead of silently landing as an empty tag; value_json nativizes any struct (and is the only way to put SEVERAL tags in a GameplayTagContainer). Array/set/map pins are refused (use a MakeArray/MakeSet/MakeMap node) and so are pins currently split into sub-pins (recombine_blueprint_pin first). A plain string is fine for an FText pin. TRAP: on a FormatText "Format" pin the literal IS written but the {argument} pins are NOT created, leaving a valid, useless node -- build the string with Concat_StrStr / Conv_StringToText instead.
 
@@ -1327,6 +1523,8 @@ Write the literal default of an UNCONNECTED input pin and return the value read 
 
 ## `set_property_access_path`
 
+*Destructive, idempotent.*
+
 Rewrite a UK2Node_PropertyAccess node's binding Path and reconstruct the node so the leaf property re-resolves and the Value pin re-types, then return the path READ BACK -- so resolved:true is real evidence the new binding points at something. It does NOT recompile: follow with compile_blueprint + get_compile_errors. reconstructed:false means the PropertyAccessEditor feature was unavailable: the path WAS written but text_path/resolved_pin stay stale until the graph reopens.
 
 | Parameter | Type | Required | Description |
@@ -1340,6 +1538,8 @@ Rewrite a UK2Node_PropertyAccess node's binding Path and reconstruct the node so
 
 ## `set_replication_condition`
 
+*Destructive, idempotent.*
+
 Set the ELifetimeCondition (COND_OwnerOnly, COND_SkipOwner, COND_InitialOnly...) that decides WHICH clients get a replicated variable, then compile. It is the second half of set_bp_variable_replication, which decides WHETHER it replicates at all: on a variable that is not Replicated/RepNotify the condition is stored and completely INERT, and the response says so through is_replicated:false plus a "note". Blueprint-declared variables only.
 
 | Parameter | Type | Required | Description |
@@ -1351,6 +1551,8 @@ Set the ELifetimeCondition (COND_OwnerOnly, COND_SkipOwner, COND_InitialOnly...)
 **Returns:** `{ blueprint_name, variable_name, condition, is_replicated, note? } -- condition is the canonical COND_ name that was stored; is_replicated:false means the setting has no effect yet.`
 
 ## `set_static_mesh_properties`
+
+*Destructive, idempotent.*
 
 Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE of a Blueprint (an OWN SCS node, not a placed actor), in one call. Does NOT compile and does NOT save. Use apply_material_to_blueprint when only a material is changing or the slot is not 0, and get_blueprint_material_info to read the resulting slots back.
 
@@ -1364,6 +1566,8 @@ Assign a static mesh asset and/or a slot-0 material to a mesh component TEMPLATE
 **Returns:** `{ component: string } -- name only, no verification: read the result with get_blueprint_material_info / get_blueprint_component_property.`
 
 ## `spawn_blueprint_actor`
+
+*Additive.*
 
 Spawn an instance of a Blueprint class as an actor and report WHICH world took it and whether the actor has AUTHORITY. The default (world absent or 'editor') places it in the EDITOR level, not in play. For anything that must exist for every player during PIE use world='server'; world='pie' is ambiguous and can land on the CLIENT, where the actor has no authority, no AI controller and no server-side existence while looking identical in the payload. The actor is NOT saved into the map: save_level afterwards for an editor-world spawn.
 
@@ -1379,6 +1583,8 @@ Spawn an instance of a Blueprint class as an actor and report WHICH world took i
 
 ## `split_blueprint_pin`
 
+*Destructive.*
+
 Split a struct-typed pin (Vector, Rotator, Transform...) into its scalar sub-pins and return their names, so each component can be wired or defaulted on its own instead of writing the whole struct literal. Refused when the schema says the pin is not splittable. Note the interaction: set_pin_default_value REFUSES a pin that is currently split -- recombine_blueprint_pin first if you want to write the struct as one value.
 
 | Parameter | Type | Required | Description |
@@ -1391,6 +1597,8 @@ Split a struct-typed pin (Vector, Rotator, Transform...) into its scalar sub-pin
 **Returns:** `{ split, sub_pins:[string] } -- sub_pins are the names to pass to connect_pins / set_pin_default_value from now on (e.g. "NewLocation_X").`
 
 ## `validate_pin_connection`
+
+*Read-only.*
 
 Dry-run the K2 schema's verdict on a pin pair WITHOUT touching the graph: returns valid plus the schema's own message (which names the incompatible types) and its raw response code. connect_pins runs the same check and then connects, so use this one to test a plan before committing a build_blueprint_graph batch whose rollback can be refused, or to find out WHY a connection was rejected without leaving anything behind.
 

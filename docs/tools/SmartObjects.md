@@ -6,6 +6,8 @@
 
 ## `add_smart_object_definition_default_behavior`
 
+*Additive.*
+
 Attach a definition-level default behavior (applied to slots without their own) to a USmartObjectDefinition; the private DefaultBehaviorDefinitions array is reached via FArrayProperty reflection.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Attach a definition-level default behavior (applied to slots without their own) 
 **Returns:** `{ definition_path: string, behavior_class: string, default_behavior_count: int, added: bool, saved: bool }`
 
 ## `add_smart_object_slot`
+
+*Additive, idempotent.*
 
 Append a named activity slot to a USmartObjectDefinition (idempotent on name).
 
@@ -29,6 +33,8 @@ Append a named activity slot to a USmartObjectDefinition (idempotent on name).
 
 ## `add_smart_object_slot_behavior_definition`
 
+*Additive.*
+
 Attach a behavior definition (class resolved by name) to a slot of a USmartObjectDefinition. The class must derive from USmartObjectBehaviorDefinition (e.g. GameplayBehaviorSmartObjectBehaviorDefinition). A behavior on every slot (or a default) makes the definition Validate()-valid.
 
 | Parameter | Type | Required | Description |
@@ -40,6 +46,8 @@ Attach a behavior definition (class resolved by name) to a slot of a USmartObjec
 **Returns:** `{ definition_path: string, slot_index: int, behavior_class: string, behavior_count: int, saved: bool }`
 
 ## `add_smart_object_slot_entrance_annotation`
+
+*Additive.*
 
 Add an entrance (entry/exit point) annotation to a slot of a USmartObjectDefinition, including its navigation/trajectory fields.
 
@@ -63,6 +71,8 @@ Add an entrance (entry/exit point) annotation to a slot of a USmartObjectDefinit
 
 ## `claim_smart_object`
 
+*Destructive.*
+
 Claim a free slot on the Smart Object component of an actor in the editor world. Returns the canonical claim_handle (LexToString) for downstream release.
 
 | Parameter | Type | Required | Description |
@@ -73,6 +83,8 @@ Claim a free slot on the Smart Object component of an actor in the editor world.
 **Returns:** `{ actor_label: string, definition_path: string, claim_handle: string, slot_id: string, is_claimed: bool, success: bool }`
 
 ## `create_smart_object_definition`
+
+*Additive.*
 
 Create (or load) a USmartObjectDefinition asset and seed it with N activity slots via the public DebugAddSlot API.
 
@@ -85,6 +97,8 @@ Create (or load) a USmartObjectDefinition asset and seed it with N activity slot
 **Returns:** `{ definition_path: string, definition_name: string, num_slots: int, created: bool, saved: bool }`
 
 ## `find_smart_objects`
+
+*Read-only.*
 
 Spatially query the SmartObject subsystem for slots within a box centered on a point (USmartObjectSubsystem::FindSmartObjects). HONEST GATE: the spatial index only populates once the subsystem runtime is initialized (BeginPlay/PIE); in the editor/headless world it is empty, so this returns success with an empty results list and a note rather than fabricating hits.
 
@@ -99,6 +113,8 @@ Spatially query the SmartObject subsystem for slots within a box centered on a p
 
 ## `get_smart_object_component_definition`
 
+*Read-only.*
+
 Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and whether it is registered.
 
 | Parameter | Type | Required | Description |
@@ -108,6 +124,8 @@ Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and
 **Returns:** `{ actor_label: string, definition: string, has_definition: bool, registered: bool }`
 
 ## `get_smart_object_definition_summary`
+
+*Read-only.*
 
 Read back the object-level state of a USmartObjectDefinition: activity tags, tag policies, user-filter presence, slot count, world-space bounds, and a structural Validate() pass with any error messages.
 
@@ -119,6 +137,8 @@ Read back the object-level state of a USmartObjectDefinition: activity tags, tag
 
 ## `get_smart_object_info`
 
+*Read-only.*
+
 Get slot count, activity tag set, and the number of registered actors for a USmartObjectDefinition.
 
 | Parameter | Type | Required | Description |
@@ -128,6 +148,8 @@ Get slot count, activity tag set, and the number of registered actors for a USma
 **Returns:** `{ definition_path: string, slot_count: int, activity_tags: [string], registered_actor_count: int }`
 
 ## `get_smart_object_slot_entrance_annotations`
+
+*Read-only.*
 
 List a slot's entrance annotations with all their fields (round-trip reader for add_smart_object_slot_entrance_annotation, including the navigation/trajectory fields).
 
@@ -140,6 +162,8 @@ List a slot's entrance annotations with all their fields (round-trip reader for 
 
 ## `get_smart_object_slots_detail`
 
+*Read-only.*
+
 Read back per-slot detail (name, enabled, offset, rotation, activity tags, behavior/data counts) of a USmartObjectDefinition.
 
 | Parameter | Type | Required | Description |
@@ -149,6 +173,8 @@ Read back per-slot detail (name, enabled, offset, rotation, activity tags, behav
 **Returns:** `{ definition_path: string, slot_count: int, slots: [{ index: int, name: string, enabled: bool, offset: [number, number, number], rotation: [number, number, number], activity_tags: [string], user_filter_is_empty: bool, behavior_count: int, behavior_classes: [string], data_count: int }] }`
 
 ## `register_smart_object_actor`
+
+*Additive.*
 
 Spawn an empty actor in the editor world, attach a USmartObjectComponent pointing at the given definition, and register it with USmartObjectSubsystem. Note: the definition must already have a behavior definition (per-slot or default) or the subsystem silently rejects the handle (see handle_valid).
 
@@ -162,6 +188,8 @@ Spawn an empty actor in the editor world, attach a USmartObjectComponent pointin
 
 ## `release_smart_object`
 
+*Destructive.*
+
 Release a Smart Object claim. The only headless-safe path is to pass actor_label so the subsystem can unregister the component (which releases any claim it holds). FSmartObjectUserHandle is private in UE 5.7, so a claim_handle-only path is not possible without a C++ extension.
 
 | Parameter | Type | Required | Description |
@@ -172,6 +200,8 @@ Release a Smart Object claim. The only headless-safe path is to pass actor_label
 **Returns:** `{ actor_label: string, released: bool } | (error: "release_smart_object: ...")`
 
 ## `remove_smart_object_definition_default_behavior`
+
+*Destructive, idempotent.*
 
 Remove a definition-level default behavior (by index) from a USmartObjectDefinition; the private DefaultBehaviorDefinitions array is reached via FArrayProperty reflection and resized through FScriptArrayHelper. Idempotent: a behavior_index past the end returns already_absent without error.
 
@@ -184,6 +214,8 @@ Remove a definition-level default behavior (by index) from a USmartObjectDefinit
 
 ## `remove_smart_object_slot`
 
+*Destructive.*
+
 Remove a slot (by index) from a USmartObjectDefinition; the private Slots array is resized via FScriptArrayHelper (reflection-based element destruct).
 
 | Parameter | Type | Required | Description |
@@ -194,6 +226,8 @@ Remove a slot (by index) from a USmartObjectDefinition; the private Slots array 
 **Returns:** `{ definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool }`
 
 ## `remove_smart_object_slot_behavior_definition`
+
+*Destructive, idempotent.*
 
 Remove a behavior definition from a slot of a USmartObjectDefinition by its index in the slot's BehaviorDefinitions array. Idempotent: a behavior_index past the end returns already_absent without error.
 
@@ -207,6 +241,8 @@ Remove a behavior definition from a slot of a USmartObjectDefinition by its inde
 
 ## `remove_smart_object_slot_entrance_annotation`
 
+*Destructive, idempotent.*
+
 Remove an entrance annotation (by its index among the slot's entrance annotations) from a slot of a USmartObjectDefinition. entrance_index counts only FSmartObjectSlotEntranceAnnotation entries in the slot's DefinitionData (mirror of add_smart_object_slot_entrance_annotation, inverted). Idempotent: an entrance_index past the number of entrances returns already_absent without error.
 
 | Parameter | Type | Required | Description |
@@ -219,6 +255,8 @@ Remove an entrance annotation (by its index among the slot's entrance annotation
 
 ## `set_component_definition`
 
+*Destructive, idempotent.*
+
 Set (change) the USmartObjectDefinition on the USmartObjectComponent of an actor in the editor world.
 
 | Parameter | Type | Required | Description |
@@ -229,6 +267,8 @@ Set (change) the USmartObjectDefinition on the USmartObjectComponent of an actor
 **Returns:** `{ actor_label: string, definition_path: string, definition: string, registered: bool, set: bool }`
 
 ## `set_smart_object_definition_activity_tags`
+
+*Destructive, idempotent.*
 
 Set the object-level activity tags of a USmartObjectDefinition, and optionally the tag merging/filtering policies.
 
@@ -243,6 +283,8 @@ Set the object-level activity tags of a USmartObjectDefinition, and optionally t
 
 ## `set_smart_object_definition_user_tag_filter`
 
+*Destructive, idempotent.*
+
 Set the object-level user tag filter (a gameplay tag query) of a USmartObjectDefinition, built from a tag list and a match mode.
 
 | Parameter | Type | Required | Description |
@@ -254,6 +296,8 @@ Set the object-level user tag filter (a gameplay tag query) of a USmartObjectDef
 **Returns:** `{ definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }`
 
 ## `set_smart_object_slot_activity_tags`
+
+*Destructive, idempotent.*
 
 Replace a slot's activity tags (which activity it supports) on a USmartObjectDefinition, addressed by slot_index.
 
@@ -267,6 +311,8 @@ Replace a slot's activity tags (which activity it supports) on a USmartObjectDef
 
 ## `set_smart_object_slot_enabled`
 
+*Destructive, idempotent.*
+
 Toggle whether a slot is initially enabled on a USmartObjectDefinition.
 
 | Parameter | Type | Required | Description |
@@ -279,6 +325,8 @@ Toggle whether a slot is initially enabled on a USmartObjectDefinition.
 
 ## `set_smart_object_slot_runtime_tags`
 
+*Destructive, idempotent.*
+
 Replace a slot's initial runtime tags (FGameplayTagContainer) on a USmartObjectDefinition, addressed by slot_index. Tags not registered in the project are skipped.
 
 | Parameter | Type | Required | Description |
@@ -290,6 +338,8 @@ Replace a slot's initial runtime tags (FGameplayTagContainer) on a USmartObjectD
 **Returns:** `{ definition_path: string, slot_index: int, runtime_tags: [string], saved: bool }`
 
 ## `set_smart_object_slot_transform`
+
+*Destructive, idempotent.*
 
 Set a slot's local offset and/or rotation relative to the parent object.
 
@@ -304,6 +354,8 @@ Set a slot's local offset and/or rotation relative to the parent object.
 
 ## `set_smart_object_slot_user_tag_filter`
 
+*Destructive, idempotent.*
+
 Set a slot's user tag filter (a gameplay tag query controlling which users may use it), built from a tag list and a match mode.
 
 | Parameter | Type | Required | Description |
@@ -316,6 +368,8 @@ Set a slot's user tag filter (a gameplay tag query controlling which users may u
 **Returns:** `{ definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }`
 
 ## `use_smart_object`
+
+*Destructive, idempotent.*
 
 Claim a free slot on an actor's SmartObject component and immediately mark it occupied (USmartObjectSubsystem::MarkSlotAsOccupied), driving a behavior definition. Single-call claim+occupy keyed by actor_label (an FSmartObjectClaimHandle cannot be rebuilt from a string, so a two-step claim_handle path is impossible). HONEST GATE: the component handle only registers once the subsystem runtime is initialized (PIE/BeginPlay); headless it is invalid and this returns a clean error. Idempotent: an already-occupied slot returns already_occupied without re-occupying.
 

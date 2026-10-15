@@ -6,6 +6,8 @@
 
 ## `inspect_subsystem_instance`
 
+*Read-only.*
+
 Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the instance via the lifetime hint (engine/gameinstance/world/editor/localplayer) + subsystem class.
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the 
 | `player_index` | number | no | Local player index, used only when lifetime is "localplayer" (default 0). |
 
 ## `list_local_player_subsystems`
+
+*Read-only.*
 
 Enumerate every live ULocalPlayerSubsystem-derived instance across all local players in the editor world's GameInstance.
 

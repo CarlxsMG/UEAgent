@@ -6,6 +6,8 @@
 
 ## `add_attach_track`
 
+*Additive, idempotent.*
+
 Add a Sequencer 3D-Attach track on a binding so it follows another binding (e.g. a prop attached to a character's hand socket) over the section's range.  The attachee binding owns a UMovieScene3DAttachTrack; AddConstraint creates an attach section pointing at the target binding.  Idempotent by (target_binding_guid, start_frame).
 
 | Parameter | Type | Required | Description |
@@ -22,6 +24,8 @@ Add a Sequencer 3D-Attach track on a binding so it follows another binding (e.g.
 
 ## `add_audio_section`
 
+*Additive.*
+
 Adds (or reuses) a root audio track on a Level Sequence and optionally a section.  Finds an existing root UMovieSceneAudioTrack or adds one. If sound_path loads a USoundBase, a sound section is placed at the playback range start.
 
 | Parameter | Type | Required | Description |
@@ -32,6 +36,8 @@ Adds (or reuses) a root audio track on a Level Sequence and optionally a section
 **Returns:** `{ sequence_name: string, track_class: string, audio_track: string, audio_track_index: int (the index set_audio_track_volume / set_audio_track_pitch take), track_added: bool, sound_loaded: bool, section_added: bool, section_count: int, sound_path: string, saved: bool }`
 
 ## `add_camera_cut`
+
+*Additive.*
 
 Adds a camera cut section bound to a camera binding over a frame range.  Creates the camera cut track if it does not yet exist.
 
@@ -45,6 +51,8 @@ Adds a camera cut section bound to a camera binding over a frame range.  Creates
 **Returns:** `{ sequence_name: string, camera_binding_guid: string, start_frame: int, end_frame: int, section_class: string, section_count: int, saved: bool }`
 
 ## `add_camera_cut_section`
+
+*Additive.*
 
 Append a new UMovieSceneCameraCutSection bound to the given camera binding GUID over a frame range.
 
@@ -60,6 +68,8 @@ Append a new UMovieSceneCameraCutSection bound to the given camera binding GUID 
 
 ## `add_camera_cut_track`
 
+*Additive.*
+
 Adds (or returns the existing) camera cut track on a Level Sequence's movie scene.
 
 | Parameter | Type | Required | Description |
@@ -69,6 +79,8 @@ Adds (or returns the existing) camera cut track on a Level Sequence's movie scen
 **Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_count: int, saved: bool }`
 
 ## `add_camera_focus_track`
+
+*Additive.*
 
 Add a Float property track on ACineCameraActor::ManualFocusDistance to a Level Sequence binding.  Thin domain wrapper over add_property_track.
 
@@ -81,6 +93,8 @@ Add a Float property track on ACineCameraActor::ManualFocusDistance to a Level S
 **Returns:** `Forwarded response from add_property_track: { sequence_name, binding_guid, property_type, property_name, track_class, section_class, section_created, section_count, saved }`
 
 ## `add_component_material_track`
+
+*Additive.*
 
 Add a component material parameter track to an object binding (animates an indexed material slot), optionally keying a scalar parameter (asset-level, headless).
 
@@ -97,6 +111,8 @@ Add a component material parameter track to an object binding (animates an index
 
 ## `add_event_track_section`
 
+*Additive.*
+
 Append a new UMovieSceneEventSection to the existing UMovieSceneEventTrack on the sequence.
 
 | Parameter | Type | Required | Description |
@@ -110,6 +126,8 @@ Append a new UMovieSceneEventSection to the existing UMovieSceneEventTrack on th
 
 ## `add_event_track_to_sequence`
 
+*Additive.*
+
 Adds a root event track (UMovieSceneEventTrack) to a Level Sequence.
 
 | Parameter | Type | Required | Description |
@@ -120,6 +138,8 @@ Adds a root event track (UMovieSceneEventTrack) to a Level Sequence.
 
 ## `add_fade_track_to_sequence`
 
+*Additive.*
+
 Adds (or returns the existing) root fade track with a fade section spanning the playback range.
 
 | Parameter | Type | Required | Description |
@@ -129,6 +149,8 @@ Adds (or returns the existing) root fade track with a fade section spanning the 
 **Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, saved: bool }`
 
 ## `add_keyframe_to_property_track`
+
+*Additive.*
 
 Adds a keyframe to a property track's section channel(s) at the given time.  The property track must already exist (call add_property_track first). The value is keyed onto every channel of the section:
 
@@ -144,6 +166,8 @@ Adds a keyframe to a property track's section channel(s) at the given time.  The
 
 ## `add_level_visibility_track`
 
+*Additive.*
+
 Add a level-visibility track + section controlling streamed-level visibility over the playback range.
 
 | Parameter | Type | Required | Description |
@@ -155,6 +179,8 @@ Add a level-visibility track + section controlling streamed-level visibility ove
 **Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, visibility: string, level_count: int, saved: bool }`
 
 ## `add_marked_frame`
+
+*Additive.*
 
 Adds a user marked frame to a Level Sequence's movie scene.
 
@@ -170,6 +196,8 @@ Adds a user marked frame to a Level Sequence's movie scene.
 
 ## `add_material_parameter_collection_track`
 
+*Additive.*
+
 Add a Material Parameter Collection master track bound to an MPC asset, optionally keying a scalar parameter (asset-level, headless).
 
 | Parameter | Type | Required | Description |
@@ -184,6 +212,8 @@ Add a Material Parameter Collection master track bound to an MPC asset, optional
 
 ## `add_property_track`
 
+*Additive.*
+
 Adds a typed property track + section to a Level Sequence binding.  The track animates a named property on the bound object. A section spanning the movie scene's playback range is created so keys evaluate.
 
 | Parameter | Type | Required | Description |
@@ -197,6 +227,8 @@ Adds a typed property track + section to a Level Sequence binding.  The track an
 
 ## `add_sequence_folder`
 
+*Additive, idempotent.*
+
 Create a Sequencer outliner folder on a Level Sequence's movie scene (root folder, or a child of a named parent). Idempotent by name.
 
 | Parameter | Type | Required | Description |
@@ -209,6 +241,8 @@ Create a Sequencer outliner folder on a Level Sequence's movie scene (root folde
 **Returns:** `{ sequence_path: string, folder_name: string, parent_folder: string, created: bool, already_existed: bool, root_folder_count: int, saved: bool }`
 
 ## `add_shot_section`
+
+*Additive.*
 
 Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot track.  Creates the cinematic shot track if it does not exist yet.
 
@@ -224,6 +258,8 @@ Adds a cinematic shot section (UMovieSceneCinematicShotSection) to the shot trac
 
 ## `add_shot_track`
 
+*Additive.*
+
 Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
 
 | Parameter | Type | Required | Description |
@@ -234,6 +270,8 @@ Adds a cinematic shot track (UMovieSceneCinematicShotTrack) to a Level Sequence.
 **Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_count: int, saved: bool }`
 
 ## `add_skeletal_animation_track`
+
+*Additive.*
 
 Adds a skeletal-animation track to a Level Sequence binding.  If anim_path loads a UAnimSequenceBase (a UAnimMontage qualifies), a section is added starting at the playback range start; otherwise just the empty track.
 
@@ -247,6 +285,8 @@ Adds a skeletal-animation track to a Level Sequence binding.  If anim_path loads
 
 ## `add_slomo_track`
 
+*Additive.*
+
 Add (or return) the root time-dilation (slomo) track with a float section over the playback range, setting the dilation value at a frame. Asset-level/headless (NOT the PIE-only player play-rate).
 
 | Parameter | Type | Required | Description |
@@ -259,6 +299,8 @@ Add (or return) the root time-dilation (slomo) track with a float section over t
 
 ## `add_spawnable_to_sequence`
 
+*Additive.*
+
 Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
 
 | Parameter | Type | Required | Description |
@@ -269,6 +311,8 @@ Adds a spawnable actor binding to a Level Sequence (asset-model, headless).
 **Returns:** `{ sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, saved: bool }`
 
 ## `add_subcomponent_possessable`
+
+*Additive.*
 
 Add a possessable for a subcomponent type, parented to an existing binding.
 
@@ -283,6 +327,8 @@ Add a possessable for a subcomponent type, parented to an existing binding.
 
 ## `add_subsequence_track`
 
+*Additive.*
+
 Adds a subsequence (UMovieSceneSubTrack) to a Level Sequence and nests a sub section.
 
 | Parameter | Type | Required | Description |
@@ -296,6 +342,8 @@ Adds a subsequence (UMovieSceneSubTrack) to a Level Sequence and nests a sub sec
 **Returns:** `{ sequence_path: string, track_class: string, track_added: bool, section_added: bool, inner_sequence_created: bool, inner_sequence_error?: string (why the inner sequence could not be created), start_frame: int, duration: int, section_count: int, sub_sequence_path: string, sub_sequence_name: string, saved: bool }`
 
 ## `add_transform_keyframe`
+
+*Additive.*
 
 Adds one transform keyframe (9 double channels) at a time on a binding's transform section.  Requires a transform track to already exist (call add_transform_track_to_binding first).
 
@@ -312,6 +360,8 @@ Adds one transform keyframe (9 double channels) at a time on a binding's transfo
 
 ## `add_transform_track_to_binding`
 
+*Additive.*
+
 Adds a 3D transform track (with a section spanning the playback range) to a binding.
 
 | Parameter | Type | Required | Description |
@@ -322,6 +372,8 @@ Adds a 3D transform track (with a section spanning the playback range) to a bind
 **Returns:** `{ sequence_name: string, binding_guid: string, track_class: string, track_added: bool, section_created: bool, section_count: int, saved: bool }`
 
 ## `add_visibility_track`
+
+*Additive.*
 
 Add a Visibility property track on bVisible to a Level Sequence binding.  Thin domain wrapper over add_property_track.
 
@@ -334,6 +386,8 @@ Add a Visibility property track on bVisible to a Level Sequence binding.  Thin d
 **Returns:** `Forwarded response from add_property_track: { sequence_name, binding_guid, property_type, property_name, track_class, section_class, section_created, section_count, saved }`
 
 ## `add_weighted_value_keyframe`
+
+*Additive.*
 
 Write a single key onto an existing float property track's first section (cubic / linear / constant interp).
 
@@ -352,6 +406,8 @@ Write a single key onto an existing float property track's first section (cubic 
 
 ## `add_weighted_value_track`
 
+*Additive.*
+
 Add a Float property track on a numeric property (weight / alpha / scalar blend) to a Level Sequence binding.  Thin domain wrapper over add_property_track.
 
 | Parameter | Type | Required | Description |
@@ -364,6 +420,8 @@ Add a Float property track on a numeric property (weight / alpha / scalar blend)
 **Returns:** `Forwarded response from add_property_track: { sequence_name, binding_guid, property_type, property_name, track_class, section_class, section_created, section_count, saved }`
 
 ## `bind_actor_property_to_sequence`
+
+*Destructive.*
 
 Bind an editor-world actor to a Level Sequence (possessable) and add a typed property track to its binding.  Combined bind+animate flow.
 
@@ -379,6 +437,8 @@ Bind an editor-world actor to a Level Sequence (possessable) and add a typed pro
 
 ## `bind_actor_to_sequence`
 
+*Destructive.*
+
 Adds a possessable binding to a Level Sequence for an existing editor-world actor.
 
 | Parameter | Type | Required | Description |
@@ -389,6 +449,8 @@ Adds a possessable binding to a Level Sequence for an existing editor-world acto
 **Returns:** `{ sequence_name: string, actor_name: string, binding_guid: string, display_name: string, possessable: bool, saved: bool }`
 
 ## `bind_component_property_to_sequence`
+
+*Destructive.*
 
 Bind an editor-world actor's component to a Level Sequence (possessable, parented to actor's binding) and add a typed property track to its binding.
 
@@ -406,6 +468,8 @@ Bind an editor-world actor's component to a Level Sequence (possessable, parente
 
 ## `bind_component_to_sequence`
 
+*Destructive.*
+
 Adds a possessable binding for an actor's component to a Level Sequence.  Resolves the actor by label in the current editor world, finds the named component (by component name, class name, or "root"), adds a possessable for the component class, binds the component, and parents the component binding to the actor's binding when the actor is already possessed.
 
 | Parameter | Type | Required | Description |
@@ -419,6 +483,8 @@ Adds a possessable binding for an actor's component to a Level Sequence.  Resolv
 
 ## `clear_marked_frames`
 
+*Destructive, idempotent.*
+
 Removes ALL user marked frames from a Level Sequence's movie scene.
 
 | Parameter | Type | Required | Description |
@@ -428,6 +494,8 @@ Removes ALL user marked frames from a Level Sequence's movie scene.
 **Returns:** `{ sequence_name: string, removed_count: int, already_empty: bool, marked_frame_count: int, saved: bool }`
 
 ## `create_cine_camera_in_sequence`
+
+*Additive.*
 
 Creates a spawnable CineCameraActor binding, keys its transform, and binds a camera cut to it.  High-value one-shot: spawnable CineCameraActor + transform track keyed at frame 0 + a camera cut spanning the playback range.
 
@@ -440,6 +508,8 @@ Creates a spawnable CineCameraActor binding, keys its transform, and binds a cam
 **Returns:** `{ sequence_name: string, binding_guid: string, display_name: string, class_name: string, spawnable: bool, transform_keyed: bool, camera_cut_added: bool, saved: bool }`
 
 ## `create_level_sequence`
+
+*Additive.*
 
 Create a new Level Sequence asset with a specified duration and frame rate
 
@@ -454,6 +524,8 @@ Create a new Level Sequence asset with a specified duration and frame rate
 
 ## `delete_level_sequence`
 
+*Destructive.*
+
 Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Succeeds only when actually_deleted: the delete reported success, the asset is no longer registered and its file is gone from disk (a read-only file, or one another process holds open, stays behind and fails the call).
 
 | Parameter | Type | Required | Description |
@@ -463,6 +535,8 @@ Deletes a Level Sequence asset permanently, choosing the first sequence under /G
 **Returns:** `{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, file_still_exists: bool, actually_deleted: bool }`
 
 ## `duplicate_keyframe`
+
+*Additive.*
 
 Clone an existing key (Float / Vector / Color / Bool channel) from source_time_seconds to dest_time_seconds, preserving the original value.
 
@@ -479,6 +553,8 @@ Clone an existing key (Float / Vector / Color / Bool channel) from source_time_s
 
 ## `get_audio_section_properties`
 
+*Read-only.*
+
 Read the playback properties of an audio section (UMovieSceneAudioSection), resolved like set_audio_section_properties (root audio track + section_index).  Pure reader (no transaction/save).  looping reads IsRepeating() (the engine's loop query); volume/pitch are sampled at frame 0; volume_key_count/pitch_key_count report the animated-channel key counts.
 
 | Parameter | Type | Required | Description |
@@ -491,6 +567,8 @@ Read the playback properties of an audio section (UMovieSceneAudioSection), reso
 
 ## `get_binding_tracks`
 
+*Read-only.*
+
 List all tracks for a given binding GUID with class, display name, section count.
 
 | Parameter | Type | Required | Description |
@@ -501,6 +579,8 @@ List all tracks for a given binding GUID with class, display name, section count
 **Returns:** `{ sequence_name: string, binding_guid: string, tracks: [{class, display_name, section_count, is_empty}], track_count: int }`
 
 ## `get_channel_keyframes`
+
+*Read-only.*
 
 Read every keyframe on one channel of a binding's section (resolved like set_section_easing).  Pure reader (no transaction/save).  channel_type selects which channel proxy view to index: "double" (transform loc/rot/scale, default), "float" (property/color), "bool" (visibility).  Bool keys omit interp/tangent fields.
 
@@ -520,6 +600,8 @@ Read every keyframe on one channel of a binding's section (resolved like set_sec
 
 ## `get_level_sequence_status_runtime`
 
+*Read-only.*
+
 Retrieve the current playback status of an active Level Sequence player
 
 | Parameter | Type | Required | Description |
@@ -529,6 +611,8 @@ Retrieve the current playback status of an active Level Sequence player
 **Returns:** `{ player_key: string, status: string, is_playing: bool, is_paused: bool, is_reversed: bool, current_time: number, duration: number, frame_rate: number, playback_progress: number }`
 
 ## `get_level_sequences`
+
+*Read-only.*
 
 List all Level Sequences in the project, optionally filtered by package path
 
@@ -541,6 +625,8 @@ List all Level Sequences in the project, optionally filtered by package path
 
 ## `get_marked_frames`
 
+*Read-only.*
+
 Lists every user marked frame in a Level Sequence's movie scene.
 
 | Parameter | Type | Required | Description |
@@ -550,6 +636,8 @@ Lists every user marked frame in a Level Sequence's movie scene.
 **Returns:** `{ sequence_name: string, marked_frames: [{index, frame, label, is_determinism_fence, is_inclusive}], marked_frame_count: int, marked_frames_locked: bool }`
 
 ## `get_section_info`
+
+*Read-only.*
 
 Get detailed info about a sequencer section: range, easing, completion mode, blend type, lock/infinite state.
 
@@ -567,6 +655,8 @@ Get detailed info about a sequencer section: range, easing, completion mode, ble
 
 ## `get_sequence_bindings`
 
+*Read-only.*
+
 Lists every object binding in a Level Sequence with its tracks.
 
 | Parameter | Type | Required | Description |
@@ -577,6 +667,8 @@ Lists every object binding in a Level Sequence with its tracks.
 
 ## `get_sequence_duration`
 
+*Read-only.*
+
 Reads the playback range of a Level Sequence, the first under /Game whose asset name matches (case-insensitive), without changing it. Returns duration in seconds, and start_frame and end_frame in tick-resolution frames, not display frames; get_timeline_info also gives both rates.
 
 | Parameter | Type | Required | Description |
@@ -586,6 +678,8 @@ Reads the playback range of a Level Sequence, the first under /Game whose asset 
 **Returns:** `{ sequence_name: string, duration: number, start_frame: int, end_frame: int }`
 
 ## `get_sequence_folders`
+
+*Read-only.*
 
 Read the Sequencer folder tree of a Level Sequence (root folders, recursively, with child tracks + bindings). Read-only.
 
@@ -598,6 +692,8 @@ Read the Sequencer folder tree of a Level Sequence (root folders, recursively, w
 
 ## `get_sequence_frame_rate`
 
+*Read-only.*
+
 Reads the tick resolution of a Level Sequence (found by asset name under /Game), NOT its display rate, without changing it. Returns frame_rate as a decimal plus numerator and denominator. Read the display rate with get_timeline_info; change both with set_sequence_frame_rate.
 
 | Parameter | Type | Required | Description |
@@ -607,6 +703,8 @@ Reads the tick resolution of a Level Sequence (found by asset name under /Game),
 **Returns:** `{ sequence_name: string, frame_rate: number, numerator: int, denominator: int }`
 
 ## `get_sequence_master_tracks`
+
+*Read-only.*
 
 List the master tracks and binding tracks of a Level Sequence.  A track is a "master track" if it has no binding GUID (applies to the sequence globally, e.g. a FadeTrack, AudioTrack, EventTrack). Binding tracks have a non-empty FGuid. This command returns both lists with class, name, section_count, binding_guid fields.
 
@@ -619,6 +717,8 @@ List the master tracks and binding tracks of a Level Sequence.  A track is a "ma
 
 ## `get_sequence_possessables`
 
+*Read-only.*
+
 List the possessable bindings of a Level Sequence found by asset name under /Game (first match): GUID, name, possessed class and parent GUID of each, plus possessable_count. Read-only; spawnables are listed by get_sequence_spawnables, and every binding with its tracks by get_sequence_bindings.
 
 | Parameter | Type | Required | Description |
@@ -629,6 +729,8 @@ List the possessable bindings of a Level Sequence found by asset name under /Gam
 
 ## `get_sequence_spawnables`
 
+*Read-only.*
+
 List all spawnables in a level sequence with GUID, name, template class.
 
 | Parameter | Type | Required | Description |
@@ -638,6 +740,8 @@ List all spawnables in a level sequence with GUID, name, template class.
 **Returns:** `{ sequence_name: string, spawnables: [{guid, name, template_class, spawnable, spawn_ownership}], spawnable_count: int }`
 
 ## `get_sequence_track_count`
+
+*Read-only.*
 
 Flat readback of the total/master/binding track counts and per-class breakdown.
 
@@ -650,6 +754,8 @@ Flat readback of the total/master/binding track counts and per-class breakdown.
 
 ## `get_sequence_tracks`
 
+*Read-only.*
+
 Read the master and binding tracks for a Level Sequence
 
 | Parameter | Type | Required | Description |
@@ -660,6 +766,8 @@ Read the master and binding tracks for a Level Sequence
 
 ## `get_timeline_info`
 
+*Read-only.*
+
 Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.
 
 | Parameter | Type | Required | Description |
@@ -669,6 +777,8 @@ Reads the timeline summary of a Level Sequence asset (first asset-name match und
 **Returns:** `{ sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int }`
 
 ## `move_keyframe`
+
+*Destructive, idempotent.*
 
 Move one keyframe (located by 'index' or 'frame') to new_frame on a binding's section channel, preserving its value/interp/tangents.  Idempotent: MoveKey(bRemoveDuplicateKeys=true) collapses a duplicate when re-moved onto an existing frame.  channel_type selects the proxy view ("double" default | "float" | "bool").
 
@@ -692,6 +802,8 @@ Move one keyframe (located by 'index' or 'frame') to new_frame on a binding's se
 
 ## `move_track_to_folder`
 
+*Destructive, idempotent.*
+
 Move a master track (by class) or an object-binding (by GUID) into a named Sequencer folder. Idempotent.
 
 | Parameter | Type | Required | Description |
@@ -707,6 +819,8 @@ Move a master track (by class) or an object-binding (by GUID) into a named Seque
 
 ## `pause_level_sequence_runtime`
 
+*Destructive.*
+
 Pauses, at its current position, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned. Players live in the PIE or game world and stop resolving once it ends. Returns player_key, paused, playing and current_time in seconds; read it later with get_level_sequence_status_runtime.
 
 | Parameter | Type | Required | Description |
@@ -717,6 +831,8 @@ Pauses, at its current position, the runtime ULevelSequencePlayer whose player_k
 
 ## `pause_timeline`
 
+*Destructive.*
+
 Pause playback in the open Sequencer editor on a target sequence
 
 | Parameter | Type | Required | Description |
@@ -726,6 +842,8 @@ Pause playback in the open Sequencer editor on a target sequence
 **Returns:** `{ sequence_name: string, playing: bool, paused: bool }`
 
 ## `play_level_sequence_runtime`
+
+*Destructive.*
 
 Create a runtime player and start playback of a Level Sequence
 
@@ -738,6 +856,8 @@ Create a runtime player and start playback of a Level Sequence
 
 ## `play_timeline`
 
+*Destructive.*
+
 Start playback in the open Sequencer editor on a target sequence
 
 | Parameter | Type | Required | Description |
@@ -747,6 +867,8 @@ Start playback in the open Sequencer editor on a target sequence
 **Returns:** `{ sequence_name: string, playing: bool }`
 
 ## `remove_keyframe`
+
+*Destructive.*
 
 Remove one keyframe (located by 'index' or 'frame') from a binding's section channel (resolved like move_keyframe).  The out-of-range guard is applied BEFORE RemoveKey because TMovieSceneChannelData::RemoveKey has a fatal check(IsValidIndex) -- an invalid locator returns a clean error, never a crash.  channel_type selects the proxy view ("double" default | "float" | "bool").
 
@@ -769,6 +891,8 @@ Remove one keyframe (located by 'index' or 'frame') from a binding's section cha
 
 ## `remove_marked_frame`
 
+*Destructive.*
+
 Removes one user marked frame from a Level Sequence, by index, frame, or label.
 
 | Parameter | Type | Required | Description |
@@ -781,6 +905,8 @@ Removes one user marked frame from a Level Sequence, by index, frame, or label.
 **Returns:** `{ sequence_name: string, removed_index: int, already_removed: bool, marked_frame_count: int, saved: bool }`
 
 ## `remove_section`
+
+*Destructive.*
 
 Remove a section from a sequencer track by index.  Resolves the section like set_section_active (binding_guid + track_type/index + section_index), then removes it from its owning track via UMovieSceneTrack::RemoveSectionAt. One delete for what every per-track add_*_section adds.
 
@@ -798,6 +924,8 @@ Remove a section from a sequencer track by index.  Resolves the section like set
 
 ## `remove_sequence_binding`
 
+*Destructive.*
+
 Remove a spawnable or possessable binding, found by GUID, from a Level Sequence named by asset name under /Game, then save the sequence; a failed save returns success false. Fails when the GUID is not a spawnable or possessable of the sequence. Returns removed_as; get GUIDs from get_sequence_bindings.
 
 | Parameter | Type | Required | Description |
@@ -808,6 +936,8 @@ Remove a spawnable or possessable binding, found by GUID, from a Level Sequence 
 **Returns:** `{ sequence_name: string, binding_guid: string, removed: bool, removed_as: string, saved: bool }`
 
 ## `remove_sequence_folder`
+
+*Destructive, idempotent.*
 
 Remove a Sequencer outliner folder (root, or a named child of parent_folder) from a Level Sequence's movie scene. Inverse of add_sequence_folder; idempotent by name (already-absent is success, not error).
 
@@ -822,6 +952,8 @@ Remove a Sequencer outliner folder (root, or a named child of parent_folder) fro
 
 ## `remove_sequence_track`
 
+*Destructive.*
+
 Delete any track from a sequence by display name OR exact class name (optionally filtered by track_class).
 
 | Parameter | Type | Required | Description |
@@ -834,6 +966,8 @@ Delete any track from a sequence by display name OR exact class name (optionally
 **Returns:** `{ sequence_path: string, track_name: string, track_class: string, sections_removed: int, removed: bool, saved: bool }`
 
 ## `set_attach_section_rules`
+
+*Destructive, idempotent.*
 
 Set the attach/detach transform rules on a Sequencer 3D-attach section (created by add_attach_track).  The 6 rules (location/rotation/scale x attach/detach) control how the attachee's transform is preserved when the attach begins/ends. Only the supplied rules change (applied_count) and all 6 are read back. The section is resolved like get_section_info (binding_guid + track_index + section_index).
 
@@ -857,6 +991,8 @@ Set the attach/detach transform rules on a Sequencer 3D-attach section (created 
 
 ## `set_audio_section_properties`
 
+*Destructive, idempotent.*
+
 Set playback properties on an audio section (UMovieSceneAudioSection).  Optionally swaps the sound and toggles loop/play-until-finished/subtitle/attenuation flags. SetAttenuationSettings is a no-op at eval unless override_attenuation is true, so the override flag is applied first.
 
 | Parameter | Type | Required | Description |
@@ -875,6 +1011,8 @@ Set playback properties on an audio section (UMovieSceneAudioSection).  Optional
 
 ## `set_audio_section_start_offset`
 
+*Destructive, idempotent.*
+
 Set the StartFrameOffset on an existing UMovieSceneAudioSection (skip-into-clip).
 
 | Parameter | Type | Required | Description |
@@ -888,6 +1026,8 @@ Set the StartFrameOffset on an existing UMovieSceneAudioSection (skip-into-clip)
 **Returns:** `{ sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, applied: bool, saved: bool }`
 
 ## `set_audio_track_pitch`
+
+*Destructive, idempotent.*
 
 Set the PitchMultiplier channel on an audio section (default value or at a specific time).
 
@@ -903,6 +1043,8 @@ Set the PitchMultiplier channel on an audio section (default value or at a speci
 
 ## `set_audio_track_volume`
 
+*Destructive, idempotent.*
+
 Set the SoundVolume channel on an audio section (default value or at a specific time).
 
 | Parameter | Type | Required | Description |
@@ -916,6 +1058,8 @@ Set the SoundVolume channel on an audio section (default value or at a specific 
 **Returns:** `{ sequence_name: string, audio_track_index: int, section_index: int, volume: float, channel_name: string, key_count: int, keys_written: int, saved: bool }`
 
 ## `set_binding_channel_keyframe_interp`
+
+*Destructive, idempotent.*
 
 Set the interpolation mode, tangent mode, tangents and/or value of one keyframe on a binding's section channel (resolved like set_section_easing).  Like set_keyframe_interpolation but for per-binding channels: transform "double" (default) or property "float".  Bool channels have no interp/tangent and are rejected.  Idempotent (writing the same fields = same state).
 
@@ -943,6 +1087,8 @@ Set the interpolation mode, tangent mode, tangents and/or value of one keyframe 
 
 ## `set_keyframe_interpolation`
 
+*Destructive, idempotent.*
+
 Set the interpolation mode, tangent mode and tangents of an existing keyframe on a master float track's channel (asset-level, headless).
 
 | Parameter | Type | Required | Description |
@@ -960,6 +1106,8 @@ Set the interpolation mode, tangent mode and tangents of an existing keyframe on
 
 ## `set_level_sequence_time_runtime`
 
+*Destructive, idempotent.*
+
 Set the playback time of an active Level Sequence player
 
 | Parameter | Type | Required | Description |
@@ -970,6 +1118,8 @@ Set the playback time of an active Level Sequence player
 **Returns:** `{ player_key: string, requested_time: number, actual_time: number, frame_rate: number }`
 
 ## `set_marked_frames_locked`
+
+*Destructive, idempotent.*
 
 Sets whether a Level Sequence's user marked frames are locked.
 
@@ -982,6 +1132,8 @@ Sets whether a Level Sequence's user marked frames are locked.
 
 ## `set_playback_range_locked`
 
+*Destructive, idempotent.*
+
 Sets whether a Level Sequence's playback range is locked (UMovieScene::SetPlaybackRangeLocked).  Overwrite-setter (naturally idempotent); the locked flag is read back via IsPlaybackRangeLocked().
 
 | Parameter | Type | Required | Description |
@@ -992,6 +1144,8 @@ Sets whether a Level Sequence's playback range is locked (UMovieScene::SetPlayba
 **Returns:** `{ sequence_name: string, locked: bool, saved: bool }`
 
 ## `set_property_track_keyframe_count`
+
+*Destructive, idempotent.*
 
 Resize a property track's first section to exactly N keys evenly spaced from the section start, all carrying the same default value.
 
@@ -1006,6 +1160,8 @@ Resize a property track's first section to exactly N keys evenly spaced from the
 **Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, saved: bool }`
 
 ## `set_section_active`
+
+*Destructive, idempotent.*
 
 Toggle whether a sequencer section is active (evaluated) or muted.  Maps to UMovieSceneSection::SetIsActive; reports the actual is_active read back (SetIsActive is a no-op on a LOCKED section).
 
@@ -1024,6 +1180,8 @@ Toggle whether a sequencer section is active (evaluated) or muted.  Maps to UMov
 
 ## `set_section_blend_type`
 
+*Destructive, idempotent.*
+
 Set the blend type on a sequencer section (absolute|additive|relative|additive_from_base|override).
 
 | Parameter | Type | Required | Description |
@@ -1040,6 +1198,8 @@ Set the blend type on a sequencer section (absolute|additive|relative|additive_f
 **Returns:** `{ sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool }`
 
 ## `set_section_color`
+
+*Destructive, idempotent.*
 
 Set the editor color tint of a sequencer section (UMovieSceneSection::SetColorTint).  The tint is WITH_EDITORONLY_DATA (a no-op in cooked/no-editor-data builds); in the editor it persists on the asset.
 
@@ -1061,6 +1221,8 @@ Set the editor color tint of a sequencer section (UMovieSceneSection::SetColorTi
 
 ## `set_section_completion_mode`
 
+*Destructive, idempotent.*
+
 Set how a sequencer section handles state when no longer evaluated (keep_state|restore_state|project_default).
 
 | Parameter | Type | Required | Description |
@@ -1077,6 +1239,8 @@ Set how a sequencer section handles state when no longer evaluated (keep_state|r
 **Returns:** `{ sequence_path: string, completion_mode: string, set: bool, saved: bool }`
 
 ## `set_section_easing`
+
+*Destructive, idempotent.*
 
 Set ease-in/ease-out durations (in frames) on a sequencer section.
 
@@ -1097,6 +1261,8 @@ Set ease-in/ease-out durations (in frames) on a sequencer section.
 
 ## `set_section_locked`
 
+*Destructive, idempotent.*
+
 Lock or unlock a sequencer section.  Maps to UMovieSceneSection::SetIsLocked; a locked section cannot be modified by other edit ops, so lock LAST in an edit chain.
 
 | Parameter | Type | Required | Description |
@@ -1113,6 +1279,8 @@ Lock or unlock a sequencer section.  Maps to UMovieSceneSection::SetIsLocked; a 
 **Returns:** `{ sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool }`
 
 ## `set_section_pre_post_rollout`
+
+*Destructive, idempotent.*
 
 Set pre-roll and/or post-roll frames on a sequencer section.  Pre-roll = frames the section evaluates BEFORE its visible range. Post-roll = frames the section evaluates AFTER its visible range. Both are stored as FFrameNumber on UMovieSceneSection.  Pass at least one of pre_roll_frames or post_roll_frames (a non-None value). A 0 value means "no roll" (clears the roll window). The values are written via the inline SetPreRollFrames / SetPostRollFrames setters and read back through the section's public FFrameNumber fields.
 
@@ -1132,6 +1300,8 @@ Set pre-roll and/or post-roll frames on a sequencer section.  Pre-roll = frames 
 
 ## `set_section_range`
 
+*Destructive, idempotent.*
+
 Sets the frame range of a binding track's first section.
 
 | Parameter | Type | Required | Description |
@@ -1145,6 +1315,8 @@ Sets the frame range of a binding track's first section.
 **Returns:** `{ sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, saved: bool }`
 
 ## `set_section_row_index`
+
+*Destructive, idempotent.*
 
 Set the row index of a sequencer section (UMovieSceneSection::SetRowIndex).  Only meaningful when the owning track supports multiple rows (reported as supports_multiple_rows); the owning track is also Modify()'d.
 
@@ -1163,6 +1335,8 @@ Set the row index of a sequencer section (UMovieSceneSection::SetRowIndex).  Onl
 
 ## `set_sequence_display_rate`
 
+*Destructive, idempotent.*
+
 Set the display frame rate of a Level Sequence.  The display rate is the asset-level "play rate" (frames per second of the timeline). Changing it rescales how existing frame numbers map to time. Backed by UMovieScene::SetDisplayRate(FFrameRate).  Note: The numerator/denominator are integers (FFrameRate), so the fps argument is rounded to the nearest whole-number fps. For non-integer rates (e.g. 23.976) the caller should still pass the closest whole number; the engine does not support fractional FFrameRate numerators without a custom non-integer tick resolution.
 
 | Parameter | Type | Required | Description |
@@ -1175,6 +1349,8 @@ Set the display frame rate of a Level Sequence.  The display rate is the asset-l
 
 ## `set_sequence_duration`
 
+*Destructive, idempotent.*
+
 Sets the playback range of a Level Sequence (found by asset name under /Game) to [0, duration) and marks the package dirty without saving; not undoable. Returns previous_duration, actual_duration, duration_set (within 0.01 s), and start_frame and end_frame in tick-resolution frames.
 
 | Parameter | Type | Required | Description |
@@ -1185,6 +1361,8 @@ Sets the playback range of a Level Sequence (found by asset name under /Game) to
 **Returns:** `{ sequence_name: string, requested_duration: number, previous_duration: number, actual_duration: number, duration_set: bool, start_frame: int, end_frame: int }`
 
 ## `set_sequence_frame_rate`
+
+*Destructive, idempotent.*
 
 Change the frame rate of a Level Sequence: its tick resolution AND its display rate, as create_level_sequence sets them (one tick per frame). Every key, section and range is migrated to the new rate, so nothing moves in time. To change only the display rate, use set_sequence_display_rate.
 
@@ -1197,6 +1375,8 @@ Change the frame rate of a Level Sequence: its tick resolution AND its display r
 
 ## `set_sequence_playback_range`
 
+*Destructive, idempotent.*
+
 Sets the playback range (in tick frames) of a Level Sequence's movie scene.
 
 | Parameter | Type | Required | Description |
@@ -1208,6 +1388,8 @@ Sets the playback range (in tick frames) of a Level Sequence's movie scene.
 **Returns:** `{ sequence_name: string, requested_start_frame: int, requested_end_frame: int, start_frame: int, end_frame: int, range_set: bool, saved: bool }`
 
 ## `set_sequence_view_range`
+
+*Destructive, idempotent.*
 
 Set the editor view range of a Level Sequence (in seconds).  The view range controls the visible timeline window in the Sequencer editor (does NOT affect playback or asset playback range). Backed by UMovieScene::SetViewRange(double, double) -- MOVIESCENE_API.
 
@@ -1222,6 +1404,8 @@ Set the editor view range of a Level Sequence (in seconds).  The view range cont
 
 ## `set_sequence_working_range`
 
+*Destructive, idempotent.*
+
 Set the editor working range of a Level Sequence (in seconds).  The working range is the timeline window used for evaluation / playback preview in the Sequencer editor. Backed by UMovieScene::SetWorkingRange(double, double) -- MOVIESCENE_API.
 
 | Parameter | Type | Required | Description |
@@ -1234,6 +1418,8 @@ Set the editor working range of a Level Sequence (in seconds).  The working rang
 **Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, saved: bool }`
 
 ## `set_skeletal_animation_section_params`
+
+*Destructive, idempotent.*
 
 Set the playback params on a skeletal-animation section (UMovieSceneSkeletalAnimationSection::Params).  Writes the public FMovieSceneSkeletalAnimationParams fields directly.
 
@@ -1258,6 +1444,8 @@ Set the playback params on a skeletal-animation section (UMovieSceneSkeletalAnim
 
 ## `set_spawn_ownership`
 
+*Destructive, idempotent.*
+
 Set the ESpawnOwnership lifetime policy of a spawnable custom binding.
 
 | Parameter | Type | Required | Description |
@@ -1270,6 +1458,8 @@ Set the ESpawnOwnership lifetime policy of a spawnable custom binding.
 **Returns:** `{ sequence_name: string, binding_guid: string, ownership: string, saved: bool }`
 
 ## `set_sub_section_parameters`
+
+*Destructive, idempotent.*
 
 Set the playback parameters on a subsequence OR cinematic-shot section (both are UMovieSceneSubSection).  Writes the public FMovieSceneSectionParameters fields directly; bCanLoop gates the loop offsets so it is applied first.
 
@@ -1290,6 +1480,8 @@ Set the playback parameters on a subsequence OR cinematic-shot section (both are
 
 ## `set_timeline_time`
 
+*Destructive, idempotent.*
+
 Set the playhead time of the open Sequencer editor on a target sequence
 
 | Parameter | Type | Required | Description |
@@ -1300,6 +1492,8 @@ Set the playhead time of the open Sequencer editor on a target sequence
 **Returns:** `{ sequence_name: string, requested_time: number, actual_frame: int, time_set: bool }`
 
 ## `set_transform_section_mask`
+
+*Destructive, idempotent.*
 
 Set the evaluation channel mask on a 3D transform section (UMovieScene3DTransformSection::SetMask).  The mask is a visibility/eval filter built from EMovieSceneTransformChannel; it nulls the channel proxy (intended rebuild) and does NOT delete existing keys.
 
@@ -1318,6 +1512,8 @@ Set the evaluation channel mask on a 3D transform section (UMovieScene3DTransfor
 
 ## `set_transform_section_quaternion_interp`
 
+*Destructive, idempotent.*
+
 Toggle quaternion (slerp) rotation interpolation on a 3D transform section (UMovieScene3DTransformSection::SetUseQuaternionInterpolation).
 
 | Parameter | Type | Required | Description |
@@ -1334,6 +1530,8 @@ Toggle quaternion (slerp) rotation interpolation on a 3D transform section (UMov
 **Returns:** `{ sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool }`
 
 ## `set_transform_track_interp_mode`
+
+*Destructive, idempotent.*
 
 Set EMovieSceneBlendType on a transform track's section (absolute|additive|relative|additive_from_base|override).
 
@@ -1352,6 +1550,8 @@ Set EMovieSceneBlendType on a transform track's section (absolute|additive|relat
 **Returns:** `{ sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool }`
 
 ## `stop_level_sequence_runtime`
+
+*Destructive.*
 
 Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (always true) and playing as read just after Stop. Use pause_level_sequence_runtime to keep the player.
 

@@ -6,6 +6,8 @@
 
 ## `add_anim_bone_track`
 
+*Additive.*
+
 Add a bone curve track with identity keys to a UAnimSequence
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Add a bone curve track with identity keys to a UAnimSequence
 **Returns:** `{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, message }`
 
 ## `add_anim_composite_segment`
+
+*Additive.*
 
 Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's AnimationTrack, then recompute its length
 
@@ -32,6 +36,8 @@ Append an FAnimSegment referencing a real UAnimSequence to a UAnimComposite's An
 
 ## `add_anim_conduit`
 
+*Additive.*
+
 Add a conduit node to a state machine inside an Animation Blueprint.
 
 | Parameter | Type | Required | Description |
@@ -44,6 +50,8 @@ Add a conduit node to a state machine inside an Animation Blueprint.
 
 ## `add_anim_curve_name`
 
+*Additive.*
+
 Add a curve metadata entry (curve name) to a USkeleton
 
 | Parameter | Type | Required | Description |
@@ -54,6 +62,8 @@ Add a curve metadata entry (curve name) to a USkeleton
 **Returns:** `{ skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }`
 
 ## `add_anim_float_curve`
+
+*Additive.*
 
 Add a named float curve with keys to a UAnimSequence
 
@@ -66,6 +76,8 @@ Add a named float curve with keys to a UAnimSequence
 **Returns:** `{ anim_sequence_path, curve_name, num_float_curves, num_keys, curve_found, success, saved, message }`
 
 ## `add_anim_graph_node`
+
+*Additive.*
 
 Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner graph. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
 
@@ -81,6 +93,8 @@ Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner gr
 
 ## `add_anim_notify`
 
+*Additive.*
+
 Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.
 
 | Parameter | Type | Required | Description |
@@ -94,6 +108,8 @@ Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track
 
 ## `add_anim_notify_name`
 
+*Additive.*
+
 Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.
 
 | Parameter | Type | Required | Description |
@@ -104,6 +120,8 @@ Register a notify name in the AnimationNotifies list of a USkeleton (no duplicat
 **Returns:** `{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }`
 
 ## `add_anim_notify_state`
+
+*Additive.*
 
 Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.
 
@@ -119,6 +137,8 @@ Add an instance of a UAnimNotifyState class with a start time and duration to a 
 
 ## `add_anim_slot_group`
 
+*Additive, idempotent.*
+
 Add an animation slot group (the groups montage slots belong to) to a USkeleton asset and save it. Idempotent: an existing group returns added false and changes nothing, but the skeleton is still saved; a failed save returns success false. Returns added and slot_group_count.
 
 | Parameter | Type | Required | Description |
@@ -129,6 +149,8 @@ Add an animation slot group (the groups montage slots belong to) to a USkeleton 
 **Returns:** `{ asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool }`
 
 ## `add_anim_state`
+
+*Additive.*
 
 Add a state node to a state machine inside an Animation Blueprint.
 
@@ -142,6 +164,8 @@ Add a state node to a state machine inside an Animation Blueprint.
 
 ## `add_anim_state_machine`
 
+*Additive.*
+
 Add a state-machine node to the AnimGraph of an Animation Blueprint.
 
 | Parameter | Type | Required | Description |
@@ -152,6 +176,8 @@ Add a state-machine node to the AnimGraph of an Animation Blueprint.
 **Returns:** `{ anim_blueprint_path: string, machine_name: string, node_class: string, state_machine_graph: string, state_machine_created: bool, already_existed: bool, saved: bool, state_machine_count: int, save_error?: string }`
 
 ## `add_anim_sync_marker`
+
+*Destructive.*
 
 Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.
 
@@ -165,6 +191,8 @@ Append an authored sync marker (name and time, on marker track 0) to a UAnimSequ
 
 ## `add_anim_transform_curve`
 
+*Additive.*
+
 Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
 
 | Parameter | Type | Required | Description |
@@ -176,6 +204,8 @@ Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
 **Returns:** `{ anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, success, saved, save_error }`
 
 ## `add_anim_transition`
+
+*Additive.*
 
 Create a source->target transition in an anim state machine.
 
@@ -194,6 +224,8 @@ Create a source->target transition in an anim state machine.
 
 ## `add_animation_asset_to_pose_search_database`
 
+*Additive.*
+
 Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
 
 | Parameter | Type | Required | Description |
@@ -204,6 +236,8 @@ Append an animation asset to a UPoseSearchDatabase as an enabled entry over its 
 **Returns:** `{ database_path, animation_asset_path, animation_asset_count, added, already_existed, saved, message }`
 
 ## `add_blendspace_sample`
+
+*Additive.*
 
 Add a blend sample (animation + blend position) to a BlendSpace
 
@@ -216,6 +250,8 @@ Add a blend sample (animation + blend position) to a BlendSpace
 **Returns:** `{ blendspace_path, sample_index, num_samples, success, saved, message }`
 
 ## `add_bone`
+
+*Additive.*
 
 Add a new bone to a skeleton's reference skeleton
 
@@ -230,6 +266,8 @@ Add a new bone to a skeleton's reference skeleton
 
 ## `add_ik_goal`
 
+*Additive, idempotent.*
+
 Add an IK goal to an IK Rig, associated with a bone.  If bone_name is omitted, a leaf bone of the rig's skeletal mesh is picked automatically. Idempotent: existing goal with the same bone returns success without re-creating.
 
 | Parameter | Type | Required | Description |
@@ -241,6 +279,8 @@ Add an IK goal to an IK Rig, associated with a bone.  If bone_name is omitted, a
 **Returns:** `{ asset_path: string, goal_name: string, bone_name: string, goal_count: int, saved: bool, already_exists?: bool, save_error?: string }`
 
 ## `add_ik_retarget_chain`
+
+*Additive.*
 
 Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.
 
@@ -256,6 +296,8 @@ Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK 
 
 ## `add_ik_solver`
 
+*Additive.*
+
 Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one of "FullBodyIK", "Limb", "Pole", "BodyMover", "SetTransform" or "StretchLimb" (default "FullBodyIK"). Unknown types are rejected with an honest error.
 
 | Parameter | Type | Required | Description |
@@ -266,6 +308,8 @@ Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one 
 **Returns:** `{ asset_path: string, solver_index: int, solver_type: string, solver_struct: string, solver_count: int, saved: bool, save_error?: string }`
 
 ## `add_montage_notify`
+
+*Destructive.*
 
 Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.
 
@@ -279,6 +323,8 @@ Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an a
 
 ## `add_montage_section`
 
+*Additive.*
+
 Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.
 
 | Parameter | Type | Required | Description |
@@ -290,6 +336,8 @@ Add a composite section to a UAnimMontage at an absolute start time, or move the
 **Returns:** `{ montage_path, section_name, start_time, section_count, sections, already_existed, added, saved, message }`
 
 ## `add_montage_segment`
+
+*Additive.*
 
 Append an animation segment referencing a real UAnimSequence to a montage slot
 
@@ -305,6 +353,8 @@ Append an animation segment referencing a real UAnimSequence to a montage slot
 
 ## `add_montage_slot`
 
+*Additive.*
+
 Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.
 
 | Parameter | Type | Required | Description |
@@ -316,6 +366,8 @@ Add an empty slot animation track with the given slot name to a UAnimMontage and
 
 ## `add_motion_warping_component`
 
+*Additive, idempotent.*
+
 Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if the actor already has one, returns the existing instance with already_existed:true instead of creating a duplicate. The component is NewObject&lt;UMotionWarpingComponent>(Actor, FName("MotionWarping")) followed by RegisterComponent() so it shows up in GetComponents() immediately. The owning world's level is marked dirty so the editor persists the change on save; no explicit SavePackage call (avoids the noise of saving a transient actor out of an editor world).
 
 | Parameter | Type | Required | Description |
@@ -325,6 +377,8 @@ Attach a UMotionWarpingComponent to an actor in the editor world. Idempotent: if
 **Returns:** `{ actor_path: string, component_path: string, already_existed: bool }`
 
 ## `add_notify_track`
+
+*Additive.*
 
 Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
 
@@ -338,6 +392,8 @@ Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
 
 ## `add_pose_search_channel_to_schema`
 
+*Destructive.*
+
 Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a channel of that class is already there, overwrite its Weight instead (already_existed=true); then finalize via PostEditChange and save. Returns schema_cardinality and channel_count; success stays true if the save fails: read saved.
 
 | Parameter | Type | Required | Description |
@@ -349,6 +405,8 @@ Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a ch
 **Returns:** `{ schema_path, channel_type, channel_class, weight, schema_cardinality, channel_count, added, already_existed, weight_updated, saved, message }`
 
 ## `add_pose_search_roled_skeleton`
+
+*Destructive, idempotent.*
 
 Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
 
@@ -363,6 +421,8 @@ Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable und
 
 ## `add_pose_to_pose_asset`
 
+*Destructive.*
+
 Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.
 
 | Parameter | Type | Required | Description |
@@ -374,6 +434,8 @@ Add a pose copied from the skeleton reference pose to a UPoseAsset under the giv
 
 ## `add_retargeter_op`
 
+*Additive.*
+
 Add a retarget op to an IK Retargeter's op stack. Default type: FK Chains op.
 
 | Parameter | Type | Required | Description |
@@ -384,6 +446,8 @@ Add a retarget op to an IK Retargeter's op stack. Default type: FK Chains op.
 **Returns:** `{ asset_path: string, op_index: int, op_name: string, op_type: string, op_count: int }`
 
 ## `add_rig_bone`
+
+*Additive.*
 
 Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at the root, then compile and save the blueprint. The engine keeps names unique, so element_key is the name the bone really got. Refused while PIE runs unless force is set.
 
@@ -400,6 +464,8 @@ Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at 
 
 ## `add_rig_control`
 
+*Additive.*
+
 Add a control to a Control Rig's hierarchy.  Control types: Bool, Float, ScaleFloat, Integer, Vector2D, Position, Scale, Rotator, Transform, EulerTransform (defaults to Float).
 
 | Parameter | Type | Required | Description |
@@ -413,6 +479,8 @@ Add a control to a Control Rig's hierarchy.  Control types: Bool, Float, ScaleFl
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, control_type: string, control_type_recognized: bool, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
 ## `add_rig_null`
+
+*Additive.*
 
 Add a null (space) to a Control Rig's hierarchy.
 
@@ -428,6 +496,8 @@ Add a null (space) to a Control Rig's hierarchy.
 
 ## `add_rigvm_link`
 
+*Additive.*
+
 Wire a link between two RigVM pins output to input
 
 | Parameter | Type | Required | Description |
@@ -439,6 +509,8 @@ Wire a link between two RigVM pins output to input
 **Returns:** `{ asset_path: string, source_pin: string, target_pin: string, linked: bool, link_count: int, saved: bool, save_error: string }`
 
 ## `add_rigvm_node`
+
+*Additive.*
 
 Add a rig-unit node to a Control Rig's RigVM solver graph
 
@@ -453,6 +525,8 @@ Add a rig-unit node to a Control Rig's RigVM solver graph
 
 ## `add_skeletal_mesh_lod`
 
+*Additive.*
+
 Append a new LOD entry to a skeletal mesh (clone of LOD 0 build settings).
 
 | Parameter | Type | Required | Description |
@@ -463,6 +537,8 @@ Append a new LOD entry to a skeletal mesh (clone of LOD 0 build settings).
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }`
 
 ## `add_skeletal_mesh_socket`
+
+*Additive.*
 
 Add a socket to a skeletal mesh on a named bone.
 
@@ -478,6 +554,8 @@ Add a socket to a skeletal mesh on a named bone.
 
 ## `add_socket_to_skeleton_asset`
 
+*Additive.*
+
 Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save still returns success, so check saved. Mesh-only sockets: add_skeletal_mesh_socket.
 
 | Parameter | Type | Required | Description |
@@ -492,6 +570,8 @@ Add a socket to a USkeleton asset on a bone (the root by default) at a bone-rela
 
 ## `add_virtual_bone`
 
+*Additive.*
+
 Add a virtual bone from a source bone to a target bone of a USkeleton asset, named "VB &lt;source>_&lt;target>" by the engine, then save. Bone names are not checked against the skeleton; an existing pair returns that bone with already_exists true. Returns virtual_bone_name and virtual_bone_count.
 
 | Parameter | Type | Required | Description |
@@ -503,6 +583,8 @@ Add a virtual bone from a source bone to a target bone of a USkeleton asset, nam
 **Returns:** `{ asset_path: string, virtual_bone_name: string, source_bone: string, target_bone: string, virtual_bone_count: int, saved: bool, already_exists: bool }`
 
 ## `add_warp_target_to_component`
+
+*Destructive, idempotent.*
 
 Add (or update in-place) a FMotionWarpingTarget on an existing UMotionWarpingComponent. Exactly one of three payload shapes must be supplied: (1) component_path -> AddOrUpdateWarpTargetFromComponent(name, comp, NAME_None, false, TargetsForwardVector, ZeroVector, ZeroRotator); (2) location + rotation -> AddOrUpdateWarpTargetFromLocationAndRotation; (3) location only -> AddOrUpdateWarpTargetFromLocation. The engine API is idempotent by WarpTargetName (replace-in-place). Marking the owning actor dirty so the editor persists the change.
 
@@ -518,6 +600,8 @@ Add (or update in-place) a FMotionWarpingTarget on an existing UMotionWarpingCom
 
 ## `assign_skeletal_mesh_physics_asset`
 
+*Destructive.*
+
 Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
 
 | Parameter | Type | Required | Description |
@@ -528,6 +612,8 @@ Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
 **Returns:** `{ skeletal_mesh_path: string, physics_asset_path: string, assigned: bool, cleared: bool, physics_asset_name: string }`
 
 ## `bake_skeletal_mesh_lod`
+
+*Destructive.*
 
 Run the editor's skeletal-mesh reduction pipeline via USkeletalMeshEditorSubsystem::RegenerateLOD.
 
@@ -542,6 +628,8 @@ Run the editor's skeletal-mesh reduction pipeline via USkeletalMeshEditorSubsyst
 
 ## `build_animation_state_machine`
 
+*Destructive, idempotent.*
+
 Atomic JSON-spec builder for an Animation Blueprint state machine. Builds (or reuses) the state machine, then iterates states, transitions, and per-transition rules in one idempotent call. Replaces 8+ primitive cmds (add_anim_state_machine + add_anim_state + add_anim_transition + set_anim_transition_rule_*) with a single spec. Re-running with the same spec is a no-op (each primitive is internally idempotent: state-by-name, transition-by-source+target). For repeated invocations that change rule shape, the rule is re-applied on the existing transition.
 
 | Parameter | Type | Required | Description |
@@ -555,6 +643,8 @@ Atomic JSON-spec builder for an Animation Blueprint state machine. Builds (or re
 
 ## `build_pose_search_database_index`
 
+*Destructive.*
+
 Request an async build of the PoseSearch index for a database
 
 | Parameter | Type | Required | Description |
@@ -565,6 +655,8 @@ Request an async build of the PoseSearch index for a database
 **Returns:** `{ database_path, schema_path, schema_cardinality, animation_asset_count, wait_for_completion, result, success, in_progress, failed, message }`
 
 ## `clear_anim_graph_node_pin_binding`
+
+*Destructive, idempotent.*
 
 Remove the property binding from one input pin of an AnimGraph node (inverse of set_anim_graph_node_pin_binding), dropping a stale binding without recreating the node. Returns was_bound, is_bound and cleared; an unbound pin gives cleared=false, not an error. Undoable; saves the AnimBP without recompiling (run compile_anim_blueprint).
 
@@ -581,6 +673,8 @@ Remove the property binding from one input pin of an AnimGraph node (inverse of 
 
 ## `clear_anim_transition_rule`
 
+*Destructive, idempotent.*
+
 Remove every rule node from a transition's BoundGraph except the sink.
 
 | Parameter | Type | Required | Description |
@@ -594,6 +688,8 @@ Remove every rule node from a transition's BoundGraph except the sink.
 
 ## `clear_motion_warping_targets`
 
+*Destructive, idempotent.*
+
 Remove EVERY FMotionWarpingTarget from a UMotionWarpingComponent in one call (there is no bulk engine API; use remove_warp_target for a single named target). Reports previous + new count and the names it removed. Idempotent: clearing an already-empty component returns cleared:false + count:0, not an error.
 
 | Parameter | Type | Required | Description |
@@ -603,6 +699,8 @@ Remove EVERY FMotionWarpingTarget from a UMotionWarpingComponent in one call (th
 **Returns:** `{ actor_name, cleared, previous_count, new_count, removed_names: [string] }`
 
 ## `collapse_montage_segments`
+
+*Destructive.*
 
 Collapse a montage slot track's segments end-to-end (no gaps, order preserved)
 
@@ -615,6 +713,8 @@ Collapse a montage slot track's segments end-to-end (no gaps, order preserved)
 
 ## `commit_bone_changes`
 
+*Destructive.*
+
 Mark a skeleton dirty + save it. YOU DO NOT NEED THIS after add_bone / remove_bone / rename_bone / set_bone_transform: each of those already notifies the skeleton's listeners on its own. It exists for the cases those do not cover -- batched mutations made outside the modifier, or an asset import that never went through one (interop with other tools).
 
 | Parameter | Type | Required | Description |
@@ -626,6 +726,8 @@ Mark a skeleton dirty + save it. YOU DO NOT NEED THIS after add_bone / remove_bo
 
 ## `compile_anim_blueprint`
 
+*Destructive.*
+
 Compile an Animation Blueprint synchronously and save its package, even when the compile fails; returns status (EBlueprintStatus name), is_up_to_date, has_error and the error and warning messages with their counts. Refused while PIE runs unless force=true. Use get_anim_blueprint_info to inspect without compiling.
 
 | Parameter | Type | Required | Description |
@@ -635,6 +737,8 @@ Compile an Animation Blueprint synchronously and save its package, even when the
 **Returns:** `{ anim_blueprint_path: string, compiled: bool, status: string, is_up_to_date: bool, has_error: bool, error_count: int, warning_count: int, errors: [string], warnings: [string], saved: bool, save_error?: string }`
 
 ## `configure_animation_events`
+
+*Destructive, idempotent.*
 
 Switch the tick of a skeletal mesh component in the editor world (or the one the world param picks): despite the name, it only toggles component ticking and tick-when-paused. Returns the previous and current tick flags; nothing is marked dirty or saved.
 
@@ -647,6 +751,8 @@ Switch the tick of a skeletal mesh component in the editor world (or the one the
 **Returns:** `{ component_name: string, requested_settings: string, events_configured: bool, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `connect_anim_graph_pins`
+
+*Destructive.*
 
 Wire two AnimGraph pins (pose links AND data pins) using the graph's OWN schema. USE THIS INSTEAD OF connect_pins inside an AnimGraph: the generic connect_pins uses the K2 schema, which does not understand FPoseLink/FComponentSpacePoseLink pose pins, whereas this goes through UAnimationGraphSchema::TryCreateConnection so pose links connect correctly. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
 
@@ -663,6 +769,8 @@ Wire two AnimGraph pins (pose links AND data pins) using the graph's OWN schema.
 
 ## `connect_ik_goal_to_solver`
 
+*Destructive, idempotent.*
+
 Connect an existing IK Rig goal to a solver, creating that solver's per-goal effector/settings.  This is the step that makes get_/set_ik_goal_settings work: a goal added via add_ik_goal is not attached to any solver until connected. Idempotent — re-connecting an already-connected goal is a no-op (already_connected:true), avoiding the duplicate the raw engine call would create.
 
 | Parameter | Type | Required | Description |
@@ -674,6 +782,8 @@ Connect an existing IK Rig goal to a solver, creating that solver's per-goal eff
 **Returns:** `{ ik_rig_path: string, goal_name: string, solver_index: int, connected: bool, already_connected: bool, saved: bool }`
 
 ## `copy_anim_graph_nodes`
+
+*Additive.*
 
 Copy a set of AnimGraph nodes (with internal FAnimNode settings + intra-selection wiring) between graphs. Equivalent to the editor's copy/paste: preserves each node's runtime struct properties and any links WITHIN the copied set (links to nodes outside the selection are dropped). Saves the destination ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
 
@@ -691,6 +801,8 @@ Copy a set of AnimGraph nodes (with internal FAnimNode settings + intra-selectio
 
 ## `create_anim_blueprint`
 
+*Additive.*
+
 Create an Animation Blueprint (parent UAnimInstance) for a skeleton at package_path/name with the editor factory, compile it and save it; an existing Animation Blueprint at that path is returned unchanged (already_existed=true). Refused while PIE runs unless force=true. Returns asset_path, generated_class and target_skeleton_set.
 
 | Parameter | Type | Required | Description |
@@ -703,6 +815,8 @@ Create an Animation Blueprint (parent UAnimInstance) for a skeleton at package_p
 
 ## `create_anim_composite`
 
+*Additive.*
+
 Create and save a UAnimComposite asset bound to a USkeleton, under /Game
 
 | Parameter | Type | Required | Description |
@@ -714,6 +828,8 @@ Create and save a UAnimComposite asset bound to a USkeleton, under /Game
 **Returns:** `{ name, package_path, asset_path, composite_path, skeleton, num_segments, created, already_existed, saved, message }`
 
 ## `create_anim_montage`
+
+*Additive.*
 
 Create and save an empty-but-valid UAnimMontage asset under /Game
 
@@ -728,6 +844,8 @@ Create and save an empty-but-valid UAnimMontage asset under /Game
 
 ## `create_anim_sequence`
 
+*Additive.*
+
 Create and save a real UAnimSequence via the Animation Data Model
 
 | Parameter | Type | Required | Description |
@@ -741,6 +859,8 @@ Create and save a real UAnimSequence via the Animation Data Model
 **Returns:** `{ anim_sequence_path, anim_name, skeleton, play_length, frame_rate, num_frames, success, saved, already_existed, message }`
 
 ## `create_blend_space`
+
+*Additive.*
 
 Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
 
@@ -758,6 +878,8 @@ Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
 
 ## `create_control_rig_blueprint`
 
+*Additive, idempotent.*
+
 Create a Control Rig Blueprint (non-modular) at package_path/name with UControlRigBlueprintFactory, compile it and save it. Idempotent: an existing Control Rig Blueprint there is returned unchanged (already_existed=true). Returns asset_path, generated_class, is_control_rig and saved; refused while PIE runs unless force is set.
 
 | Parameter | Type | Required | Description |
@@ -768,6 +890,8 @@ Create a Control Rig Blueprint (non-modular) at package_path/name with UControlR
 **Returns:** `{ asset_path: string, name: string, generated_class: string, is_control_rig: bool, created: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `create_editable_skeletal_mesh`
+
+*Additive.*
 
 Duplicate a skeletal mesh to an editable location in /Game.
 
@@ -781,6 +905,8 @@ Duplicate a skeletal mesh to an editable location in /Game.
 
 ## `create_editable_skeleton`
 
+*Additive.*
+
 Create an editable /Game skeleton by duplicating an engine skeleton
 
 | Parameter | Type | Required | Description |
@@ -792,6 +918,8 @@ Create an editable /Game skeleton by duplicating an engine skeleton
 **Returns:** `{ asset_path: string, name: string, source: string, bone_count: int, created: bool, saved: bool, save_error: string }`
 
 ## `create_ik_retargeter`
+
+*Additive.*
 
 Create and save a UIKRetargeter asset wiring source + target IK Rigs.
 
@@ -806,6 +934,8 @@ Create and save a UIKRetargeter asset wiring source + target IK Rigs.
 
 ## `create_ik_rig`
 
+*Additive, idempotent.*
+
 Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idempotent: if the asset already exists, loads and (re)applies the mesh. The default skeletal_mesh_path is /Engine/EngineMeshes/SkeletalCube.
 
 | Parameter | Type | Required | Description |
@@ -817,6 +947,8 @@ Create and save a UIKRigDefinition asset and set its source skeletal mesh.  Idem
 **Returns:** `{ asset_path: string, name: string, skeletal_mesh: string, skeletal_mesh_set: bool, created: bool, already_existed: bool, saved: bool, save_error?: string }`
 
 ## `create_pose_asset`
+
+*Additive.*
 
 Create and save a UPoseAsset asset bound to a USkeleton, under /Game
 
@@ -830,6 +962,8 @@ Create and save a UPoseAsset asset bound to a USkeleton, under /Game
 
 ## `create_pose_asset_from_anim_sequence`
 
+*Additive.*
+
 Create a UPoseAsset built from a real UAnimSequence's frames
 
 | Parameter | Type | Required | Description |
@@ -842,6 +976,8 @@ Create a UPoseAsset built from a real UAnimSequence's frames
 
 ## `create_pose_search_database`
 
+*Additive.*
+
 Create and save a UPoseSearchDatabase data asset bound to a UPoseSearchSchema
 
 | Parameter | Type | Required | Description |
@@ -853,6 +989,8 @@ Create and save a UPoseSearchDatabase data asset bound to a UPoseSearchSchema
 **Returns:** `{ name, package_path, asset_path, database_path, schema_path, schema_cardinality, animation_asset_count, created, already_existed, saved, message }`
 
 ## `create_pose_search_schema`
+
+*Additive.*
 
 Create and save a UPoseSearchSchema data asset bound to a USkeleton
 
@@ -867,6 +1005,8 @@ Create and save a UPoseSearchSchema data asset bound to a USkeleton
 
 ## `create_retarget_pose`
 
+*Additive.*
+
 Create a new retarget pose for editing in an IK Retargeter.  The pose is set as the current pose after creation, ready for bone rotation edits via set_retarget_pose_bone_rotation.
 
 | Parameter | Type | Required | Description |
@@ -879,6 +1019,8 @@ Create a new retarget pose for editing in an IK Retargeter.  The pose is set as 
 
 ## `create_skeletal_mesh_morph_target`
 
+*Additive.*
+
 Create a new empty morph target on a skeletal mesh.
 
 | Parameter | Type | Required | Description |
@@ -890,6 +1032,8 @@ Create a new empty morph target on a skeletal mesh.
 
 ## `delete_montage_section`
 
+*Destructive.*
+
 Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.
 
 | Parameter | Type | Required | Description |
@@ -900,6 +1044,8 @@ Delete the first composite section with that name (FName match, case ignored) fr
 **Returns:** `{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }`
 
 ## `disconnect_anim_graph_pins`
+
+*Destructive.*
 
 Break AnimGraph pin links: a specific source->target link, or ALL links on the source pin. Use the specific form to insert a node into an existing chain (break A->B, then wire A->N and N->B). Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
 
@@ -916,6 +1062,8 @@ Break AnimGraph pin links: a specific source->target link, or ALL links on the s
 
 ## `disconnect_ik_goal_from_solver`
 
+*Destructive, idempotent.*
+
 Disconnect a goal from a solver, removing that solver's per-goal effector/settings.  Inverse of connect_ik_goal_to_solver. Idempotent — disconnecting a goal that isn't connected is a no-op (was_connected:false).
 
 | Parameter | Type | Required | Description |
@@ -928,6 +1076,8 @@ Disconnect a goal from a solver, removing that solver's per-goal effector/settin
 
 ## `duplicate_anim_sequence`
 
+*Additive.*
+
 Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; the save result is not reported, and a name taken by an asset of another class is refused. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 
 | Parameter | Type | Required | Description |
@@ -939,6 +1089,8 @@ Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton
 **Returns:** `{ source_path, duplicate_path, duplicate_class }`
 
 ## `edit_anim_notify`
+
+*Destructive.*
 
 Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occurrence)
 
@@ -958,6 +1110,8 @@ Edit an existing FAnimNotifyEvent on a UAnimSequence (identified by name + occur
 
 ## `edit_blendspace_sample`
 
+*Destructive.*
+
 Edit a blend sample (by index): blend value and/or animation. At least one of blend_value / animation_path is required; both are individually optional so you can retime a sample without touching its animation, or swap the animation without moving it.
 
 | Parameter | Type | Required | Description |
@@ -970,6 +1124,8 @@ Edit a blend sample (by index): blend value and/or animation. At least one of bl
 **Returns:** `{ blendspace_path, index, value_edited, animation_replaced, num_samples, samples, saved, message }`
 
 ## `evaluate_pose_search_query`
+
+*Read-only.*
 
 Run a live motion-matching query on a PIE/Game actor against a loaded UPoseSearchDatabase (UPoseSearchLibrary::MotionMatch) and return the best-match asset + search cost, plus the query trajectory. Diagnoses why a chooser returns null. Best-effort: per-channel cost is not exposed by the BlueprintPure result.
 
@@ -985,6 +1141,8 @@ Run a live motion-matching query on a PIE/Game actor against a loaded UPoseSearc
 
 ## `get_active_montages`
 
+*Read-only.*
+
 Report the AnimMontage(s) currently playing on a live PIE actor's skeletal mesh (useful for blend-out debugging).
 
 | Parameter | Type | Required | Description |
@@ -997,6 +1155,8 @@ Report the AnimMontage(s) currently playing on a live PIE actor's skeletal mesh 
 
 ## `get_anim_asset_info`
 
+*Read-only.*
+
 Load any animation asset and report its class, skeleton and asset_type (montage, composite, pose, sequence, blendspace or animation_asset) plus the counts of that type: sections/slots/notifies, segments, poses/tracks/curves, length, samples. Read-only; get_montage_info, get_anim_sequence_info and get_blendspace_samples give detail.
 
 | Parameter | Type | Required | Description |
@@ -1007,6 +1167,8 @@ Load any animation asset and report its class, skeleton and asset_type (montage,
 
 ## `get_anim_blueprint_info`
 
+*Read-only.*
+
 Read an Animation Blueprint without compiling or changing it: target skeleton, parent and generated class, is_anim_instance, is_template, graph_count, and the state machines of its top-level AnimGraph with their state counts (conduits not counted). list_anim_state_machines scans every function graph.
 
 | Parameter | Type | Required | Description |
@@ -1016,6 +1178,8 @@ Read an Animation Blueprint without compiling or changing it: target skeleton, p
 **Returns:** `{ asset_path: string, target_skeleton: string, target_skeleton_set: bool, parent_class: string, generated_class: string, is_anim_instance: bool, is_template: bool, graph_count: int, state_machine_count: int, state_machines: [{ name: string, state_count: int }] }`
 
 ## `get_anim_curve_data`
+
+*Read-only.*
 
 Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
 
@@ -1029,6 +1193,8 @@ Read one curve of a UAnimSequence without changing it: for a float curve its fla
 
 ## `get_anim_curve_names`
 
+*Read-only.*
+
 List the bone tracks, float curves, and transform curves on a UAnimSequence
 
 | Parameter | Type | Required | Description |
@@ -1038,6 +1204,8 @@ List the bone tracks, float curves, and transform curves on a UAnimSequence
 **Returns:** `{ sequence_path, bone_track_count, float_curve_count, transform_curve_count, bone_tracks, float_curves, transform_curves }`
 
 ## `get_anim_graph_node_properties`
+
+*Read-only.*
 
 Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtime settings, not the K2 pin surface get_graph_nodes reports). Use it to mirror a reference ABP's settings when grafting nodes: Pose History PoseCount/CollectorName, Slot SlotName, blend params...
 
@@ -1051,6 +1219,8 @@ Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtim
 
 ## `get_anim_notifies`
 
+*Read-only.*
+
 List the notify events of a UAnimSequence without changing it: name, trigger time, duration, track_index and the notify_class or notify_state_class of each, plus num_notifies. Use get_notify_track_names for track names and get_montage_info for the notifies of a montage.
 
 | Parameter | Type | Required | Description |
@@ -1061,6 +1231,8 @@ List the notify events of a UAnimSequence without changing it: name, trigger tim
 
 ## `get_anim_sequence_info`
 
+*Read-only.*
+
 Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, bone track and float curve counts from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq. Use get_anim_curve_names for the track and curve names.
 
 | Parameter | Type | Required | Description |
@@ -1070,6 +1242,8 @@ Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num
 **Returns:** `{ anim_sequence_path, skeleton, play_length, frame_rate, num_frames, num_bone_tracks, num_float_curves, num_sync_markers, enable_root_motion, success }`
 
 ## `get_anim_state_machine_info`
+
+*Read-only.*
 
 Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded.
 
@@ -1082,6 +1256,8 @@ Read the nodes of one state machine of an Animation Blueprint without compiling 
 
 ## `get_animation_blueprint_info`
 
+*Read-only.*
+
 Retrieve metadata and optional full data for an Animation Blueprint asset
 
 | Parameter | Type | Required | Description |
@@ -1093,6 +1269,8 @@ Retrieve metadata and optional full data for an Animation Blueprint asset
 
 ## `get_blendspace_samples`
 
+*Read-only.*
+
 Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blendspace_sample, edit_blendspace_sample or remove_blendspace_sample.
 
 | Parameter | Type | Required | Description |
@@ -1102,6 +1280,8 @@ Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation pa
 **Returns:** `{ animation, blend_x, blend_y, blend_z, rate_scale, blendspace_path, num_samples, samples }`
 
 ## `get_bone_transform`
+
+*Read-only.*
 
 Read the LOCAL reference-pose transform of a bone (parent-relative, not component space). Exact inverse of set_bone_transform: it reads the same raw ref-pose array that one writes, so a read-modify-write round trip is lossless.
 
@@ -1113,6 +1293,8 @@ Read the LOCAL reference-pose transform of a bone (parent-relative, not componen
 **Returns:** `{ asset_path, bone_name, bone_index, found, location:[x,y,z], rotation:[p,y,r], scale:[x,y,z], bone_count, op: "get_bone_transform" }`
 
 ## `get_ik_bone_settings`
+
+*Read-only.*
 
 Get bone-specific settings for a bone within a solver.  FullBodyIK returns snake_case keys (rotation/position stiffness, axis limits Free/Limited/Locked, min/max angles, preferred angles); StretchLimb (the only other solver with per-bone settings) is serialized generically (camelCase: squashDirection vector). Only FullBodyIK and StretchLimb support per-bone settings; others return a `note`.
 
@@ -1126,6 +1308,8 @@ Get bone-specific settings for a bone within a solver.  FullBodyIK returns snake
 
 ## `get_ik_goal_settings`
 
+*Read-only.*
+
 Get goal-specific settings for a goal connected to a solver.  FullBodyIK returns snake_case keys (chain_depth, strength_alpha, pull_chain_alpha, pin_rotation); BodyMover (the only other solver with per-goal settings) is serialized generically (camelCase: influenceMultiplier, boneName). The goal must be connected to the solver first (connect_ik_goal_to_solver), else a `note` explains that. Solvers without per-goal settings return a `note`.
 
 | Parameter | Type | Required | Description |
@@ -1138,6 +1322,8 @@ Get goal-specific settings for a goal connected to a solver.  FullBodyIK returns
 
 ## `get_ik_retarget_chain_details`
 
+*Read-only.*
+
 Get detailed info about a retarget chain: start/end bones, goal name.
 
 | Parameter | Type | Required | Description |
@@ -1149,6 +1335,8 @@ Get detailed info about a retarget chain: start/end bones, goal name.
 
 ## `get_ik_retargeter_info`
 
+*Read-only.*
+
 Read the global structure of an IK Retargeter via its controller: source/target IK Rigs, the op-stack, per-op chain mappings, and the current poses.  Read-only. Chain mappings are per-op in 5.6+ (there is no global RootSettings on the UIKRetargeter in 5.8; detailed root/global settings live inside the ops themselves).
 
 | Parameter | Type | Required | Description |
@@ -1159,6 +1347,8 @@ Read the global structure of an IK Retargeter via its controller: source/target 
 
 ## `get_ik_rig_info`
 
+*Read-only.*
+
 Read solver/goal/retarget-chain info from an IK Rig.
 
 | Parameter | Type | Required | Description |
@@ -1168,6 +1358,8 @@ Read solver/goal/retarget-chain info from an IK Rig.
 **Returns:** `{ asset_path: string, solver_count: int, goal_count: int, chain_count: int, solvers?: [{ index, type, name, enabled, start_bone, end_bone }], goals?: [{ name, bone_name }], retarget_chains?: [{ name, start_bone, end_bone, goal_name }], skeletal_mesh: string }`
 
 ## `get_ik_solver_bones`
+
+*Read-only.*
 
 Get the start and end bone names for a solver in an IK Rig.
 
@@ -1180,6 +1372,8 @@ Get the start and end bone names for a solver in an IK Rig.
 
 ## `get_ik_solver_details`
 
+*Read-only.*
+
 Get detailed info about a solver: type name, enabled state, bones, connected goals.
 
 | Parameter | Type | Required | Description |
@@ -1190,6 +1384,8 @@ Get detailed info about a solver: type name, enabled state, bones, connected goa
 **Returns:** `{ asset_path: string, solver_index: int, solver_type: string, unique_name: string, enabled: bool, start_bone: string, end_bone: string, connected_goal_count: int, connected_goals: [string] }`
 
 ## `get_ik_solver_settings`
+
+*Read-only.*
 
 Get detailed solver-specific settings for a solver in an IK Rig.  Returns all solver-level parameters for the specified solver. FullBodyIK uses curated snake_case keys; every other solver type (Limb/Pole/BodyMover/SetTransform/StretchLimb) is serialized generically from its live settings struct (camelCase property names).
 
@@ -1202,6 +1398,8 @@ Get detailed solver-specific settings for a solver in an IK Rig.  Returns all so
 
 ## `get_montage_info`
 
+*Read-only.*
+
 Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_blend_times or set_montage_properties.
 
 | Parameter | Type | Required | Description |
@@ -1211,6 +1409,8 @@ Read a UAnimMontage without changing it: skeleton_path, section, slot and notify
 **Returns:** `{ montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }`
 
 ## `get_morph_target_deltas`
+
+*Read-only.*
 
 Read back the vertex deltas of a morph target on a specific LOD (inverse of set_morph_target_deltas).
 
@@ -1225,6 +1425,8 @@ Read back the vertex deltas of a morph target on a specific LOD (inverse of set_
 
 ## `get_notify_track_names`
 
+*Read-only.*
+
 List the notify track names of a UAnimSequence in track order (UAnimationBlueprintLibrary::GetAnimationNotifyTrackNames) without changing it; returns track_names and track_count. Use get_anim_notifies for the events and add_notify_track or remove_notify_track to edit tracks.
 
 | Parameter | Type | Required | Description |
@@ -1234,6 +1436,8 @@ List the notify track names of a UAnimSequence in track order (UAnimationBluepri
 **Returns:** `{ animation_path, track_names, track_count }`
 
 ## `get_pose_search_runtime_state`
+
+*Read-only.*
 
 Read-only report of the live motion-matching state on a PIE/Game actor (why a chooser returns null): its AnimInstance, its MotionTrajectory samples, whether a PoseSearchHistoryCollector node named pose_history_name exists, and (optionally) the target database's schema/channels.
 
@@ -1249,6 +1453,8 @@ Read-only report of the live motion-matching state on a PIE/Game actor (why a ch
 
 ## `get_retarget_poses`
 
+*Read-only.*
+
 List every retarget pose (source and target) of an IK Retargeter with its root translation delta and per-bone rotation deltas.  Read-only. Bone rotation deltas use the same quat keys as set_retarget_pose_bone_rotation (quat_x, quat_y, quat_z, quat_w).
 
 | Parameter | Type | Required | Description |
@@ -1258,6 +1464,8 @@ List every retarget pose (source and target) of an IK Retargeter with its root t
 **Returns:** `{ asset_path: string, source: [{ name, is_current, root_translation_offset: {x,y,z}, bone_rotations: [{ bone, quat_x, quat_y, quat_z, quat_w }] }], target: [ ... same shape ... ] }`
 
 ## `get_retargeter_op_info`
+
+*Read-only.*
 
 Read one retarget op's live settings struct from an IK Retargeter by op index.  Read-only (no save). The settings keys are the op settings UPROPERTY names with only the first character lower-cased (FJsonObjectConverter convention), e.g. FK Chains op exposes lODThreshold, bEnabled, bDebugDraw, chainDrawSize, bDrawChainLines. op_type is the settings struct name (e.g. IKRetargetFKChainsOpSettings), which differs from get_ik_retargeter_info.ops[].op_type (the op struct name).
 
@@ -1270,6 +1478,8 @@ Read one retarget op's live settings struct from an IK Retargeter by op index.  
 
 ## `get_rig_control_value`
 
+*Read-only.*
+
 Read a Control Rig control's current value (typed per ERigControlType) and its limit min/max.  Round-trips set_rig_control_value / set_rig_control_limits.
 
 | Parameter | Type | Required | Description |
@@ -1281,6 +1491,8 @@ Read a Control Rig control's current value (typed per ERigControlType) and its l
 
 ## `get_rig_hierarchy`
 
+*Read-only.*
+
 Read every element of a Control Rig Blueprint hierarchy in traversal order as elements [{name, type}], plus bone_count, null_count, control_count, curve_count, other_count (sockets, connectors and the rest) and total. Read-only: nothing is compiled or saved.
 
 | Parameter | Type | Required | Description |
@@ -1290,6 +1502,8 @@ Read every element of a Control Rig Blueprint hierarchy in traversal order as el
 **Returns:** `{ asset_path: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, elements: [{name, type}] }`
 
 ## `get_rigvm_graph`
+
+*Read-only.*
 
 Read a Control Rig's RigVM solver graph nodes pins and links
 
@@ -1301,6 +1515,8 @@ Read a Control Rig's RigVM solver graph nodes pins and links
 
 ## `get_skeletal_mesh_info`
 
+*Read-only.*
+
 Get detailed info about a skeletal mesh: LODs, materials, morph targets, sockets, bones.
 
 | Parameter | Type | Required | Description |
@@ -1310,6 +1526,8 @@ Get detailed info about a skeletal mesh: LODs, materials, morph targets, sockets
 **Returns:** `{ skeletal_mesh_path: string, num_lods: int, num_materials: int, num_morph_targets: int, num_sockets: int, num_bones: int, bone_names: [string], lod_info: [{lod_index, num_verts, num_sections}] }`
 
 ## `get_skeletal_mesh_lod_info`
+
+*Read-only.*
 
 Get per-LOD build settings and screen size for a skeletal mesh.
 
@@ -1322,6 +1540,8 @@ Get per-LOD build settings and screen size for a skeletal mesh.
 
 ## `get_skeletal_mesh_material_slots`
 
+*Read-only.*
+
 Get all material slot info for a skeletal mesh: slot names, material paths.
 
 | Parameter | Type | Required | Description |
@@ -1332,6 +1552,8 @@ Get all material slot info for a skeletal mesh: slot names, material paths.
 
 ## `get_skeletal_mesh_morph_targets`
 
+*Read-only.*
+
 Get all morph targets on a skeletal mesh with delta counts.
 
 | Parameter | Type | Required | Description |
@@ -1341,6 +1563,8 @@ Get all morph targets on a skeletal mesh with delta counts.
 **Returns:** `{ skeletal_mesh_path: string, count: int, morph_targets: [{name, has_valid_data, num_deltas_lod0}] }`
 
 ## `get_skeletal_mesh_section_info`
+
+*Read-only.*
 
 Get section data for a LOD: material index, triangle count, vertex count, flags.
 
@@ -1353,6 +1577,8 @@ Get section data for a LOD: material index, triangle count, vertex count, flags.
 
 ## `get_skeleton_asset_info`
 
+*Read-only.*
+
 Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, every virtual bone with its source and target, slot_group_count and socket_count. Read-only; for up to 100 bone names use get_skeleton_info with load_full_data true.
 
 | Parameter | Type | Required | Description |
@@ -1362,6 +1588,8 @@ Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, e
 **Returns:** `{ asset_path: string, bone_count: int, bones: [string], virtual_bone_count: int, virtual_bone_names: [string], virtual_bones: [{ name: string, source_bone: string, target_bone: string }], slot_group_count: int, socket_count: int }`
 
 ## `get_skeleton_info`
+
+*Read-only.*
 
 Retrieve metadata and optional full bone/socket/slot data for a Skeleton asset
 
@@ -1374,6 +1602,8 @@ Retrieve metadata and optional full bone/socket/slot data for a Skeleton asset
 
 ## `inspect_motion_warping_component`
 
+*Read-only.*
+
 Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_windows_in_anims_within_montages flag, the warp target array (via GetWarpTargets()), the modifier count (via GetModifiers()), the runtime adapter class (GetOwnerAdapter()->GetClass()), and the protected switch-off-conditions array count (via reflection — FindFProperty&lt;FArrayProperty> + FScriptArrayHelper). Read-only, idempotent.
 
 | Parameter | Type | Required | Description |
@@ -1383,6 +1613,8 @@ Read the full data-layer state of a UMotionWarpingComponent: the b_search_for_wi
 **Returns:** `{ actor_path: string, b_search_for_windows_in_anims_within_montages: bool, warp_target_count: int, modifier_count: int, owner_adapter_class: string, switch_off_condition_count: int, warp_targets: array }`
 
 ## `inspect_pose_search_database`
+
+*Read-only.*
 
 Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchDatabase
 
@@ -1394,6 +1626,8 @@ Read-only walk of Schema, DatabaseAnimationAssets and Channels on a UPoseSearchD
 
 ## `inspect_pose_search_schema`
 
+*Read-only.*
+
 Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An empty finalized_channels / is_finalized:false is NOT a bug in this tool: the schema only gets finalized by AddDefaultChannels() or by a PostEditChange() on it, so a freshly authored schema reports none until something triggers that.
 
 | Parameter | Type | Required | Description |
@@ -1404,6 +1638,8 @@ Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An em
 
 ## `is_skeleton_shared`
 
+*Read-only.*
+
 Find the skeletal mesh assets bound to a USkeleton asset through an Asset Registry query on their Skeleton tag, returning mesh_count, mesh_paths and shared (true when more than one mesh uses it). Read-only; only the skeleton itself is loaded.
 
 | Parameter | Type | Required | Description |
@@ -1413,6 +1649,8 @@ Find the skeletal mesh assets bound to a USkeleton asset through an Asset Regist
 **Returns:** `{ asset_path, mesh_count, shared, mesh_paths }`
 
 ## `link_montage_sections`
+
+*Destructive, idempotent.*
 
 Chain one montage section to the next by setting its NextSectionName.  add_montage_section creates sections but never links them; this writes FCompositeSection::NextSectionName so playback flows section -> next. Pass next_section_name "" or "None" to clear the link. Idempotent.
 
@@ -1426,6 +1664,8 @@ Chain one montage section to the next by setting its NextSectionName.  add_monta
 
 ## `list_anim_state_machines`
 
+*Read-only.*
+
 List the state machine nodes at the top level of every function graph of an Animation Blueprint (the AnimGraph included), read-only and without compiling: count and state_machines [{name, graph_name}]. Machines nested inside states are not listed.
 
 | Parameter | Type | Required | Description |
@@ -1436,6 +1676,8 @@ List the state machine nodes at the top level of every function graph of an Anim
 
 ## `list_warp_targets_on_component`
 
+*Read-only.*
+
 List every FMotionWarpingTarget on an actor's UMotionWarpingComponent. Read-only: wraps GetWarpTargets() (TConstArrayView&lt;FMotionWarpingTarget>). Each entry reports the FName, the static location/rotation, the optional component reference (via path or null), the optional bone name, the b_follow_component flag, the location/rotation offsets, and the location_offset_direction enum integer.
 
 | Parameter | Type | Required | Description |
@@ -1445,6 +1687,8 @@ List every FMotionWarpingTarget on an actor's UMotionWarpingComponent. Read-only
 **Returns:** `{ actor_path: string, warp_target_count: int, warp_targets: array }`
 
 ## `move_ik_solver_in_stack`
+
+*Destructive.*
 
 Move a solver from one position to another in the IK Rig solver stack.
 
@@ -1457,6 +1701,8 @@ Move a solver from one position to another in the IK Rig solver stack.
 **Returns:** `{ asset_path: string, from_index: int, to_index: int, moved: bool, solver_count: int }`
 
 ## `play_animation`
+
+*Destructive.*
 
 Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Play at play_rate, then jump to start_section if playback started. Editor world unless the world param says otherwise; the component needs an anim instance. playing/success mean Montage_Play returned a length above 0.
 
@@ -1472,6 +1718,8 @@ Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Pla
 
 ## `refresh_anim_montage_cache`
 
+*Destructive, idempotent.*
+
 Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent.
 
 | Parameter | Type | Required | Description |
@@ -1481,6 +1729,8 @@ Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bo
 **Returns:** `{ montage_path, refreshed, sequence_length, slot_count, section_count, saved, message }`
 
 ## `reimport_anim_sequence`
+
+*Destructive.*
 
 Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, automated (no dialogs) and unsaved; a missing source returns reimported=false with a note instead of crashing.
 
@@ -1493,6 +1743,8 @@ Reimport a UAnimSequence, or any reimportable asset (the class is not checked), 
 
 ## `remove_anim_blueprint`
 
+*Destructive.*
+
 Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
 
 | Parameter | Type | Required | Description |
@@ -1502,6 +1754,8 @@ Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_anim_bone_track`
+
+*Destructive.*
 
 Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack) and save the package; removed=false when no track has that bone name, and the save result is not reported. List tracks with get_anim_curve_names.
 
@@ -1514,6 +1768,8 @@ Remove the animation track of one bone from a UAnimSequence through its data con
 
 ## `remove_anim_composite`
 
+*Destructive.*
+
 Delete a UAnimComposite asset after verifying the asset is a UAnimComposite.
 
 | Parameter | Type | Required | Description |
@@ -1523,6 +1779,8 @@ Delete a UAnimComposite asset after verifying the asset is a UAnimComposite.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_anim_composite_segment`
+
+*Destructive.*
 
 Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then recompute its length
 
@@ -1534,6 +1792,8 @@ Remove an FAnimSegment by index from a UAnimComposite's AnimationTrack, then rec
 **Returns:** `{ composite_path, index, num_segments, composite_length, segments, success, saved, save_error }`
 
 ## `remove_anim_conduit`
+
+*Destructive.*
 
 Remove a conduit node (and its bound rule subgraph) from a state machine.
 
@@ -1547,6 +1807,8 @@ Remove a conduit node (and its bound rule subgraph) from a state machine.
 
 ## `remove_anim_curve`
 
+*Destructive.*
+
 Remove a float or transform curve by name from a UAnimSequence through its data controller and save the package (the save result is not reported); removed=false when no such curve exists. Any curve_type other than transform targets float curves.
 
 | Parameter | Type | Required | Description |
@@ -1559,6 +1821,8 @@ Remove a float or transform curve by name from a UAnimSequence through its data 
 
 ## `remove_anim_curve_name`
 
+*Destructive, idempotent.*
+
 Remove a curve metadata entry (curve name) from a USkeleton (idempotent).
 
 | Parameter | Type | Required | Description |
@@ -1570,6 +1834,8 @@ Remove a curve metadata entry (curve name) from a USkeleton (idempotent).
 
 ## `remove_anim_montage`
 
+*Destructive.*
+
 Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
 
 | Parameter | Type | Required | Description |
@@ -1579,6 +1845,8 @@ Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_anim_notify`
+
+*Destructive.*
 
 Remove all UAnimNotify events matching a name from an AnimSequence
 
@@ -1591,6 +1859,8 @@ Remove all UAnimNotify events matching a name from an AnimSequence
 
 ## `remove_anim_sequence`
 
+*Destructive.*
+
 Delete a UAnimSequence asset after verifying the asset is a UAnimSequence.
 
 | Parameter | Type | Required | Description |
@@ -1600,6 +1870,8 @@ Delete a UAnimSequence asset after verifying the asset is a UAnimSequence.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_anim_slot_group`
+
+*Destructive, idempotent.*
 
 Remove an animation slot group from a skeleton (idempotent; guarded against missing group).
 
@@ -1611,6 +1883,8 @@ Remove an animation slot group from a skeleton (idempotent; guarded against miss
 **Returns:** `{ asset_path: string, group_name: string, removed: bool, already_absent: bool, slot_group_count: int, slot_group_names: [string], saved: bool }`
 
 ## `remove_anim_state`
+
+*Destructive.*
 
 Remove a state node (and its bound animation subgraph) from a state machine.
 
@@ -1624,6 +1898,8 @@ Remove a state node (and its bound animation subgraph) from a state machine.
 
 ## `remove_anim_sync_marker`
 
+*Destructive.*
+
 Remove every authored sync marker with the given name from a UAnimSequence and save the package (no undo transaction; the save result is not reported). Returns markers_before, markers_after and removed, which is false when no marker had that name.
 
 | Parameter | Type | Required | Description |
@@ -1634,6 +1910,8 @@ Remove every authored sync marker with the given name from a UAnimSequence and s
 **Returns:** `{ sequence_path, marker_name, markers_before, markers_after, removed }`
 
 ## `remove_anim_transition`
+
+*Destructive.*
 
 Remove a source->target transition (and its rule subgraph) from a state machine.
 
@@ -1648,6 +1926,8 @@ Remove a source->target transition (and its rule subgraph) from a state machine.
 
 ## `remove_animation_asset_from_pose_search_database`
 
+*Destructive, idempotent.*
+
 Remove one FPoseSearchDatabaseAnimationAsset entry from a UPoseSearchDatabase by 0-based index (inverse of add_animation_asset_to_pose_search_database). Idempotent: an out-of-range index returns removed:false + note, not an error. The database index is NOT rebuilt here -- run build_pose_search_database_index afterwards.
 
 | Parameter | Type | Required | Description |
@@ -1658,6 +1938,8 @@ Remove one FPoseSearchDatabaseAnimationAsset entry from a UPoseSearchDatabase by
 **Returns:** `{ database_path, animation_asset_index, removed, previous_count, new_count }`
 
 ## `remove_blend_profile`
+
+*Destructive, idempotent.*
 
 Remove a WHOLE UBlendProfile from a skeleton (idempotent). Inverse of set_blend_profile_bone, which is what implicitly CREATES a profile -- there is no separate create_blend_profile to undo.
 
@@ -1670,6 +1952,8 @@ Remove a WHOLE UBlendProfile from a skeleton (idempotent). Inverse of set_blend_
 
 ## `remove_blend_space`
 
+*Destructive.*
+
 Delete a UBlendSpace asset after verifying the asset is a UBlendSpace.
 
 | Parameter | Type | Required | Description |
@@ -1679,6 +1963,8 @@ Delete a UBlendSpace asset after verifying the asset is a UBlendSpace.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_blendspace_1d`
+
+*Destructive.*
 
 Delete a UBlendSpace1D asset after verifying the asset is a UBlendSpace1D.
 
@@ -1690,6 +1976,8 @@ Delete a UBlendSpace1D asset after verifying the asset is a UBlendSpace1D.
 
 ## `remove_blendspace_sample`
 
+*Destructive.*
+
 Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indices REORDER -- the engine removes with a swap, so the LAST sample lands in the deleted slot. Never remove a batch by descending index and assume the rest held still: the full post-op sample list is returned so the caller can re-sync before the next call.
 
 | Parameter | Type | Required | Description |
@@ -1700,6 +1988,8 @@ Remove a blend sample (by index) from a BlendSpace. WARNING: the remaining indic
 **Returns:** `{ blendspace_path, removed, num_samples, samples, saved, message }`
 
 ## `remove_bone`
+
+*Destructive, idempotent.*
 
 Remove a bone from a skeleton's reference skeleton (idempotent).
 
@@ -1713,6 +2003,8 @@ Remove a bone from a skeleton's reference skeleton (idempotent).
 
 ## `remove_ik_goal`
 
+*Destructive, idempotent.*
+
 Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches the goal from every solver's effector and clears it from any retarget chain that referenced it. Idempotent — removing a goal that isn't present is a no-op (removed:false, already_absent:true).
 
 | Parameter | Type | Required | Description |
@@ -1723,6 +2015,8 @@ Remove an IK goal from an IK Rig by name.  Inverse of add_ik_goal: also detaches
 **Returns:** `{ asset_path: string, goal_name: string, removed: bool, already_absent: bool, goal_count: int, saved: bool, save_error?: string }`
 
 ## `remove_ik_retarget_chain`
+
+*Destructive.*
 
 Remove a retarget chain from an IK Rig by name.
 
@@ -1735,6 +2029,8 @@ Remove a retarget chain from an IK Rig by name.
 
 ## `remove_ik_solver`
 
+*Destructive.*
+
 Remove a solver from an IK Rig's solver stack by index.
 
 | Parameter | Type | Required | Description |
@@ -1746,6 +2042,8 @@ Remove a solver from an IK Rig's solver stack by index.
 
 ## `remove_montage_notify`
 
+*Destructive.*
+
 Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.
 
 | Parameter | Type | Required | Description |
@@ -1756,6 +2054,8 @@ Remove the notify event at a zero-based index from the Notifies array of a UAnim
 **Returns:** `{ montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, message }`
 
 ## `remove_montage_slot`
+
+*Destructive.*
 
 Remove a slot animation track from a UAnimMontage by name or index
 
@@ -1769,6 +2069,8 @@ Remove a slot animation track from a UAnimMontage by name or index
 
 ## `remove_motion_warping_component`
 
+*Destructive, idempotent.*
+
 Detach the UMotionWarpingComponent from an actor (mirror of add_motion_warping_component). Idempotent: an actor that has no such component returns already_existed:false + removed:false + note, not an error.
 
 | Parameter | Type | Required | Description |
@@ -1778,6 +2080,8 @@ Detach the UMotionWarpingComponent from an actor (mirror of add_motion_warping_c
 **Returns:** `{ actor_path: string, component_path?: string, removed: bool, already_existed: bool, note?: string }`
 
 ## `remove_notify_track`
+
+*Destructive.*
 
 Remove a named notify TRACK from an AnimSequence (deletes events on it + reindexes the rest)
 
@@ -1790,6 +2094,8 @@ Remove a named notify TRACK from an AnimSequence (deletes events on it + reindex
 
 ## `remove_pose_asset`
 
+*Destructive.*
+
 Delete a UPoseAsset asset after verifying the asset is a UPoseAsset.
 
 | Parameter | Type | Required | Description |
@@ -1799,6 +2105,8 @@ Delete a UPoseAsset asset after verifying the asset is a UPoseAsset.
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_pose_curve`
+
+*Destructive.*
 
 Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.
 
@@ -1811,6 +2119,8 @@ Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo t
 
 ## `remove_pose_from_pose_asset`
 
+*Destructive.*
+
 Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.
 
 | Parameter | Type | Required | Description |
@@ -1821,6 +2131,8 @@ Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fix
 **Returns:** `{ pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, message }`
 
 ## `remove_pose_search_channel_from_schema`
+
+*Destructive.*
 
 Remove a UPoseSearchFeatureChannel_* from a UPoseSearchSchema by index or type (inverse of add_pose_search_channel_to_schema)
 
@@ -1834,6 +2146,8 @@ Remove a UPoseSearchFeatureChannel_* from a UPoseSearchSchema by index or type (
 
 ## `remove_pose_search_database`
 
+*Destructive, idempotent.*
+
 Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
@@ -1843,6 +2157,8 @@ Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typ
 **Returns:** `{ database_path, deleted, already_existed, asset_class?, note? }`
 
 ## `remove_pose_search_roled_skeleton`
+
+*Destructive, idempotent.*
 
 Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent. The schema is re-finalized after the removal, so finalized_channels changes with it.
 
@@ -1856,6 +2172,8 @@ Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role o
 
 ## `remove_pose_search_schema`
 
+*Destructive, idempotent.*
+
 Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
@@ -1865,6 +2183,8 @@ Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-d
 **Returns:** `{ schema_path, deleted, already_existed, asset_class?, note? }`
 
 ## `remove_retarget_pose`
+
+*Destructive, idempotent.*
 
 Remove a retarget pose from an IK Retargeter by name.  Inverse of create_retarget_pose. If the removed pose was the current one, the retargeter falls back to the default pose. Idempotent — removing a pose that isn't present is a no-op (removed:false, already_absent:true). The engine's built-in default pose cannot be removed (honest error).
 
@@ -1878,6 +2198,8 @@ Remove a retarget pose from an IK Retargeter by name.  Inverse of create_retarge
 
 ## `remove_retargeter_op`
 
+*Destructive.*
+
 Remove a retarget op from an IK Retargeter by index.
 
 | Parameter | Type | Required | Description |
@@ -1888,6 +2210,8 @@ Remove a retarget op from an IK Retargeter by index.
 **Returns:** `{ asset_path: string, removed_op_index: int, removed: bool, op_count: int }`
 
 ## `remove_rig_element`
+
+*Destructive.*
 
 Remove one element (by name and type) from a Control Rig Blueprint hierarchy with RemoveElement, then compile and save the blueprint. Errors on an unknown type or a missing element. Returns the per-type counts afterwards; refused while PIE runs unless force is set.
 
@@ -1901,6 +2225,8 @@ Remove one element (by name and type) from a Control Rig Blueprint hierarchy wit
 
 ## `remove_rigvm_node`
 
+*Destructive.*
+
 Remove a node from a Control Rig's RigVM solver graph
 
 | Parameter | Type | Required | Description |
@@ -1911,6 +2237,8 @@ Remove a node from a Control Rig's RigVM solver graph
 **Returns:** `{ asset_path: string, node_name: string, removed: bool, node_count: int, saved: bool, save_error: string }`
 
 ## `remove_skeletal_mesh_lod`
+
+*Destructive.*
 
 Remove an LOD entry by index via USkeletalMesh::RemoveSourceModel. LOD 0 is protected.
 
@@ -1923,6 +2251,8 @@ Remove an LOD entry by index via USkeletalMesh::RemoveSourceModel. LOD 0 is prot
 
 ## `remove_skeletal_mesh_morph_target`
 
+*Destructive.*
+
 Remove a morph target from a skeletal mesh by name.
 
 | Parameter | Type | Required | Description |
@@ -1933,6 +2263,8 @@ Remove a morph target from a skeletal mesh by name.
 **Returns:** `{ morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int }`
 
 ## `remove_skeletal_mesh_socket`
+
+*Destructive, idempotent.*
 
 Remove a socket from a skeletal mesh (and its skeleton twin). Idempotent: re-running with an absent socket returns already_removed=true without mutating the asset.
 
@@ -1945,6 +2277,8 @@ Remove a socket from a skeletal mesh (and its skeleton twin). Idempotent: re-run
 
 ## `remove_socket_from_skeleton_asset`
 
+*Destructive, idempotent.*
+
 Remove a socket from the socket list of a USkeleton asset and save it. Idempotent: a missing socket returns removed false and already_absent true without saving. Returns socket_count and the remaining socket_names; sockets that exist only on a skeletal mesh are untouched (use remove_skeletal_mesh_socket).
 
 | Parameter | Type | Required | Description |
@@ -1955,6 +2289,8 @@ Remove a socket from the socket list of a USkeleton asset and save it. Idempoten
 **Returns:** `{ asset_path: string, socket_name: string, removed: bool, already_absent: bool, socket_count: int, socket_names: [string], saved: bool }`
 
 ## `remove_virtual_bone`
+
+*Destructive, idempotent.*
 
 Remove a virtual bone from a USkeleton asset, named directly or found by its source and target bones, then save. Idempotent: no match returns removed false and already_absent true without saving. Returns the remaining virtual_bone_names; a failed save returns success false.
 
@@ -1969,6 +2305,8 @@ Remove a virtual bone from a USkeleton asset, named directly or found by its sou
 
 ## `remove_warp_target`
 
+*Destructive, idempotent.*
+
 Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName. Wraps UMotionWarpingComponent::RemoveWarpTarget(name) which returns the count of entries removed (0 or 1; the array is keyed by FName). Idempotent: removing a non-existent target returns count:0 without raising an error.
 
 | Parameter | Type | Required | Description |
@@ -1979,6 +2317,8 @@ Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName. Wraps UMo
 **Returns:** `{ actor_path: string, target_name: string, removed_count: int, warp_target_count: int }`
 
 ## `rename_anim_curve`
+
+*Destructive.*
 
 Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
 
@@ -1993,6 +2333,8 @@ Rename a float or transform curve on a UAnimSequence through its data controller
 
 ## `rename_bone`
 
+*Destructive.*
+
 Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails with an error when old_name is not a bone or new_name is already taken; skeletal meshes and animations that use the old name are not updated. A failed save returns success false.
 
 | Parameter | Type | Required | Description |
@@ -2004,6 +2346,8 @@ Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails 
 **Returns:** `{ asset_path, old_name, new_name, renamed: true, not_found: false, already_used: false, bone_count, saved, save_error?, op: "rename_bone" }`
 
 ## `rename_ik_retarget_chain`
+
+*Destructive.*
 
 Rename a retarget chain of an IK Rig asset and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. The save result is not reported.
 
@@ -2017,6 +2361,8 @@ Rename a retarget chain of an IK Rig asset and save it. The engine makes the new
 
 ## `rename_montage_section`
 
+*Destructive.*
+
 Rename an existing FCompositeSection on a UAnimMontage by zero-based section_index
 
 | Parameter | Type | Required | Description |
@@ -2029,6 +2375,8 @@ Rename an existing FCompositeSection on a UAnimMontage by zero-based section_ind
 
 ## `rename_pose_in_pose_asset`
 
+*Destructive.*
+
 Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).
 
 | Parameter | Type | Required | Description |
@@ -2040,6 +2388,8 @@ Rename an existing named pose in a UPoseAsset (UPoseAsset::ModifyPoseName).
 **Returns:** `{ pose_asset_path, old_pose_name, new_pose_name, renamed, contains_new, contains_old, num_poses, pose_names, saved, message }`
 
 ## `rename_rig_element`
+
+*Destructive, idempotent.*
 
 Rename an element in a Control Rig's hierarchy.  Idempotent: renaming to the current name is a no-op ({ renamed:false, already_named:true }). The engine disambiguates name collisions with a numeric suffix rather than failing, reported honestly via name_adjusted.
 
@@ -2054,6 +2404,8 @@ Rename an element in a Control Rig's hierarchy.  Idempotent: renaming to the cur
 
 ## `rename_skeletal_mesh_morph_target`
 
+*Destructive.*
+
 Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_name is not a morph target of the mesh or new_name already exists; a failed save also returns an error although the rename stays in memory. Returns old_name, new_name and renamed.
 
 | Parameter | Type | Required | Description |
@@ -2066,6 +2418,8 @@ Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_n
 
 ## `rename_skeletal_mesh_socket`
 
+*Destructive.*
+
 Rename a socket on a skeletal mesh (and its skeleton twin).
 
 | Parameter | Type | Required | Description |
@@ -2077,6 +2431,8 @@ Rename a socket on a skeletal mesh (and its skeleton twin).
 **Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool, already_renamed: bool, socket_count: int }`
 
 ## `scaffold_aim_offset_blend_space`
+
+*Additive.*
 
 Create a UAimOffsetBlendSpace for a skeleton at package_path/asset_name and save it, or re-save the one already there (already_existed=true); a failed save still succeeds with saved=false. Yaw/pitch ranges and grid counts are only echoed, not written: set axes with set_blendspace_properties.
 
@@ -2095,6 +2451,8 @@ Create a UAimOffsetBlendSpace for a skeleton at package_path/asset_name and save
 **Returns:** `{ asset_path, skeleton_path, yaw_min, yaw_max, pitch_min, pitch_max, num_grid_points_yaw, num_grid_points_pitch, already_existed, saved, note? }`
 
 ## `scaffold_blend_space_2d`
+
+*Additive, idempotent.*
 
 Create a UBlendSpace (2D) asset for parameter-driven animation blending (e.g. Speed x Direction). Idempotent on re-run; axis metadata left at engine defaults (set the protected axis fields afterwards with set_blendspace_properties).
 
@@ -2116,6 +2474,8 @@ Create a UBlendSpace (2D) asset for parameter-driven animation blending (e.g. Sp
 
 ## `scaffold_locomotion_animbp`
 
+*Additive, idempotent.*
+
 Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
 
 | Parameter | Type | Required | Description |
@@ -2131,6 +2491,8 @@ Create or update a character Animation Blueprint with a "Locomotion" state machi
 
 ## `scale_anim_curve`
 
+*Destructive.*
+
 Retime a FLOAT curve on a UAnimSequence: every key TIME becomes (t - origin) * factor + origin, and the key VALUES are left untouched -- this stretches/compresses a curve in time, it does not scale its amplitude. FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
 
 | Parameter | Type | Required | Description |
@@ -2143,6 +2505,8 @@ Retime a FLOAT curve on a UAnimSequence: every key TIME becomes (t - origin) * f
 **Returns:** `{ anim_sequence_path, curve_name, origin, factor, num_keys, applied, saved, message }`
 
 ## `set_anim_additive_settings`
+
+*Destructive, idempotent.*
 
 Set the additive-animation type and base pose on a UAnimSequence
 
@@ -2158,6 +2522,8 @@ Set the additive-animation type and base pose on a UAnimSequence
 
 ## `set_anim_bone_track_keys`
 
+*Destructive, idempotent.*
+
 Set per-key bone transforms (translation/rotation/scale) on a UAnimSequence bone track (real pose data, not identity).
 
 | Parameter | Type | Required | Description |
@@ -2169,6 +2535,8 @@ Set per-key bone transforms (translation/rotation/scale) on a UAnimSequence bone
 **Returns:** `{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, message }`
 
 ## `set_anim_curve_color`
+
+*Destructive, idempotent.*
 
 Set the editor display color of a FLOAT curve on a UAnimSequence (cosmetic: it tints the curve in the editor, it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
 
@@ -2182,6 +2550,8 @@ Set the editor display color of a FLOAT curve on a UAnimSequence (cosmetic: it t
 
 ## `set_anim_curve_comment`
 
+*Destructive, idempotent.*
+
 Set the author comment of a FLOAT curve on a UAnimSequence (metadata only; it does not affect evaluation). FLOAT-CURVE ONLY: transform curves and any other non-float curve return applied=false instead of an error.
 
 | Parameter | Type | Required | Description |
@@ -2193,6 +2563,8 @@ Set the author comment of a FLOAT curve on a UAnimSequence (metadata only; it do
 **Returns:** `{ anim_sequence_path, curve_name, comment, applied, saved, message }`
 
 ## `set_anim_curve_interp_mode`
+
+*Destructive, idempotent.*
 
 Set the interpolation mode (tangent flags) on an animation curve
 
@@ -2207,6 +2579,8 @@ Set the interpolation mode (tangent flags) on an animation curve
 
 ## `set_anim_curve_keys`
 
+*Destructive, idempotent.*
+
 Set the keys (time/value pairs) on an animation curve
 
 | Parameter | Type | Required | Description |
@@ -2220,6 +2594,8 @@ Set the keys (time/value pairs) on an animation curve
 
 ## `set_anim_frame_rate`
 
+*Destructive, idempotent.*
+
 Set the sampling frame rate of a UAnimSequence (IAnimationDataController::SetFrameRate).
 
 | Parameter | Type | Required | Description |
@@ -2230,6 +2606,8 @@ Set the sampling frame rate of a UAnimSequence (IAnimationDataController::SetFra
 **Returns:** `{ sequence_path, fps, numerator, denominator }`
 
 ## `set_anim_graph_node_pin_binding`
+
+*Destructive, idempotent.*
 
 Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_anim_graph_node_property edits the FAnimNode struct instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
 
@@ -2247,6 +2625,8 @@ Bind an AnimGraph node input pin to a variable or property path in the node prop
 
 ## `set_anim_graph_node_property`
 
+*Destructive, idempotent.*
+
 Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) name. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
 
 | Parameter | Type | Required | Description |
@@ -2262,6 +2642,8 @@ Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) nam
 
 ## `set_anim_montage_preview_mesh`
 
+*Destructive, idempotent.*
+
 Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.
 
 | Parameter | Type | Required | Description |
@@ -2272,6 +2654,8 @@ Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo
 **Returns:** `{ montage_path, mesh_path, prev_mesh_path, applied, saved, message }`
 
 ## `set_anim_montage_rate_scale`
+
+*Destructive, idempotent.*
 
 Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage
 
@@ -2286,6 +2670,8 @@ Set the global RateScale (and optionally BlendOutTriggerTime) on a UAnimMontage
 
 ## `set_anim_montage_skeleton`
 
+*Destructive, idempotent.*
+
 Rebind a UAnimMontage to a different USkeleton (clears existing source link + recomputes bone caches)
 
 | Parameter | Type | Required | Description |
@@ -2297,6 +2683,8 @@ Rebind a UAnimMontage to a different USkeleton (clears existing source link + re
 
 ## `set_anim_number_of_frames`
 
+*Destructive, idempotent.*
+
 Set the number of sampled frames on a UAnimSequence (IAnimationDataController::SetNumberOfFrames).
 
 | Parameter | Type | Required | Description |
@@ -2307,6 +2695,8 @@ Set the number of sampled frames on a UAnimSequence (IAnimationDataController::S
 **Returns:** `{ sequence_path, frame_count }`
 
 ## `set_anim_retarget_source`
+
+*Destructive, idempotent.*
 
 Set a UAnimSequence's retarget source (and optionally its retarget reference-pose sequence)
 
@@ -2320,6 +2710,8 @@ Set a UAnimSequence's retarget source (and optionally its retarget reference-pos
 
 ## `set_anim_root_motion`
 
+*Destructive, idempotent.*
+
 Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.
 
 | Parameter | Type | Required | Description |
@@ -2332,6 +2724,8 @@ Write the three root motion settings of a UAnimSequence (bEnableRootMotion, Root
 **Returns:** `{ anim_sequence_path, enable_root_motion, root_motion_root_lock, force_root_lock, success, saved, message }`
 
 ## `set_anim_transition_rule_automatic`
+
+*Destructive, idempotent.*
 
 Set the automatic rule of one transition (source_state to target_state) in a state machine of an Animation Blueprint: bAutomaticRuleBasedOnSequencePlayerInState and AutomaticRuleTriggerTime, both written every call (omitted means false and 0). Marks it structurally modified and saves without compiling; refused while PIE runs unless force=true.
 
@@ -2348,6 +2742,8 @@ Set the automatic rule of one transition (source_state to target_state) in a sta
 
 ## `set_anim_transition_rule_from_bool`
 
+*Destructive, idempotent.*
+
 Wire a bool variable's getter as the rule of a transition.
 
 | Parameter | Type | Required | Description |
@@ -2361,6 +2757,8 @@ Wire a bool variable's getter as the rule of a transition.
 **Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }`
 
 ## `set_anim_transition_rule_from_comparison`
+
+*Destructive, idempotent.*
 
 Wire a float comparison as the rule of a transition.
 
@@ -2378,6 +2776,8 @@ Wire a float comparison as the rule of a transition.
 
 ## `set_animation_speed`
 
+*Destructive, idempotent.*
+
 Set the animation playback speed for a skeletal mesh component
 
 | Parameter | Type | Required | Description |
@@ -2389,6 +2789,8 @@ Set the animation playback speed for a skeletal mesh component
 **Returns:** `{ component_name: string, requested_speed: number, previous_speed: number, actual_speed: number, speed_set_successfully: bool, previous_tick_enabled: bool, current_tick_enabled: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, anim_instance_valid: bool?, warning: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `set_blend_profile_bone`
+
+*Destructive, idempotent.*
 
 Set a bone's blend scale on a UBlendProfile (creates profile if missing).
 
@@ -2403,6 +2805,8 @@ Set a bone's blend scale on a UBlendProfile (creates profile if missing).
 **Returns:** `{ asset_path, profile_name, bone_name, scale, updated, created_profile, profile_count, saved, op: "set_blend_profile_bone" }`
 
 ## `set_blendspace_interpolation`
+
+*Destructive, idempotent.*
 
 Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, damping ratio, max speed, smoothing type.  Distinct from set_blendspace_properties (which only sets the BlendParameters axis name/min/max/grid). Writes UBlendSpace::InterpolationParam[axis] via reflection. 1D smooths axis 0 only; 2D smooths X (axis 0) and Y (axis 1). Only the supplied fields change.
 
@@ -2422,6 +2826,8 @@ Set a blend space's INPUT-SMOOTHING (interpolation) per axis: smoothing time, da
 
 ## `set_blendspace_properties`
 
+*Destructive, idempotent.*
+
 Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid divisions.  create_blend_space only sets X; this sets the Y axis too (and can change X after creation). On a 1D blend space the y_axis_* params are reported as an honest note and ignored. Only the supplied fields change.
 
 | Parameter | Type | Required | Description |
@@ -2440,6 +2846,8 @@ Configure an existing blend space's X and (for 2D) Y axis: name, min, max, grid 
 
 ## `set_bone_parent`
 
+*Destructive, idempotent.*
+
 Re-parent a bone (pass empty parent_name to make it a new root).
 
 | Parameter | Type | Required | Description |
@@ -2452,6 +2860,8 @@ Re-parent a bone (pass empty parent_name to make it a new root).
 
 ## `set_bone_transform`
 
+*Destructive, idempotent.*
+
 Update the local reference-pose transform of an existing bone
 
 | Parameter | Type | Required | Description |
@@ -2463,6 +2873,8 @@ Update the local reference-pose transform of an existing bone
 **Returns:** `{ asset_path, bone_name, bone_index, updated, not_found, bone_count, saved, op: "set_bone_transform" }`
 
 ## `set_ik_bone_settings`
+
+*Destructive, idempotent.*
 
 Set bone-specific settings for a bone within a solver.  Partial update (idempotent): only fields present in ``settings`` are applied; bone settings are auto-created if absent. FullBodyIK snake_case keys: rotation_stiffness (0-1), position_stiffness (0-1), limit_x/limit_y/limit_z ("Free"/"Limited"/"Locked"), min_x, max_x, min_y, max_y, min_z, max_z, use_preferred_angles (bool), preferred_x, preferred_y, preferred_z. StretchLimb uses its live bone struct's camelCase keys (squashDirection: {x,y,z}). Only FullBodyIK and StretchLimb support per-bone settings; others return an honest error.
 
@@ -2477,6 +2889,8 @@ Set bone-specific settings for a bone within a solver.  Partial update (idempote
 
 ## `set_ik_goal_settings`
 
+*Destructive, idempotent.*
+
 Set goal-specific settings for a goal connected to a solver.  Partial update (idempotent): only fields present in ``settings`` are applied. FullBodyIK uses snake_case keys: bone_name, chain_depth (0+), strength_alpha (0-1), pull_chain_alpha (0-1), pin_rotation (0-1). BodyMover uses its live goal struct's camelCase keys (influenceMultiplier 0-10, clamped server-side). Connect the goal first with connect_ik_goal_to_solver. Solvers without per-goal settings return an honest error.
 
 | Parameter | Type | Required | Description |
@@ -2489,6 +2903,8 @@ Set goal-specific settings for a goal connected to a solver.  Partial update (id
 **Returns:** `{ ik_rig_path: string, solver_index: int, goal_name: string, success: bool }`
 
 ## `set_ik_retarget_chain_bones`
+
+*Destructive, idempotent.*
 
 Set start bone, end bone, and/or goal for a retarget chain in an IK Rig.
 
@@ -2504,6 +2920,8 @@ Set start bone, end bone, and/or goal for a retarget chain in an IK Rig.
 
 ## `set_ik_solver_bones`
 
+*Destructive, idempotent.*
+
 Set the start and/or end bone for a solver in an IK Rig.
 
 | Parameter | Type | Required | Description |
@@ -2517,6 +2935,8 @@ Set the start and/or end bone for a solver in an IK Rig.
 
 ## `set_ik_solver_enabled`
 
+*Destructive, idempotent.*
+
 Enable or disable a solver in an IK Rig's solver stack.
 
 | Parameter | Type | Required | Description |
@@ -2528,6 +2948,8 @@ Enable or disable a solver in an IK Rig's solver stack.
 **Returns:** `{ asset_path: string, solver_index: int, enabled: bool, set_ok: bool }`
 
 ## `set_ik_solver_settings`
+
+*Destructive, idempotent.*
 
 Set detailed solver-specific settings on a solver in an IK Rig.  Partial update: only fields present in ``settings`` are applied (idempotent). FullBodyIK uses snake_case keys: root_bone, iterations (0-1000), sub_iterations (0-1000), mass_multiplier (0-10), allow_stretch (bool), root_behavior (enum string), global_pull_chain_alpha (0-1), max_angle (0-45), over_relaxation (1-2). Other solver types (Limb/Pole/BodyMover/SetTransform/StretchLimb) accept the camelCase names of their live settings struct; ClampMin/ClampMax bounds are enforced server-side.
 
@@ -2541,6 +2963,8 @@ Set detailed solver-specific settings on a solver in an IK Rig.  Partial update:
 
 ## `set_montage_blend_times`
 
+*Destructive, idempotent.*
+
 Set the blend-in / blend-out times on a UAnimMontage
 
 | Parameter | Type | Required | Description |
@@ -2552,6 +2976,8 @@ Set the blend-in / blend-out times on a UAnimMontage
 **Returns:** `{ montage_path, blend_in, blend_out, applied, saved, message }`
 
 ## `set_montage_properties`
+
+*Destructive, idempotent.*
 
 Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.
 
@@ -2572,6 +2998,8 @@ Set only the supplied blend modes, auto blend out, trigger time, sync group/slot
 
 ## `set_montage_section_start_time`
 
+*Destructive, idempotent.*
+
 Set the StartTime on an existing FCompositeSection by zero-based section_index
 
 | Parameter | Type | Required | Description |
@@ -2583,6 +3011,8 @@ Set the StartTime on an existing FCompositeSection by zero-based section_index
 **Returns:** `{ montage_path, section_index, start_time, applied, saved, message }`
 
 ## `set_montage_segment_anim_sequence`
+
+*Destructive, idempotent.*
 
 Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (resets segment start/end times to the new sequence's range)
 
@@ -2597,6 +3027,8 @@ Rebind an existing FAnimSegment on a slot track to a different UAnimSequence (re
 
 ## `set_montage_segment_start_time`
 
+*Destructive, idempotent.*
+
 Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index). AnimEndTime is left untouched.
 
 | Parameter | Type | Required | Description |
@@ -2609,6 +3041,8 @@ Set the AnimStartTime on an existing FAnimSegment by (slot_name, segment_index).
 **Returns:** `{ montage_path, slot_name, segment_index, start_time, anim_end_time, applied, saved, message }`
 
 ## `set_morph_target_deltas`
+
+*Destructive, idempotent.*
 
 Set vertex deltas for a morph target on a specific LOD.  Each delta is a dict with keys: vertex_index (int), position_delta ({x,y,z}), normal_delta ({x,y,z}).
 
@@ -2623,6 +3057,8 @@ Set vertex deltas for a morph target on a specific LOD.  Each delta is a dict wi
 
 ## `set_morph_target_generated_by_engine`
 
+*Destructive, idempotent.*
+
 Mark morph targets on a skeletal mesh as generated-by-engine (the runtime optimization that rebuilds them rather than using the imported source data).
 
 | Parameter | Type | Required | Description |
@@ -2634,6 +3070,8 @@ Mark morph targets on a skeletal mesh as generated-by-engine (the runtime optimi
 
 ## `set_motion_warping_component_search_in_anims`
 
+*Destructive, idempotent.*
+
 Set bSearchForWindowsInAnimsWithinMontages on the UMotionWarpingComponent of an editor-world actor found by internal name (not label): when true, warping windows are also searched in animations inside montages. Marks the level dirty, not saved; returns previous and new values and changed.
 
 | Parameter | Type | Required | Description |
@@ -2644,6 +3082,8 @@ Set bSearchForWindowsInAnimsWithinMontages on the UMotionWarpingComponent of an 
 **Returns:** `{ actor_name, previous_search_in_anims: bool, new_search_in_anims: bool, changed: bool }`
 
 ## `set_motion_warping_target_bone_name`
+
+*Destructive, idempotent.*
 
 Set the BoneName on an existing FMotionWarpingTarget (resolves the existing Component ref).
 
@@ -2657,6 +3097,8 @@ Set the BoneName on an existing FMotionWarpingTarget (resolves the existing Comp
 
 ## `set_motion_warping_target_follow_component`
 
+*Destructive, idempotent.*
+
 Set bFollowComponent on an existing component-based warp target of an editor-world actor found by internal name, keeping its Component, BoneName and offsets. A missing target, or one without a Component, is an error. WarpTargets is Transient, so the change is not saved with the level.
 
 | Parameter | Type | Required | Description |
@@ -2668,6 +3110,8 @@ Set bFollowComponent on an existing component-based warp target of an editor-wor
 **Returns:** `{ actor_name, warp_target_name, previous_follow: bool, new_follow: bool, changed: bool }`
 
 ## `set_motion_warping_target_location`
+
+*Destructive, idempotent.*
 
 Update an existing FMotionWarpingTarget's location (and optionally rotation) by FName -- an idempotent replace-in-place. Choose this over add_warp_target_to_component when the target already exists and you only want to nudge where it points; add_warp_target_to_component is the one that CREATES a target.
 
@@ -2682,6 +3126,8 @@ Update an existing FMotionWarpingTarget's location (and optionally rotation) by 
 
 ## `set_motion_warping_target_location_offset`
 
+*Destructive, idempotent.*
+
 Set LocationOffset (FVector) on an existing FMotionWarpingTarget (keeps BoneName/follow/rotation-offset).
 
 | Parameter | Type | Required | Description |
@@ -2693,6 +3139,8 @@ Set LocationOffset (FVector) on an existing FMotionWarpingTarget (keeps BoneName
 **Returns:** `{ actor_name, warp_target_name, previous_x, previous_y, previous_z, new_x, new_y, new_z, changed: bool }`
 
 ## `set_motion_warping_target_rotation`
+
+*Destructive, idempotent.*
 
 Set the rotation of an existing warp target of an editor-world actor (found by internal name), keeping its Location. The target is rebuilt as a plain transform target, so a component-based one loses its Component, BoneName, follow flag and offsets. WarpTargets is Transient: not saved.
 
@@ -2706,6 +3154,8 @@ Set the rotation of an existing warp target of an editor-world actor (found by i
 
 ## `set_pose_asset_base_pose`
 
+*Destructive, idempotent.*
+
 Set the base pose of a UPoseAsset by name (UPoseAsset::SetBasePoseName).
 
 | Parameter | Type | Required | Description |
@@ -2717,6 +3167,8 @@ Set the base pose of a UPoseAsset by name (UPoseAsset::SetBasePoseName).
 
 ## `set_pose_search_database_schema`
 
+*Destructive, idempotent.*
+
 Bind a UPoseSearchSchema to a UPoseSearchDatabase (assigns the Schema field). Use it right after creating a database with no schema, or to rebind an existing one; a database without a schema cannot be indexed.
 
 | Parameter | Type | Required | Description |
@@ -2727,6 +3179,8 @@ Bind a UPoseSearchSchema to a UPoseSearchDatabase (assigns the Schema field). Us
 **Returns:** `{ database_path, previous_schema_path, new_schema_path, changed: bool, saved: bool }`
 
 ## `set_pose_search_schema_mirror_data_table`
+
+*Destructive, idempotent.*
 
 Bind (or rebind) the UMirrorDataTable of the schema's FPoseSearchRoledSkeleton entry under `role` (default role when omitted). Refused when no entry has that role.
 
@@ -2740,6 +3194,8 @@ Bind (or rebind) the UMirrorDataTable of the schema's FPoseSearchRoledSkeleton e
 
 ## `set_pose_search_schema_properties`
 
+*Destructive, idempotent.*
+
 Author UPoseSearchSchema scalar tunables via reflection (partial merge + clamp). Replaces the 8 former per-field set_pose_search_schema_* setters.
 
 | Parameter | Type | Required | Description |
@@ -2750,6 +3206,8 @@ Author UPoseSearchSchema scalar tunables via reflection (partial merge + clamp).
 **Returns:** `{ asset_path, asset_class, settings, applied_keys, changed, saved }`
 
 ## `set_pose_search_schema_role`
+
+*Destructive, idempotent.*
 
 Rename the role (FName) of the schema's FPoseSearchRoledSkeleton entry under role_from (default role when omitted). Refused when new_role is already taken by another entry.
 
@@ -2763,6 +3221,8 @@ Rename the role (FName) of the schema's FPoseSearchRoledSkeleton entry under rol
 
 ## `set_pose_search_schema_skeleton`
 
+*Destructive, idempotent.*
+
 Bind (or rebind) the USkeleton of the schema's FPoseSearchRoledSkeleton entry under `role`. Idempotent by role: if a skeleton is already bound under that role it is REPLACED; if no roled entry exists for that role yet, one is created. Use add_pose_search_roled_skeleton instead when you want to ADD a second character's role without disturbing the first.
 
 | Parameter | Type | Required | Description |
@@ -2774,6 +3234,8 @@ Bind (or rebind) the USkeleton of the schema's FPoseSearchRoledSkeleton entry un
 **Returns:** `{ asset_path, role, previous_skeleton_path, new_skeleton_path, changed, saved }`
 
 ## `set_retarget_pose_bone_rotation`
+
+*Destructive, idempotent.*
 
 Set a bone's rotation offset in the current retarget pose (euler degrees). Creates a default pose if none is current.
 
@@ -2796,6 +3258,8 @@ Set a bone's rotation offset in the current retarget pose (euler degrees). Creat
 
 ## `set_retargeter_chain_mapping`
 
+*Destructive, idempotent.*
+
 Map a source chain to a target chain in an IK Retargeter.
 
 | Parameter | Type | Required | Description |
@@ -2808,6 +3272,8 @@ Map a source chain to a target chain in an IK Retargeter.
 **Returns:** `{ asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool }`
 
 ## `set_retargeter_op_settings`
+
+*Destructive, idempotent.*
 
 Partial-merge a retarget op's live settings struct (only the JSON fields present are written -> idempotent), and optionally toggle the op enabled flag.  Settings keys match get_retargeter_op_info (first char lower-cased, e.g. lODThreshold). Numeric ClampMin/ClampMax metadata is enforced after the merge. The optional `enabled` flag is applied via the controller (its own transaction). The payload echoes the read-back settings.
 
@@ -2822,6 +3288,8 @@ Partial-merge a retarget op's live settings struct (only the JSON fields present
 
 ## `set_rig_control_limits`
 
+*Destructive, idempotent.*
+
 Set a scalar Control Rig control's min/max limits (Float/ScaleFloat/Integer).  Enables the limit array for the control type and sets MinimumValue/MaximumValue type-correctly; once enabled, set_rig_control_value clamps via ApplyLimits. Verified read-back.
 
 | Parameter | Type | Required | Description |
@@ -2835,6 +3303,8 @@ Set a scalar Control Rig control's min/max limits (Float/ScaleFloat/Integer).  E
 **Returns:** `{ asset_path: string, control_name: string, control_type: string, min: number, max: number, limit_enabled: bool, saved: bool, save_error?: string }`
 
 ## `set_rig_control_settings`
+
+*Destructive, idempotent.*
 
 Edit an existing Control Rig control's shape/gizmo/color/limit-draw settings (the bits add_rig_control can't set afterwards).  Read-modify-write: reads the control's FRigControlSettings, applies the provided fields, writes back via URigHierarchyController::SetControlSettings, recompiles + saves, and returns the verified read-back. Only the supplied fields change.
 
@@ -2852,6 +3322,8 @@ Edit an existing Control Rig control's shape/gizmo/color/limit-draw settings (th
 
 ## `set_rig_control_shape_transform`
 
+*Destructive, idempotent.*
+
 Set the local shape (gizmo) transform of an existing Control Rig control.  Reads the current local shape transform, overrides only the supplied location/rotation/scale, writes back via URigHierarchy::SetControlShapeTransform, recompiles + saves, and returns the verified read-back. This positions the manipulator gizmo relative to the control, independent of the control's value.
 
 | Parameter | Type | Required | Description |
@@ -2866,6 +3338,8 @@ Set the local shape (gizmo) transform of an existing Control Rig control.  Reads
 
 ## `set_rig_control_value`
 
+*Destructive, idempotent.*
+
 Set a Control Rig control's pose value (Initial + Current), type-correct per the control's ERigControlType.  add_rig_control only seeds the identity value. SetControlValue applies the control's limits, so a value outside an enabled min/max is clamped (set limits first with set_rig_control_limits). Verified read-back.
 
 | Parameter | Type | Required | Description |
@@ -2877,6 +3351,8 @@ Set a Control Rig control's pose value (Initial + Current), type-correct per the
 **Returns:** `{ asset_path: string, control_name: string, control_type: string, value: any, saved: bool, save_error?: string }`
 
 ## `set_rigvm_pin_default`
+
+*Destructive, idempotent.*
 
 Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. success reflects the save even when the write failed: check set, pin_found and current_value, which is read back.
 
@@ -2890,6 +3366,8 @@ Set the default value of a pin in the main RigVM graph of a Control Rig Blueprin
 
 ## `set_skeletal_mesh_allow_cpu_access`
 
+*Destructive, idempotent.*
+
 Set bAllowCPUAccess on every LOD of a skeletal mesh. Used to keep vertex/skin data resident for FX sampling or other CPU work.
 
 | Parameter | Type | Required | Description |
@@ -2900,6 +3378,8 @@ Set bAllowCPUAccess on every LOD of a skeletal mesh. Used to keep vertex/skin da
 **Returns:** `{ skeletal_mesh_path: string, b_allow: bool, applied_lods: int, saved: bool }`
 
 ## `set_skeletal_mesh_anim_class`
+
+*Destructive, idempotent.*
 
 Repoint a Blueprint's skeletal mesh component AnimClass to a (fork) AnimBlueprint. Also handles the INHERITED native Character Mesh, which is not in the SCS and which the generic component-property setters cannot reach: it writes the CDO component archetype so spawned instances inherit the new AnimClass. Also sets AnimationMode=AnimationBlueprint.
 
@@ -2912,6 +3392,8 @@ Repoint a Blueprint's skeletal mesh component AnimClass to a (fork) AnimBlueprin
 **Returns:** `{ blueprint, component, anim_class, previous_anim_class, applied, wrote_cdo_archetype, saved }`
 
 ## `set_skeletal_mesh_lod_build_settings`
+
+*Destructive, idempotent.*
 
 Change the stored build settings of one LOD of a skeletal mesh asset, only the fields you pass, and save the mesh. The mesh is not rebuilt here, so the settings take effect at its next build or reimport; a failed save returns an error. Returns settings_applied.
 
@@ -2932,6 +3414,8 @@ Change the stored build settings of one LOD of a skeletal mesh asset, only the f
 **Returns:** `{ lod_index: int, settings_applied: {...}, saved: bool }`
 
 ## `set_skeletal_mesh_lod_reduction_settings`
+
+*Destructive, idempotent.*
 
 Author a LOD's FSkeletalMeshOptimizationSettings (ReductionSettings) — the data bake_skeletal_mesh_lod consumes, making the bake steerable instead of running with defaults.  Partial update (idempotent): only fields present are written. Enums are by name (full "SMTC_NumOfTriangles" or short "NumOfTriangles"). termination_criterion (SMTC_*) and reduction_method (SMOT_*) are DISTINCT.
 
@@ -2964,6 +3448,8 @@ Author a LOD's FSkeletalMeshOptimizationSettings (ReductionSettings) — the dat
 
 ## `set_skeletal_mesh_lod_screen_size`
 
+*Destructive, idempotent.*
+
 Set ScreenSize.Default (the screen size at which this LOD switches in) of one LOD of a skeletal mesh asset. Marks the mesh dirty but does NOT save it, so follow with save_asset; per-platform overrides are left as they are. Returns old_screen_size and screen_size.
 
 | Parameter | Type | Required | Description |
@@ -2975,6 +3461,8 @@ Set ScreenSize.Default (the screen size at which this LOD switches in) of one LO
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, old_screen_size: float, screen_size: float, applied: bool }`
 
 ## `set_skeletal_mesh_lod_settings`
+
+*Destructive, idempotent.*
 
 Set the remaining flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter covers (hysteresis, CPU access, morph error tolerance, skin cache usage, mesh deformer, prioritization weight).  Partial update (idempotent): only fields present are written.
 
@@ -2993,6 +3481,8 @@ Set the remaining flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no oth
 
 ## `set_skeletal_mesh_material_slot`
 
+*Destructive, idempotent.*
+
 Assign a material to an existing material slot of a skeletal mesh ASSET (writes FSkeletalMaterial.MaterialInterface in USkeletalMesh::GetMaterials()). Address the slot by slot_index OR slot_name (exactly one). Never auto-grows the slot array.
 
 | Parameter | Type | Required | Description |
@@ -3006,6 +3496,8 @@ Assign a material to an existing material slot of a skeletal mesh ASSET (writes 
 
 ## `set_skeletal_mesh_min_lod`
 
+*Destructive, idempotent.*
+
 Set the platform-wide forced-min-LOD bias on a skeletal mesh.
 
 | Parameter | Type | Required | Description |
@@ -3016,6 +3508,8 @@ Set the platform-wide forced-min-LOD bias on a skeletal mesh.
 **Returns:** `{ skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }`
 
 ## `set_skeletal_mesh_section_cast_shadow`
+
+*Destructive, idempotent.*
 
 Set the cast shadow flag on a specific section of a skeletal mesh LOD.
 
@@ -3030,6 +3524,8 @@ Set the cast shadow flag on a specific section of a skeletal mesh LOD.
 
 ## `set_skeletal_mesh_section_recompute_tangent`
 
+*Destructive, idempotent.*
+
 Set the recompute tangent flag on a specific section of a skeletal mesh LOD.
 
 | Parameter | Type | Required | Description |
@@ -3042,6 +3538,8 @@ Set the recompute tangent flag on a specific section of a skeletal mesh LOD.
 **Returns:** `{ lod_index: int, section_index: int, recompute_tangent: bool, saved: bool }`
 
 ## `set_skeletal_mesh_section_visible_in_ray_tracing`
+
+*Destructive, idempotent.*
 
 Toggle a section's bVisibleInRayTracing flag on a specific skeletal mesh LOD.
 
@@ -3056,6 +3554,8 @@ Toggle a section's bVisibleInRayTracing flag on a specific skeletal mesh LOD.
 
 ## `set_skeletal_mesh_socket_parent`
 
+*Destructive, idempotent.*
+
 Re-parent an existing socket on a skeletal mesh to a different bone. Validates the bone exists in the reference skeleton.
 
 | Parameter | Type | Required | Description |
@@ -3067,6 +3567,8 @@ Re-parent an existing socket on a skeletal mesh to a different bone. Validates t
 **Returns:** `{ socket_name: string, parent_bone_name: string, skeletal_mesh_path: string, reparented: bool }`
 
 ## `set_skeletal_mesh_socket_transform`
+
+*Destructive, idempotent.*
 
 Set the local transform (relative to parent bone) of a socket on a skeletal mesh. All three of location/rotation/scale are optional; only fields present are written.
 
@@ -3082,6 +3584,8 @@ Set the local transform (relative to parent bone) of a socket on a skeletal mesh
 
 ## `setup_foot_ik`
 
+*Destructive.*
+
 Add a UAnimGraphNode_LegIK to the AnimGraph of an Animation Blueprint, binding the foot bone references.
 
 | Parameter | Type | Required | Description |
@@ -3094,6 +3598,8 @@ Add a UAnimGraphNode_LegIK to the AnimGraph of an Animation Blueprint, binding t
 
 ## `sort_montage_segments`
 
+*Destructive.*
+
 Sort a montage slot track's segments by start time ascending
 
 | Parameter | Type | Required | Description |
@@ -3104,6 +3610,8 @@ Sort a montage slot track's segments by start time ascending
 **Returns:** `{ montage_path, slot_name, segment_count, applied, saved, message }`
 
 ## `stop_animation`
+
+*Destructive.*
 
 Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 s blend-out: only montage_path when given, otherwise every active montage. Editor world unless the world param says otherwise; an unknown montage_path is an error. was_playing and playing cover any montage.
 
@@ -3117,6 +3625,8 @@ Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 
 
 ## `validate_anim_state_machine`
 
+*Read-only.*
+
 Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. state_count counts states only (conduits and aliases excluded), transition_count the transition nodes; compile_anim_blueprint is the check that the machine compiles.
 
 | Parameter | Type | Required | Description |
@@ -3127,6 +3637,8 @@ Check a state machine of an Animation Blueprint by node counts, without compilin
 **Returns:** `{ is_valid, errors[], warnings[], info[], state_count, transition_count }`
 
 ## `wire_aim_offset`
+
+*Destructive, idempotent.*
 
 Create a UBlendSpace1D asset for aim-offset blending (yaw or pitch axis). Idempotent on re-run.
 

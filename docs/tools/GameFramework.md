@@ -6,6 +6,8 @@
 
 ## `create_game_instance_class_bp`
 
+*Additive, idempotent.*
+
 Create a Blueprint subclass of UGameInstance. Idempotent on re-run.
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Create a Blueprint subclass of UGameInstance. Idempotent on re-run.
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_exists }`
 
 ## `create_game_mode_class_bp`
+
+*Additive, idempotent.*
 
 Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on re-run).
 
@@ -30,6 +34,8 @@ Create a new AGameModeBase-derivative Blueprint asset and save it (idempotent on
 
 ## `create_game_state_class_bp`
 
+*Additive, idempotent.*
+
 Create a Blueprint subclass of AGameStateBase (or AGameState). Idempotent on re-run.
 
 | Parameter | Type | Required | Description |
@@ -41,6 +47,8 @@ Create a Blueprint subclass of AGameStateBase (or AGameState). Idempotent on re-
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_exists }`
 
 ## `create_hud_class_bp`
+
+*Additive, idempotent.*
 
 Create a Blueprint subclass of AHUD. Idempotent on re-run.
 
@@ -54,6 +62,8 @@ Create a Blueprint subclass of AHUD. Idempotent on re-run.
 
 ## `create_player_controller_class_bp`
 
+*Additive, idempotent.*
+
 Create a Blueprint subclass of APlayerController. Idempotent on re-run.
 
 | Parameter | Type | Required | Description |
@@ -65,6 +75,8 @@ Create a Blueprint subclass of APlayerController. Idempotent on re-run.
 **Returns:** `{ asset_name, asset_path, package_class, parent_class, already_exists }`
 
 ## `create_player_state_class_bp`
+
+*Additive, idempotent.*
 
 Create a Blueprint subclass of APlayerState. Idempotent on re-run.
 
@@ -78,6 +90,8 @@ Create a Blueprint subclass of APlayerState. Idempotent on re-run.
 
 ## `get_game_mode_info`
 
+*Read-only.*
+
 Read the AGameModeBase CDO's class slots (DefaultPawnClass, HUDClass, PlayerStateClass, GameStateClass, SpectatorClass, PlayerControllerClass) and the world settings' DefaultGameMode override.
 
 | Parameter | Type | Required | Description |
@@ -88,6 +102,8 @@ Read the AGameModeBase CDO's class slots (DefaultPawnClass, HUDClass, PlayerStat
 **Returns:** `{ game_mode_class: string, parent_class: string, is_multiplayer: bool, default_pawn_class: string, hud_class: string, player_state_class: string, game_state_class: string, spectator_class: string, player_controller_class: string, world_settings_default_game_mode?: string }`
 
 ## `place_player_start`
+
+*Additive.*
 
 Spawn an APlayerStart actor in the editor world at the given location with optional rotation + player-start tag. Location AND rotation are RE-READ from the actor after writing them, so a mismatch is visible instead of echoed back.
 
@@ -102,6 +118,8 @@ Spawn an APlayerStart actor in the editor world at the given location with optio
 
 ## `register_spawn_point`
 
+*Additive.*
+
 Mark an existing actor as a registered spawn point for the project (sets PlayerStartTag + ensures it's a APlayerStart). Useful for tagging generic actors as respawn anchors in lieu of placing APlayerStarts.
 
 | Parameter | Type | Required | Description |
@@ -113,6 +131,8 @@ Mark an existing actor as a registered spawn point for the project (sets PlayerS
 
 ## `reset_game_mode_override`
 
+*Destructive, idempotent.*
+
 Inverse of set_game_mode_override: clears the per-world GameMode override (AWorldSettings::DefaultGameMode) back to null, so the world falls back to the engine's URL/INI DefaultGameMode. Takes no parameters and acts on the current editor world.
 
 No parameters.
@@ -120,6 +140,8 @@ No parameters.
 **Returns:** `{ reset, world_name, previous_default_game_mode }`
 
 ## `set_game_mode_default_pawn`
+
+*Destructive, idempotent.*
 
 Set the AGameModeBase::DefaultPawnClass UPROPERTY on the GameMode's CDO.
 
@@ -133,6 +155,8 @@ Set the AGameModeBase::DefaultPawnClass UPROPERTY on the GameMode's CDO.
 
 ## `set_game_mode_game_state_class`
 
+*Destructive, idempotent.*
+
 Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO.
 
 | Parameter | Type | Required | Description |
@@ -144,6 +168,8 @@ Set the AGameModeBase::GameStateClass UPROPERTY on the GameMode's CDO.
 **Returns:** `{ game_mode_class: string, game_state_class: string, already_set: bool }`
 
 ## `set_game_mode_hud_class`
+
+*Destructive, idempotent.*
 
 Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO.
 
@@ -157,6 +183,8 @@ Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO.
 
 ## `set_game_mode_override`
 
+*Destructive, idempotent.*
+
 Set the AWorldSettings::DefaultGameMode override on the current editor world.
 
 | Parameter | Type | Required | Description |
@@ -166,6 +194,8 @@ Set the AWorldSettings::DefaultGameMode override on the current editor world.
 **Returns:** `{ world_settings_path: string, default_game_mode: string, is_multiplayer: bool }`
 
 ## `set_game_mode_player_state_class`
+
+*Destructive, idempotent.*
 
 Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO.
 
@@ -178,6 +208,8 @@ Set the AGameModeBase::PlayerStateClass UPROPERTY on the GameMode's CDO.
 **Returns:** `{ game_mode_class: string, player_state_class: string }`
 
 ## `set_game_mode_spectator_class`
+
+*Destructive, idempotent.*
 
 Set the AGameModeBase::SpectatorClass UPROPERTY on the GameMode's CDO.
 
