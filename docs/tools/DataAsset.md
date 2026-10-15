@@ -232,9 +232,9 @@ Export a whole DataTable to CSV with the native exporter (read-only), returning 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable (data_table also accepted) |
+| `table_path` | string | yes | Full asset path of the DataTable. |
+| `data_table` | string | no | Alias of table_path: pass one of the two. |
 | `file_path` | string | no | Optional OS path to also write the CSV string to (echoed back as written_to) |
-| `data_table` | string | no |   |
 
 **Returns:** `{ table_path, row_struct, row_count, csv, written_to? }`
 
@@ -244,9 +244,9 @@ Export a whole DataTable to JSON with the native exporter (read-only), so TMap&l
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable (data_table also accepted) |
+| `table_path` | string | yes | Full asset path of the DataTable. |
+| `data_table` | string | no | Alias of table_path: pass one of the two. |
 | `file_path` | string | no | Optional OS path to also write the JSON string to (echoed back as written_to) |
-| `data_table` | string | no |   |
 
 **Returns:** `{ table_path, row_struct, row_count, json, written_to? }`
 
@@ -346,9 +346,9 @@ Read one column across every row of a DataTable as ExportText strings, so TMaps,
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable (data_table also accepted) |
+| `table_path` | string | yes | Full asset path of the DataTable. |
 | `column` | string | yes | Name of the column (a field of the row struct, by property or display name) to read across every row |
-| `data_table` | string | no |   |
+| `data_table` | string | no | Alias of table_path: pass one of the two. |
 
 **Returns:** `{ table_path, column, row_struct, row_count, values:{ rowName: exporttext-string } }`
 

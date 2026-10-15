@@ -3370,7 +3370,8 @@ TSharedPtr<FJsonObject> HandleDiffDataTables(const TSharedPtr<FJsonObject>& Para
 // ==========================================================================
 
 // MCP:get_data_table_column - Read one column across every row of a DataTable as ExportText strings, so TMaps, soft references and tags come out flat and intact; read-only. Returns row_struct, row_count and values as {row_name: text}. Use it to verify cell edits; an unknown column is an error.
-//   @param table_path - Full asset path of the DataTable (data_table also accepted)
+//   @param table_path - Full asset path of the DataTable.
+//   @param data_table - Alias of table_path: pass one of the two.
 //   @param column - Name of the column (a field of the row struct, by property or display name) to read across every row
 //   @returns { table_path, column, row_struct, row_count, values:{ rowName: exporttext-string } }
 TSharedPtr<FJsonObject> HandleGetDataTableColumn(const TSharedPtr<FJsonObject>& Params)
@@ -3421,7 +3422,8 @@ TSharedPtr<FJsonObject> HandleGetDataTableColumn(const TSharedPtr<FJsonObject>& 
 }
 
 // MCP:export_data_table_as_json - Export a whole DataTable to JSON with the native exporter (read-only), so TMap<Enum,SoftClass>, soft references and GameplayTags survive, unlike get_data_table_rows. Returns row_struct, row_count and the json string (an array of row objects), optionally also written to a UTF-8 file.
-//   @param table_path - Full asset path of the DataTable (data_table also accepted)
+//   @param table_path - Full asset path of the DataTable.
+//   @param data_table - Alias of table_path: pass one of the two.
 //   @param file_path - Optional OS path to also write the JSON string to (echoed back as written_to)
 //   @returns { table_path, row_struct, row_count, json, written_to? }
 TSharedPtr<FJsonObject> HandleExportDataTableAsJson(const TSharedPtr<FJsonObject>& Params)
@@ -3432,7 +3434,8 @@ TSharedPtr<FJsonObject> HandleExportDataTableAsJson(const TSharedPtr<FJsonObject
 }
 
 // MCP:export_data_table_as_csv - Export a whole DataTable to CSV with the native exporter (read-only), returning row_struct, row_count and the csv string, optionally also written to a UTF-8 file. Use it as the backup before import_data_table_csv; nested structs and TMaps do not survive CSV cleanly, so export_data_table_as_json is the faithful copy.
-//   @param table_path - Full asset path of the DataTable (data_table also accepted)
+//   @param table_path - Full asset path of the DataTable.
+//   @param data_table - Alias of table_path: pass one of the two.
 //   @param file_path - Optional OS path to also write the CSV string to (echoed back as written_to)
 //   @returns { table_path, row_struct, row_count, csv, written_to? }
 TSharedPtr<FJsonObject> HandleExportDataTableAsCsv(const TSharedPtr<FJsonObject>& Params)

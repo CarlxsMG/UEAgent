@@ -18294,19 +18294,19 @@
               "name": "table_path",
               "jsonType": "string",
               "required": true,
-              "description": "Full asset path of the DataTable (data_table also accepted)"
+              "description": "Full asset path of the DataTable."
+            },
+            {
+              "name": "data_table",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias of table_path: pass one of the two."
             },
             {
               "name": "file_path",
               "jsonType": "string",
               "required": false,
               "description": "Optional OS path to also write the CSV string to (echoed back as written_to)"
-            },
-            {
-              "name": "data_table",
-              "jsonType": "string",
-              "required": false,
-              "description": ""
             }
           ],
           "returns": "{ table_path, row_struct, row_count, csv, written_to? }"
@@ -18319,19 +18319,19 @@
               "name": "table_path",
               "jsonType": "string",
               "required": true,
-              "description": "Full asset path of the DataTable (data_table also accepted)"
+              "description": "Full asset path of the DataTable."
+            },
+            {
+              "name": "data_table",
+              "jsonType": "string",
+              "required": false,
+              "description": "Alias of table_path: pass one of the two."
             },
             {
               "name": "file_path",
               "jsonType": "string",
               "required": false,
               "description": "Optional OS path to also write the JSON string to (echoed back as written_to)"
-            },
-            {
-              "name": "data_table",
-              "jsonType": "string",
-              "required": false,
-              "description": ""
             }
           ],
           "returns": "{ table_path, row_struct, row_count, json, written_to? }"
@@ -18466,7 +18466,7 @@
               "name": "table_path",
               "jsonType": "string",
               "required": true,
-              "description": "Full asset path of the DataTable (data_table also accepted)"
+              "description": "Full asset path of the DataTable."
             },
             {
               "name": "column",
@@ -18478,7 +18478,7 @@
               "name": "data_table",
               "jsonType": "string",
               "required": false,
-              "description": ""
+              "description": "Alias of table_path: pass one of the two."
             }
           ],
           "returns": "{ table_path, column, row_struct, row_count, values:{ rowName: exporttext-string } }"
@@ -47838,10 +47838,10 @@
           "description": "Set the attach/detach transform rules on a Sequencer 3D-attach section (created by add_attach_track).  The 6 rules (location/rotation/scale x attach/detach) control how the attachee's transform is preserved when the attach begins/ends. Only the supplied rules change (applied_count) and all 6 are read back. The section is resolved like get_section_info (binding_guid + track_index + section_index).",
           "params": [
             {
-              "name": "sequence_path",
+              "name": "sequence_name",
               "jsonType": "string",
               "required": true,
-              "description": "Asset path of the target Level Sequence (alias for sequence_name)."
+              "description": "Name of the target Level Sequence (or sequence_path)."
             },
             {
               "name": "binding_guid",
@@ -47850,10 +47850,10 @@
               "description": "GUID of the attachee binding that owns the attach track."
             },
             {
-              "name": "sequence_name",
+              "name": "sequence_path",
               "jsonType": "string",
               "required": false,
-              "description": "Name of the target Level Sequence (or sequence_path)."
+              "description": "Asset path of the target Level Sequence (alias for sequence_name)."
             },
             {
               "name": "binding_name_or_guid",

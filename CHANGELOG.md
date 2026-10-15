@@ -42,6 +42,9 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   `set_landscape_grass_type_properties` are optional; and the parameters read through helpers have
   their real types (`vector` and `color` arrays, scale and offset ranges, material function input
   props, post process volume numbers). `set_mesh_uvs_from_projection` lists `polygroup_layer`.
+- In an alias chain, the catalog keeps `required` on the first spelling the annotation documents. The
+  `data_table` alias of three DataTable tools is documented, and `set_attach_section_rules` requires
+  `sequence_name`, its documented spelling, instead of `sequence_path`.
 
 ## 1.1.0 - 2026-10-14
 

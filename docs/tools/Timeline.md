@@ -839,9 +839,9 @@ Set the attach/detach transform rules on a Sequencer 3D-attach section (created 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_path` | string | yes | Asset path of the target Level Sequence (alias for sequence_name). |
+| `sequence_name` | string | yes | Name of the target Level Sequence (or sequence_path). |
 | `binding_guid` | string | yes | GUID of the attachee binding that owns the attach track. |
-| `sequence_name` | string | no | Name of the target Level Sequence (or sequence_path). |
+| `sequence_path` | string | no | Asset path of the target Level Sequence (alias for sequence_name). |
 | `binding_name_or_guid` | string | no | Sequencer binding: the bound object's name or its GUID string (alias for binding_guid). |
 | `track_index` | number | no | Optional index into the binding's tracks (default 0). |
 | `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"); used when track_index is omitted. |

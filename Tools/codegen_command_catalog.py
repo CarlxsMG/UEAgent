@@ -139,13 +139,17 @@ def _alias_reads(body: str) -> list[tuple[str, str]]:
 
 
 def _prefer_documented(params: list[dict], chains: dict[str, str]) -> None:
-    """Move a chain's `required` flag to the member the annotation documents.
+    """Move a chain's `required` flag to the FIRST member the annotation documents.
 
     `chains` maps each member (head included) to its chain key. Within a chain
-    only ONE member can be required (the others are alternative spellings); if
-    the required one has no description and another one does, they swap. That
-    way the name the schema REQUIRES is always the one that says what it is
-    for, instead of an undocumented alias."""
+    only ONE member can be required (the others are alternative spellings), and
+    it is the first documented one in documented order (`params` lists the
+    documented params first, in that order), whichever the C++ reads first.
+    That way the name the schema REQUIRES is the one the annotation presents as
+    the parameter, never an undocumented alias -- and documenting an alias
+    AFTER the canonical name (`@param data_table - Alias of table_path.`) does
+    not move the requirement onto the alias, which would make the server refuse
+    every call that passes only the canonical name."""
     by_chain: dict[str, list[dict]] = {}
     for p in params:
         key = chains.get(p["name"])
@@ -153,10 +157,10 @@ def _prefer_documented(params: list[dict], chains: dict[str, str]) -> None:
             by_chain.setdefault(key, []).append(p)
     for group_params in by_chain.values():
         req = next((p for p in group_params if p.get("required")), None)
-        if not req or (req.get("description") or "").strip():
-            continue                      # no required member, or it is already documented
+        if not req:
+            continue                      # no required member
         doc = next((p for p in group_params if (p.get("description") or "").strip()), None)
-        if doc is not None:
+        if doc is not None and doc is not req:
             req["required"] = False
             doc["required"] = True
 
