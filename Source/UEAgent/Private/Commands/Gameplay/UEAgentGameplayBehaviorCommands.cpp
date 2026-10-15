@@ -250,7 +250,7 @@ TSharedPtr<FJsonObject> HandleGetBehaviorConfigInfo(
 // ---------------------------------------------------------------------------
 // trigger_behavior_on_actor  — uses static UGameplayBehaviorSubsystem::TriggerBehavior
 // ---------------------------------------------------------------------------
-// MCP:trigger_behavior_on_actor - Trigger a UGameplayBehaviorConfig on a Pawn in the editor world.
+// MCP:trigger_behavior_on_actor - Start the behavior of a UGameplayBehaviorConfig on a Pawn found by label in the editor world: the config supplies its UGameplayBehavior, whose Trigger runs on the pawn, and the world UGameplayBehaviorSubsystem tracks it until it ends or end_behavior_on_actor stops it. triggered=false means the behavior refused. Runtime only: nothing is saved or undoable. A config without BehaviorClass (see set_behavior_class), no subsystem in the editor world (see get_behavior_subsystem_info), a missing actor or a non-Pawn is an error.
 //   @param config_path - Content path of the UGameplayBehaviorConfig.
 //   @param actor_label - Label of the Pawn actor in the editor world to receive the behavior.
 //   @returns { config_path: string, actor_label: string, behavior_class: string, triggered: bool }

@@ -6,6 +6,8 @@
 
 ## `cancel_package_build`
 
+*Destructive.*
+
 Cancels the in-progress package build, if one is running (honest no-op otherwise). FMonitoredProcess::Cancel(true) kills the whole process tree, since UAT spawns child processes (UBT, the cooker) that would otherwise keep running.
 
 No parameters.
@@ -14,6 +16,8 @@ No parameters.
 
 ## `get_package_build_status`
 
+*Read-only.*
+
 Polls the state of the most recent start_package_build job: running / finished / canceled / launch-failed, with elapsed time and a tail of captured UAT output. Honest has_build:false if no build was ever started this editor session.
 
 No parameters.
@@ -21,6 +25,8 @@ No parameters.
 **Returns:** `{ has_build: bool, running?: bool, finished?: bool, canceled?: bool, launch_failed?: bool, exit_code?: int, success?: bool, platform?: string, configuration?: string, elapsed_seconds?: number, output_tail?: string }`
 
 ## `start_package_build`
+
+*Destructive.*
 
 Starts an asynchronous project package build (BuildCookRun) via UAT (FSerializedUATProcess), for the current .uproject. Runs RunUAT BuildCookRun -project=&lt;this project> -noP4 -utf8output -platform=&lt;platform> -clientconfig=&lt;configuration> -cook -allmaps -build -stage -pak -archive -archivedirectory=&lt;dir>. This is a real external process that can take minutes (it builds the target, then cooks); the call returns immediately once launched -- poll get_package_build_status for progress/outcome. Refuses to start a second build while one is already in flight (honest, not silently queued).
 

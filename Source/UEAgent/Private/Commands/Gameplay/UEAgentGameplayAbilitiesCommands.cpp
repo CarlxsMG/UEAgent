@@ -758,9 +758,9 @@ TSharedPtr<FJsonObject> HandleGetGameplayEffectInfo(const TSharedPtr<FJsonObject
 
 // --- Attribute values (current and base) -----------------------------------------
 
-// MCP:get_attributes - Get list of attributes for an actor's attribute set
-//   @param actor_name - Name of the actor to query for attributes
-//   @returns { attribute_name, attribute_set, value, base_value, found, actor_name, attributes, count }
+// MCP:get_attributes - List every attribute of the attribute sets registered on the ability system component of an editor-world actor (its IAbilitySystemInterface answer, else its first UAbilitySystemComponent), each with attribute_name, attribute_set, value (current, modifiers included), base_value and found, plus count. Read-only. A missing actor or component is an error; a component with no registered set gives count 0. Use get_attribute_value for one attribute, set_attribute_base_value to change one.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @returns { actor_name: string, attributes: [{ attribute_name: string, attribute_set?: string, value: number, base_value: number, found: bool }], count: int }
 TSharedPtr<FJsonObject> HandleGetAttributes(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayAbilitiesImpl;

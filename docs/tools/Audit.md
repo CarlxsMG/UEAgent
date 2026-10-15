@@ -6,6 +6,8 @@
 
 ## `audit_asset_references`
 
+*Destructive.*
+
 Project-wide reference audit under folder_path: assets with zero referencers ("orphans") and dependencies pointing at a package no longer on disk ("broken"). Metadata-only through the AssetRegistry -- it never LOADS the assets, so it scales to a large project without spiking memory. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. For one asset rather than a sweep, use get_asset_referencers / get_asset_dependencies; for unused assets only, find_unused_assets.
 
 | Parameter | Type | Required | Description |
@@ -19,6 +21,8 @@ Project-wide reference audit under folder_path: assets with zero referencers ("o
 
 ## `audit_blueprint_health`
 
+*Destructive.*
+
 Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and records error/warning counts. By far the heaviest audit here (it compiles, it does not just read metadata) and it runs synchronously in the editor -- ALWAYS scope it with folder_path on a large project, and lean on max_results, which is a hard cap. It returns only a summary plus a report path; read the detail back with read_mcp_audit_file. To find already-broken Blueprints WITHOUT recompiling anything, use find_erroring_blueprints instead.
 
 | Parameter | Type | Required | Description |
@@ -31,6 +35,8 @@ Project-wide compile-sweep: RECOMPILES every Blueprint under folder_path and rec
 
 ## `audit_collision_profiles`
 
+*Destructive.*
+
 Aggregate report of every project collision profile AND every collision channel (built-in + custom), including which custom ECC_GameTraceChannelN slots are already taken -- the question to ask before add_collision_channel. Cheap: it reads the collision settings in memory, with no AssetRegistry scan and no asset loading, so unlike the other audit_* sweeps it takes no folder_path and no max_results. Returns a summary + a report path (read the detail with read_mcp_audit_file).
 
 No parameters.
@@ -38,6 +44,8 @@ No parameters.
 **Returns:** `{ path: string, summary: { profile_count: int, channel_count: int, custom_channels_in_use: int } }`
 
 ## `audit_replication`
+
+*Destructive.*
 
 Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_replication_info / get_actor_replication_info.
 
@@ -50,6 +58,8 @@ Project-wide replication audit: for every Blueprint under folder_path, which var
 **Returns:** `{ path: string, summary: { blueprint_count: int, replicated_class_count: int, replicated_variable_count: int, rpc_count: int } }`
 
 ## `audit_widget_accessibility`
+
+*Read-only.*
 
 Sweep Widget Blueprints for the accessibility problems that are measurable from what was AUTHORED: text/background contrast against the WCAG 2.x threshold, text smaller than a legible minimum, interactive widgets with no accessible label for a screen reader, and buttons below a minimum touch/focus size. On console this is a CERTIFICATION requirement, not a nicety. READ THE LIMITS BEFORE TRUSTING A PASS: contrast is computed against the FIRST ancestor holding a solid colour -- a UBorder's brush, a UButton's WidgetStyle.Normal, or a flat UImage -- so a background painted by a texture, a material, a video or a sibling drawn underneath is INVISIBLE to this, and those cases come back as background_source:"none" rather than quietly passing, because "could not judge" and "fine" are different answers. A brush only counts when it has no ResourceObject, its TintColor is UseColor_Specified, and its DrawAs actually FILLS the middle: Box, Image or RoundedBox. DrawAs=Border is excluded on purpose (it tiles the sides and leaves the centre empty, which is exactly where the text sits). Colours coming from a CommonUI style asset or a property binding are equally invisible: only authored values are read. What IS exact is the maths -- relative luminance 0.2126R+0.7152G+0.0722B over LINEAR values (which is what an FLinearColor already is) and ratio (Llight+0.05)/(Ldark+0.05), straight from WCAG.
 
@@ -66,6 +76,8 @@ Sweep Widget Blueprints for the accessibility problems that are measurable from 
 **Returns:** `{ folder_path, widget_blueprints_scanned, widgets_examined, issue_count, issues_by_kind: {low_contrast, contrast_unknown, small_text, missing_accessible_text, small_touch_target}, entries: [{ widget_bp_path, widget_name, widget_class, kind, detail, contrast_ratio?, required_ratio?, text_color?, background_color?, background_source?, font_size?, width?, height? }], truncated }`
 
 ## `audit_widget_style`
+
+*Read-only.*
 
 Sweep Widget Blueprints and report every widget whose style DEVIATES from a reference widget -- the "who is off-theme" question, which is the one that scales badly by hand once there are more than a couple of screens. You designate one widget as the truth (reference_bp_path + reference_widget_name), list the property paths that define the style (dotted paths work: "WidgetStyle.Normal.TintColor"), and this reports, per matching widget, which of those paths differ and what each side holds. Comparison is on the property's exported text, so it is type-agnostic and reports a real difference rather than a formatting one. Pair it with apply_widget_style_preset, which can copy those same paths off that same reference widget to FIX what this finds.
 
@@ -84,6 +96,8 @@ Sweep Widget Blueprints and report every widget whose style DEVIATES from a refe
 
 ## `audit_widget_text`
 
+*Read-only.*
+
 Sweep Widget Blueprints and report which player-visible texts are typed INLINE rather than coming from a String Table -- the localization-maintainability question. NOTE: this corrects the intuition most people start with: a text written as a bare string is NOT lost to localization. Unreal assigns it a stable key when the package is saved, and FTextInspector::ShouldGatherForLocalization returns true, so it DOES get collected and translated. What it lacks is a MEANINGFUL identity: the namespace comes out empty and the key is an opaque GUID like 971E3B3B436AEE91028BA1ADB97B3046. That still costs -- translators see no context, and re-authoring the text churns the key, orphaning the translation. So this reports identity_kind per text: string_table (best), explicit (an author-given namespace/key), auto_key (typed inline, key generated on save) and none (never saved, no identity yet). Default output is everything that is NOT string_table or explicit.
 
 | Parameter | Type | Required | Description |
@@ -98,6 +112,8 @@ Sweep Widget Blueprints and report which player-visible texts are typed INLINE r
 
 ## `capture_pie_state`
 
+*Destructive.*
+
 Snapshot of every actor in the ACTIVE PIE world, with every property flagged Replicated or SaveGame (generic -- no judgment call about what is "relevant"). It requires a live PIE session: with none running for pie_client_index it errors cleanly instead of silently snapshotting the EDITOR world, which is what makes it usable as co-op evidence -- point it at a client index to prove a value really replicated. On a large world ALWAYS pass class_filter and/or max_actors. Returns a summary plus a report path; read the detail with read_mcp_audit_file.
 
 | Parameter | Type | Required | Description |
@@ -109,6 +125,8 @@ Snapshot of every actor in the ACTIVE PIE world, with every property flagged Rep
 **Returns:** `{ path: string, truncated: bool, summary: { actor_count: int, actors_seen: int, total_matching_actors: int, max_actors: int, truncated: bool, class_filter: [string], replicated_property_count: int, savegame_property_count: int, savegame_filter_status: "active"|"dead_in_this_run" }, report_size_bytes: int, verification: {...}, verification_checks: [...] } -- class_filter lists the resolved class paths; success is false when the report is missing or empty on disk.`
 
 ## `read_mcp_audit_file`
+
+*Read-only.*
 
 Read back the FULL report that an audit_* or capture_pie_state command wrote to disk. Those commands return only a summary plus a path, so this is the second half of every one of them -- without it you never see the per-Blueprint / per-asset / per-actor detail. Restricted to Saved/MCPAudits/: it is not a general file reader.
 

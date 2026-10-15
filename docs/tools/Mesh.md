@@ -6,17 +6,21 @@
 
 ## `clear_procedural_mesh`
 
-Clear a single section or all sections on a procedural mesh component.
+*Destructive, idempotent.*
+
+Empty the geometry of one section, or drop every section, of a UProceduralMeshComponent on an editor-world actor found by label, then rebuild its bounds and collision. A single cleared section keeps its slot (remaining_sections unchanged); with section_index omitted or -1 all sections go. Transient: nothing is marked dirty, saved or undoable. A missing actor or component_index is an error, a section_index past the end is silently ignored, and any other negative index is unchecked, so never pass one. remove_procedural_mesh_component deletes the component itself.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
-| `section_index` | number | no | Optional target section; defaults to INDEX_NONE (clear all) |
+| `section_index` | number | no | Optional 0-based section to empty; omit it, or pass -1, to drop all sections |
 
 **Returns:** `{ actor_label: string, section_cleared: int, remaining_sections: int }`
 
 ## `create_procedural_box_mesh`
+
+*Additive.*
 
 Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push it into a procedural mesh component as a single section.
 
@@ -32,21 +36,25 @@ Generate a box mesh via UKismetProceduralMeshLibrary::GenerateBoxMesh and push i
 
 ## `create_procedural_grid_mesh`
 
-Generate a welded grid mesh via UKismetProceduralMeshLibrary::CreateGridMeshWelded and push it into a procedural mesh component as a single section.
+*Destructive.*
+
+Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component is an error; a negative section_index is unchecked, so never pass one. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional target section index; defaults to 0 |
-| `num_x` | number | no | Optional X subdivision count; defaults to 10 |
-| `num_y` | number | no | Optional Y subdivision count; defaults to 10 |
+| `num_x` | number | no | Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10 |
+| `num_y` | number | no | Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10 |
 | `grid_spacing` | number | no | Optional grid cell size in world units; defaults to 16.0 |
 | `create_collision` | boolean | no | Optional bool; defaults to false |
 
 **Returns:** `{ actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }`
 
 ## `create_procedural_mesh_component`
+
+*Additive, idempotent.*
 
 Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshComponent as its root. Idempotent: reuses the actor's existing PMC if found.
 
@@ -59,6 +67,8 @@ Spawn a bare AActor in the editor world and attach a fresh UProceduralMeshCompon
 
 ## `get_procedural_mesh_info`
 
+*Read-only.*
+
 Read summary info (section count, collision flags, per-section vertex/triangle counts) for a procedural mesh component on a named actor.
 
 | Parameter | Type | Required | Description |
@@ -69,6 +79,8 @@ Read summary info (section count, collision flags, per-section vertex/triangle c
 **Returns:** `{ actor_label: string, num_sections: int, use_complex_as_simple_collision: bool, use_async_cooking: bool, sections: [{ index, vertex_count, triangle_count }] }`
 
 ## `get_procedural_mesh_section_data`
+
+*Read-only.*
 
 Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors) of a single procedural mesh section.
 
@@ -82,6 +94,8 @@ Read back the raw geometry (vertices, triangles, normals, UV0, tangents, colors)
 
 ## `get_procedural_mesh_section_visible`
 
+*Read-only.*
+
 Read the visibility flag of a single section on a procedural mesh component.
 
 | Parameter | Type | Required | Description |
@@ -94,6 +108,8 @@ Read the visibility flag of a single section on a procedural mesh component.
 
 ## `remove_procedural_mesh_component`
 
+*Destructive.*
+
 Destroy the UProceduralMeshComponent on a named actor in the editor world (inverse of create_procedural_mesh_component). It removes only the FIRST such component it finds, so an actor carrying several needs one call each; the response says whether one was found at all, and whether it was the actor's root.
 
 | Parameter | Type | Required | Description |
@@ -103,6 +119,8 @@ Destroy the UProceduralMeshComponent on a named actor in the editor world (inver
 **Returns:** `{ actor_label, removed, component_name?, was_root? }`
 
 ## `set_procedural_mesh_material`
+
+*Destructive, idempotent.*
 
 Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.
 
@@ -116,6 +134,8 @@ Assign a material to one slot of the first UProceduralMeshComponent on an editor
 
 ## `set_procedural_mesh_section_visible`
 
+*Destructive, idempotent.*
+
 Toggle the visibility of a single section on a procedural mesh component. Idempotent: sets the section's bSectionVisible flag directly.
 
 | Parameter | Type | Required | Description |
@@ -128,6 +148,8 @@ Toggle the visibility of a single section on a procedural mesh component. Idempo
 **Returns:** `{ actor_label: string, section_index: int, visible: bool, total_sections: int }`
 
 ## `slice_procedural_mesh`
+
+*Destructive.*
 
 Slice a procedural mesh in place with a plane, optionally spawning the other half as a new PMC on the same actor. NOT idempotent: mutates the mesh destructively; re-running slices the already-sliced result.
 
@@ -144,6 +166,8 @@ Slice a procedural mesh in place with a plane, optionally spawning the other hal
 **Returns:** `{ actor_label, sliced, total_sections, other_half_created, other_half_component_name?, other_half_sections? }`
 
 ## `update_procedural_mesh_section`
+
+*Destructive.*
 
 Update an existing procedural mesh section in-place (same topology, new vertex positions).
 

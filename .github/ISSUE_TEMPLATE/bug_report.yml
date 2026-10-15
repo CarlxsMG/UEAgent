@@ -34,6 +34,6 @@ body:
     attributes:
       label: Versions
       description: UEAgent version, Unreal Engine version, operating system and MCP client.
-      placeholder: UEAgent 1.1.0, UE 5.8.1, Windows 11, Claude Code
+      placeholder: UEAgent 1.2.0, UE 5.8.1, Windows 11, Claude Code
     validations:
       required: true

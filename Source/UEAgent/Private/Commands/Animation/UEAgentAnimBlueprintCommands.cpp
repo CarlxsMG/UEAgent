@@ -548,7 +548,7 @@ TSharedPtr<FJsonObject> HandleCreateAnimBlueprint(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // add_anim_state_machine
 // ---------------------------------------------------------------------------
-// MCP:add_anim_state_machine - Add a state-machine node to the AnimGraph of an Animation Blueprint.
+// MCP:add_anim_state_machine - Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_anim_graph_pins, fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_animation_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @param machine_name - Name for the new state machine
 //   @returns { anim_blueprint_path: string, machine_name: string, node_class: string, state_machine_graph: string, state_machine_created: bool, already_existed: bool, saved: bool, state_machine_count: int, save_error?: string }
@@ -688,7 +688,7 @@ TSharedPtr<FJsonObject> HandleAddAnimState(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // add_anim_conduit
 // ---------------------------------------------------------------------------
-// MCP:add_anim_conduit - Add a conduit node to a state machine inside an Animation Blueprint.
+// MCP:add_anim_conduit - Add a conduit node named conduit_name to an existing state machine of an Animation Blueprint (a missing blueprint or machine is an error; create the machine with add_anim_state_machine), then mark the blueprint structurally modified and save it without compiling. Idempotent by name: an existing conduit is returned unchanged (already_existed true). The conduit is placed unconnected: link it to states with add_anim_transition; remove_anim_conduit undoes it. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @param machine_name - Name of the target state machine
 //   @param conduit_name - Name for the new conduit
@@ -2275,10 +2275,10 @@ TSharedPtr<FJsonObject> HandleScaffoldAimOffsetBlendSpace(
     return Resp;
 }
 
-// MCP:setup_foot_ik - Add a UAnimGraphNode_LegIK to the AnimGraph of an Animation Blueprint, binding the foot bone references.
+// MCP:setup_foot_ik - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, then mark the blueprint structurally modified and save it without compiling. The foot bones are NOT bound: the node has no LeftFootBone or RightFootBone property (its legs live in LegsDefinition), so left_foot_bone and right_foot_bone are only echoed back, and the node is left unwired. Configure it with set_anim_graph_node_property and connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset.
-//   @param left_foot_bone - Name of the left foot bone in the skeleton.
-//   @param right_foot_bone - Name of the right foot bone in the skeleton.
+//   @param left_foot_bone - Name of the left foot bone; required and echoed back, but not written to the node and not checked against the skeleton.
+//   @param right_foot_bone - Name of the right foot bone; required and echoed back, but not written to the node and not checked against the skeleton.
 //   @returns { anim_blueprint_path, left_foot_bone, right_foot_bone, ik_node_count, already_existed, saved }
 TSharedPtr<FJsonObject> HandleSetupFootIk(
     const TSharedPtr<FJsonObject>& Params)

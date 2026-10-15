@@ -6,6 +6,8 @@
 
 ## `register_gameplay_debugger_category`
 
+*Additive.*
+
 Registers (or reconfigures, idempotently) a named GameplayDebugger category backed by a single generic data-driven FGameplayDebuggerCategory (GameplayDebugger.h IGameplayDebugger::RegisterCategory). FGameplayDebuggerCategory has 0 BlueprintCallable surface, so this is the only path to author a custom debugger category from MCP. Toggle visibility in-game with the console command "showdebug &lt;category_name>".
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Registers (or reconfigures, idempotently) a named GameplayDebugger category back
 **Returns:** `{ category_name: string, spec_count: int, registered: bool, already_existed: bool }`
 
 ## `unregister_gameplay_debugger_category`
+
+*Destructive, idempotent.*
 
 Unregisters a named GameplayDebugger category created by register_gameplay_debugger_category (GameplayDebugger.h IGameplayDebugger::UnregisterCategory, the exact inverse of RegisterCategory). Also drops the category's stored specs. Idempotent: unregistering a category that register_gameplay_debugger_category did not create is an honest no-op reporting already_absent:true.
 

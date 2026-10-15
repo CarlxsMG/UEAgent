@@ -281,11 +281,11 @@ namespace UEAgentTimelineImpl
 
 // --- Level Sequence assets ----------------------------------------------------------
 
-// MCP:create_level_sequence - Create a new Level Sequence asset with a specified duration and frame rate
+// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate. If that asset already exists it is loaded and those settings are overwritten without migrating its keys, which can shift them in time; sequence_created is true either way. Not undoable; another asset class at the path is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
 //   @param sequence_name - Name of the new sequence to create
 //   @param package_path - Target content path, defaults to /Game/Sequences
-//   @param duration - Playback duration in seconds, 0 to 3600, default 10
-//   @param frame_rate - Frame rate in fps, 0 to 120, default 30
+//   @param duration - Playback duration in seconds, above 0 and at most 3600, default 10
+//   @param frame_rate - Frame rate in fps, above 0 and at most 120, truncated to whole fps, default 30
 //   @returns { sequence_name: string, package_path: string, duration: number, frame_rate: number, sequence_created: bool, saved: bool, asset_path: string, playback_range_set: bool, tick_rate_set: bool, actual_start_frame: int, actual_end_frame: int }
 TSharedPtr<FJsonObject> HandleCreateLevelSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -866,7 +866,7 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_sequence_tracks - Read the master and binding tracks for a Level Sequence
+// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count adds root tracks and bindings, not the tracks inside bindings. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
 //   @param sequence_name - Name of the target level sequence
 //   @returns { sequence_name: string, master_tracks: [object], bindings: [object], master_track_count: int, binding_count: int, total_track_count: int }
 TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& Params)
@@ -961,9 +961,10 @@ TSharedPtr<FJsonObject> HandleSetTimelineTime(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:play_timeline - Start playback in the open Sequencer editor on a target sequence
+// MCP:play_timeline - Starts playback in the editor's Sequencer on a Level Sequence found by asset name under /Game, first opening it there when it is not the sequence shown. Editor preview only, no PIE or game player (use play_level_sequence_runtime for that). Returns at once and changes no asset; calling it while playing keeps playing. playing is read right after the call. Errors when the sequence is missing or no Sequencer can show it. Pause with pause_timeline; move the playhead with set_timeline_time.
 //   @param sequence_name - Name of the target level sequence
 //   @returns { sequence_name: string, playing: bool }
+//   @hints additive idempotent
 TSharedPtr<FJsonObject> HandlePlayTimeline(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;

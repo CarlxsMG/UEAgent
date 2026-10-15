@@ -6,7 +6,9 @@
 
 ## `inspect_subsystem_instance`
 
-Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the instance via the lifetime hint (engine/gameinstance/world/editor/localplayer) + subsystem class.
+*Read-only.*
+
+Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -14,7 +16,11 @@ Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the 
 | `lifetime` | string | yes | Which host resolves the instance: one of engine \| gameinstance \| world \| editor \| localplayer. |
 | `player_index` | number | no | Local player index, used only when lifetime is "localplayer" (default 0). |
 
+**Returns:** `{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }`
+
 ## `list_local_player_subsystems`
+
+*Read-only.*
 
 Enumerate every live ULocalPlayerSubsystem-derived instance across all local players in the editor world's GameInstance.
 

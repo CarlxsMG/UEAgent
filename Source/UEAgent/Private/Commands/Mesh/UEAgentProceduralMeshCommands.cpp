@@ -223,12 +223,12 @@ TSharedPtr<FJsonObject> HandleCreateProceduralBoxMesh(
 // create_procedural_grid_mesh {actor_label, component_index?, section_index?,
 //   num_x?=10, num_y?=10, grid_spacing?=16.0, create_collision?=false}
 // ---------------------------------------------------------------------------
-// MCP:create_procedural_grid_mesh - Generate a welded grid mesh via UKismetProceduralMeshLibrary::CreateGridMeshWelded and push it into a procedural mesh component as a single section.
+// MCP:create_procedural_grid_mesh - Build a flat welded grid of num_x by num_y vertices spaced grid_spacing apart, centred on the component origin in its XY plane with 0-1 UVs and +Z normals, and write it into section_index of a UProceduralMeshComponent on an editor-world actor found by label, replacing that section if it exists. A missing actor or component is an error; a negative section_index is unchecked, so never pass one. Transient: nothing is marked dirty, saved or undoable. Add the component with create_procedural_mesh_component first; create_procedural_box_mesh builds a box.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
 //   @param section_index - Optional target section index; defaults to 0
-//   @param num_x - Optional X subdivision count; defaults to 10
-//   @param num_y - Optional Y subdivision count; defaults to 10
+//   @param num_x - Optional vertex count along X (the grid has num_x - 1 cells; below 2 there is no geometry); defaults to 10
+//   @param num_y - Optional vertex count along Y (the grid has num_y - 1 cells; below 2 there is no geometry); defaults to 10
 //   @param grid_spacing - Optional grid cell size in world units; defaults to 16.0
 //   @param create_collision - Optional bool; defaults to false
 //   @returns { actor_label: string, section_index: int, vertex_count: int, triangle_count: int, total_sections: int }
@@ -337,10 +337,10 @@ TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(
 // clear_procedural_mesh {actor_label, component_index?, section_index?=ALL}
 //   If section_index is supplied, clear that section; otherwise clear all.
 // ---------------------------------------------------------------------------
-// MCP:clear_procedural_mesh - Clear a single section or all sections on a procedural mesh component.
+// MCP:clear_procedural_mesh - Empty the geometry of one section, or drop every section, of a UProceduralMeshComponent on an editor-world actor found by label, then rebuild its bounds and collision. A single cleared section keeps its slot (remaining_sections unchanged); with section_index omitted or -1 all sections go. Transient: nothing is marked dirty, saved or undoable. A missing actor or component_index is an error, a section_index past the end is silently ignored, and any other negative index is unchecked, so never pass one. remove_procedural_mesh_component deletes the component itself.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
-//   @param section_index - Optional target section; defaults to INDEX_NONE (clear all)
+//   @param section_index - Optional 0-based section to empty; omit it, or pass -1, to drop all sections
 //   @returns { actor_label: string, section_cleared: int, remaining_sections: int }
 
 TSharedPtr<FJsonObject> HandleClearProceduralMesh(

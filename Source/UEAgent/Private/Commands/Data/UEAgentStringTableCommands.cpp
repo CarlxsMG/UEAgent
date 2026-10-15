@@ -298,7 +298,7 @@ TSharedPtr<FJsonObject> HandleSetStringTableEntry(const TSharedPtr<FJsonObject>&
 // --------------------------------------------------------------------------- //
 // remove_string_table_entry
 // --------------------------------------------------------------------------- //
-// MCP:remove_string_table_entry - Remove an entry and its metadata from a UStringTable by key
+// MCP:remove_string_table_entry - Remove the entry key, with all its metadata, from a UStringTable asset inside an undo transaction, then mark the asset dirty and save it. Idempotent: a key that was not in the table is not an error -- existed comes back false while removed (the key is absent afterwards) is still true, and the table is saved anyway. A missing table is an error, and so is a failed save, which keeps the removal in memory. Use remove_string_table_metadata to drop only metadata, set_string_table_entry to add or change an entry, get_string_table_entries to list them.
 //   @param string_table_path - Full asset path to the UStringTable
 //   @param key - Entry key to remove
 //   @returns { string_table_path: string, key: string, removed: bool, existed: bool, verified: bool, namespace: string, entry_count: int, saved: bool }

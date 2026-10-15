@@ -148,7 +148,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 // ---------------------------------------------------------------------------
 // set_mid_scalar_param
 // ---------------------------------------------------------------------------
-// MCP:set_mid_scalar_param - Set a scalar parameter value on a Material Instance Dynamic.
+// MCP:set_mid_scalar_param - Set a scalar parameter override on a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic or create_dynamic_material_on_actor return it; it takes effect at once and is never saved. An unknown param_name is not rejected: the override is stored and read back, so set is true even though no material input uses it -- check names with get_mid_all_params. old_value is 0 for a parameter without a value. Vectors and textures: set_mid_vector_param, set_mid_texture_param.
 //   @param mid_object_path - Object path of the MID (from create_material_instance_dynamic)
 //   @param param_name - Name of the scalar parameter
 //   @param value - New float value
@@ -333,7 +333,7 @@ TSharedPtr<FJsonObject> HandleGetMidAllParams(
 // ---------------------------------------------------------------------------
 // copy_mid_params_from_source
 // ---------------------------------------------------------------------------
-// MCP:copy_mid_params_from_source - Copy all parameter values from a source material into a Material Instance Dynamic.
+// MCP:copy_mid_params_from_source - Copy parameter values from a source material or material instance into a transient Material Instance Dynamic (MID), found by object path or name as create_material_instance_dynamic returns it. The MID's current overrides are cleared first, then every non-static parameter the MID exposes takes the source's value where the source has that parameter; static switches are not copied. Takes effect at once, nothing saved, no undo. copied is always true, so verify with get_mid_all_params. For saved Material Instance Constant assets use copy_material_instance_params.
 //   @param mid_object_path - Object path of the MID
 //   @param source_material_path - Content path to the source material to copy from
 //   @returns { mid_object_path, source_material_path, source_material_name, copied }

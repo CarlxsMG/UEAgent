@@ -186,11 +186,11 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:set_material_node_param - Set a value/property on a material expression node (e.g. a Constant value or parameter name).
+// MCP:set_material_node_param - Write one value on an expression node of a UMaterial asset (not an instance), found by its object name node_id. ParameterName renames a node that has a parameter name; otherwise Constant, ScalarParameter, Constant3Vector, Constant4Vector and VectorParameter nodes ignore param_name and take value as their main value (R, DefaultValue or Constant); other node types set the named property by reflection. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). An unknown node or property is an error, an unparsable value is not. Instances: set_material_instance_param.
 //   @param material_path - Material asset path
 //   @param node_id - Id of the target expression in the material
 //   @param param_name - Name of the property to set (e.g. "ParameterName", "R", "DefaultValue")
-//   @param value - String value to import (parsed per property type)
+//   @param value - Text to write: a number for Constant and ScalarParameter, "(R=1,G=0.5,B=0,A=1)" for the vector nodes (unparsable text gives black), the new name for ParameterName, else UE import text for the property; omitted means empty text.
 //   @returns { material: string, node_id: string, param_name: string, value: string }
 
 TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>& Params)

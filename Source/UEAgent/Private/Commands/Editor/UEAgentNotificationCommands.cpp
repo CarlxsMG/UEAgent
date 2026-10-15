@@ -200,7 +200,7 @@ TSharedPtr<FJsonObject> HandlePrintToOutputLog(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_message_log_entry
 // ---------------------------------------------------------------------------
-// MCP:add_message_log_entry - Add an entry to a named engine Message Log listing.
+// MCP:add_message_log_entry - Add one message to a named editor Message Log listing (for example "PIE", "MapCheck" or a new name, created on demand) at Info, Warning or Error severity; an unrecognised severity becomes Info, and a missing log_name or message is an error. Entries stay in memory for the editor session and are never saved. Use it for diagnostics meant for Window > Message Log; print_to_output_log writes to the Output Log instead. message_count is the listing's message count after the add. Read entries back with get_message_log_entries, show the window with open_message_log, empty the listing with clear_message_log.
 //   @param log_name - The message log listing name (e.g. "PIE", "MapCheck", or a custom name).
 //   @param message - The message text to add.
 //   @param severity - EMessageSeverity token: "Info" (default), "Warning", "Error".
@@ -269,9 +269,10 @@ TSharedPtr<FJsonObject> HandleAddMessageLogEntry(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // open_message_log
 // ---------------------------------------------------------------------------
-// MCP:open_message_log - Open the editor Message Log window to a given listing.
+// MCP:open_message_log - Open or focus the editor Message Log window on one listing (PIE by default), creating the listing empty when it does not exist yet and enabling message log display; no message is changed. opened only says the request was made: without an editor UI nothing shows. module_available says whether the MessageLog module loaded. To read the messages use get_message_log_entries rather than the window; add or empty them with add_message_log_entry and clear_message_log.
 //   @param log_name - Listing to surface (default "PIE").
 //   @returns { opened: bool, log_name: string, module_available: bool }
+//   @hints additive idempotent
 
 TSharedPtr<FJsonObject> HandleOpenMessageLog(const TSharedPtr<FJsonObject>& Params)
 {

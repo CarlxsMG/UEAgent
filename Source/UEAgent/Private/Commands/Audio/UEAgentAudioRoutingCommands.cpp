@@ -222,11 +222,11 @@ namespace
 // ---------------------------------------------------------------------------- //
 // create_audio_bus
 // ---------------------------------------------------------------------------- //
-// MCP:create_audio_bus - Create (or load) a UAudioBus asset and set its channel layout
+// MCP:create_audio_bus - Creates a UAudioBus asset at package_path/name and saves it, or loads the one already there (already_exists true) and saves it again; another asset class at that path is an error. channels, when given, sets the channel layout, overwriting an existing bus's layout; when omitted nothing is written, so a new bus keeps the engine default (Mono, not Stereo) and an existing one keeps its own. Change the layout later with set_audio_bus_channels and read it with get_audio_bus; create_sound_source_bus makes a source bus that plays this bus's audio.
 //   @param name - Name of the new Audio Bus asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param channels - EAudioBusChannels: 'Mono' | 'Stereo' (default) | 'Quad' | 'FiveDotOne' | 'SevenDotOne'
-//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, created: bool, already_exists: bool, saved: bool }
+//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, applied_channels: bool, created: bool, already_exists: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetName, PackagePath, FullPath, Error;
@@ -364,7 +364,7 @@ TSharedPtr<FJsonObject> HandleSetAudioBusChannels(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------- //
 // create_sound_source_bus
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_source_bus - Create (or load) a USoundSourceBus asset and wire its routing fields
+// MCP:create_sound_source_bus - Creates a USoundSourceBus asset at package_path/name, or loads the one already there, writes its routing fields and saves it; another asset class at the path is an error. source_bus_channels and duration are always written, so on an existing asset omitted ones are overwritten with the defaults (Stereo, 1.0 s). audio_bus_path, when given, must load as a UAudioBus and becomes the bus whose audio this source bus plays; when omitted that field is left as is. Edit later with set_sound_source_bus_audio_bus or set_sound_source_bus_send_info; read with get_sound_source_bus.
 //   @param name - Name of the new Sound Source Bus asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @param source_bus_channels - ESourceBusChannels: 'Mono' | 'Stereo' (default). USoundSourceBus inherits only Mono/Stereo.

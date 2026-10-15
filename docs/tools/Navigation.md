@@ -6,6 +6,8 @@
 
 ## `add_eqs_generator`
 
+*Destructive.*
+
 Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no generator yet, this becomes it; otherwise replaces.
 
 | Parameter | Type | Required | Description |
@@ -18,6 +20,8 @@ Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no g
 
 ## `add_eqs_option`
 
+*Additive.*
+
 Appends a new empty option to a UEnvQuery and returns its index.
 
 | Parameter | Type | Required | Description |
@@ -28,7 +32,9 @@ Appends a new empty option to a UEnvQuery and returns its index.
 
 ## `add_eqs_test`
 
-Adds a UEnvQueryTest subclass to an option's Tests array.
+*Additive, idempotent.*
+
+Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it. Marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -39,6 +45,8 @@ Adds a UEnvQueryTest subclass to an option's Tests array.
 **Returns:** `{ query_path, option_index, test_class, test_name, test_index, test_count, already_existed } — idempotent by test class within the option`
 
 ## `create_eqs_query`
+
+*Additive.*
 
 Creates and saves an empty Environment Query System (EQS) asset (UEnvQuery)
 
@@ -51,6 +59,8 @@ Creates and saves an empty Environment Query System (EQS) asset (UEnvQuery)
 
 ## `diagnose_navmesh`
 
+*Read-only.*
+
 One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity + world extent — detects the EMPTY brush = 0 bounds that yields 0 tiles), inclusion/total nav bounds, bWholeWorldNavigable, invoker-only generation + registered invokers, the RecastNavMesh MaxTiles / built (active) tile count / RuntimeGeneration, and is_spatially_loaded per volume, plus an actionable `diagnosis` list. Read-only.
 
 | Parameter | Type | Required | Description |
@@ -60,6 +70,8 @@ One-call navmesh diagnosis: reports every ANavMeshBoundsVolume (brush validity +
 **Returns:** `` { world, has_authority, nav_system_present, whole_world_navigable, generate_only_around_invokers, supported_agent_count, nav_data_count, is_navigation_dirty, nav_bounds_volume_count, nav_bounds_volumes:[{actor_name, actor_label, is_spatially_loaded, brush_present, brush_empty, bounds_valid, bounds_extent:{x,y,z}, brush_poly_count, note}], registered_nav_bounds_count, total_nav_bounds:{valid, min:{x,y,z}, max:{x,y,z}, extent:{x,y,z}}, invoker_component_count, invoker_location_count, invoker_seed_bounds_count, recast_navmesh_present, recast:{name, runtime_generation, supports_runtime_generation, max_tiles, active_tile_count, tile_size_uu, is_spatially_loaded}, diagnosis:[string], success, world_name, world_package, world_type, net_mode, pie_instance }. On a CLIENT world (has_authority=false) the heuristics are suppressed and `diagnosis` says so first: a client with no nav system / no RecastNavMesh is EXPECTED, and rebuild_navigation is NEVER recommended from there. ``
 
 ## `diff_collision_channels`
+
+*Read-only.*
 
 Aligns this project's custom collision channels with another project's config BY NAME and reports index shifts (which ECC_GameTraceChannelN slot / TraceTypeQueryN a same-named channel moved to). Diagnoses the migration hazard where custom channels don't travel and traces silently stop hitting. Reads the other project's DefaultEngine.ini straight from disk (not loaded). Read-only.
 
@@ -71,6 +83,8 @@ Aligns this project's custom collision channels with another project's config BY
 
 ## `dump_collision_channels`
 
+*Read-only.*
+
 Dumps this project's custom collision channels (from config): each ECC_GameTraceChannelN / object channel -> friendly name, whether it's a trace or object channel, and its TraceTypeQueryN / ObjectTypeQueryN index (the value a raycast/overlap passes). Read-only. Read from GConfig [/Script/Engine.CollisionProfile] DefaultChannelResponses.
 
 No parameters.
@@ -78,6 +92,8 @@ No parameters.
 **Returns:** `{ source, builtin_trace_count, builtin_object_count, count, channels:[{channel, channel_value, name, is_trace_type, is_static_object, is_custom_game_slot, default_response, query_type, query_index, query_number}], success }`
 
 ## `get_eqs_query_info`
+
+*Read-only.*
 
 Reports the composition of a UEnvQuery asset: each option's generator class and its list of test classes. Read-only.
 
@@ -89,6 +105,8 @@ Reports the composition of a UEnvQuery asset: each option's generator class and 
 
 ## `get_navigation_info`
 
+*Read-only.*
+
 Read the navigation system state of the editor world (never PIE): nav_system_present, nav_data_count, supported_agent_count with the agent names, and is_navigation_dirty. Read-only; a world without a navigation system reports zeros instead of an error.
 
 No parameters.
@@ -96,6 +114,8 @@ No parameters.
 **Returns:** `{ nav_system_present, nav_data_count, supported_agent_count, is_navigation_dirty, supported_agents, success }`
 
 ## `get_recast_navmesh_settings`
+
+*Read-only.*
 
 Reads the generation settings of the editor world's default ARecastNavMesh.
 
@@ -105,6 +125,8 @@ No parameters.
 
 ## `list_eqs_context_types`
 
+*Read-only.*
+
 Lists all concrete UEnvQueryContext subclasses usable as EQS contexts. Read-only reflection (GetDerivedClasses).
 
 No parameters.
@@ -112,6 +134,8 @@ No parameters.
 **Returns:** `{ base_class, count, types:[{name, path}] }`
 
 ## `list_eqs_generator_types`
+
+*Read-only.*
 
 Lists all concrete UEnvQueryGenerator subclasses usable as EQS generators. Read-only reflection (GetDerivedClasses).
 
@@ -121,6 +145,8 @@ No parameters.
 
 ## `list_eqs_test_types`
 
+*Read-only.*
+
 Lists all concrete UEnvQueryTest subclasses usable as EQS tests. Read-only reflection (GetDerivedClasses).
 
 No parameters.
@@ -129,6 +155,8 @@ No parameters.
 
 ## `rebuild_navigation`
 
+*Destructive.*
+
 Triggers a navigation build on the editor world's navigation system
 
 No parameters.
@@ -136,6 +164,8 @@ No parameters.
 **Returns:** `{ rebuilt, nav_system_present, message, success, nav_data_count }`
 
 ## `remove_eqs_generator`
+
+*Destructive, idempotent.*
 
 Clears the generator on a query option. Idempotent (removed=false if the option had none).
 
@@ -148,6 +178,8 @@ Clears the generator on a query option. Idempotent (removed=false if the option 
 
 ## `remove_eqs_option`
 
+*Destructive.*
+
 Remove the option at option_index, with its generator and tests, from a UEnvQuery asset; later options shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range index is an error, not a no-op. Returns removed and option_count.
 
 | Parameter | Type | Required | Description |
@@ -158,6 +190,8 @@ Remove the option at option_index, with its generator and tests, from a UEnvQuer
 **Returns:** `{ query_path, option_index, removed, option_count }`
 
 ## `remove_eqs_test`
+
+*Destructive.*
 
 Remove the test at test_index from one option of a UEnvQuery asset; later tests shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range option or test index is an error, not a no-op. Returns removed and test_count.
 
@@ -170,6 +204,8 @@ Remove the test at test_index from one option of a UEnvQuery asset; later tests 
 **Returns:** `{ query_path, option_index, test_index, removed, test_count }`
 
 ## `run_eqs_query`
+
+*Destructive.*
 
 Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true).
 
@@ -184,6 +220,8 @@ Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunIn
 
 ## `set_eqs_generator_properties`
 
+*Destructive, idempotent.*
+
 Sets properties on an option's generator by reflection (mcp_common::SetObjectProperty). Class-ref props (SearchedActorClass, SearchCenter) take a class path string; FAIDataProvider*Value props (SearchRadius, GenerateOnlyActorsInRadius) take an object like {"DefaultValue": &lt;n>}.
 
 | Parameter | Type | Required | Description |
@@ -195,6 +233,8 @@ Sets properties on an option's generator by reflection (mcp_common::SetObjectPro
 **Returns:** `{ query_path, option_index, generator_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
 ## `set_eqs_test_scoring`
+
+*Destructive, idempotent.*
 
 Sets scoring/filter parameters on a test within a query option and PERSISTS them on the asset (TestPurpose, FilterType, ScoringEquation, ScoringFactor, FloatValue bounds are all real UEnvQueryTest UPROPERTYs). The response reports the values read back from the test object.
 
@@ -213,6 +253,8 @@ Sets scoring/filter parameters on a test within a query option and PERSISTS them
 **Returns:** `{ query_path, option_index, test_index, test_name, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max }`
 
 ## `set_recast_navmesh_settings`
+
+*Destructive, idempotent.*
 
 Configures generation settings on the editor world's default ARecastNavMesh (partial/idempotent; only provided params are applied and all numeric values are clamped server-side first).
 
@@ -235,6 +277,8 @@ Configures generation settings on the editor world's default ARecastNavMesh (par
 
 ## `spawn_nav_link_proxy`
 
+*Additive.*
+
 Spawns an ANavLinkProxy actor in the editor world at a location
 
 | Parameter | Type | Required | Description |
@@ -244,6 +288,8 @@ Spawns an ANavLinkProxy actor in the editor world at a location
 **Returns:** `{ actor_name, actor_label, actor_path, actor_class, success }`
 
 ## `spawn_nav_modifier_volume`
+
+*Additive.*
 
 Spawns an ANavModifierVolume in the editor world with a box brush
 

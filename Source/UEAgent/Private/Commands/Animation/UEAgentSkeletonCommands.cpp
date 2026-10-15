@@ -663,9 +663,9 @@ namespace
 // ---------------------------------------------------------------------------
 // add_bone
 // ---------------------------------------------------------------------------
-// MCP:add_bone - Add a new bone to a skeleton's reference skeleton
+// MCP:add_bone - Add a bone named bone_name to the reference skeleton of a USkeleton asset under parent_name (omitted or empty: an extra root bone), with local_transform relative to the parent (a zero or missing scale becomes 1), then save the skeleton. Idempotent by name: an existing bone is returned (added false, already_existed true) without checking its parent or saving. An unknown parent is an error, and so is a failed save. Only the skeleton changes: skeletal meshes using it get no new bone, and there is no undo entry. No commit_bone_changes is needed; set_bone_parent and set_bone_transform edit bones, add_virtual_bone adds virtual ones.
 //   @param skeleton_path - Path to the USkeleton asset
-//   @param bone_name - Name for the new bone (must not already exist)
+//   @param bone_name - Name for the new bone; when a bone of that name already exists nothing changes (added false)
 //   @param parent_name - Parent bone name, or empty/null for a new root bone
 //   @param local_transform - Optional {location:[x,y,z], rotation:[p,y,r], scale:[x,y,z]}, defaults to identity
 //   @returns { asset_path, bone_name, bone_index, parent_index, bone_count, added, already_existed, saved, op: "add_bone" }

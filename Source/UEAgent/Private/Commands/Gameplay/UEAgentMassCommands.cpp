@@ -250,7 +250,7 @@ TSharedPtr<FJsonObject> HandleCreateMassEntityConfig(
 // ---------------------------------------------------------------------------
 // add_mass_trait
 // ---------------------------------------------------------------------------
-// MCP:add_mass_trait - Add a UMassEntityTraitBase-derived trait to a Mass entity config
+// MCP:add_mass_trait - Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, nothing is added, though added is still true (compare trait_count). trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
 //   @param config_path - Asset path to the UMassEntityConfig
 //   @param trait_class - Trait class name to add (e.g. UMassMovementTrait)
 //   @returns { config_path, trait_class, trait_path, trait_count, added, saved }

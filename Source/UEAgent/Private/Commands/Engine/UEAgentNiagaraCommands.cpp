@@ -4933,7 +4933,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
 // UNiagaraDataInterfaceTexture). Uses reflection: we FindPropertyByName
 // the DI's UPROPERTY that matches the asset class.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_asset - Set the underlying asset on a UNiagaraDataInterface user-parameter binding.
+// MCP:set_niagara_data_interface_asset - Points an object property of a user-parameter data interface on a Niagara system at an asset (e.g. the mesh of a StaticMesh DI, the texture of a Texture DI), then requests a system recompile. The DI must already exist (add_niagara_data_interface); property_name picks the property, else the first hard object property in reflection order. The asset must load and be of the property's class, else it is an error. The tool does not save the system, mark it dirty or open an undo transaction: persist it with save_asset. For non-asset fields use set_niagara_data_interface_default.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter DI to mutate
 //   @param asset_path - Asset path of the UObject to assign (must be the right subclass)
@@ -5018,7 +5018,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceAsset(const TSharedPtr<FJso
 // on the DI's user-exposed defaults, distinct from the bound asset above).
 // Uses ImportText_Direct against an arbitrary property by name.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_default - Set a default property (scalar/vector/color) on a UNiagaraDataInterface user-parameter binding by name.
+// MCP:set_niagara_data_interface_default - Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), then requests a system recompile. A missing DI or property, or text that does not parse, is an error. The tool does not save the system, mark it dirty or open an undo transaction (persist with save_asset); value is echoed, not read back. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter DI to mutate
 //   @param property_name - Name of the FProperty on the DI to set
@@ -5122,7 +5122,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaceInfo(const TSharedPtr<FJson
 // for ColorCurve, "XCurve"/"YCurve"/"ZCurve" for VectorCurve). We resolve it by
 // reflection, replace its keys, then rebuild the DI's LUT via the curve base.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_curve - Author the FRichCurve keys of a curve user-parameter data interface (Curve / Color / Vector curve DIs).
+// MCP:set_niagara_data_interface_curve - Replaces all keys of one FRichCurve property on a curve user-parameter data interface of a Niagara system with the given time/value keys (an empty array clears it), rebuilds the DI's lookup table, requests a recompile and saves the system; success requires the save. The DI must already exist (add_niagara_data_interface) and curve_property must name an FRichCurve on it: Curve by default, XCurve/YCurve/ZCurve (WCurve too on Vector4) on vector curve DIs, RedCurve/GreenCurve/BlueCurve/AlphaCurve on color curve DIs. For array DIs use set_niagara_data_interface_array.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter curve DI (no "User." prefix)
 //   @param keys - Array of { time: number, value: number } keys to set (replaces all existing keys on the channel)

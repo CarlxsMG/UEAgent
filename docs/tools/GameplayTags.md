@@ -6,6 +6,8 @@
 
 ## `add_gameplay_tag_redirect`
 
+*Additive, idempotent.*
+
 Add an entry to UGameplayTagsSettings::GameplayTagRedirects (the persistent redirect config), then call FGameplayTagRedirectors::RefreshTagRedirects() so the runtime map picks it up. Idempotent (same Old->New pair returns already_present=true). Requires a ConfigRestartRequired=true flag — UGameplayTagsSettings flags it as such; callers should note that the running game still resolves Old to itself until next process restart in Shipping, but in the editor the redirect is live immediately.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Add an entry to UGameplayTagsSettings::GameplayTagRedirects (the persistent redi
 **Returns:** `{ old_tag_name, new_tag_name, added: bool, already_present: bool, total_redirects: int, needs_restart: bool }`
 
 ## `add_gameplay_tag_to_table`
+
+*Additive.*
 
 Add one tag (with an optional developer comment) as a row in a gameplay tag DataTable, verifying the write by read-back. The team-friendly way to declare tags: it touches only this asset instead of rewriting the shared DefaultGameplayTags.ini the way create_gameplay_tag does. The trade-off is that a tag added here is not registered LIVE, so it may not resolve until the table is reloaded -- if you must use it in the same session, check with find_gameplay_tag first.
 
@@ -29,6 +33,8 @@ Add one tag (with an optional developer comment) as a row in a gameplay tag Data
 
 ## `add_tag_to_object`
 
+*Additive.*
+
 Grant a gameplay tag to an object that implements IGameplayTagAssetInterface -- the way to put an actor into a state (stunned, wet, on fire, alerted) so that tag-driven systems react without any of them knowing about each other. Reports already_present and echoes the resulting tag list, so the reply is its own oracle. Register the tag first (find_gameplay_tag / create_gameplay_tag): an unregistered string resolves to an empty tag and is added as nothing.
 
 | Parameter | Type | Required | Description |
@@ -40,6 +46,8 @@ Grant a gameplay tag to an object that implements IGameplayTagAssetInterface -- 
 
 ## `count_gameplay_tag_references`
 
+*Read-only.*
+
 DOES NOT COUNT ANYTHING: reference_count is ALWAYS 0, plus a note saying why. Declared engine gap -- there is no public GetTagReferenceCount API (the manager tracks refcounts internally, for debug tooling only), so all this returns honestly is whether the tag is valid. Never read the 0 as "nobody uses this tag" and never delete a tag on its evidence. To actually find users: find_blueprint_node_references with include_pin_defaults, plus a binary grep of Content/ and Config/ for the tag string.
 
 | Parameter | Type | Required | Description |
@@ -49,6 +57,8 @@ DOES NOT COUNT ANYTHING: reference_count is ALWAYS 0, plus a note saying why. De
 **Returns:** `{ tag_name, valid: bool, reference_count: 0, note: "..." }`
 
 ## `create_gameplay_tag`
+
+*Destructive.*
 
 Add a new gameplay tag to the project's DefaultGameplayTags.ini AND register it LIVE in this editor session -- that live half is why you must call this before writing the tag into a DataTable row or a property, since an unregistered tag string is silently reset to None by the importers. But it REWRITES THE WHOLE INI: the list comes back alphabetised, every comment block is deleted, and other tags' DevComments are re-serialised and normalised, so adding one tag can produce a diff full of unrelated insertions and deletions. Copy the ini first; the oracle is `git diff --stat` showing your N insertions and ZERO deletions, and if not, git checkout the ini and re-insert only your line (the tag stays registered live either way -- confirm with find_gameplay_tag).
 
@@ -62,6 +72,8 @@ Add a new gameplay tag to the project's DefaultGameplayTags.ini AND register it 
 
 ## `create_gameplay_tag_table`
 
+*Additive.*
+
 Create a DataTable of gameplay tags (row struct FGameplayTagTableRow) -- the alternative to declaring tags in DefaultGameplayTags.ini, and the better choice for a large or team-owned tag set: rows merge and diff like data instead of fighting over one ini that the create_gameplay_tag path rewrites end to end. The table must be registered in the project's gameplay tag settings to be loaded. Fill it with add_gameplay_tag_to_table and check it with validate_gameplay_tag_table.
 
 | Parameter | Type | Required | Description |
@@ -73,6 +85,8 @@ Create a DataTable of gameplay tags (row struct FGameplayTagTableRow) -- the alt
 
 ## `find_gameplay_tag`
 
+*Read-only.*
+
 Does this exact tag string exist and resolve right now? Returns found plus the resolved tag string. The precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match -- so the control case and the case under test become indistinguishable. Also the confirmation that create_gameplay_tag registered live even if you restored the ini. Exact lookup: use query_gameplay_tags for prefix/pattern search, get_gameplay_tag_source to see where it is defined.
 
 | Parameter | Type | Required | Description |
@@ -83,6 +97,8 @@ Does this exact tag string exist and resolve right now? Returns found plus the r
 
 ## `get_all_gameplay_tags`
 
+*Read-only.*
+
 Dump EVERY gameplay tag registered in the project, with a count -- the full vocabulary the game can reason about, including tags contributed by plugins and vendor content. Large by nature (projects run to thousands), so use query_gameplay_tags to search a branch and find_gameplay_tag to test one string; keep this for a full inventory or a naming audit.
 
 No parameters.
@@ -90,6 +106,8 @@ No parameters.
 **Returns:** `{ tags: [object], count: int }`
 
 ## `get_gameplay_tag_info`
+
+*Read-only.*
 
 Read one gameplay tag's detail, including its PARENT tag -- how you walk the hierarchy that makes tags useful (Material.Wood.Oak answers to Material.Wood). Worth knowing before writing a match: hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. get_gameplay_tag_source says where the tag is defined; find_gameplay_tag just tests existence.
 
@@ -101,6 +119,8 @@ Read one gameplay tag's detail, including its PARENT tag -- how you walk the hie
 
 ## `get_gameplay_tag_redirects`
 
+*Read-only.*
+
 List every entry configured in UGameplayTagsSettings::GameplayTagRedirects (the persistent Old->New redirect config). Read-only reader counterpart of add_gameplay_tag_redirect / remove_gameplay_tag_redirect; does NOT mutate or save.
 
 No parameters.
@@ -108,6 +128,8 @@ No parameters.
 **Returns:** `{ redirects: [{ old_tag_name, new_tag_name }], count: int }`
 
 ## `get_gameplay_tag_source`
+
+*Read-only.*
 
 Where does this tag come from: native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- plus its comment and its native / restricted / explicit flags. The call that tells you whether a tag will survive an editor restart and which file to edit to change it, and the one that distinguishes YOUR tags from a vendor's or the engine's before you rename or remove anything.
 
@@ -119,6 +141,8 @@ Where does this tag come from: native C++, DefaultGameplayTags.ini, a tag DataTa
 
 ## `get_gameplay_tag_table_rows`
 
+*Read-only.*
+
 List every tag declared in a gameplay tag DataTable, with its developer comment -- what this table contributes to the project vocabulary, as opposed to get_all_gameplay_tags which returns the merged live registry from all sources. Use it to audit one team's or one module's tags, and validate_gameplay_tag_table to catch malformed or duplicated rows.
 
 | Parameter | Type | Required | Description |
@@ -129,6 +153,8 @@ List every tag declared in a gameplay tag DataTable, with its developer comment 
 
 ## `get_gameplay_tags_manager`
 
+*Read-only.*
+
 One-line health check of the gameplay tag system: the manager singleton's validity and the TOTAL number of registered tags. Cheap sanity probe before a tag frontier -- a plausible total confirms the registry loaded, and comparing the count before and after create_gameplay_tag shows the registration took. Counts only; for the tags themselves use get_all_gameplay_tags or query_gameplay_tags.
 
 No parameters.
@@ -136,6 +162,8 @@ No parameters.
 **Returns:** `{ manager_name: string, is_valid: bool, total_tags: int }`
 
 ## `get_object_tags`
+
+*Read-only.*
 
 Read the gameplay tags an object currently owns -- what the game believes this actor or asset IS (states, factions, damage types, item categories). Requires the object to implement IGameplayTagAssetInterface; anything else returns nothing, which is a fact about the interface, not about the object's data. Reads the LIVE container, so during PIE tags added at runtime appear here. has_tag / has_any_gameplay_tags answer a specific question instead of listing everything.
 
@@ -146,6 +174,8 @@ Read the gameplay tags an object currently owns -- what the game believes this a
 **Returns:** `{ object_path: string, tags: [string], tag_count: int }`
 
 ## `has_all_gameplay_tags`
+
+*Read-only.*
 
 Does the object own EVERY tag in the list (AND) -- the multi-condition gate: alive AND armed AND not restrained. Hierarchy-aware, and the direction is asymmetric: a requested tag matches when an owned tag IS it or DESCENDS from it, so asking for a family accepts its children but asking for a leaf does not accept the family. It also returns owned_tags, so a false answer is diagnosable in the same call. has_any_gameplay_tags is the OR, has_none_gameplay_tags the negation.
 
@@ -158,6 +188,8 @@ Does the object own EVERY tag in the list (AND) -- the multi-condition gate: ali
 
 ## `has_any_gameplay_tags`
 
+*Read-only.*
+
 Does the object own AT LEAST ONE of these tags (OR) -- the "is it any kind of X" gate: any Damage.*, any Status.*, any Team.*. Hierarchy matching is ASYMMETRIC and this is where it bites: a requested FAMILY accepts its descendants, a requested LEAF does not accept the family, so swapping the two silently turns an always-true gate into an always-false one. When in doubt request leaf tags, which match either way. Unlike has_all_gameplay_tags it does not echo the owned tags, so pair a false with get_object_tags.
 
 | Parameter | Type | Required | Description |
@@ -168,6 +200,8 @@ Does the object own AT LEAST ONE of these tags (OR) -- the "is it any kind of X"
 **Returns:** `{ object_path, requested: [string], has_any: bool }`
 
 ## `has_none_gameplay_tags`
+
+*Read-only.*
 
 Does the object own NONE of these tags -- the blocker/immunity check: not stunned, not already burning, not on the excluded-faction list. Computed as !HasAny (there is no public HasNone), so it inherits the same asymmetric hierarchy matching: listing a FAMILY blocks all of its descendants, listing a LEAF blocks only that leaf. Beware the double negative -- a true here means "clear to proceed", not "has them".
 
@@ -180,6 +214,8 @@ Does the object own NONE of these tags -- the blocker/immunity check: not stunne
 
 ## `has_tag`
 
+*Read-only.*
+
 Does this object own this gameplay tag: the single-tag state check (is it stunned, is it alerted, is it a valid target) as a plain bool. The cheapest of the tag predicates -- has_any_gameplay_tags / has_all_gameplay_tags / has_none_gameplay_tags take a list, get_object_tags returns everything. Verify the tag exists first (find_gameplay_tag): an unregistered string becomes an empty tag and returns false exactly like a genuine miss.
 
 | Parameter | Type | Required | Description |
@@ -191,6 +227,8 @@ Does this object own this gameplay tag: the single-tag state check (is it stunne
 
 ## `query_gameplay_tags`
 
+*Read-only.*
+
 Search the registered gameplay tags for everything matching a pattern -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this". Pick it over get_all_gameplay_tags, which dumps the entire project registry, and over find_gameplay_tag, which only answers about one exact string. Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not.
 
 | Parameter | Type | Required | Description |
@@ -201,6 +239,8 @@ Search the registered gameplay tags for everything matching a pattern -- the dis
 
 ## `remove_gameplay_tag`
 
+*Destructive.*
+
 Delete a gameplay tag from its ini source list. Two cautions. Nothing tells you who was using it -- count_gameplay_tag_references always answers 0 by construction, so audit with find_blueprint_node_references and a binary grep of Content/ first, and add_gameplay_tag_redirect if anything still points at it. And like create_gameplay_tag this rewrites DefaultGameplayTags.ini wholesale, reordering it and dropping comments, so the oracle is `git diff` on the ini, not the success flag.
 
 | Parameter | Type | Required | Description |
@@ -210,6 +250,8 @@ Delete a gameplay tag from its ini source list. Two cautions. Nothing tells you 
 **Returns:** `{ tag: string, success: bool, was_present: bool, delete_returned: bool, removed: bool, message: string }`
 
 ## `remove_gameplay_tag_from_table`
+
+*Destructive, idempotent.*
 
 Remove a gameplay tag row (by tag, the row name) from a FGameplayTagTableRow data table.  Idempotent: a missing row reports already_absent without error.  The remove counterpart of add_gameplay_tag_to_table.
 
@@ -222,6 +264,8 @@ Remove a gameplay tag row (by tag, the row name) from a FGameplayTagTableRow dat
 
 ## `remove_gameplay_tag_redirect`
 
+*Destructive.*
+
 Delete the gameplay tag redirect(s) that rewrite a given old tag name -- cleanup once every asset has been resaved and nothing references the old name any more. Removing it too early silently breaks whatever still points at the old tag, since an unresolved tag becomes empty rather than an error. If the same old name was rewritten more than once over time there will be several entries: remove_all=true clears them all, and removed_count tells you how many went.
 
 | Parameter | Type | Required | Description |
@@ -233,6 +277,8 @@ Delete the gameplay tag redirect(s) that rewrite a given old tag name -- cleanup
 
 ## `remove_tag_from_object`
 
+*Destructive.*
+
 Take a gameplay tag off an object implementing IGameplayTagAssetInterface -- clearing a state (no longer stunned, no longer burning) so the systems keyed on it stop reacting. The was_present flag distinguishes "removed it" from "it was never there", and the reply echoes the remaining tags. Exact match only: removing a parent tag does not remove its children.
 
 | Parameter | Type | Required | Description |
@@ -243,6 +289,8 @@ Take a gameplay tag off an object implementing IGameplayTagAssetInterface -- cle
 **Returns:** `{ object_path: string, tag_name: string, success: bool, was_present: bool, message: string, tags: [string] }`
 
 ## `validate_gameplay_tag_table`
+
+*Read-only.*
 
 Walk every row of a UDataTable (whose RowStruct is FGameplayTagTableRow). For each tag name, verify the tag is actually registered in the manager. Returns the list of missing tags so the user can fix the table or register the missing tags. Does NOT mutate anything.
 

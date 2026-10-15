@@ -388,8 +388,12 @@ namespace McpMetaToolsPrivate
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetStringField(TEXT("name"), Tool->Name);
 		Result->SetStringField(TEXT("domain"), Tool->Domain);
-		Result->SetStringField(TEXT("description"), Tool->Description);
+		Result->SetStringField(TEXT("description"), Tool->PublishedDescription());
 		Result->SetObjectField(TEXT("inputSchema"), Tool->InputSchema);
+		if (Tool->Annotations.IsValid())
+		{
+			Result->SetObjectField(TEXT("annotations"), Tool->Annotations);
+		}
 		return Result;
 	}
 

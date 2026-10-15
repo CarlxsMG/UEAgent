@@ -6,6 +6,8 @@
 
 ## `add_pcg_component`
 
+*Additive, idempotent.*
+
 Attach a PCG component (the procedural generation engine) to an actor and optionally point it at a PCG graph -- what turns a plain actor or volume into something that scatters meshes and points by rule. Idempotent: an actor that already has one gets it back. The component generates within the actor's BOUNDS, so on a volume with no brush geometry it produces zero instances with no error at all -- confirm the extent with get_actor_bounds first. Then run generate_pcg_component and inspect with get_pcg_component_info.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Attach a PCG component (the procedural generation engine) to an actor and option
 **Returns:** `{ actor_name, component_name, already_existed, graph_path, graph_assigned }`
 
 ## `add_pcg_graph_parameter`
+
+*Additive, idempotent.*
 
 Expose a tunable on a PCG graph (bool / int / float / double / string) so density, radius or a toggle can be driven from outside instead of being welded into a node. Idempotent (already_existed when the name is taken). Only worth doing on graphs you own -- adding one to a library graph means editing that asset. Set a value with set_pcg_graph_parameter and list them with get_pcg_graph_parameters.
 
@@ -29,6 +33,8 @@ Expose a tunable on a PCG graph (bool / int / float / double / string) so densit
 
 ## `add_pcg_node`
 
+*Additive.*
+
 Adds a node of the given UPCGSettings subclass to a PCG graph.  Uses UPCGGraph::AddNodeOfType, which creates the node's settings in the transient package and reparents the node into the graph (headless-safe). The graph is re-saved after the mutation.
 
 | Parameter | Type | Required | Description |
@@ -39,6 +45,8 @@ Adds a node of the given UPCGSettings subclass to a PCG graph.  Uses UPCGGraph::
 **Returns:** `{ graph_name: string, asset_path: string, node_title: string, node_name: string, settings_class: string, node_count: int, saved: bool, save_error: string }`
 
 ## `add_pcg_subgraph_node`
+
+*Additive.*
 
 Embed one PCG graph inside another as a Subgraph node -- how you reuse a scatter or filter recipe across biomes instead of duplicating nodes, and how you consume a library graph without editing it. Check first with get_pcg_graph_info that the target graph actually USES its input node (a graph with no edges from its default input cannot be fed filtered data and will ignore whatever you wire in), and with get_pcg_graph_parameters whether it exposes anything tunable.
 
@@ -51,6 +59,8 @@ Embed one PCG graph inside another as a Subgraph node -- how you reuse a scatter
 
 ## `cleanup_pcg_component`
 
+*Destructive.*
+
 Wipe a PCG component's generated output synchronously -- and the step you must not skip after editing a graph: a plain generate_pcg_component with force reuses the CACHED result, so the world keeps the STALE meshes and settings while every flag reads generated:true. Call this with remove_components=true FIRST, then generate, then verify by re-reading the actor's spawned components rather than the generated flag. Also the way to clear procedural content before moving or resizing the volume.
 
 | Parameter | Type | Required | Description |
@@ -61,6 +71,8 @@ Wipe a PCG component's generated output synchronously -- and the step you must n
 **Returns:** `{ actor_name, cleaned, generated }`
 
 ## `connect_pcg_nodes`
+
+*Destructive, idempotent.*
 
 Connects two PCG nodes by adding a directed edge from an output pin to an input pin.  Node names come from get_pcg_graph_info; the implicit graph endpoints are addressable as "Input"/"Output". from_pin/to_pin default to the node's "Out"/"In" pin (else its first pin); the resolved labels are echoed in the response. Idempotent: an existing edge reports already_connected without error. The graph is re-saved after a new edge is added.
 
@@ -76,6 +88,8 @@ Connects two PCG nodes by adding a directed edge from an output pin to an input 
 
 ## `create_pcg_graph`
 
+*Additive.*
+
 Creates (or loads, idempotently) a UPCGGraph asset and saves it.  Uses CreatePackage + NewObject&lt;UPCGGraph> (headless-safe). A fresh PCG graph has the implicit Input/Output nodes; node_count counts user-added nodes only (initially 0). Requires the PCG plugin to be enabled.
 
 | Parameter | Type | Required | Description |
@@ -86,6 +100,8 @@ Creates (or loads, idempotently) a UPCGGraph asset and saves it.  Uses CreatePac
 **Returns:** `{ graph_name: string, asset_path: string, created: bool, already_exists: bool, node_count: int, saved: bool, save_error: string }`
 
 ## `disconnect_pcg_nodes`
+
+*Destructive, idempotent.*
 
 Removes the directed edge between two PCG nodes' pins.  Pin labels default to the node's "Out"/"In" pin (else its first pin) and the resolved labels are echoed. Idempotent: if no such edge exists it reports already_disconnected without error. The graph is re-saved after an edge is removed.
 
@@ -101,6 +117,8 @@ Removes the directed edge between two PCG nodes' pins.  Pin labels default to th
 
 ## `generate_pcg_component`
 
+*Additive.*
+
 Triggers PCG generation on an actor's UPCGComponent. Generation is ASYNCHRONOUS (scheduled on the PCG subsystem, resolved over subsequent editor ticks) — this returns the scheduled task id, NOT a finished result. Poll get_pcg_component_info / get_pcg_generated_data for completion (honest).
 
 | Parameter | Type | Required | Description |
@@ -112,6 +130,8 @@ Triggers PCG generation on an actor's UPCGComponent. Generation is ASYNCHRONOUS 
 
 ## `get_pcg_component_info`
 
+*Read-only.*
+
 Read an actor's PCG component: which graph it runs, its seed, whether it is generating or already generated, activated, partitioned, and its generation trigger. Read-only. Use it to find which graph is driving an actor and to confirm a seed for deterministic scatter -- but NOT as proof the world matches the graph: generated:true is satisfied by a cached result, so after editing a graph the flag says done while the spawned meshes are stale. The real check is the actor's spawned components (get_pcg_generated_data / get_components_by_class), after cleanup_pcg_component + generate_pcg_component.
 
 | Parameter | Type | Required | Description |
@@ -121,6 +141,8 @@ Read an actor's PCG component: which graph it runs, its seed, whether it is gene
 **Returns:** `{ actor_name, has_component, graph_path, is_generating, generated, seed, activated, is_partitioned, generation_trigger }`
 
 ## `get_pcg_generated_data`
+
+*Read-only.*
 
 Reports the generated output of an actor's UPCGComponent: per output item, its pin, tags and data class. Read-only; empty until a generation completes (generation is asynchronous).
 
@@ -132,6 +154,8 @@ Reports the generated output of an actor's UPCGComponent: per output item, its p
 
 ## `get_pcg_graph_info`
 
+*Read-only.*
+
 Reads the structure of a UPCGGraph: node count, per-node titles and pin labels, and every directed edge.  Pin labels and the input_node_name/output_node_name feed connect_pcg_nodes / disconnect_pcg_nodes; the implicit graph endpoints are also addressable by the tokens "Input"/"Output".
 
 | Parameter | Type | Required | Description |
@@ -142,6 +166,8 @@ Reads the structure of a UPCGGraph: node count, per-node titles and pin labels, 
 
 ## `get_pcg_graph_parameters`
 
+*Read-only.*
+
 List a PCG graph's user parameters with name, type and current value -- and the read that decides whether a THIRD-PARTY graph can be reused without editing it. An empty list means nothing is exposed: meshes, densities and exclusions are welded inside, so the only way to change them is to edit the asset, which is not an option for a read-only library graph. Read-only. Note it accepts a PCGGraph asset, not a PCGGraphInstance -- overriding a parameter on an instance has no headless route and must be ticked in the details panel.
 
 | Parameter | Type | Required | Description |
@@ -151,6 +177,8 @@ List a PCG graph's user parameters with name, type and current value -- and the 
 **Returns:** `{ pcg_graph_path, parameter_count, parameters:[{name, type, value}] }`
 
 ## `get_pcg_node_properties`
+
+*Read-only.*
 
 Reads every editable property of a PCG node's settings object via reflection.  The node is resolved by name from get_pcg_graph_info (or the "Input"/"Output" tokens); its UPCGSettings is serialized to JSON. Read-only.
 
@@ -163,6 +191,8 @@ Reads every editable property of a PCG node's settings object via reflection.  T
 
 ## `list_pcg_node_types`
 
+*Read-only.*
+
 Enumerate every PCG node type available in this build (all concrete PCGSettings subclasses, including plugin- and project-added ones), with class names and paths. Run it before add_pcg_node so you pass a class that exists instead of guessing a name from documentation that may not match this engine version. Read-only reflection.
 
 No parameters.
@@ -170,6 +200,8 @@ No parameters.
 **Returns:** `{ base_class, count, types:[{name, path}] }`
 
 ## `remove_pcg_node`
+
+*Destructive, idempotent.*
 
 Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode, which auto-breaks the node's edges and notifies its neighbours; the graph is re-saved after the mutation. The implicit Input/Output endpoint nodes cannot be removed (doing so would silently corrupt the graph) and are rejected with an honest error. Idempotent: a node that is not present reports already_removed without error.
 
@@ -182,6 +214,8 @@ Removes a user-added node from a PCG graph by name.  Uses UPCGGraph::RemoveNode,
 
 ## `set_pcg_component_properties`
 
+*Destructive, idempotent.*
+
 Sets properties on an actor's UPCGComponent by reflection (Seed, bActivated, bIsComponentPartitioned, GenerationTrigger, ...). Reads the stored values back into the response.
 
 | Parameter | Type | Required | Description |
@@ -192,6 +226,8 @@ Sets properties on an actor's UPCGComponent by reflection (Seed, bActivated, bIs
 **Returns:** `{ actor_name, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
 ## `set_pcg_graph_parameter`
+
+*Destructive, idempotent.*
 
 Write the value of an existing PCG graph user parameter (bool / int / float / double) and read the stored value back, so the reply is its own oracle -- how you tune scatter density or a rule threshold without opening the graph. The parameter must already exist (add_pcg_graph_parameter) and the value type must match. IMPORTANT: it accepts a PCGGraph ASSET only and answers "PCG graph not found" for a PCGGraphInstance -- per-instance overrides have no headless route and must be ticked in the details panel. Changing a parameter does not update the world: cleanup_pcg_component then generate_pcg_component, or the cached output is reused.
 
@@ -205,6 +241,8 @@ Write the value of an existing PCG graph user parameter (bool / int / float / do
 
 ## `set_pcg_node_properties`
 
+*Destructive, idempotent.*
+
 Authors a PCG node's settings object via reflection (partial merge + clamp).  Only the keys present in ``properties`` are written; absent keys are untouched. After the merge, PostEditChange() invalidates the node's cached CRC and regenerates its pins. The graph is re-saved and the persisted settings are read back. Idempotent: re-applying the same values is a no-op.
 
 | Parameter | Type | Required | Description |
@@ -216,6 +254,8 @@ Authors a PCG node's settings object via reflection (partial merge + clamp).  On
 **Returns:** `{ graph_name: string, asset_path: string, node_name: string, settings_class: string, applied_keys: [string], properties: object, saved: bool, save_error: string }`
 
 ## `spawn_pcg_volume`
+
+*Additive.*
 
 Spawns an APCGVolume in the editor world with a REAL cube brush (from ``extent``), optionally assigning a graph. Bounds, origin, scale and brush geometry are RE-READ from the spawned actor, never echoed. Without ``extent`` the volume is spawned brush-less (kept for compatibility) and the response says so explicitly, because a PCG component with null bounds generates 0 instances in total silence.
 

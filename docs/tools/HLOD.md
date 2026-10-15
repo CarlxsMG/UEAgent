@@ -6,6 +6,8 @@
 
 ## `build_hlod`
 
+*Destructive.*
+
 Triggers a world HLOD build for the current editor world.  This is a HEAVY/async operation that requires a World Partition world plus the WorldPartitionHLODsBuilder commandlet / a long-running editor build job, so it cannot be driven synchronously from a single request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition) and returns an honest result: build_started is false with a note explaining why (not a World Partition map, or async/commandlet-only).
 
 No parameters.
@@ -13,6 +15,8 @@ No parameters.
 **Returns:** `{ world: string, is_world_partition: bool, build_started: bool, note?: string }`
 
 ## `create_hlod_layer`
+
+*Additive, idempotent.*
 
 Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'.
 
@@ -26,6 +30,8 @@ Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempote
 
 ## `get_hlod_layer_actors`
 
+*Read-only.*
+
 Enumerate which LOADED actors in the current editor world are assigned to a given UHLODLayer (read-side of set_hlod_layer_actors). Two limits worth knowing before you trust an empty result: it only sees actors currently loaded, and it is WORLD PARTITION ONLY -- on a non-WP world it returns not_applicable=true with a note instead of a list, because there the assignment would not survive a Generate anyway.
 
 | Parameter | Type | Required | Description |
@@ -35,6 +41,8 @@ Enumerate which LOADED actors in the current editor world are assigned to a give
 **Returns:** `{ hlod_layer_path, world, is_world_partition, not_applicable, note?, total: int, actors: [{actor_name, actor_path, actor_label}] }`
 
 ## `get_hlod_layer_info`
+
+*Read-only.*
 
 Reads layer type and streaming-grid settings of a UHLODLayer.
 
@@ -46,6 +54,8 @@ Reads layer type and streaming-grid settings of a UHLODLayer.
 
 ## `get_hlod_layers`
 
+*Read-only.*
+
 Lists all UHLODLayer assets under a content path via the AssetRegistry.
 
 | Parameter | Type | Required | Description |
@@ -56,6 +66,8 @@ Lists all UHLODLayer assets under a content path via the AssetRegistry.
 
 ## `remove_hlod_layer`
 
+*Destructive, idempotent.*
+
 Destroy a UHLODLayer asset at a /Game path (mirror of create_hlod_layer). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UHLODLayer, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
@@ -65,6 +77,8 @@ Destroy a UHLODLayer asset at a /Game path (mirror of create_hlod_layer). Typed-
 **Returns:** `{ asset_path, deleted, already_existed, layer_type?, note? }`
 
 ## `set_hlod_layer_actors`
+
+*Destructive, idempotent.*
 
 Assign a UHLODLayer to a BATCH of loaded actors in the current editor world -- or clear it from them by passing hlod_layer_path="". WORLD PARTITION ONLY: on a non-WP world it returns not_applicable=true and changes nothing. Idempotent per actor: one that already has that layer is not touched at all and comes back counted as unchanged, so the changed/unchanged/cleared split tells you exactly what really moved.
 
@@ -77,6 +91,8 @@ Assign a UHLODLayer to a BATCH of loaded actors in the current editor world -- o
 
 ## `set_hlod_layer_parent`
 
+*Destructive, idempotent.*
+
 Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent chain drives nested HLOD generation (a layer's HLOD becomes an input to its parent's HLOD). Send parent_layer_path="" to clear the parent to null; omit parent_layer_path to leave it untouched. Idempotent: if the parent is already the requested value, nothing is modified/saved (changed_parent=false). Validates against self-parent and circular parent chains (the engine's guard is editor-only and does not run headless).
 
 | Parameter | Type | Required | Description |
@@ -87,6 +103,8 @@ Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent
 **Returns:** `{ hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool }`
 
 ## `set_hlod_layer_settings`
+
+*Destructive, idempotent.*
 
 Sets streaming-grid settings / layer type on a UHLODLayer and saves it.  Partial update: only the fields you send are touched. Sending cell_size or loading_range also enables the layer spatially loaded. Layer type accepts 'Instancing'|'MeshApproximate'|'Custom'|'CustomHLODActor'.
 

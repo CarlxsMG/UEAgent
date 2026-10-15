@@ -3661,6 +3661,7 @@ TSharedPtr<FJsonObject> HandleGetFoliageInRadius(const TSharedPtr<FJsonObject>& 
 // MCP:foliage_type_exists - Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- has_foliage_instances answers whether anything of it is placed in the level.
 //   @param foliage_type_path - Asset path (e.g. /Game/Foliage/BP_Tree)
 //   @returns { exists: bool, asset_path: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleFoliageTypeExists(const TSharedPtr<FJsonObject>& Params)
 {
     FString FoliageTypePath;

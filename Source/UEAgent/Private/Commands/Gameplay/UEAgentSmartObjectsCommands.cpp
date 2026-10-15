@@ -795,7 +795,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_user_tag_filter"));
 }
 
-// MCP:set_smart_object_slot_enabled - Toggle whether a slot is initially enabled on a USmartObjectDefinition.
+// MCP:set_smart_object_slot_enabled - Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param enabled - Whether the slot is enabled
@@ -819,7 +819,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotEnabled(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_enabled"));
 }
 
-// MCP:set_smart_object_slot_transform - Set a slot's local offset and/or rotation relative to the parent object.
+// MCP:set_smart_object_slot_transform - Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. No undo. Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param offset - Optional [x, y, z] local offset
@@ -1235,7 +1235,7 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectDefinitionDefaultBehavior(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_definition_default_behavior"));
 }
 
-// MCP:remove_smart_object_slot - Remove a slot (by index) from a USmartObjectDefinition; the private Slots array is resized via FScriptArrayHelper (reflection-based element destruct).
+// MCP:remove_smart_object_slot - Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. No undo. To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to remove
 //   @returns { definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool }

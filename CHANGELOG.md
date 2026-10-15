@@ -4,6 +4,8 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.0 - 2026-10-15
+
 - A Claude Code plugin, `ueagent`, installed from this repository
   (`/plugin install ueagent --marketplace CarlxsMG/UEAgent`): `skill-builder` turns an editor
   workflow into a new skill, and `blueprint-actor`, `project-audit` and `level-lighting` are skills
@@ -82,6 +84,20 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   their returns that way, among them `frame_timing`, `stop_trace`, `capture_pie_state`,
   `spawn_box_volume` and the dry run of `consolidate_assets`; their returns are whole again and match
   the code.
+- Every tool publishes MCP annotations: `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+  `openWorldHint`. They are derived from the code each tool runs and from its verb
+  (`Tools/tool_hints.py`), so a reader that saves, compiles or writes a file is not read-only: 640
+  tools are read-only, 403 additive, 1054 destructive, and only `execute_python` and
+  `execute_python_file` reach outside the editor. A client can now tell `get_blueprint_info` from
+  `delete_asset` without reading the prose.
+- Every tool's description ends with what it answers (`Returns: { ... }`), in `tools/list` and in
+  `describe_tool`: the catalog had the return shape of 2093 tools, and no client saw it.
+- The 125 tool definitions an external review graded lowest were rewritten from their code: what each
+  tool does, its side effects, what a wrong input does and which sibling tool to use instead. Several
+  said what the code does not do and now match it, among them `get_ability_activation_info` (it reads
+  only the asset tags), `set_anim_curve_keys` (it takes `[time, value]` arrays), `setup_foot_ik` (it
+  binds no bone) and the `binding_name_or_guid` of 17 Sequencer tools (a GUID, never a name). No
+  tool, parameter, type or accepted value changed.
 
 ## 1.1.0 - 2026-10-14
 

@@ -234,6 +234,11 @@ const FMcpToolCatalog::FParam* FMcpToolCatalog::FTool::FindParam(const FString& 
 	return Params.FindByPredicate([&ParamName](const FParam& P) { return P.Name.Equals(ParamName, ESearchCase::IgnoreCase); });
 }
 
+FString FMcpToolCatalog::FTool::PublishedDescription() const
+{
+	return Returns.IsEmpty() ? Description : Description + TEXT("\n\nReturns: ") + Returns;
+}
+
 FString FMcpToolCatalog::DefaultCatalogPath()
 {
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UEAgent"));
@@ -321,6 +326,13 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 			if (Tool.Name.IsEmpty() || Catalog->IndexByName.Contains(Tool.Name))
 			{
 				continue; // no name, or a duplicate: the first one wins, as in the catalog
+			}
+			(*CommandObj)->TryGetStringField(TEXT("returns"), Tool.Returns);
+			Tool.Returns.TrimStartAndEndInline();
+			const TSharedPtr<FJsonObject>* AnnotationsObj = nullptr;
+			if ((*CommandObj)->TryGetObjectField(TEXT("annotations"), AnnotationsObj) && AnnotationsObj && AnnotationsObj->IsValid())
+			{
+				Tool.Annotations = CloneObject(*AnnotationsObj);
 			}
 
 			const TArray<TSharedPtr<FJsonValue>>* ParamsJson = nullptr;
@@ -447,8 +459,12 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 
 			TSharedPtr<FJsonObject> ToolJson = MakeShared<FJsonObject>();
 			ToolJson->SetStringField(TEXT("name"), Tool.Name);
-			ToolJson->SetStringField(TEXT("description"), Tool.Description);
+			ToolJson->SetStringField(TEXT("description"), Tool.PublishedDescription());
 			ToolJson->SetObjectField(TEXT("inputSchema"), InputSchema);
+			if (Tool.Annotations.IsValid())
+			{
+				ToolJson->SetObjectField(TEXT("annotations"), Tool.Annotations);
+			}
 			ToolsJson.Add(MakeShared<FJsonValueObject>(ToolJson));
 			Tool.InputSchema = InputSchema;
 

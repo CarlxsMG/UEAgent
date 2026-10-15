@@ -948,9 +948,9 @@ TSharedPtr<FJsonObject> HandleDuplicateMpc(const TSharedPtr<FJsonObject>& Params
 // object — no asset file I/O (MPCI instances are runtime/transient).
 // ========================================================================== //
 
-// MCP:create_material_parameter_collection_instance - Get or create a transient MPCI on the target world
+// MCP:create_material_parameter_collection_instance - Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Optional world context label, default editor
+//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
 //   @returns { collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }
 TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollectionInstance(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1048,7 +1048,7 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_vector_parameter_value - Override a vector parameter value on the world's MPCI
+// MCP:set_mpci_vector_parameter_value - Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the vector parameter to override
 //   @param rgba - Optional [r, g, b, a] color value
@@ -1056,7 +1056,7 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
 //   @param g - Optional green channel
 //   @param b - Optional blue channel
 //   @param a - Optional alpha channel
-//   @param world_label - Optional world context label, default editor
+//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
 //   @returns { collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }
 TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1184,9 +1184,9 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:clear_mpci_parameter_overrides - Force the world's MPCI back to the parent's default values
+// MCP:clear_mpci_parameter_overrides - Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Optional world context label, default editor
+//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
 //   @returns { collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }
 TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1249,9 +1249,9 @@ TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_parent_collection - Rebind the world's MPCI to a different parent collection
+// MCP:set_mpci_parent_collection - Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
 //   @param collection_path - Full /Game path of the new parent MPC
-//   @param world_label - Optional world context label, default editor
+//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
 //   @returns { collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }
 TSharedPtr<FJsonObject> HandleSetMpciParentCollection(const TSharedPtr<FJsonObject>& Params)
 {

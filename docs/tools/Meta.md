@@ -6,6 +6,8 @@
 
 ## `batch`
 
+*Destructive.*
+
 Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no intermediate MCP round-trips -- the way to cut N calls to 1 when you are authoring in bulk. Any command the bridge dispatches can go in the list. By default every item runs even if an earlier one failed, and each result is reported individually; set stop_on_error to abort at the first failure, and transaction to make the whole run a single undo step.
 
 | Parameter | Type | Required | Description |

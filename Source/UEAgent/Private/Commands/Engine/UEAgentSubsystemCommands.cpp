@@ -93,10 +93,11 @@ TSharedPtr<FJsonObject> HandleListLocalPlayerSubsystems(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:inspect_subsystem_instance - Reflection walk of public UPROPERTYs on a live subsystem instance. Resolves the instance via the lifetime hint (engine/gameinstance/world/editor/localplayer) + subsystem class.
+// MCP:inspect_subsystem_instance - Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
 //   @param subsystem_class - Class name of the subsystem to inspect (short reflected name or /Script path).
 //   @param lifetime - Which host resolves the instance: one of engine | gameinstance | world | editor | localplayer.
 //   @param player_index - Local player index, used only when lifetime is "localplayer" (default 0).
+//   @returns { subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }
 TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObject>& Params)
 {
     FString ClassName;

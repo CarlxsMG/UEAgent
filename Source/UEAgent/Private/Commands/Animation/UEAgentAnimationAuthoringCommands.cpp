@@ -433,9 +433,9 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_anim_curve_name
 // ---------------------------------------------------------------------------
-// MCP:add_anim_curve_name - Add a curve metadata entry (curve name) to a USkeleton
+// MCP:add_anim_curve_name - Register a curve name as curve metadata on a USkeleton (USkeleton::AddCurveMetaData) in an undo transaction, then save the skeleton package. Idempotent: a name already registered is kept, reported as already_existed=true, and the skeleton is saved anyway. It adds no keys -- to put a keyed float curve on a UAnimSequence use add_anim_float_curve; remove_anim_curve_name is the inverse. An unknown skeleton is an error and a failed save makes success false.
 //   @param curve_name - The curve name to add (e.g. 'Curve_Example').
-//   @param skeleton_path - Asset path of the target Skeleton
+//   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
 //   @returns { skeleton_path, curve_name, present, added, already_existed, curve_count, saved, message }
 TSharedPtr<FJsonObject> HandleAddAnimCurveName(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1100,7 +1100,7 @@ TSharedPtr<FJsonObject> HandleCreateAnimComposite(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // create_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:create_pose_asset - Create and save a UPoseAsset asset bound to a USkeleton, under /Game
+// MCP:create_pose_asset - Create an empty UPoseAsset (no poses) at package_path/name, bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton), and save it; no undo transaction. Idempotent: a UPoseAsset already at that path is returned untouched with already_existed=true, even when bound to another skeleton. A name taken by another asset class or an unknown skeleton is an error, and a failed save makes success false. Add poses with add_pose_to_pose_asset; to build one from animation frames use create_pose_asset_from_anim_sequence.
 //   @param name - Asset name (e.g. 'Pose_Example').
 //   @param package_path - Target content package path where the asset is created (default /Game/Animation)
 //   @param skeleton_path - Asset path of the target Skeleton
@@ -2061,7 +2061,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_sequence
 // ---------------------------------------------------------------------------
-// MCP:create_anim_sequence - Create and save a real UAnimSequence via the Animation Data Model
+// MCP:create_anim_sequence - Create a UAnimSequence at package_path/anim_name bound to the USkeleton at skeleton_path (default the engine SkeletalCube_Skeleton) and save it; its data model gets frame_rate rounded to whole fps and round(length_seconds * fps) frames, but no bone tracks or curves. Idempotent: a UAnimSequence already at that path is returned unchanged (already_existed=true, length and rate not applied); another asset class there or an unknown skeleton is an error. A failed save still answers success, with saved=false. Fill it with add_anim_bone_track or add_anim_float_curve; inspect it with get_anim_sequence_info.
 //   @param anim_name - Asset name (no path).
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @param length_seconds - Sequence length in seconds (default 1.0)
@@ -2150,10 +2150,10 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_anim_bone_track
 // ---------------------------------------------------------------------------
-// MCP:add_anim_bone_track - Add a bone curve track with identity keys to a UAnimSequence
+// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). An empty or unknown bone_name silently falls back to the root bone, so read bone_name in the reply; a missing sequence or skeleton is an error and a failed save makes success false. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of the skeleton bone
-//   @param num_keys - Number of identity keyframes to generate (default 2)
+//   @param num_keys - Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence.
 //   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, message }
 TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2461,7 +2461,7 @@ TSharedPtr<FJsonObject> HandleRemovePoseFromPoseAsset(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // set_pose_asset_base_pose
 // ---------------------------------------------------------------------------
-// MCP:set_pose_asset_base_pose - Set the base pose of a UPoseAsset by name (UPoseAsset::SetBasePoseName).
+// MCP:set_pose_asset_base_pose - Set which named pose of a UPoseAsset is its base pose (UPoseAsset::SetBasePoseName) in an undo transaction, then save the asset; an empty or None base_pose_name goes back to the skeleton reference pose. A name the asset does not contain is an error before anything changes; check applied, false when the engine refused the name, and a failed save makes success false. The base pose only drives evaluation of an additive pose asset, which additive and note report. Edit poses with add_pose_to_pose_asset, rename_pose_in_pose_asset and remove_pose_from_pose_asset.
 //   @param pose_asset_path - Path to the UPoseAsset.
 //   @param base_pose_name - Name of the pose to use as the base; empty/None resets to the reference pose.
 //   @returns { pose_asset_path, base_pose_name, requested_name, applied, base_pose_index, is_reference_pose, additive, note, saved, message }
@@ -2755,7 +2755,7 @@ TSharedPtr<FJsonObject> HandleScaleAnimCurve(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_float_curve
 // ---------------------------------------------------------------------------
-// MCP:add_anim_float_curve - Add a named float curve with keys to a UAnimSequence
+// MCP:add_anim_float_curve - Add a float curve (Editable flag) to a UAnimSequence through its data controller and set its keys from [time, value] pairs as linear keys with auto tangents, in one undo step, then save the package. An existing float curve of that name is kept and its keys are replaced (idempotent); curve_found confirms the curve and num_keys counts the keys sent. A missing sequence is an error and a failed save makes success false. Rekey: set_anim_curve_keys; transform curves: add_anim_transform_curve; a skeleton-only name: add_anim_curve_name; read back: get_anim_curve_data.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Float curve name to add.
 //   @param keys - JSON array of [time, value] pairs (default [[0,0],[1,1]])
@@ -3534,10 +3534,10 @@ TSharedPtr<FJsonObject> HandleGetAnimCurveNames(const TSharedPtr<FJsonObject>& P
 //   calls IAnimationDataController::SetFrameRate — see above.)
 // ========================================================================== //
 
-// MCP:set_anim_curve_keys - Set the keys (time/value pairs) on an animation curve
+// MCP:set_anim_curve_keys - Replace every key of an existing curve on a UAnimSequence with the given [time, value] pairs as linear keys with auto tangents, through its data controller in an undo transaction, then save the package; num_keys is read back. The curve must exist (add_anim_float_curve first), keys needs at least one valid pair, and a curve_type other than float or transform is an error. Only float curves take keys: on a transform curve nothing changes, yet applied is true. A failed save makes success false.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the float curve (e.g. "MyCurve")
-//   @param keys - JSON array of {time, value, arrive_tangent?, leave_tangent?, interp_mode?} objects
+//   @param keys - JSON array of [time, value] pairs, time in seconds, at least one; entries that are not such a pair are skipped, and tangents or interpolation cannot be given.
 //   @param curve_type - Curve type to target: float (default) or transform
 //   @returns { anim_sequence_path, curve_name, curve_type, num_keys, applied, saved }
 TSharedPtr<FJsonObject> HandleSetAnimCurveKeys(const TSharedPtr<FJsonObject>& Params)
@@ -3613,7 +3613,7 @@ if (CurveType == ERawCurveTrackTypes::RCT_Float)
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_keys"));
 }
 
-// MCP:set_anim_curve_interp_mode - Set the interpolation mode (tangent flags) on an animation curve
+// MCP:set_anim_curve_interp_mode - Replace the curve flags (the EAnimAssetCurveFlags bitmask) of an existing float or transform curve on a UAnimSequence with one flag, in an undo transaction, then save the package. Despite the name it changes no key interpolation or tangents: linear and editable both set Editable; metadata, drive_track and disabled set those flags. interp_mode is required; an unknown mode, curve or sequence is an error, and any curve_type other than transform means float. old_flags and new_flags are the bitmasks before and after; a failed save makes success false. get_anim_curve_data reads the flags.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the curve
 //   @param interp_mode - One of "linear|editable|metadata|drive_track|disabled"

@@ -6,7 +6,9 @@
 
 ## `append_mesh_primitive`
 
-Append a primitive shape to a DynamicMeshActor's dynamic mesh
+*Additive.*
+
+Append a Box, Sphere, Cylinder or Cone to the live dynamic mesh of a DynamicMeshActor in the editor world, keeping the geometry already there: size is the box edge or the diameter and height of the round shapes, centred at location in mesh-local space. Each call adds another copy, inside an editor transaction; nothing is saved to an asset. An unknown actor or primitive is an error; appended is true when the triangle count grew. To merge another actor's mesh use append_mesh_to_dynamic_mesh; to persist the result, copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -21,6 +23,8 @@ Append a primitive shape to a DynamicMeshActor's dynamic mesh
 
 ## `append_mesh_to_dynamic_mesh`
 
+*Additive.*
+
 Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshBasicEditFunctions::AppendMesh.
 
 | Parameter | Type | Required | Description |
@@ -32,6 +36,8 @@ Merge another UDynamicMesh into the live dynamic mesh of a DynamicMeshActor via 
 **Returns:** `{ actor_name, source_actor_name, triangles_before, triangles_after, triangles_added, vertex_count_after, appended: true }`
 
 ## `apply_adaptive_remesh`
+
+*Destructive.*
 
 Adaptive-remesh a DynamicMeshActor's dynamic mesh using a target edge length and optional weight map
 
@@ -47,7 +53,9 @@ Adaptive-remesh a DynamicMeshActor's dynamic mesh using a target edge length and
 
 ## `apply_mesh_boolean`
 
-Apply a CSG boolean to a DynamicMeshActor's dynamic mesh
+*Destructive.*
+
+Apply a CSG boolean (Subtract by default, Union or Intersect) between the live dynamic mesh of a DynamicMeshActor in the editor world and a temporary primitive tool: other_primitive (Sphere by default) of size cm, offset by location in mesh-local space. The target is changed in place inside an editor transaction, nothing is saved, and each call cuts or merges again. An unknown actor, operation or primitive is an error. boolean_applied is always true: compare triangle_count with triangle_count_before. To use another actor's mesh as the tool call apply_mesh_boolean_actor_to_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -61,6 +69,8 @@ Apply a CSG boolean to a DynamicMeshActor's dynamic mesh
 **Returns:** `{ actor_name: string, operation: string, other_primitive: string, triangle_count: int, triangle_count_before: int, vertex_count: int, boolean_applied: bool }`
 
 ## `apply_mesh_boolean_actor_to_actor`
+
+*Destructive.*
 
 Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike apply_mesh_boolean (which builds a transient primitive tool), the tool geometry is the live dynamic mesh of source_actor_name. The target mesh is mutated in place; the source mesh is left untouched. NOT idempotent: re-running keeps cutting/merging the same tool against the already-modified target.
 
@@ -77,6 +87,8 @@ Apply a CSG boolean using a second DynamicMeshActor as the cutting tool. Unlike 
 
 ## `apply_mesh_morphology`
 
+*Destructive.*
+
 Apply an SDF-based morphology op (dilate/contract/close/open) to a DynamicMeshActor's dynamic mesh. Replaces the mesh with an SDF-based offset mesh approximation.
 
 | Parameter | Type | Required | Description |
@@ -88,6 +100,8 @@ Apply an SDF-based morphology op (dilate/contract/close/open) to a DynamicMeshAc
 **Returns:** `{ actor_name, operation, distance, triangle_count, triangle_count_before, vertex_count, morphed }`
 
 ## `apply_mesh_solidify`
+
+*Destructive.*
 
 Voxel-wrap a DynamicMeshActor's dynamic mesh (replaces the mesh with a voxelised-and-meshed approximation).
 
@@ -104,7 +118,9 @@ Voxel-wrap a DynamicMeshActor's dynamic mesh (replaces the mesh with a voxelised
 
 ## `apply_uniform_remesh`
 
-Uniform-remesh a DynamicMeshActor's dynamic mesh to a target edge length or triangle count
+*Destructive.*
+
+Remesh the live dynamic mesh of a DynamicMeshActor in the editor world into evenly sized triangles, aiming at target_edge_length (cm) or target_tri_count: exactly one is required, else an error. The mesh changes in place inside an editor transaction and the actor's package is marked dirty, not saved. smoothing_type uniform and mixed work, but uv_preserving matches no engine name: it falls back to Mixed and leaves preserve_sharp_edges and auto_compact at true, so check the echoed settings. remeshed is true when the triangle or vertex count changed. For variable density use apply_adaptive_remesh; to only reduce triangles, simplify_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -118,6 +134,8 @@ Uniform-remesh a DynamicMeshActor's dynamic mesh to a target edge length or tria
 **Returns:** `{ actor_name: string, target_edge_length: number, target_tri_count: int, preserve_sharp_edges: bool, smoothing_type: string, auto_compact: bool, target_type: string, triangle_count: int, triangle_count_before: int, vertex_count: int, remeshed: bool }`
 
 ## `auto_generate_mesh_uvs`
+
+*Destructive.*
 
 Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFunctions::AutoGeneratePatchBuilderMeshUVs or AutoGenerateXAtlasMeshUVs. This is what sits behind the editor's "Auto UV" button. Use it when a projection is not enough — organic or mixed-orientation geometry; for plank-and-post shapes set_mesh_uvs_from_projection with box is usually cleaner and far cheaper. Both methods PACK the result into standard UV space by default, so island layout is handled too. SLOW on dense meshes: this is a solver, not a projection.
 
@@ -138,6 +156,8 @@ Compute a real UV UNWRAP for the whole mesh via UGeometryScriptLibrary_MeshUVFun
 
 ## `build_mesh_bvh`
 
+*Destructive, idempotent.*
+
 Build a Bounding Volume Hierarchy for a DynamicMeshActor's dynamic mesh via UGeometryScriptLibrary_MeshSpatial::BuildBVHForMesh. The BVH is required for the spatial-query cmds (find_nearest_point_on_mesh, find_nearest_ray_intersection_with_mesh, is_point_inside_mesh). Idempotent: if b_only_if_invalid=true (default), a fresh BVH is built only when the existing one is invalid.
 
 | Parameter | Type | Required | Description |
@@ -149,6 +169,8 @@ Build a Bounding Volume Hierarchy for a DynamicMeshActor's dynamic mesh via UGeo
 
 ## `clear_dynamic_mesh`
 
+*Destructive, idempotent.*
+
 Empty a DynamicMeshActor's live UDynamicMesh in place (keep the actor, drop the geometry).
 
 | Parameter | Type | Required | Description |
@@ -159,6 +181,8 @@ Empty a DynamicMeshActor's live UDynamicMesh in place (keep the actor, drop the 
 
 ## `compact_mesh`
 
+*Destructive.*
+
 Compact vertex and triangle ID lists on a DynamicMeshActor's dynamic mesh
 
 | Parameter | Type | Required | Description |
@@ -168,6 +192,8 @@ Compact vertex and triangle ID lists on a DynamicMeshActor's dynamic mesh
 **Returns:** `{ actor_name: string, triangle_count: int, vertex_count: int, compacted: bool }`
 
 ## `copy_dynamic_mesh_to_static_mesh`
+
+*Destructive, idempotent.*
 
 Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStaticMesh asset's LOD via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshToStaticMesh (7-arg V2, bUseSectionMaterials=true; engine-default options). Editor-only (the engine function is WITH_EDITOR-gated and touches GEditor + FlushRenderingCommands). Idempotent: overwrites the target LOD in place, no duplication. HONEST GATES: the target asset must already exist (create it first, e.g. via create_editable_static_mesh) and must NOT live under /Engine/ (the engine refuses to modify built-in engine assets).
 
@@ -183,6 +209,8 @@ Write the live dynamic mesh of a DynamicMeshActor INTO an EXISTING /Game UStatic
 
 ## `copy_mesh_uv_channel`
 
+*Additive.*
+
 Copy UV data from one UV channel to another on the same mesh.
 
 | Parameter | Type | Required | Description |
@@ -194,6 +222,8 @@ Copy UV data from one UV channel to another on the same mesh.
 **Returns:** `{ actor_name: string, source_channel: int, dest_channel: int, copied: bool, num_uv_channels_after: int, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; copied is false when source_channel equals dest_channel, and note says so or that the mesh grew new channels to reach dest_channel.`
 
 ## `copy_static_mesh_to_dynamic_mesh`
+
+*Destructive, idempotent.*
 
 Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh (engine-default options: build settings applied, tangents on). Destructive replace of the actor's current mesh. Idempotent-ish: re-running re-extracts the same source geometry (result depends only on the source asset + LOD). Reads the MaxAvailable LOD (LODIndex clamped to the asset's available LODs) so it is robust across meshes with fewer LODs.
 
@@ -207,6 +237,8 @@ Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a Dynamic
 
 ## `delete_selected_triangles_from_mesh`
 
+*Destructive.*
+
 Delete the listed triangle IDs from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
@@ -218,6 +250,8 @@ Delete the listed triangle IDs from a DynamicMeshActor's live dynamic mesh in th
 
 ## `delete_triangle_from_mesh`
 
+*Destructive.*
+
 Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the editor world; a missing ID is not an error, deleted just comes back false. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
@@ -228,6 +262,8 @@ Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the edi
 **Returns:** `{ actor_name, triangle_id, deleted, triangle_count, previous_triangle_count }`
 
 ## `find_nearest_point_on_mesh`
+
+*Read-only.*
 
 Find the nearest point on the mesh to a 3D query point via UGeometryScriptLibrary_MeshSpatial::FindNearestPointOnMesh. Builds a fresh BVH if needed, then queries.
 
@@ -241,6 +277,8 @@ Find the nearest point on the mesh to a 3D query point via UGeometryScriptLibrar
 **Returns:** `{ actor_name, found: bool, valid: bool, triangle_id, position_x/y/z, bary_coords_x/y/z }`
 
 ## `find_nearest_ray_intersection_with_mesh`
+
+*Read-only.*
 
 Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Builds a fresh BVH if needed.
 
@@ -256,7 +294,9 @@ Cast a ray against the mesh and return the nearest hit via UGeometryScriptLibrar
 
 ## `generate_mesh_uvs`
 
-Planar-project a UV set onto a DynamicMeshActor's dynamic mesh
+*Destructive, idempotent.*
+
+Planar-project UVs for the whole live dynamic mesh of a DynamicMeshActor in the editor world into channel uv_channel, overwriting it: the projection runs down mesh-local Z with 1 UV unit per cm, not fitted to 0-1. It first sets the mesh's UV channel count to exactly uv_channel + 1, so higher channels are discarded. Idempotent, in an editor transaction, nothing saved; uvs_generated is always true, even for uv_channel 8 or more, which changes nothing. For box, cylinder or region projections use set_mesh_uvs_from_projection; for a real unwrap, auto_generate_mesh_uvs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -266,6 +306,8 @@ Planar-project a UV set onto a DynamicMeshActor's dynamic mesh
 **Returns:** `{ actor_name: string, uv_channel: int, triangle_count: int, vertex_count: int, uvs_generated: bool }`
 
 ## `get_dynamic_mesh_info`
+
+*Read-only.*
 
 Read geometry stats off a DynamicMeshActor's live dynamic mesh
 
@@ -277,6 +319,8 @@ Read geometry stats off a DynamicMeshActor's live dynamic mesh
 
 ## `get_is_dense_mesh`
 
+*Read-only.*
+
 Return true if the mesh's triangle IDs are dense (no gaps after deletions).
 
 | Parameter | Type | Required | Description |
@@ -286,6 +330,8 @@ Return true if the mesh's triangle IDs are dense (no gaps after deletions).
 **Returns:** `{ actor_name, is_dense }`
 
 ## `get_mesh_bounding_box`
+
+*Read-only.*
 
 Read the local-space axis-aligned bounding box of a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetMeshBoundingBox.
 
@@ -297,6 +343,8 @@ Read the local-space axis-aligned bounding box of a static mesh via UGeometryScr
 **Returns:** `{ static_mesh_path, lod_index, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z }`
 
 ## `get_mesh_components_detail`
+
+*Read-only.*
 
 Enumerate the connected components (physical pieces) of a DynamicMeshActor's live dynamic mesh via UE::Geometry::FMeshConnectedComponents, reporting for EACH island its triangle count, its local-space bounding box, its triangle_id range and which MaterialIDs it carries. Read-only (unlike the engine's SplitMeshByComponents, which consumes the mesh). This is the map of a mesh in ONE call, and the tool to reach for BEFORE painting anything: get_mesh_material_ids says how many triangles carry each material, and this says what those triangles physically ARE. HONEST GATE: it names nothing — it gives you sizes and positions, and which island is which part is still a human call; what it prevents is deriving that from a triangle-count assumption.
 
@@ -310,6 +358,8 @@ Enumerate the connected components (physical pieces) of a DynamicMeshActor's liv
 
 ## `get_mesh_connected_components`
 
+*Read-only.*
+
 Count the number of topologically separate connected components (islands) in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumConnectedComponents.
 
 | Parameter | Type | Required | Description |
@@ -321,6 +371,8 @@ Count the number of topologically separate connected components (islands) in a s
 
 ## `get_mesh_has_attribute_set`
 
+*Read-only.*
+
 Return true if the mesh has at least one attribute set registered.
 
 | Parameter | Type | Required | Description |
@@ -330,6 +382,8 @@ Return true if the mesh has at least one attribute set registered.
 **Returns:** `{ actor_name, has_attribute_set }`
 
 ## `get_mesh_is_closed`
+
+*Read-only.*
 
 Test whether a static mesh has no topological boundary edges (i.e. is a closed manifold) via UGeometryScriptLibrary_MeshQueryFunctions::GetIsClosedMesh.
 
@@ -342,6 +396,8 @@ Test whether a static mesh has no topological boundary edges (i.e. is a closed m
 
 ## `get_mesh_material_ids`
 
+*Read-only.*
+
 Read the per-triangle MaterialID distribution of a DynamicMeshActor's live dynamic mesh via UGeometryScriptLibrary_MeshMaterialFunctions::GetMaxMaterialID + GetAllTriangleMaterialIDs. Read-only. This is the ORACLE for every MaterialID write: it returns a per-ID triangle histogram, so "did the paint actually land?" is answerable with a read instead of trusting a success flag. IMPORTANT: has_material_ids=false means the mesh has no MaterialID attribute at all, which is exactly the state in which writes are silently dropped by the engine.
 
 | Parameter | Type | Required | Description |
@@ -351,6 +407,8 @@ Read the per-triangle MaterialID distribution of a DynamicMeshActor's live dynam
 **Returns:** `{ actor_name, has_material_ids: bool, max_material_id: int, triangle_count: int, distinct_material_ids: int, histogram: [ { material_id: int, triangle_count: int } ] }`
 
 ## `get_mesh_open_border_loops`
+
+*Read-only.*
 
 Count the number of open border loops (topological "holes") in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumOpenBorderLoops.
 
@@ -362,6 +420,8 @@ Count the number of open border loops (topological "holes") in a static mesh via
 **Returns:** `{ static_mesh_path, lod_index, open_border_loops, ambiguous_topology }`
 
 ## `get_mesh_selection_bounds`
+
+*Read-only.*
 
 Resolve a region into a selection and report its local-space BOUNDING BOX via UGeometryScriptLibrary_MeshSelectionQueryFunctions::GetMeshSelectionBoundingBox. Read-only. Takes exactly the same region parameters as select_mesh_triangles and set_mesh_material_id_in_region, so a region measured here is the same one painted there. This is what turns a bisection answer ("the piece is somewhere in X>0") into actual numbers: centre and size, which is what lets you tell a 150x100x40 slab from a 14x230x75 rail without opening the editor.
 
@@ -385,6 +445,8 @@ Resolve a region into a selection and report its local-space BOUNDING BOX via UG
 
 ## `get_mesh_triangle_count`
 
+*Read-only.*
+
 Count the triangles in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumTriangleIDs. This is the canonical triangle count after copy-from-asset; GetTriangleCount is also surfaced on UDynamicMesh directly (always == NumTriangleIDs for a freshly copied mesh).
 
 | Parameter | Type | Required | Description |
@@ -395,6 +457,8 @@ Count the triangles in a static mesh via UGeometryScriptLibrary_MeshQueryFunctio
 **Returns:** `{ static_mesh_path, lod_index, triangle_count, triangle_id_count, has_triangle_id_gaps }`
 
 ## `get_mesh_uv_area`
+
+*Read-only.*
 
 Compute the total UV-space area of all triangles in a static mesh's UV channel via UGeometryScriptLibrary_MeshQueryFunctions::GetMeshUVArea. bIsValidUVChannel is false if the mesh has no UVs in that channel.
 
@@ -408,6 +472,8 @@ Compute the total UV-space area of all triangles in a static mesh's UV channel v
 
 ## `get_mesh_uv_channel_count`
 
+*Read-only.*
+
 Read the number of UV channels in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets.
 
 | Parameter | Type | Required | Description |
@@ -418,6 +484,8 @@ Read the number of UV channels in a static mesh via UGeometryScriptLibrary_MeshQ
 **Returns:** `{ static_mesh_path, lod_index, uv_channel_count }`
 
 ## `get_mesh_vertex_count`
+
+*Read-only.*
 
 Count the vertices in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetVertexCount.
 
@@ -430,6 +498,8 @@ Count the vertices in a static mesh via UGeometryScriptLibrary_MeshQueryFunction
 
 ## `get_mesh_volume_area`
 
+*Read-only.*
+
 Read the surface area and signed volume of a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetMeshVolumeArea.
 
 | Parameter | Type | Required | Description |
@@ -440,6 +510,8 @@ Read the surface area and signed volume of a static mesh via UGeometryScriptLibr
 **Returns:** `{ static_mesh_path, lod_index, surface_area, volume, is_closed }`
 
 ## `get_mesh_volume_area_center`
+
+*Read-only.*
 
 Read surface area, signed volume, and center-of-mass of a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetMeshVolumeAreaCenter.
 
@@ -452,6 +524,8 @@ Read surface area, signed volume, and center-of-mass of a static mesh via UGeome
 
 ## `get_num_connected_islands`
 
+*Read-only.*
+
 Get the number of separate connected components in the mesh (alias of GetNumConnectedComponents).
 
 | Parameter | Type | Required | Description |
@@ -461,6 +535,8 @@ Get the number of separate connected components in the mesh (alias of GetNumConn
 **Returns:** `{ actor_name, num_connected_islands }`
 
 ## `get_num_extended_polygroup_layers`
+
+*Read-only.*
 
 Count the extended polygroup layers (those beyond the default polygroup layer) on a DynamicMeshActor's live dynamic mesh in the editor world, as num_polygroup_layers. Read-only; reply actor_name is the component name, not the actor label. Change the count with set_num_extended_polygroup_layers.
 
@@ -472,6 +548,8 @@ Count the extended polygroup layers (those beyond the default polygroup layer) o
 
 ## `get_num_open_border_edges`
 
+*Read-only.*
+
 Count the open boundary edges (edges with a single adjacent triangle) of a DynamicMeshActor's live dynamic mesh in the editor world; 0 means the mesh is closed. Read-only; get the loops with get_mesh_open_border_loops. Reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
@@ -481,6 +559,8 @@ Count the open boundary edges (edges with a single adjacent triangle) of a Dynam
 **Returns:** `{ actor_name, num_open_border_edges }`
 
 ## `get_num_uv_islands`
+
+*Read-only.*
 
 Get the number of UV islands in a UV channel.
 
@@ -493,6 +573,8 @@ Get the number of UV islands in a UV channel.
 
 ## `is_bvh_valid_for_mesh`
 
+*Read-only.*
+
 Check whether a BVH for the DynamicMeshActor's dynamic mesh is currently valid via UGeometryScriptLibrary_MeshSpatial::IsBVHValidForMesh. Read-only: no allocation, no rebuild.
 
 | Parameter | Type | Required | Description |
@@ -502,6 +584,8 @@ Check whether a BVH for the DynamicMeshActor's dynamic mesh is currently valid v
 **Returns:** `{ actor_name, bvh_valid: bool }`
 
 ## `is_point_inside_mesh`
+
+*Read-only.*
 
 Test whether a 3D point is inside the mesh using Fast Winding Number via UGeometryScriptLibrary_MeshSpatial::IsPointInsideMesh. Builds a fresh BVH+FWN if needed.
 
@@ -517,6 +601,8 @@ Test whether a 3D point is inside the mesh using Fast Winding Number via UGeomet
 
 ## `rebuild_mesh_bvh`
 
+*Destructive.*
+
 Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
 
 | Parameter | Type | Required | Description |
@@ -528,7 +614,9 @@ Rebuild the BVH for a mesh (use after any mesh edit; BVH goes stale).
 
 ## `recompute_mesh_normals`
 
-Recompute per-overlay normals on a DynamicMeshActor's dynamic mesh
+*Destructive, idempotent.*
+
+Recompute the normals of the live dynamic mesh of a DynamicMeshActor in the editor world, overwriting the values of its existing normal overlay while keeping its hard-edge splits; a mesh without normals first gets per-vertex normals. Face contributions are weighted by area and by corner angle (both on by default; both off gives a plain average). Idempotent, in an editor transaction, nothing saved; recomputed is always true. Use it when shading looks wrong after geometry edits; copy_dynamic_mesh_to_static_mesh persists the result.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -539,6 +627,8 @@ Recompute per-overlay normals on a DynamicMeshActor's dynamic mesh
 **Returns:** `{ actor_name: string, angle_weighted: bool, area_weighted: bool, triangle_count: int, vertex_count: int, recomputed: bool }`
 
 ## `recompute_mesh_uvs`
+
+*Destructive.*
 
 Recompute UVs on a UV channel using the configured flatten method.
 
@@ -552,6 +642,8 @@ Recompute UVs on a UV channel using the configured flatten method.
 **Returns:** `{ actor_name, uv_channel, island_source, method, recomputed }`
 
 ## `remap_material_ids`
+
+*Destructive.*
 
 Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass from_material_id + to_material_id to merge one ID into another (UGeometryScriptLibrary_MeshMaterialFunctions::RemapMaterialIDs), or pass compact=true with the material list to close gaps left by deleted/merged IDs (CompactMaterialIDs) and get back the compacted list to hand to copy_dynamic_mesh_to_static_mesh. Gaps matter: MaterialIDs index into that list positionally, so an unused ID in the middle costs a wasted material slot on the baked asset.
 
@@ -568,6 +660,8 @@ Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass 
 
 ## `remove_dynamic_mesh_actor`
 
+*Destructive.*
+
 Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_dynamic_mesh_actor.
 
 | Parameter | Type | Required | Description |
@@ -578,6 +672,8 @@ Destroy a DynamicMeshActor in the editor world, found by label or object name, i
 
 ## `remove_unused_vertices`
 
+*Destructive.*
+
 Remove the vertices no triangle references from a DynamicMeshActor's live dynamic mesh in the editor world and refresh its render data. Remaining vertex IDs are not renumbered and a clean mesh is a no-op; returns vertex_count_before, vertex_count, vertices_removed and removed.
 
 | Parameter | Type | Required | Description |
@@ -587,6 +683,8 @@ Remove the vertices no triangle references from a DynamicMeshActor's live dynami
 **Returns:** `{ actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }`
 
 ## `repack_mesh_uvs`
+
+*Destructive.*
 
 Pack existing UV islands on a UV channel into standard UV space.
 
@@ -600,6 +698,8 @@ Pack existing UV islands on a UV channel into standard UV space.
 **Returns:** `{ actor_name, uv_channel, target_image_width, optimize_island_rotation, repacked }`
 
 ## `repair_mesh_self_intersections`
+
+*Destructive.*
 
 Boolean-union a DynamicMeshActor's dynamic mesh with itself to repair self-intersections, remove internal/floating geometry and resolve non-manifold overlaps (UGeometryScriptLibrary_MeshBooleanFunctions::ApplyMeshSelfUnion). Convergent: the first pass mutates the mesh, but a second pass on the already-cleaned mesh is a no-op (repaired reports false). NOTE: the engine impl ignores its internal success flag and always returns the target mesh, so success is measured by comparing the triangle count, not by the return value.
 
@@ -615,16 +715,20 @@ Boolean-union a DynamicMeshActor's dynamic mesh with itself to repair self-inter
 
 ## `rotate_dynamic_mesh`
 
-Rotate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::RotateMesh.
+*Destructive.*
+
+Rotate every vertex of the live dynamic mesh of a DynamicMeshActor in the editor world about the mesh-local origin, baking the rotation into the geometry; the actor transform is not touched. Rotations accumulate: each call turns the current mesh again. rotation is required (omitting it is an error). Runs in an editor transaction, nothing saved; applied is always true. Use transform_dynamic_mesh to move, rotate and scale in one call, set_actor_transform to turn the actor itself, rotate_mesh_uvs to rotate UVs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `rotation` | array | no | [pitch, yaw, roll] Euler rotation in degrees |
+| `rotation` | array | no | Required (the call fails without it): [pitch, yaw, roll] Euler rotation in degrees, applied on top of the current mesh |
 
-**Returns:** `{ actor_name, rotation:{}, applied: true }`
+**Returns:** `{ actor_name: string, rotation_pitch: number, rotation_yaw: number, rotation_roll: number, applied: bool }`
 
 ## `rotate_mesh_uvs`
+
+*Destructive.*
 
 Rotate all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by an angle in degrees around a UV-space pivot; 0 degrees changes nothing (rotated false). No undo entry; reply actor_name is the component name, not the actor label.
 
@@ -640,6 +744,8 @@ Rotate all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the e
 
 ## `scale_dynamic_mesh`
 
+*Destructive.*
+
 Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::ScaleMesh.
 
 | Parameter | Type | Required | Description |
@@ -650,6 +756,8 @@ Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_Mes
 **Returns:** `{ actor_name, scale:{}, applied: true }`
 
 ## `scale_mesh_uvs`
+
+*Destructive.*
 
 Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors; zero factors are refused and 1, 1 changes nothing (scaled false). No undo entry; reply actor_name is the component name, not the actor label.
 
@@ -665,6 +773,8 @@ Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the ed
 **Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }`
 
 ## `select_mesh_triangles`
+
+*Destructive.*
 
 Resolve a region into a triangle selection and REPORT it, without modifying anything. Read-only companion of set_mesh_material_id_in_region: same region parameters, same resolver, so a region previewed here paints exactly those triangles there. Use it to avoid the failure mode where a mis-specified box selects 0 triangles and the paint call still returns success. Coordinates are LOCAL to the dynamic mesh, not world.
 
@@ -690,6 +800,8 @@ Resolve a region into a triangle selection and REPORT it, without modifying anyt
 
 ## `set_dynamic_mesh_material`
 
+*Destructive, idempotent.*
+
 Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMeshComponent.
 
 | Parameter | Type | Required | Description |
@@ -701,6 +813,8 @@ Assign a UMaterialInterface asset to a slot on a DynamicMeshActor's UDynamicMesh
 **Returns:** `{ actor_name: string, material_path: string, material_name: string, slot_index: int, applied: bool, note?: string }`
 
 ## `set_mesh_material_id`
+
+*Destructive, idempotent.*
 
 Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. scope='all' repaints every triangle (UGeometryScriptLibrary_MeshMaterialFunctions::ClearMaterialIDs); scope='triangles' repaints the listed triangle IDs (SetMaterialIDOnTriangles). Calls EnableMaterialIDs first, because on a mesh without that attribute the engine drops the write and still reports success. Verify with get_mesh_material_ids, not with the success flag.
 
@@ -714,6 +828,8 @@ Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. sco
 **Returns:** `{ actor_name, material_id, scope, triangles_targeted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }`
 
 ## `set_mesh_material_id_in_region`
+
+*Destructive, idempotent.*
 
 Stamp a MaterialID onto every triangle inside a region, via the engine's SelectMeshElements* family + SetMaterialIDForMeshSelection. Use this when polygroups are not usable — after a boolean, appended pieces are fused and set_polygroup_material_id cannot address them separately. Coordinates are LOCAL to the dynamic mesh, not world. Preview any region with select_mesh_triangles before painting: a region that selects 0 triangles still returns success.
 
@@ -738,6 +854,8 @@ Stamp a MaterialID onto every triangle inside a region, via the engine's SelectM
 
 ## `set_mesh_uv_element_position`
 
+*Destructive, idempotent.*
+
 Set the (u, v) of one element of a UV channel overlay on a DynamicMeshActor's live dynamic mesh in the editor world; an invalid element ID writes nothing and returns is_valid_element false, not an error. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
@@ -751,6 +869,8 @@ Set the (u, v) of one element of a UV channel overlay on a DynamicMeshActor's li
 **Returns:** `{ actor_name, uv_channel, element_id, new_position: {u, v}, is_valid_element, set: bool }`
 
 ## `set_mesh_uvs_from_projection`
+
+*Destructive, idempotent.*
 
 Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world with a box, plane or cylinder projection, optionally only inside a region. Box suits plank-and-post geometry (each face takes the axis it faces), plane only flat pieces, cylinder wrapped shapes. Returns triangles_affected and applied.
 
@@ -781,6 +901,8 @@ Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the 
 
 ## `set_num_extended_polygroup_layers`
 
+*Destructive, idempotent.*
+
 Set the number of extended polygroup layers on the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshPolygroupFunctions::SetNumExtendedPolygroupLayers. Idempotent: the engine dedups (only reshapes attributes when the count actually differs from the current one), so re-setting the same count is a no-op. The layer count is read back AFTER the set via GetNumExtendedPolygroupLayers to confirm it landed.
 
 | Parameter | Type | Required | Description |
@@ -792,7 +914,9 @@ Set the number of extended polygroup layers on the live dynamic mesh of a Dynami
 
 ## `set_num_uv_channels`
 
-Set the number of UV channels on a dynamic mesh.
+*Destructive, idempotent.*
+
+Set how many UV channels the live dynamic mesh of a DynamicMeshActor in the editor world has: added channels start without UVs, and channels from num_uv_channels upward are discarded with their UVs (note says so). The current count is a no-op (changed false). The engine allows at most 8; a larger count changes nothing yet still reports changed true. No undo entry, nothing saved; reply actor_name is the component name, not the actor label. Fill a channel with copy_mesh_uv_channel or generate_mesh_uvs; clear_uv_channel works on static mesh assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -802,6 +926,8 @@ Set the number of UV channels on a dynamic mesh.
 **Returns:** `{ actor_name: string, num_uv_channels: int, previous_num_uv_channels: int, changed: bool, note?: string } -- actor_name is the dynamic mesh component's name, not the actor label; note when channels were removed, whose UV data is dropped.`
 
 ## `set_polygroup_material_id`
+
+*Destructive, idempotent.*
 
 Stamp a MaterialID onto every triangle of one polygroup via UGeometryScriptLibrary_MeshMaterialFunctions::SetPolygroupMaterialID. This is usually the cheapest way to paint a part: append_mesh_primitive lays primitives down with PerFace polygroups, so each appended piece is already its own group. HONEST GATE: the engine reports whether the polygroup ID actually existed, and that flag is surfaced as polygroup_id_valid — a false there means nothing was painted, even though the call succeeded.
 
@@ -816,6 +942,8 @@ Stamp a MaterialID onto every triangle of one polygroup via UGeometryScriptLibra
 
 ## `simplify_mesh`
 
+*Destructive.*
+
 QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count
 
 | Parameter | Type | Required | Description |
@@ -827,6 +955,8 @@ QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count
 
 ## `spawn_dynamic_mesh_actor`
 
+*Destructive.*
+
 Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in an undoable transaction. Returns the label of the new actor as actor_name, its internal name and triangle_count (0). Remove it with remove_dynamic_mesh_actor.
 
 | Parameter | Type | Required | Description |
@@ -837,6 +967,8 @@ Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }`
 
 ## `transform_dynamic_mesh`
+
+*Destructive.*
 
 Apply a full FTransform (translation + rotation + scale) to the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TransformMesh.
 
@@ -851,6 +983,8 @@ Apply a full FTransform (translation + rotation + scale) to the live dynamic mes
 
 ## `translate_dynamic_mesh`
 
+*Destructive.*
+
 Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_MeshTransformFunctions::TranslateMesh.
 
 | Parameter | Type | Required | Description |
@@ -861,6 +995,8 @@ Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary
 **Returns:** `{ actor_name, translation:{}, applied: true }`
 
 ## `translate_mesh_uvs`
+
+*Destructive.*
 
 Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false). No undo entry; reply actor_name is the component name, not the actor label.
 
@@ -874,6 +1010,8 @@ Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the e
 **Returns:** `{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number, translated: bool }`
 
 ## `weld_mesh_edges`
+
+*Destructive.*
 
 Weld coincident open boundary edges of a DynamicMeshActor's dynamic mesh
 

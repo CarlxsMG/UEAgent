@@ -158,6 +158,7 @@ namespace
 // ---------------------------------------------------------------------------
 // MCP:interchange_module_status - Report Interchange framework availability.  Reads UInterchangeManager::IsInterchangeImportEnabled() (InterchangeManager.h, INTERCHANGEENGINE_API) and counts the supported file extensions reported by GetSupportedFormats(Assets) (InterchangeManager.h). Translator count itself is derived because UInterchangeManager's RegisteredTranslatorsClass set is private in 5.8 (InterchangeManager.h) — we surface ``enabled`` (= import enabled AND at least one supported format) which carries the same operational signal.
 //   @returns { enabled: bool, import_enabled: bool, asset_format_count: number, actor_format_count: number, scene_format_count: number, asset_formats: [string], translator_type_queried: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleInterchangeModuleStatus(const TSharedPtr<FJsonObject>& Params)
 {
     const bool bImportEnabled = UInterchangeManager::IsInterchangeImportEnabled();
@@ -801,7 +802,7 @@ TSharedPtr<FJsonObject> HandleInterchangeGetPipelineProperties(const TSharedPtr<
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:interchange_save_pipeline - Save an Interchange pipeline asset's package to disk; saved is what UPackage::Save returned.
+// MCP:interchange_save_pipeline - Write the package of an Interchange pipeline asset (a UInterchangePipelineBase loaded by object path) over its .uasset on disk with UPackage::SavePackage, dirty or not; saved is what SavePackage returned, and false makes success false. It is the persist step after interchange_create_pipeline_asset and interchange_set_pipeline_properties, which change memory only; repeating it is idempotent. Unlike save_asset it has no PIE refusal and no read-only-root guard. A path that does not load as a pipeline is an error.
 //   @param pipeline_path [string!] - Object path of the pipeline asset whose package is written to disk (loaded via LoadObject, must be a UInterchangePipelineBase).
 //   @returns { pipeline_path: string, file_path: string, saved: bool }
 TSharedPtr<FJsonObject> HandleInterchangeSavePipeline(const TSharedPtr<FJsonObject>& Params)

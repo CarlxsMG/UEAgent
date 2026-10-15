@@ -1638,7 +1638,7 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
     return Reply;
 }
 
-// MCP:get_lighting_quality - Analyze and report comprehensive lighting quality metrics for the current level including light counts by type/mobility, intensity statistics, and a lighting
+// MCP:get_lighting_quality - Read-only census of the actors with a light component in the engine's first world context (normally the editor level): counts by type and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max, per-light light_details, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. Sky lights are not counted. For one light use get_light_properties, for lights near a point get_lighting_in_area.
 //   @returns { level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating }
 TSharedPtr<FJsonObject> HandleGetLightingQuality(const TSharedPtr<FJsonObject>& Params)
 {

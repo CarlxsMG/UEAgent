@@ -130,12 +130,12 @@ namespace
 	}
 }
 
-// MCP:define_usd_prim - Define (or re-author) a prim at the given path with a USD type
+// MCP:define_usd_prim - Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. A specifier of Over or Class is applied afterwards (specifier_set_ok); an unknown one means Def but is echoed as given. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
 //   @param stage_name [string!] - Name the stage was registered under
 //   @param prim_path [string!] - Absolute SdfPath, e.g. /World/Cube
 //   @param type_name [string] - USD type name (Xform, Mesh, Cube, Scope, Camera, DistantLight...). Default: Xform
 //   @param specifier [string] - "Def" | "Over" | "Class". Default: Def
-//   @returns { prim_path: string, type_name: string, specifier: string, is_valid: bool }
+//   @returns { prim_path: string, type_name: string, specifier: string, is_valid: bool, specifier_set_ok: bool }
 TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -177,10 +177,11 @@ TSharedPtr<FJsonObject> HandleDefineUsdPrim(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:override_usd_prim - Create (or retrieve) an Over specifier at the given path
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath to author an Over for
-//   @returns { prim_path: string, is_valid: bool }
+// MCP:override_usd_prim - Author an over (specifier over, no type) at prim_path on a registered USD stage, at its current edit target, with overs for missing ancestors, to add opinions to a prim without defining it. A prim that already exists there is returned untouched, even a def, though the reply still says specifier Over. is_valid=false means USD refused; a missing stage or a bad path is an error. In memory only: save_usd_stage writes it. define_usd_prim creates a typed def; set_usd_prim_specifier changes the specifier of an existing prim.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath to author the over at, e.g. "/World/Cube"
+//   @returns { prim_path: string, is_valid: bool, specifier?: string }
+//   @hints additive idempotent
 TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;

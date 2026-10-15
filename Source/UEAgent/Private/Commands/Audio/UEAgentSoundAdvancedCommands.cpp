@@ -620,7 +620,7 @@ TSharedPtr<FJsonObject> HandleSetSoundClassProperties(
 // get_sound_class_properties
 // Reads sound class properties and hierarchy info from a USoundClass asset.
 // ---------------------------------------------------------------------------
-// MCP:get_sound_class_properties - Gets sound class properties and hierarchy info from a USoundClass.
+// MCP:get_sound_class_properties - Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is "None" for a root class. One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 //   @param sound_class_path - Content path of the USoundClass asset.
 //   @returns { sound_class_path: string, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, parent_class: string, parent_class_path: string, child_classes: [{name, path}], child_count: int }
 

@@ -6,6 +6,8 @@
 
 ## `create_behavior_config`
 
+*Additive.*
+
 Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves, then save it. An unresolved behavior_class is ignored without error, so check behavior_class in the reply; created tells new from existing.
 
 | Parameter | Type | Required | Description |
@@ -18,6 +20,8 @@ Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the 
 
 ## `end_behavior_on_actor`
 
+*Destructive.*
+
 Stop a UGameplayBehavior running on a Pawn in the editor world.
 
 | Parameter | Type | Required | Description |
@@ -29,6 +33,8 @@ Stop a UGameplayBehavior running on a Pawn in the editor world.
 
 ## `get_behavior_config_info`
 
+*Read-only.*
+
 Read the protected BehaviorClass of a UGameplayBehaviorConfig asset by reflection: behavior_class (class name), behavior_class_path and has_behavior_class. Read-only; set it with set_behavior_class, or list every config with list_behavior_configs.
 
 | Parameter | Type | Required | Description |
@@ -39,6 +45,8 @@ Read the protected BehaviorClass of a UGameplayBehaviorConfig asset by reflectio
 
 ## `get_behavior_subsystem_info`
 
+*Read-only.*
+
 Report whether the editor world has a UGameplayBehaviorSubsystem (UGameplayBehaviorSubsystem::GetCurrent): world_name, subsystem_available and, when it exists, subsystem_class. Read-only, no parameters; trigger_behavior_on_actor and end_behavior_on_actor fail without it.
 
 No parameters.
@@ -46,6 +54,8 @@ No parameters.
 **Returns:** `{ world_name: string, subsystem_available: bool, subsystem_class: string }`
 
 ## `list_behavior_configs`
+
+*Read-only.*
 
 Enumerate every UGameplayBehaviorConfig asset under a package path via AssetRegistry.
 
@@ -57,6 +67,8 @@ Enumerate every UGameplayBehaviorConfig asset under a package path via AssetRegi
 
 ## `remove_behavior_config`
 
+*Destructive, idempotent.*
+
 Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UGameplayBehaviorConfig, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
@@ -66,6 +78,8 @@ Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config).
 **Returns:** `{ config_path, deleted, already_existed, asset_class?, note? }`
 
 ## `set_behavior_class`
+
+*Destructive, idempotent.*
 
 Set the BehaviorClass of a UGameplayBehaviorConfig (via reflection; the field is protected in 5.7).
 
@@ -78,7 +92,9 @@ Set the BehaviorClass of a UGameplayBehaviorConfig (via reflection; the field is
 
 ## `trigger_behavior_on_actor`
 
-Trigger a UGameplayBehaviorConfig on a Pawn in the editor world.
+*Destructive.*
+
+Start the behavior of a UGameplayBehaviorConfig on a Pawn found by label in the editor world: the config supplies its UGameplayBehavior, whose Trigger runs on the pawn, and the world UGameplayBehaviorSubsystem tracks it until it ends or end_behavior_on_actor stops it. triggered=false means the behavior refused. Runtime only: nothing is saved or undoable. A config without BehaviorClass (see set_behavior_class), no subsystem in the editor world (see get_behavior_subsystem_info), a missing actor or a non-Pawn is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

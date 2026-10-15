@@ -347,7 +347,7 @@ TSharedPtr<FJsonObject> HandleListCameraNodeTypes(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_camera_rig_root_node - Sets a UCameraRigAsset's RootNode to a new node of the given UCameraNode subclass.
+// MCP:set_camera_rig_root_node - Replace the RootNode of a Gameplay Cameras UCameraRigAsset with a new, default-valued node of node_type; the previous root and everything under it (children, parameter values) is dropped. Runs in an undo transaction and saves the rig, but a failed save is not reported. Does not build the rig (build_camera_rig does). Valid node_type names come from list_camera_node_types; configure the new root with set_camera_node_parameters, give an ArrayCameraNode root children with add_camera_node_child, and read it back with get_camera_rig_nodes.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
 //   @param node_type - A concrete UCameraNode subclass name, e.g. "FieldOfViewCameraNode", "OffsetCameraNode", "ArrayCameraNode" (required)
 //   @returns { camera_rig_path, node_type, node_class, root_set }
@@ -664,7 +664,7 @@ namespace UEAgentCameraImpl
     }
 }
 
-// MCP:create_camera - Spawn a new camera actor in the editor world with optional initial transform.
+// MCP:create_camera - Spawn a new ACameraActor in the editor world (never in PIE) at an optional location and rotation, with camera_name as its outliner label. Labels need not be unique, so address the camera later by the returned actor_name. Each location axis must be within +-100000, otherwise an error. The level is marked dirty, not saved. location_set, rotation_set and label_set compare what the spawned actor reports with the request. Move or re-aim it with set_camera_transform; spawn_actor places a CameraActor in PIE too; add_camera_component puts a camera on an existing actor.
 //   @param camera_name - Name to assign to the new camera actor.
 //   @param location - Optional [X, Y, Z] world location for the new camera (defaults to origin)
 //   @param rotation - Optional [Pitch, Yaw, Roll] world rotation for the new camera (defaults to zero)
@@ -1938,9 +1938,9 @@ static USceneComponent* FindSceneComponentByName(AActor* Actor, const FString& C
     return nullptr;
 }
 
-// MCP:add_spring_arm - Add or configure a USpringArmComponent on an existing actor (camera boom / third-person follow distance / lag / collision probe).
+// MCP:add_spring_arm - Add a USpringArmComponent (camera boom) to an actor placed in the editor world, found by name or label; if the actor already has a spring arm, that first one is configured instead, whatever its name, overwriting only the fields you pass. A new arm becomes an instance component attached to the root. The level is marked dirty, not saved; negative lengths, sizes and speeds clamp to 0, and an unknown probe_channel is an error. Attach a camera with add_camera_component (parent_component = the returned component_name); for a Blueprint asset use add_component_to_blueprint.
 //   @param actor_name - Name or label of the target actor in the editor world.
-//   @param component_name - Optional name for the new component (defaults to "SpringArm"). If a component with this name already exists, only the provided fields are updated.
+//   @param component_name - Optional name for a new component (defaults to "SpringArm"); use a name no other component of the actor has. Ignored when the actor already has a spring arm, which is configured whatever its name.
 //   @param target_arm_length - Optional float. Natural length of the spring arm (uu). Default 300.
 //   @param socket_offset - Optional [X, Y, Z] relative offset applied at the spring-arm tip.
 //   @param target_offset - Optional [X, Y, Z] world-space offset applied at the start of the spring.

@@ -6,7 +6,9 @@
 
 ## `add_mass_trait`
 
-Add a UMassEntityTraitBase-derived trait to a Mass entity config
+*Additive, idempotent.*
+
+Adds a trait (a concrete UMassEntityTraitBase subclass) to a UMassEntityConfigAsset and saves the config. Idempotent: if the config already holds a trait of exactly that class, nothing is added, though added is still true (compare trait_count). trait_class takes a reflected name with or without its U prefix, or a /Script path; an unknown or non-trait class is an error, but an abstract one is not refused: the engine creates it behind an ensure and warns it is nulled out on save. Edit it with set_mass_trait_property; remove_mass_trait is the inverse; add_mass_trait_to_entity tags a live entity instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -16,6 +18,8 @@ Add a UMassEntityTraitBase-derived trait to a Mass entity config
 **Returns:** `{ config_path, trait_class, trait_path, trait_count, added, saved }`
 
 ## `add_mass_trait_to_entity`
+
+*Additive.*
 
 Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass entity of the editor world (not PIE) by archetype migration. Caveat: EVERY entity sharing that archetype gets the tag, not only this one. Returns old_archetype_id, new_archetype_id and changed; inverse: remove_mass_trait_from_entity.
 
@@ -28,6 +32,8 @@ Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass ent
 
 ## `count_mass_entities`
 
+*Read-only.*
+
 Count the live Mass entities of the editor world (not a PIE world), read-only. Returns total, archetype_count and per_archetype [{archetype_id, count}]; list_mass_archetypes adds fragment counts, query_mass_entities counts by fragment or tag.
 
 No parameters.
@@ -35,6 +41,8 @@ No parameters.
 **Returns:** `{ total: int, archetype_count: int, per_archetype: [{ archetype_id, count }] }`
 
 ## `create_mass_entity_config`
+
+*Additive.*
 
 Create a UMassEntityConfigAsset (an empty list of Mass traits) at package_path/config_name and save it; an existing config there is loaded and re-saved instead (created:false). Returns config_path, trait_count and saved. Add traits with add_mass_trait, then link it with set_mass_spawner_entity_types.
 
@@ -46,6 +54,8 @@ Create a UMassEntityConfigAsset (an empty list of Mass traits) at package_path/c
 **Returns:** `{ config_path, config_name, trait_count, created, saved }`
 
 ## `create_mass_spawner_actor`
+
+*Additive.*
 
 Spawn an AMassSpawner actor into the editor world at location (zero rotation) and label it; the level is not saved. config_path is only echoed, not linked (config_linked:false): link configs with set_mass_spawner_entity_types. Use a unique label, since the spawner tools take the first match.
 
@@ -59,6 +69,8 @@ Spawn an AMassSpawner actor into the editor world at location (zero rotation) an
 
 ## `despawn_mass_entities`
 
+*Destructive.*
+
 Trigger entity despawning on a AMassSpawner (DoDespawning from the FTSTicker path, outside Mass processing); inverse of spawn_mass_entities. Reports the global Mass entity-count delta; no-op (was_empty) when this spawner spawned nothing.
 
 | Parameter | Type | Required | Description |
@@ -69,6 +81,8 @@ Trigger entity despawning on a AMassSpawner (DoDespawning from the FTSTicker pat
 
 ## `destroy_all_mass_entities`
 
+*Destructive.*
+
 Destroy every Mass entity in the editor world (not a PIE world), archetype by archetype, with no undo. Returns destroyed_count, before_count and after_count. For one entity use destroy_mass_entity; to despawn what one spawner made use despawn_mass_entities.
 
 No parameters.
@@ -76,6 +90,8 @@ No parameters.
 **Returns:** `{ destroyed_count: int, before_count: int, after_count: int }`
 
 ## `destroy_mass_entity`
+
+*Destructive.*
 
 Destroy a single Mass entity by its handle (Index:SerialNumber).
 
@@ -86,6 +102,8 @@ Destroy a single Mass entity by its handle (Index:SerialNumber).
 **Returns:** `{ entity_handle, destroyed: bool, already_destroyed: bool }`
 
 ## `fire_mass_signal`
+
+*Destructive.*
 
 Broadcast a signal to a single entity or to all entities (when entity_handle omitted). The tool does NOT validate the signal name — UMassSignalSubsystem::SignalEntity silently no-ops on unknown names, which is the documented engine behavior.
 
@@ -98,6 +116,8 @@ Broadcast a signal to a single entity or to all entities (when entity_handle omi
 
 ## `get_mass_config_parent`
 
+*Read-only.*
+
 Read the parent config path of a UMassEntityConfigAsset (inverse of set_mass_config_parent).
 
 | Parameter | Type | Required | Description |
@@ -107,6 +127,8 @@ Read the parent config path of a UMassEntityConfigAsset (inverse of set_mass_con
 **Returns:** `{ config_path, parent_config_path, has_parent, config_class }`
 
 ## `get_mass_entity_info`
+
+*Read-only.*
 
 Inspect one Mass entity of the editor world (not PIE) by handle, read-only: valid, built, archetype_id and the fragment types of its archetype. A destroyed or unknown handle returns valid:false rather than an error; a malformed handle is an error.
 
@@ -118,6 +140,8 @@ Inspect one Mass entity of the editor world (not PIE) by handle, read-only: vali
 
 ## `get_mass_spawner_count`
 
+*Read-only.*
+
 Read the current spawn count of an AMassSpawner (inverse of set_mass_spawner_count).
 
 | Parameter | Type | Required | Description |
@@ -127,6 +151,8 @@ Read the current spawn count of an AMassSpawner (inverse of set_mass_spawner_cou
 **Returns:** `{ actor_label, actor_name, count }`
 
 ## `get_mass_spawner_entity_types`
+
+*Read-only.*
 
 Read the EntityTypes array of an AMassSpawner (inverse of set_mass_spawner_entity_types).
 
@@ -138,6 +164,8 @@ Read the EntityTypes array of an AMassSpawner (inverse of set_mass_spawner_entit
 
 ## `get_mass_spawner_info`
 
+*Read-only.*
+
 Read an AMassSpawner actor of the editor world, found by actor label (first match), read-only. Returns actor_name, count and entity_types [{entity_config, proportion}] with entity_type_count; the entities it spawned are counted by count_mass_entities instead.
 
 | Parameter | Type | Required | Description |
@@ -147,6 +175,8 @@ Read an AMassSpawner actor of the editor world, found by actor label (first matc
 **Returns:** `{ actor_label, actor_name, count, entity_type_count, entity_types: [{ entity_config, proportion }] }`
 
 ## `get_mass_trait_property`
+
+*Read-only.*
 
 Read a property (name or dotted path) of a trait in a Mass config via reflection (ExportText).
 
@@ -160,6 +190,8 @@ Read a property (name or dotted path) of a trait in a Mass config via reflection
 
 ## `list_mass_archetypes`
 
+*Read-only.*
+
 List every Mass archetype of the editor world (not a PIE world) with its live-entity and fragment counts, read-only. Returns archetype_count, total_entities and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity.
 
 No parameters.
@@ -168,6 +200,8 @@ No parameters.
 
 ## `list_mass_signals`
 
+*Read-only.*
+
 ALWAYS RETURNS AN EMPTY LIST -- do not use it to discover signal names. Honest engine gap: UMassSignalSubsystem::NamedSignals is protected with no public enumeration API, so the tool can only answer count:0 plus a note. Call fire_mass_signal directly with a name you already know; the engine silently no-ops on an unknown one.
 
 No parameters.
@@ -175,6 +209,8 @@ No parameters.
 **Returns:** `{ count: 0, signals: [], note: "..." }`
 
 ## `list_mass_trait_types`
+
+*Read-only.*
 
 Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag markers — what BatchChangeTagsForEntities accepts). Filters out abstract and editor-only.
 
@@ -186,6 +222,8 @@ Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag mar
 
 ## `list_mass_traits`
 
+*Read-only.*
+
 List the traits a UMassEntityConfigAsset holds itself (not those inherited from its parent config), read-only, in config order. Returns config_path, trait_count and traits [{class, name}]; edit them with add_mass_trait, remove_mass_trait and set_mass_trait_property.
 
 | Parameter | Type | Required | Description |
@@ -195,6 +233,8 @@ List the traits a UMassEntityConfigAsset holds itself (not those inherited from 
 **Returns:** `{ class, name, config_path, trait_count, traits }`
 
 ## `query_mass_entities`
+
+*Read-only.*
 
 Count entities matching a fragment/tag requirement. Requires "fragment" (UScriptStruct path or name) and optional "presence" ("All"|"Any"|"None" — default "All"). For tag-only queries use "tag" (UScriptStruct path).
 
@@ -208,6 +248,8 @@ Count entities matching a fragment/tag requirement. Requires "fragment" (UScript
 
 ## `remove_mass_trait`
 
+*Destructive.*
+
 Remove a trait from a Mass entity config (inverse of add_mass_trait)
 
 | Parameter | Type | Required | Description |
@@ -220,6 +262,8 @@ Remove a trait from a Mass entity config (inverse of add_mass_trait)
 
 ## `remove_mass_trait_from_entity`
 
+*Destructive.*
+
 Remove an FMassTag from a Mass entity of the editor world (not PIE) by archetype migration; inverse of add_mass_trait_to_entity. Caveat: the tag is removed from EVERY entity sharing that archetype, not only this one. Returns old_archetype_id, new_archetype_id and changed (false when nothing moved).
 
 | Parameter | Type | Required | Description |
@@ -230,6 +274,8 @@ Remove an FMassTag from a Mass entity of the editor world (not PIE) by archetype
 **Returns:** `{ entity_handle, old_archetype_id, new_archetype_id, tag, changed }`
 
 ## `set_mass_config_parent`
+
+*Destructive, idempotent.*
 
 Set the parent (base) config of a UMassEntityConfigAsset for trait inheritance.
 
@@ -242,6 +288,8 @@ Set the parent (base) config of a UMassEntityConfigAsset for trait inheritance.
 
 ## `set_mass_spawner_count`
 
+*Destructive, idempotent.*
+
 Set the spawn count on an AMassSpawner (reflection over its protected Count property).
 
 | Parameter | Type | Required | Description |
@@ -253,6 +301,8 @@ Set the spawn count on an AMassSpawner (reflection over its protected Count prop
 
 ## `set_mass_spawner_entity_types`
 
+*Destructive, idempotent.*
+
 Link Mass entity configs to a spawner's EntityTypes (written by reflection: the array is protected).
 
 | Parameter | Type | Required | Description |
@@ -263,6 +313,8 @@ Link Mass entity configs to a spawner's EntityTypes (written by reflection: the 
 **Returns:** `{ actor_label, entity_type_count, linked, set }`
 
 ## `set_mass_trait_property`
+
+*Destructive, idempotent.*
 
 Set a property (name or dotted path) on a trait in a Mass config via reflection (ImportText).
 
@@ -276,6 +328,8 @@ Set a property (name or dotted path) on a trait in a Mass config via reflection 
 **Returns:** `{ config_path, trait_class, property_name, value, set, saved }`
 
 ## `spawn_mass_entities`
+
+*Additive.*
 
 Trigger entity spawning on a AMassSpawner (DoSpawning from the FTSTicker path, outside Mass processing); reports the global Mass entity-count delta.
 

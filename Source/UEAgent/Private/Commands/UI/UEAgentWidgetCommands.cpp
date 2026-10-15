@@ -1828,7 +1828,7 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // add_widget_to_blueprint
 // ---------------------------------------------------------------------------
-// MCP:add_widget_to_blueprint - Add a widget to a Widget Blueprint's tree under a named panel (or the root).
+// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name is returned as is (already_existed true), even if its class differs, without compiling or saving although saved reads true. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel (the curated basic names; see list_widget_types), OR any native widget class path (e.g. /Script/UMG.Throbber), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
@@ -1975,7 +1975,7 @@ TSharedPtr<FJsonObject> HandleSetWidgetProperty(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_widget_slot_properties (CanvasPanelSlot anchors / offsets / position / size)
 // ---------------------------------------------------------------------------
-// MCP:set_widget_slot_properties - Set CanvasPanelSlot layout for a widget parented under a CanvasPanel.
+// MCP:set_widget_slot_properties - Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blueprint asset -- anchors, offsets, position, size, z_order and auto_size, only those passed -- then compile and save the blueprint; the reply reads the whole slot back. position and size write the same fields as offsets (Left/Top and Right/Bottom) and are applied after it, so they win when both are given. A widget not under a CanvasPanel, or a call with none of the six fields, is an error. Refused while PIE runs unless force=true. For other slot types use set_box_slot_properties, set_grid_slot_properties or set_slot_properties.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget whose canvas slot to edit
 //   @param anchors - Optional [MinX, MinY, MaxX, MaxY] anchor floats.

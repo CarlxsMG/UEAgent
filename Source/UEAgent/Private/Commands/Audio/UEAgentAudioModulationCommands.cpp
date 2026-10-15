@@ -465,7 +465,7 @@ TSharedPtr<FJsonObject> HandleGetControlBusMixInfo(
 // ---------------------------------------------------------------------------
 // set_control_bus_mix_stage_value
 // ---------------------------------------------------------------------------
-// MCP:set_control_bus_mix_stage_value - Set the target value (and optional fades) of a bus's stage in a mix
+// MCP:set_control_bus_mix_stage_value - Sets the stored target value, and optionally the attack and release fade times in seconds, of the stage a USoundControlBus has in a USoundControlBusMix asset, then saves the mix; success requires the save. Only that bus's first stage is edited, with no undo transaction; a bus that is not in the mix is an error (add it with add_bus_to_mix). It edits the asset, not a live value: push a runtime value with set_control_bus_value. Read the stages with get_control_bus_mix_info.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @param bus_path - Asset path to the USoundControlBus whose stage is edited
 //   @param target_value - New stage target value (required float)

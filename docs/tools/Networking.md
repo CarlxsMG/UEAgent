@@ -6,6 +6,8 @@
 
 ## `configure_replication`
 
+*Destructive, idempotent.*
+
 Configures the replication of an editor-world actor: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Both are read back. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied.
 
 | Parameter | Type | Required | Description |
@@ -19,6 +21,8 @@ Configures the replication of an editor-world actor: movement (bReplicateMovemen
 
 ## `get_dedicated_server_status`
 
+*Read-only.*
+
 Polls the state of the most recent launch_dedicated_server job: running / finished / canceled, with elapsed time and a tail of captured process output. Honest has_server:false if no server was ever launched this editor session.
 
 No parameters.
@@ -26,6 +30,8 @@ No parameters.
 **Returns:** `{ has_server: bool, running?: bool, finished?: bool, canceled?: bool, exit_code?: int, command_line?: string, elapsed_seconds?: number, output_tail?: string }`
 
 ## `get_network_info`
+
+*Read-only.*
 
 Retrieves comprehensive network information including NetDriver, replicated actors, GameState, and PlayerController details.
 
@@ -35,6 +41,8 @@ No parameters.
 
 ## `get_network_settings`
 
+*Read-only.*
+
 Retrieves current network configuration and settings for the world including NetDriver, GameState, players, and config file settings.
 
 No parameters.
@@ -42,6 +50,8 @@ No parameters.
 **Returns:** `{ world_name: string, world_valid: bool, net_mode: string, has_net_driver: bool, net_driver_class: string?, net_driver_settings: { max_net_tick_rate: number, net_server_max_tick_rate: number }?, has_replication_driver: bool, replication_driver_class: string, has_game_state: bool, game_state_class: string?, player_count: number?, players: [{ player_name: string, player_id: number, is_valid: bool, player_class: string }]?, config_settings: { default_platform_service: string?, default_identity_interface: string?, max_players: number, use_dedicated_server: bool } }`
 
 ## `get_replication_info`
+
+*Read-only.*
 
 Read one actor's current replication settings -- the exact read-side of configure_replication, returning the same fields it can write (replicate_movement, replicate_physics, net_load_on_client, net_use_owner_relevancy...), so a read-check-write round trip lines up field for field. For a whole-project sweep use audit_replication; to enumerate the replicated actors in the world, list_replicated_actors.
 
@@ -53,6 +63,8 @@ Read one actor's current replication settings -- the exact read-side of configur
 
 ## `get_world_net_mode`
 
+*Read-only.*
+
 Read the net mode of the editor world as a string ("Standalone", "ListenServer", "Client" or "DedicatedServer") with net_mode_code, is_server and is_client. Read-only, no parameters; PIE worlds are not read, so this normally reports "Standalone".
 
 No parameters.
@@ -60,6 +72,8 @@ No parameters.
 **Returns:** `{ net_mode: string, net_mode_code: int, is_server: bool, is_client: bool }`
 
 ## `launch_dedicated_server`
+
+*Destructive.*
 
 Relaunches the CURRENT editor binary with "-server -log": a real, non-rendering, network-listening game instance (GIsServer=true/GIsClient=false/GIsEditor=false -- confirmed via UE 5.8 source: StaticDedicatedServerCheck/SetIsRunningAsDedicatedServer in LaunchEngineLoop.cpp, FApp::CanEverRender()==false whenever IsRunningDedicatedServer()). This is honestly NOT a Server.Target.cs shipping build (still the full editor binary, WITH_EDITOR=1) -- it closes only the TESTABLE half of the dedicated-server gap; real server packaging is out of scope. Async, like start_package_build: returns immediately once the process is launched, poll get_dedicated_server_status for output/exit; the server never exits on its own, so call stop_dedicated_server to terminate it. Refuses to launch a second server while one is already running (honest, not silently queued/clobbered).
 
@@ -71,6 +85,8 @@ Relaunches the CURRENT editor binary with "-server -log": a real, non-rendering,
 
 ## `list_replicated_actors`
 
+*Read-only.*
+
 Enumerate the actors with bReplicates=true in the EDITOR world, optionally filtered by local_role (Authority | SimulatedProxy | AutonomousProxy | None). It reports each actor's local and remote role, so it is the cheap way to find what is even eligible to replicate before spending a PIE session on it; for a per-actor detail read use get_replication_info, and for a project-wide Blueprint sweep audit_replication.
 
 | Parameter | Type | Required | Description |
@@ -81,16 +97,20 @@ Enumerate the actors with bReplicates=true in the EDITOR world, optionally filte
 
 ## `set_network_authority`
 
-Sets the network authority role for a specified actor to Authority, SimulatedProxy, AutonomousProxy, or None.
+*Destructive, idempotent.*
+
+Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_net_role (by label) or list_replicated_actors; choose what replicates with configure_replication or set_actor_replicates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | The name of the actor to set authority for |
+| `actor_name` | string | yes | Object name of the editor-world actor (case-insensitive); labels are not matched |
 | `authority` | string | yes | The network authority role to set; valid values: Authority, SimulatedProxy, AutonomousProxy, None |
 
 **Returns:** `{ actor_name: string, authority_set: bool, previous_authority: string, requested_authority: string, actual_authority: string, actor_valid: bool, actor_class: string }`
 
 ## `stop_dedicated_server`
+
+*Destructive.*
 
 Terminates the in-progress dedicated server, if one is running (honest no-op otherwise). FMonitoredProcess::Cancel(true) kills the whole process tree.
 

@@ -2617,6 +2617,7 @@ namespace
 // MCP:get_level_blueprint - Get (or, with create=true, bring into being) the current level's Level Blueprint and return the blueprint_path that the graph tools need -- its event graph is always called "EventGraph", so add_graph_node / connect_pins can target it directly with graph_name="EventGraph". This is the entry point for level-specific scripting that does not belong in any actor. Read-only by default: with create=false and no blueprint present it answers exists:false + success:true rather than failing.
 //   @param create - Optional bool (default false). True creates the Level Blueprint if the level has none -- a mutation that dirties the map, so save_level afterwards.
 //   @returns { exists: true, created: bool, blueprint_path: string, blueprint_name: string, event_graph: "EventGraph", level_name: string, success: true }, or, when no blueprint exists and create=false: { exists: false, success: true, level_name: string, note: string }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandleGetLevelBlueprint(const TSharedPtr<FJsonObject>& Params)
 {

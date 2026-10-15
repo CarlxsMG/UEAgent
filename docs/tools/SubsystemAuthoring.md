@@ -6,6 +6,8 @@
 
 ## `activate_external_subsystem`
 
+*Destructive.*
+
 Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase::ActivateExternalSubsystem. Refuses to toggle native / abstract / base classes.
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase
 **Returns:** `{ class_name: string, activated: bool }`
 
 ## `create_subsystem_class_bp`
+
+*Additive, idempotent.*
 
 Create a new USubsystem-derivative Blueprint asset (idempotent on re-run).
 
@@ -28,6 +32,8 @@ Create a new USubsystem-derivative Blueprint asset (idempotent on re-run).
 
 ## `deactivate_external_subsystem`
 
+*Destructive.*
+
 Externally deactivate a Blueprint-authored USubsystem via FSubsystemCollectionBase::DeactivateExternalSubsystem. Refuses to toggle native / abstract / base classes.
 
 | Parameter | Type | Required | Description |
@@ -38,6 +44,8 @@ Externally deactivate a Blueprint-authored USubsystem via FSubsystemCollectionBa
 
 ## `get_subsystem_class_info`
 
+*Read-only.*
+
 Read class metadata and the full USubsystem inheritance chain for a subsystem class.
 
 | Parameter | Type | Required | Description |
@@ -47,6 +55,8 @@ Read class metadata and the full USubsystem inheritance chain for a subsystem cl
 **Returns:** `{ class_name: string, class_path: string, lifetime: string, parent_class: string, is_native: bool, is_abstract: bool, parent_chain: [{ class_name, class_path, lifetime }] }`
 
 ## `get_subsystem_instance`
+
+*Read-only.*
 
 Look up the live instance of a USubsystem by class + lifetime category (Engine/Editor/GameInstance/World/LocalPlayer).
 
@@ -59,6 +69,8 @@ Look up the live instance of a USubsystem by class + lifetime category (Engine/E
 
 ## `is_subsystem_class_active`
 
+*Read-only.*
+
 Probe whether ONE named USubsystem class currently has a live instance -- the yes/no question, where list_subsystem_instances is the enumeration. It checks every lifetime category (Engine / Editor / GameInstance / World / LocalPlayer) and answers active=true if an instance exists in ANY of them, reporting which collection each one came from.
 
 | Parameter | Type | Required | Description |
@@ -68,6 +80,8 @@ Probe whether ONE named USubsystem class currently has a live instance -- the ye
 **Returns:** `{ class_name, lifetime, active, instances:[{ collection, instance_path }] }`
 
 ## `list_subsystem_classes`
+
+*Read-only.*
 
 Enumerate all loaded USubsystem-derived classes (native + Blueprint), optionally filtered by lifetime category.
 
@@ -79,6 +93,8 @@ Enumerate all loaded USubsystem-derived classes (native + Blueprint), optionally
 
 ## `list_subsystem_instances`
 
+*Read-only.*
+
 Enumerate the USubsystem instances live in the EDITOR right now, with each one's class path and lifetime -- use is_subsystem_class_active for a yes/no on a single class. It walks the editor world context only (Engine / Editor / GameInstance / World) and does NOT iterate LocalPlayer subsystems, since a headless editor world has no PIE LocalPlayer; use list_local_player_subsystems for those.
 
 | Parameter | Type | Required | Description |
@@ -88,6 +104,8 @@ Enumerate the USubsystem instances live in the EDITOR right now, with each one's
 **Returns:** `{ total: int, lifetime_filter?, instances:[{ class_name, class_path, lifetime, instance_name, instance_path }] }`
 
 ## `remove_subsystem_class_bp`
+
+*Destructive, idempotent.*
 
 Destroy the Blueprint-authored USubsystem subclass at a package path (mirror of create_subsystem_class_bp). Typed-delete on TWO checks: the asset must be a UBlueprint AND its generated class must derive from USubsystem, so it cannot wipe an unrelated Blueprint the way the generic delete_asset can. Idempotent on missing assets.
 

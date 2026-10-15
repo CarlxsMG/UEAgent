@@ -324,7 +324,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_rigvm_link
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_link - Wire a link between two RigVM pins output to input
+// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. The Blueprint is then compiled and saved, even when the link fails, which is an error (pins missing, incompatible or already linked). Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName

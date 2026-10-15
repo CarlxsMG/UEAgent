@@ -518,7 +518,7 @@ TSharedPtr<FJsonObject> HandleSetPhysicalMaterialProperties(const TSharedPtr<FJs
 // --------------------------------------------------------------------------- //
 // spawn_physics_constraint
 // --------------------------------------------------------------------------- //
-// MCP:spawn_physics_constraint - Spawn an APhysicsConstraintActor in the editor world, optionally wiring the two constrained actors.
+// MCP:spawn_physics_constraint - Spawns an APhysicsConstraintActor in the editor world at location (zero rotation) in an undo transaction and optionally sets the two actors it constrains, found by object name or label (first match), then recomputes the joint frames. A name that matches no actor is skipped, not an error: check actor1_wired and actor2_wired. Each call adds a new actor; the level is not saved. Tune it with set_constraint_limits and set_physics_constraint_drives, read it with get_physics_constraint_info; for joints inside a Physics Asset use add_physics_asset_constraint.
 //   @param location - World [x, y, z] for the constraint actor (defaults to origin)
 //   @param actor1_name - Optional name/label of the first actor to constrain
 //   @param actor2_name - Optional name/label of the second actor to constrain

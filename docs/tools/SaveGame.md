@@ -6,6 +6,8 @@
 
 ## `create_save_game`
 
+*Additive.*
+
 Create a new SaveGame instance from a specified SaveGame class
 
 | Parameter | Type | Required | Description |
@@ -15,6 +17,8 @@ Create a new SaveGame instance from a specified SaveGame class
 **Returns:** `{ save_game_class: string, save_game_instance: string, save_game_path: string, success: bool }`
 
 ## `delete_save_game`
+
+*Destructive.*
 
 Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with does_save_game_exist). Returns slot_name, user_index and message.
 
@@ -27,6 +31,8 @@ Delete the save file of a slot with DeleteGameInSlot; the data is gone for good.
 
 ## `does_save_game_exist`
 
+*Read-only.*
+
 Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; returns exists. Read-only. Use get_save_game_slot_info for the file path, size and modification time, or list_save_games to see every slot.
 
 | Parameter | Type | Required | Description |
@@ -38,16 +44,20 @@ Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; ret
 
 ## `get_save_game_info`
 
-Retrieve metadata existence path and file size for a save slot
+*Read-only.*
+
+Check one save slot with UGameplayStatics::DoesSaveGameExist and, when it exists, report save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size when that file is on disk. Read-only; a missing slot is not an error, just exists false with no path or size. get_save_game_slot_info returns the same plus the modification time, does_save_game_exist only the flag, list_save_games every slot.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to query |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
-**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int }`
+**Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path?: string, file_size?: int }`
 
 ## `get_save_game_slot_info`
+
+*Read-only.*
 
 Read the metadata of a save slot: exists and, for an existing slot, save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. A missing slot is exists=false with an error field, not a failure.
 
@@ -60,6 +70,8 @@ Read the metadata of a save slot: exists and, for an existing slot, save_path (t
 
 ## `list_save_games`
 
+*Read-only.*
+
 List all save games for a given user index. The list is what the platform's save system calls slots: on desktop, the .sav files at the root of the save folder. A save system can also keep a slot as a FOLDER of .sav files, which is not a slot here: those folders are reported apart, in slot_folders, so an empty list is only proof of no save when slot_folders is empty too.
 
 | Parameter | Type | Required | Description |
@@ -69,6 +81,8 @@ List all save games for a given user index. The list is what the platform's save
 **Returns:** `{ user_index: int, save_directory: string, save_games: [{ slot_name, file_path?, file_size? }], count: int, slot_folders: [{ folder, sav_files }] (subfolders of save_directory holding .sav files, searched recursively) }`
 
 ## `load_game`
+
+*Destructive.*
 
 Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt.
 
@@ -82,6 +96,8 @@ Load the SaveGame stored in a slot with LoadGameFromSlot and report the transien
 
 ## `load_game_async`
 
+*Destructive.*
+
 Load a SaveGame instance from slot, sync fallback over AsyncLoadGameFromSlot
 
 | Parameter | Type | Required | Description |
@@ -93,6 +109,8 @@ Load a SaveGame instance from slot, sync fallback over AsyncLoadGameFromSlot
 
 ## `load_game_from_memory`
 
+*Destructive.*
+
 Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class.
 
 | Parameter | Type | Required | Description |
@@ -103,6 +121,8 @@ Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_mem
 
 ## `restore_actor_state`
 
+*Destructive, idempotent.*
+
 Restore the transform + properties a previous serialize_actor_state wrote, addressed by the SAME key it was saved under. Idempotent: restoring twice in a row re-applies the same values both times. It restores only what was captured -- if serialize_actor_state was called without property_names, this puts back the transform and nothing else.
 
 | Parameter | Type | Required | Description |
@@ -112,6 +132,8 @@ Restore the transform + properties a previous serialize_actor_state wrote, addre
 **Returns:** `{ restored: bool, properties_restored: [string], transform_restored: bool }`
 
 ## `save_game`
+
+*Destructive.*
 
 Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held; it does not save an object made by create_save_game. On desktop the file is Saved/SaveGames/&lt;slot>.sav. Returns success and message.
 
@@ -125,6 +147,8 @@ Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveG
 
 ## `save_game_async`
 
+*Destructive.*
+
 Save a SaveGame instance to slot, sync fallback over AsyncSaveGameToSlot
 
 | Parameter | Type | Required | Description |
@@ -137,6 +161,8 @@ Save a SaveGame instance to slot, sync fallback over AsyncSaveGameToSlot
 
 ## `save_game_to_memory`
 
+*Destructive.*
+
 Serialize a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) with SaveGameToMemory and return it as memory_base64 with memory_size; nothing is written to disk. Pass the blob to load_game_from_memory to round-trip it.
 
 | Parameter | Type | Required | Description |
@@ -146,6 +172,8 @@ Serialize a NEW default-valued SaveGame object of save_game_class (default UMCPS
 **Returns:** `{ success: bool, save_game_class: string, memory_size: int, memory_base64: string }`
 
 ## `serialize_actor_state`
+
+*Destructive, idempotent.*
 
 Save an actor's transform plus an EXPLICIT set of properties into a SaveGame slot, keyed by an identity YOU choose (stable_key, defaulting to actor_name). Nothing is captured implicitly: name the properties you want in property_names or you get the transform and only the transform. Idempotent -- re-serializing the same key overwrites that slot, it never duplicates. Pair with restore_actor_state, which takes the same key.
 

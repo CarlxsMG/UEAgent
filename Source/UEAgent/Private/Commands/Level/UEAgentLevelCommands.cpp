@@ -1223,6 +1223,7 @@ TSharedPtr<FJsonObject> HandleIsPlayInEditorActive(const TSharedPtr<FJsonObject>
 //   @param timeout_seconds - Optional float (default 30). Upper bound on the wait; 0 or less means wait indefinitely.
 //   @param poll_interval_seconds - Optional float (default 0.1). Seconds between IsInPlayInEditor probes; anything below 0.01 is floored to 0.01.
 //   @returns { started_in_pie, still_active, timed_out, elapsed_seconds, completed }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleWaitForPieCompletion(const TSharedPtr<FJsonObject>& Params)
 {
     ULevelEditorSubsystem* LevelEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;

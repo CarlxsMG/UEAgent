@@ -172,6 +172,7 @@ TSharedPtr<FJsonObject> HandleGetEngineInfo(const TSharedPtr<FJsonObject>& Param
 
 // MCP:editor_status - Prove the Unreal editor is alive and TICKING: a no-argument game-thread liveness/health probe, and the first call to make when the MCP bridge goes quiet. It runs on the GAME THREAD via the bridge's command drain, so a reply proves the game thread is pumping -- unlike a transport-only ping, which a wedged editor still answers. After a "Connection reset" use it to tell an editor CRASH (this errors, the reconnect refuses) from a mere tool TIMEOUT (this returns alive=true); call it twice and diff frame_counter to rule out a deadlock, since a frozen game thread replies once but never advances the frame. Also reports whether PIE is running (pie_active / is_simulating) and the open editor world, without starting or stopping anything. Read-only and cheap; safe to call any time.
 //   @returns { alive: bool, gis_running: bool, exit_requested: bool, is_editor: bool, frame_counter: number, pie_active: bool, is_simulating: bool, editor_world: string, world_context_count: int }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleEditorStatus(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Status = MakeShared<FJsonObject>();

@@ -41,6 +41,13 @@ change has to pass. How a call travels through the editor is in
    `@returns`: the generator reads one line, and `--check` fails on text that goes on below. Notes for
    whoever maintains the handler go under the `@returns` line, at its indentation.
 
+   The server appends the `@returns` to the description it publishes, and publishes the tool's MCP
+   annotations (read-only, destructive, idempotent, open world), which `Tools/tool_hints.py` derives
+   from the code the handler runs and from its verb. When the name misleads that rule, say so on a
+   line of the block, `//   @hints read-only` or `//   @hints additive idempotent`
+   (`python Tools/tool_hints.py --why do_thing` shows the verdict and its evidence). A `read-only`
+   that the code contradicts fails the generator.
+
 3. Add its row to the family's `FRegistrar`: `{ TEXT("do_thing"), &HandleDoThing },`
 4. Regenerate, in this order (the tables read the catalog):
 

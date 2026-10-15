@@ -6,17 +6,21 @@
 
 ## `add_chooser_column_to_table`
 
-Append a typed column (FloatRange/Bool/Enum/Object/OutputObject) to a UChooserTable.
+*Additive, idempotent.*
+
+Append a column of column_type, its input left unbound, to a UChooserTable asset, then compile and save the table (save failures are not reported). Columns are matched by type, not name: when one of that type exists its index comes back with already_existed=true and nothing changes, so the call is idempotent and a second column of one type cannot be added. The new column has no row cells, so add columns before add_chooser_row. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_type` | string | yes | Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
-| `column_name` | string | yes | Display name; used to detect duplicates (already_existed = true if a column of this type is matched). |
+| `column_name` | string | yes | Label echoed back in the reply only: it is not stored on the column and plays no part in duplicate detection, which goes by column_type. |
 
 **Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool }`
 
 ## `add_chooser_row`
+
+*Additive.*
 
 Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one.
 
@@ -27,6 +31,8 @@ Add one implicit row to a UChooserTable. Grows every column's RowValues by one (
 **Returns:** `{ table_path: string, row_index: int, row_count: int }`
 
 ## `create_chooser_table`
+
+*Additive.*
 
 Create (or load if it already exists) a UChooserTable asset under the given package path.
 
@@ -41,6 +47,8 @@ Create (or load if it already exists) a UChooserTable asset under the given pack
 
 ## `delete_chooser_table`
 
+*Destructive, idempotent.*
+
 Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UChooserTable, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
@@ -50,6 +58,8 @@ Destroy a UChooserTable asset at a /Game path (mirror of create_chooser_table). 
 **Returns:** `{ table_path, deleted, already_existed, asset_class?, note? }`
 
 ## `evaluate_chooser_table`
+
+*Read-only.*
 
 Actually RUN a UChooserTable and get the SINGLE chosen result -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null. Use evaluate_chooser_table_multi when you want EVERY matching result instead of the first.
 
@@ -63,6 +73,8 @@ Actually RUN a UChooserTable and get the SINGLE chosen result -- the way to test
 
 ## `evaluate_chooser_table_multi`
 
+*Read-only.*
+
 Actually RUN a UChooserTable and get EVERY matching result, not just the first: the multi-result mirror of evaluate_chooser_table, which is what you want when the chooser is meant to select a set. Headless-safe pure runtime API -- no PIE, no render. object_class defaults to /Script/CoreUObject.Object and is never null, since results are post-filtered with IsA; null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results.
 
 | Parameter | Type | Required | Description |
@@ -75,6 +87,8 @@ Actually RUN a UChooserTable and get EVERY matching result, not just the first: 
 
 ## `get_chooser_column_values`
 
+*Read-only.*
+
 Read ONE COLUMN ACROSS ALL ROWS of a UChooserTable, plus that column's DefaultRowValue -- the column-wise counterpart of get_chooser_row_values (one row across all columns), with the same typed cell shapes. The per-column default is EDITOR-ONLY: outside an editor build it comes back null with a note, while the row values themselves always resolve. column_index out of range is an honest error. Read-only: no compile, no save.
 
 | Parameter | Type | Required | Description |
@@ -85,6 +99,8 @@ Read ONE COLUMN ACROSS ALL ROWS of a UChooserTable, plus that column's DefaultRo
 **Returns:** `{ table_path, column_index, column_type, row_count, default: {<typed>}|null, row_values: [{<typed>}] }`
 
 ## `get_chooser_row_values`
+
+*Read-only.*
 
 Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wise counterpart of get_chooser_column_values (one column across all rows) and finer-grained than inspect_chooser_table. Cell shapes by column type: FloatRange {min,max,b_no_min,b_no_max}; Bool {cell_value}; Enum {comparison,value}; Object {comparison,asset_path}; OutputObject {asset_path}. row_index out of range is an honest error. Read-only -- no compile, no save -- and it works headless, since row data is not editor-only.
 
@@ -97,6 +113,8 @@ Read ONE ROW ACROSS ALL COLUMNS of a UChooserTable, as typed cells -- the row-wi
 
 ## `inspect_chooser_table`
 
+*Read-only.*
+
 Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count + per-column type names, ResultsStructs count, ContextData count, effective row count.
 
 | Parameter | Type | Required | Description |
@@ -107,6 +125,8 @@ Read-only summary of a UChooserTable: ResultType, OutputObjectType, column count
 
 ## `list_chooser_tables`
 
+*Read-only.*
+
 List every UChooserTable asset under a package path via the AssetRegistry.
 
 | Parameter | Type | Required | Description |
@@ -116,6 +136,8 @@ List every UChooserTable asset under a package path via the AssetRegistry.
 **Returns:** `{ package_path, total, tables:[{ asset_name, asset_path, asset_class, row_count, column_count }] }`
 
 ## `remove_chooser_column`
+
+*Destructive.*
 
 Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). Re-compiles the table so the transient caches follow. Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
 
@@ -128,6 +150,8 @@ Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_
 
 ## `remove_chooser_row`
 
+*Destructive.*
+
 Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A chooser row is not a real object: this shrinks EVERY column's RowValues array by one -- at row_index if given, else the last row -- and shrinks ResultsStructs to match, then re-compiles the table so the transient caches follow. Use remove_chooser_column to drop a column instead.
 
 | Parameter | Type | Required | Description |
@@ -138,6 +162,8 @@ Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A cho
 **Returns:** `{ table_path, removed_row_index, previous_row_count, new_row_count }`
 
 ## `set_chooser_column_default`
+
+*Destructive, idempotent.*
 
 Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. Compiles and saves only on a change (already_existed=true otherwise).
 
@@ -158,6 +184,8 @@ Set the DefaultRowValue of one UChooserTable column, the cell value rows appende
 **Returns:** `{ table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved }`
 
 ## `set_chooser_row_outcome`
+
+*Destructive, idempotent.*
 
 Set the FAssetChooser outcome (UObject reference) for a specific row in a UChooserTable.
 

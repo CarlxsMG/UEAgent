@@ -6,7 +6,9 @@
 
 ## `add_primary_asset_rule`
 
-Add or update a Primary Asset Type rule in the Asset Manager settings
+*Destructive, idempotent.*
+
+Add a PrimaryAssetTypesToScan rule to the Asset Manager project settings, or update the rule of that type, then write DefaultGame.ini (no undo); a failed write makes success false. An update always resets the base class (to UObject when base_class_path is omitted), appends directory unless already listed and sets priority only when given; idempotent. Nothing is rescanned: run scan_primary_assets so the running Asset Manager registers the assets. Cook rules: set_primary_asset_cook_rule; inverse: remove_primary_asset_rule; list rules: get_primary_asset_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -18,6 +20,8 @@ Add or update a Primary Asset Type rule in the Asset Manager settings
 **Returns:** `{ type, base_class, saved, updated_existing, directory_count, type_count }`
 
 ## `audit_class_purity`
+
+*Read-only.*
 
 Project-wide "fork purity" audit of INHERITANCE lineage (complements audit_fork_refs, which audits a fork's INTERNAL refs). Walks every Blueprint UClass under class_root, ascends each parent chain to the point where it leaves class_root, and flags any project class whose chain crosses DIRECTLY into an upstream base library (base_libraries, e.g. /Game/VendorPack) WITHOUT going through a declared thin fork -- a class carrying the fork-origin metadata tag (project setting Fork Origin Tag) that fork_class_chain writes. Catches a new asset that inherits straight from a vendored library instead of via a project fork. Read-only: classes are loaded to resolve the chain (like audit_replication) but never saved. Returns a summary plus the full per-class classification and the actionable violation list inline. NOTE: matches exact UBlueprint assets (as audit_replication/audit_fork_refs do); Widget/Anim blueprints are out of scope for v1. A legit fork created without the fork-origin tag reports as a violation -- back-fill it with set_asset_metadata_tag. The tag is also CHECKED FOR TRUTH, not just for presence: the class it names must really be in the fork point's ancestor chain (the full chain, so declaring a grandparent is fine). A class that declares a fork origin it does not actually descend from -- a copy-sibling rather than a child, or a stale tag left behind by a re-parent -- reports verdict fork_origin_mismatch, whatever its boundary looks like; that also catches copies parented straight to a native class, which the boundary check alone would wave through as native_rooted.
 
@@ -32,6 +36,8 @@ Project-wide "fork purity" audit of INHERITANCE lineage (complements audit_fork_
 **Returns:** `{ class_root: string, base_libraries: [string], summary: { class_count: int, pure_fork_count: int, native_rooted_count: int, other_parent_count: int, violation_count: int (missing_fork_tag + fork_origin_mismatch; == violations.length), missing_fork_tag_count: int, fork_origin_mismatch_count: int, distinct_impure_fork_points: int }, classes: [{ class, package, immediate_parent, fork_point, boundary_parent, boundary_kind, boundary_library, is_declared_fork, fork_origin, fork_origin_in_chain: bool, fork_origin_matched_ancestor: string, fork_origin_exists: bool, verdict: "pure_fork"|"native_rooted"|"other_parent"|"violation"|"fork_origin_mismatch" }], violations: [{ class, kind: "missing_fork_tag"|"fork_origin_mismatch", fork_point, boundary_parent, boundary_library, declared_fork_origin?, actual_immediate_parent?, fork_origin_exists?, actual_ancestor_chain?: [string], detail? }], message: string }`
 
 ## `audit_fork_refs`
+
+*Destructive.*
 
 Audit a fork subtree for references that still point at the SOURCE tree it was copied from (duplicate_asset / duplicate_directory by script do NOT remap internal refs, so a copy keeps pointing at the original -- e.g. a MaterialInstance Parent still under /Game/VendorPack). Reports, per fork asset, the source dependencies (authoritative, from the AssetRegistry) and, best-effort, the exact PROPERTY holding each source object ref. With fix=true it FArchiveReplaceObjectRefs each source object to a same-named counterpart found inside the fork and saves the asset.
 
@@ -48,6 +54,8 @@ Audit a fork subtree for references that still point at the SOURCE tree it was c
 
 ## `configure_plugin_setting`
 
+*Destructive, idempotent.*
+
 Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.
 
 | Parameter | Type | Required | Description |
@@ -61,6 +69,8 @@ Write one key=value under a plugin config section through GConfig into GEngineIn
 
 ## `delete_asset`
 
+*Destructive.*
+
 Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.
 
 | Parameter | Type | Required | Description |
@@ -70,6 +80,8 @@ Force-delete one asset with no confirmation or undo: references to it are nulled
 **Returns:** `{ asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }`
 
 ## `duplicate_asset`
+
+*Additive.*
 
 Duplicates an asset to a new name in the same directory, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
 
@@ -84,6 +96,8 @@ Duplicates an asset to a new name in the same directory, then PERSISTS the copy 
 
 ## `duplicate_directory`
 
+*Destructive.*
+
 Recursively copy a content folder to a new path, REMAPPING references among the copied assets so the new subtree points at its own copies (true graph isolation) while references to assets OUTSIDE the set stay shared with the originals (the "copy what you modify, share the rest" policy). Unlike EditorAssetLibrary.DuplicateDirectory / duplicate_asset (which copy without remapping, so copies keep pointing at the originals), this duplicates every asset then runs a second reference-replacement pass with the full old->new map, and saves the copies. Intended for material/instance/texture/data-asset libraries; Blueprints may need a recompile and maps (UWorld) are not handled specially.
 
 | Parameter | Type | Required | Description |
@@ -95,6 +109,8 @@ Recursively copy a content folder to a new path, REMAPPING references among the 
 
 ## `get_all_primary_asset_types`
 
+*Read-only.*
+
 Get all registered primary asset types from the Asset Manager.
 
 No parameters.
@@ -102,6 +118,8 @@ No parameters.
 **Returns:** `{ name, asset_class, num_assets, types, count }`
 
 ## `get_asset_bundle_data`
+
+*Read-only.*
 
 Read the AssetBundles tag of one asset from the Asset Registry without loading it: each bundle with bundle_name, asset_paths and num_assets, plus bundle_count and asset_found. An asset with no bundles, or not found, returns an empty list rather than an error. Read-only.
 
@@ -113,7 +131,9 @@ Read the AssetBundles tag of one asset from the Asset Registry without loading i
 
 ## `get_asset_bundle_entry`
 
-Get the bundle entry for a specific primary asset and bundle name.
+*Read-only.*
+
+Read one named asset bundle of a primary asset from the running Asset Manager's bundle cache (UAssetManager::GetAssetBundleEntry), loading nothing: bundle_objects lists the asset paths in it. Only scanned primary assets are cached, so an unscanned asset, an unknown bundle, a malformed id or an empty bundle all give found=false with an empty list, not an error. For every bundle of one asset by object path, read from the Asset Registry, use get_asset_bundle_data; get_primary_asset_id turns a path into the id.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -123,6 +143,8 @@ Get the bundle entry for a specific primary asset and bundle name.
 **Returns:** `{ primary_asset_id, bundle_name, bundle_objects, found }`
 
 ## `get_plugin_status`
+
+*Read-only.*
 
 Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
 
@@ -134,6 +156,8 @@ Read one plugin by name, read-only: Enabled or Disabled, version, author, catego
 
 ## `get_primary_asset_cook_rules`
 
+*Read-only.*
+
 Read the Priority / ChunkId / bApplyRecursively / CookRule for a single primary asset type.
 
 | Parameter | Type | Required | Description |
@@ -143,6 +167,8 @@ Read the Priority / ChunkId / bApplyRecursively / CookRule for a single primary 
 **Returns:** `{ primary_asset_type, cook_rule, priority, chunk_id, apply_recursively }`
 
 ## `get_primary_asset_id`
+
+*Read-only.*
 
 Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error. get_primary_asset_id_from_path is the same lookup without the split fields.
 
@@ -154,6 +180,8 @@ Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_
 
 ## `get_primary_asset_id_from_path`
 
+*Read-only.*
+
 Get the primary asset ID for a given object path.
 
 | Parameter | Type | Required | Description |
@@ -163,6 +191,8 @@ Get the primary asset ID for a given object path.
 **Returns:** `{ object_path, primary_asset_id, is_valid }`
 
 ## `get_primary_asset_ids_by_type`
+
+*Read-only.*
 
 List the Primary Asset Ids the running Asset Manager has registered for one type: asset_ids entries with type, name and full_id, plus count; success is false when none are found, unknown type included. Only scanned assets appear (see scan_primary_assets). Read-only.
 
@@ -175,6 +205,8 @@ List the Primary Asset Ids the running Asset Manager has registered for one type
 
 ## `get_primary_asset_type_info`
 
+*Read-only.*
+
 Read what the running Asset Manager holds for one primary asset type: asset_class, has_blueprint_classes, is_editor_only, num_assets from the last scan and its directories. found=false for a type it does not know, not an error; get_primary_asset_types reads the configured rules instead.
 
 | Parameter | Type | Required | Description |
@@ -185,6 +217,8 @@ Read what the running Asset Manager holds for one primary asset type: asset_clas
 
 ## `get_primary_asset_types`
 
+*Read-only.*
+
 Read the configured Primary Asset Types from the Asset Manager settings.
 
 No parameters.
@@ -192,6 +226,8 @@ No parameters.
 **Returns:** `{ types, type_count }`
 
 ## `move_asset`
+
+*Destructive.*
 
 Moves an asset to a new folder while keeping its name. GUARDED exactly like rename_asset (it reaches the same FAssetRenameManager through UEditorAssetLibrary::RenameAsset): (1) read-only roots are refused -- and here BOTH ends are checked, source and destination, since a move can also drop an asset INTO the upstream tree; (2) a native CDO hard-reference makes it refuse before the engine can open its blocking modal; (3) the outcome is read back from memory+disk instead of trusting the returned bool, which stays true even when the new package failed to save (the engine only reacts to that when UE source control is connected).
 
@@ -206,6 +242,8 @@ Moves an asset to a new folder while keeping its name. GUARDED exactly like rena
 
 ## `remove_primary_asset_rule`
 
+*Destructive.*
+
 Remove every PrimaryAssetTypesToScan entry of one type from the Asset Manager project settings and write DefaultGame.ini; an unknown type is an error. Returns removed_count, type_count_after and saved. The running Asset Manager is not refreshed, so its scanned data for the type remains.
 
 | Parameter | Type | Required | Description |
@@ -215,6 +253,8 @@ Remove every PrimaryAssetTypesToScan entry of one type from the Asset Manager pr
 **Returns:** `{ primary_asset_type, removed_count, type_count_after, saved }`
 
 ## `rename_asset`
+
+*Destructive.*
 
 Renames an asset to a new name in its current directory. GUARDED (both guards are shared with move_asset, and both come from the AssetRenameManager source -- see the comment block on AnyNativeCdoHardReferences): (1) refuses to touch anything under a read-only root (readonly_roots, default: the project's Read Only Content Roots -- the upstream tree is never mutated in place); (2) refuses BEFORE calling the engine when a native class' CDO hard-references the asset, because FAssetRenameManager would open an FMessageDialog there and block the game thread (which kills the MCP session). And it does not trust IAssetTools::RenameAssets' return value: the result is READ BACK (new object resolves + new package on disk + redirector left at the original path), because the engine silently drops packages that failed to save unless UE source control is connected (with plain git it never is).
 
@@ -228,6 +268,8 @@ Renames an asset to a new name in its current directory. GUARDED (both guards ar
 **Returns:** `{ original_asset_path: string, new_asset_name: string, new_asset_path: string, rename_success: bool, rename_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_file_exists: bool?, original_asset_class: string, original_package_name: string, new_object_resolves: bool?, new_file_on_disk: bool?, new_file_path: string?, redirector_left: bool?, verification: object?, verification_checks: [object]?, would_block_on_modal: bool?, cdo_referencing_class: string?, cdo_soft_reference_check: string? }`
 
 ## `run_external_project_script`
+
+*Destructive.*
 
 Spawn a SEPARATE headless UnrealEditor-Cmd.exe to run a python script against an EXTERNAL project and capture its stdout. Needed because another project's /Game packages collide with the live project's (they cannot be loaded side by side), so reading data from content outside this project needs an isolated editor. Give it an existing .uproject OR a module_dir (a minimal engine-only .uproject is cloned in place, with any 'disable_plugins' turned off, then deleted); it launches `<uproject> -run=pythonscript -script=<script> -unattended -nullrhi -NoLiveCoding -stdout`, blocks until exit or timeout, and returns stdout. HEAVY: spawns a full editor process (tens of seconds) and BLOCKS the editor for the duration -- run with confirmation. The engine binary is resolved from THIS editor's install (FPaths::EngineDir); no path is assumed.
 
@@ -244,6 +286,8 @@ Spawn a SEPARATE headless UnrealEditor-Cmd.exe to run a python script against an
 
 ## `scan_primary_assets`
 
+*Read-only.*
+
 Synchronously rescan the directories and specific assets of every PrimaryAssetTypesToScan rule (or only primary_asset_type) so the Asset Manager registers their primary assets; rules without paths are skipped. Returns num_assets_found, types_scanned and per-type scanned_types. Run it after add_primary_asset_rule.
 
 | Parameter | Type | Required | Description |
@@ -254,12 +298,14 @@ Synchronously rescan the directories and specific assets of every PrimaryAssetTy
 
 ## `set_primary_asset_cook_rule`
 
-Set the CookRule (and optional ChunkId / bApplyRecursively) on an existing primary asset type
+*Destructive, idempotent.*
+
+Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_cook_rules; the reply's cook_rule is the short name of the stored rule.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `primary_asset_type` | string | yes | Name of the primary asset type (e.g. "Item"). |
-| `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "Production" / "Always". |
+| `cook_rule` | string | yes | One of "Unknown" / "Never" / "Development" / "DevelopmentAlways" / "Always", case-insensitive; "Development" stores ProductionNeverCook, and the EPrimaryAssetCookRule names (e.g. "AlwaysCook", "DevelopmentAlwaysProductionUnknownCook") are accepted too. |
 | `chunk_id` | number | no | Optional chunk ID override for the rule |
 | `apply_recursively` | boolean | no | Optional flag to apply the rule recursively |
 

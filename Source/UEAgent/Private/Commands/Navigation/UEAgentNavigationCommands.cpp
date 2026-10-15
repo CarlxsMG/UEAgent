@@ -797,7 +797,7 @@ TSharedPtr<FJsonObject> HandleAddEQSGenerator(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_eqs_test - Adds a UEnvQueryTest subclass to an option's Tests array.
+// MCP:add_eqs_test - Add a test of test_class to an option of a UEnvQuery asset, after the option's existing tests. Idempotent per class: if the option already has a test of that class, that one is returned (already_existed=true) and nothing is added, so an option holds at most one test per class. A missing option_index is created, appending empty options up to it. Marks the asset dirty without saving (save_asset). Valid classes: list_eqs_test_types; configure the test with set_eqs_test_scoring; remove_eqs_test is the inverse.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param test_class - Test class name (e.g. "Distance", "Trace", "Pathfinding", "Dot") or full path
 //   @param option_index - Optional option index to target (default 0; created if missing)

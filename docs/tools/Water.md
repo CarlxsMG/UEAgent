@@ -6,6 +6,8 @@
 
 ## `add_water_body_to_zone`
 
+*Additive.*
+
 Link an existing water body actor to an existing AWaterZone.
 
 | Parameter | Type | Required | Description |
@@ -16,6 +18,8 @@ Link an existing water body actor to an existing AWaterZone.
 **Returns:** `{ water_body_label: string, water_zone_label: string, linked: bool }`
 
 ## `configure_water_zone`
+
+*Destructive, idempotent.*
 
 Set an AWaterZone's planar extent and/or water-info render-target resolution, then RE-READ both from the actor (extent, world bounds, texel density) instead of echoing the request back.
 
@@ -28,6 +32,8 @@ Set an AWaterZone's planar extent and/or water-info render-target resolution, th
 **Returns:** `{ water_zone_label: string, zone_extent: [x,y] (RE-READ, kept for compatibility), zone_extent_actual: [x,y] (RE-READ, COMPLETE extent), world_bounds_extent: [x,y,z] (HALF-extent of the real actor bounds), world_bounds_origin: [x,y,z], world_bounds_min: [x,y,z], world_bounds_max: [x,y,z], actor_scale: [x,y,z], render_target_resolution_actual: [x,y] (omitted if unreadable), render_target_resolution_verified: bool, water_info_texel_size_uu: number (zone_extent / render_target_resolution; omitted if the resolution is unreadable or zero), applied: bool (DERIVED from read-back == request), requested: { extent, render_target_resolution } }`
 
 ## `create_lake_water_body`
+
+*Additive.*
 
 Spawn a Lake AWaterBody actor, optionally link to a WaterZone, and READ BACK the wave height the factory attached (a lake is born with the OCEAN's waves and nothing else reveals it).
 
@@ -43,6 +49,8 @@ Spawn a Lake AWaterBody actor, optionally link to a WaterZone, and READ BACK the
 
 ## `create_ocean_water_body`
 
+*Additive.*
+
 Spawn an Ocean AWaterBody actor, optionally link to a WaterZone, and read back its wave height (on an ocean the factory's waves are CORRECT -- ~508 uu -- so no warning is emitted here).
 
 | Parameter | Type | Required | Description |
@@ -56,6 +64,8 @@ Spawn an Ocean AWaterBody actor, optionally link to a WaterZone, and read back i
 **Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, linked_to_zone: bool, affects_landscape: bool, max_wave_height: number (RE-READ), max_wave_height_on_spawn: number (RE-READ), has_waves: bool, waves_disabled: bool, requested: { actor_label, location, water_zone_label, affects_landscape, disable_waves } }`
 
 ## `create_river_water_body`
+
+*Additive.*
 
 Spawn a River AWaterBody actor, optionally link to a WaterZone, and read back its wave height (a river is born at 0.000 -- that is the control case for the lake defect).
 
@@ -71,6 +81,8 @@ Spawn a River AWaterBody actor, optionally link to a WaterZone, and read back it
 
 ## `create_water_body_exclusion_volume`
 
+*Additive.*
+
 Spawn an AWaterBodyExclusionVolume (a brush volume that excludes water bodies), build its cube brush, set the exclusion mode, and optionally bind specific water bodies by label.
 
 | Parameter | Type | Required | Description |
@@ -85,6 +97,8 @@ Spawn an AWaterBodyExclusionVolume (a brush volume that excludes water bodies), 
 
 ## `create_water_zone`
 
+*Additive.*
+
 Spawn a new AWaterZone actor in the editor world at location, unrotated, and label it. Not idempotent: every call adds another zone, even with a label already in use. Nothing is saved. Returns actor_label, actor_name and has_water_mesh; link bodies via water_zone_label of create_lake_water_body and its siblings.
 
 | Parameter | Type | Required | Description |
@@ -96,6 +110,8 @@ Spawn a new AWaterZone actor in the editor world at location, unrotated, and lab
 
 ## `get_river_spline_points`
 
+*Read-only.*
+
 Read back a water body's spline path as world points.
 
 | Parameter | Type | Required | Description |
@@ -105,6 +121,8 @@ Read back a water body's spline path as world points.
 **Returns:** `{ water_body_label: string, point_count: int, points: [[number, number, number]] }`
 
 ## `get_water_body_gerstner_wave_detail`
+
+*Read-only.*
 
 Read the computed individual Gerstner waves of a water body (wavelength, amplitude, steepness, direction).
 
@@ -116,6 +134,8 @@ Read the computed individual Gerstner waves of a water body (wavelength, amplitu
 
 ## `get_water_body_info`
 
+*Read-only.*
+
 Read back a water body's type, linked zone, surface material, and max wave height.
 
 | Parameter | Type | Required | Description |
@@ -125,6 +145,8 @@ Read back a water body's type, linked zone, surface material, and max wave heigh
 **Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, material: string, max_wave_height: number }`
 
 ## `get_water_body_wave_info`
+
+*Read-only.*
 
 Read a water body's wave state: whether waves are supported, whether they are present, the max wave height, and the active waves class + wave count.
 
@@ -136,6 +158,8 @@ Read a water body's wave state: whether waves are supported, whether they are pr
 
 ## `get_water_zone_info`
 
+*Read-only.*
+
 Read info about an existing AWaterZone and count its linked water bodies.
 
 | Parameter | Type | Required | Description |
@@ -145,6 +169,8 @@ Read info about an existing AWaterZone and count its linked water bodies.
 **Returns:** `{ actor_label: string, actor_name: string, has_water_mesh: bool, linked_body_count: number, zone_extent: [number, number], overlap_priority: int }`
 
 ## `remove_water_body_from_zone`
+
+*Destructive.*
 
 Unlink an existing water body actor from an existing AWaterZone (inverse of add_water_body_to_zone).
 
@@ -157,6 +183,8 @@ Unlink an existing water body actor from an existing AWaterZone (inverse of add_
 
 ## `set_river_spline_points`
 
+*Destructive, idempotent.*
+
 Set ANY water body's spline path from world points, then synchronize the water spline metadata and RE-READ the spline (point count + closed-loop) to prove it landed.
 
 | Parameter | Type | Required | Description |
@@ -167,6 +195,8 @@ Set ANY water body's spline path from world points, then synchronize the water s
 **Returns:** `{ water_body_label: string, point_count: int (RE-READ), spline_point_count_actual: int (RE-READ, same value, unambiguously named), closed_loop_actual: bool (RE-READ), requested_point_count: int, applied: bool (DERIVED: read-back count == requested count) }`
 
 ## `set_river_width_depth_at_point`
+
+*Destructive, idempotent.*
 
 Set a river's width and/or depth at a spline input key (river water bodies only); reads them back.
 
@@ -181,6 +211,8 @@ Set a river's width and/or depth at a spline input key (river water bodies only)
 
 ## `set_river_widths_depths`
 
+*Destructive, idempotent.*
+
 Set a river's width and/or depth at EVERY spline point in one call (bulk taper authoring) with a single metadata-sync at the end — avoids one MCP round-trip per point. Arrays are indexed by spline point (point i maps to spline input key i) and, when provided, MUST have exactly point_count entries. River water bodies only. Reads back the applied per-point arrays.
 
 | Parameter | Type | Required | Description |
@@ -192,6 +224,8 @@ Set a river's width and/or depth at EVERY spline point in one call (bulk taper a
 **Returns:** `{ water_body_label: string, point_count: int, applied_widths: bool, applied_depths: bool, widths: [number], depths: [number] }`
 
 ## `set_water_body_gerstner_waves`
+
+*Destructive, idempotent.*
 
 Build a Gerstner wave set (UGerstnerWaterWaves + simple parametric generator) and apply it to a wave-supporting water body (Lake/Ocean; rivers are rejected). The generator ramps per-wave Steepness from large_wave_steepness to small_wave_steepness; the no-self-intersection (no fold, no black-crest) criterion is total_steepness (returned) &lt;= 1 — lower the two steepness params and/or num_waves if it exceeds 1.
 
@@ -212,6 +246,8 @@ Build a Gerstner wave set (UGerstnerWaterWaves + simple parametric generator) an
 
 ## `set_water_body_gerstner_waves_spectrum`
 
+*Destructive, idempotent.*
+
 Build a Gerstner wave set using the oceanology spectrum generator (octaves of a known wave spectrum) and apply it to a wave-supporting water body (Lake/Ocean).
 
 | Parameter | Type | Required | Description |
@@ -224,6 +260,8 @@ Build a Gerstner wave set using the oceanology spectrum generator (octaves of a 
 
 ## `set_water_body_material`
 
+*Destructive, idempotent.*
+
 Set the surface water material on a water body (resolved by asset path).
 
 | Parameter | Type | Required | Description |
@@ -234,6 +272,8 @@ Set the surface water material on a water body (resolved by asset path).
 **Returns:** `{ water_body_label: string, material: string, set: bool }`
 
 ## `set_water_body_properties`
+
+*Destructive, idempotent.*
 
 Partial-update a water body's properties (only the keys present are applied); each applied field is read back with already_set when it already matched.
 

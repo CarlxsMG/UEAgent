@@ -6,6 +6,8 @@
 
 ## `add_component_event`
 
+*Additive.*
+
 Checks an event of a level actor's component; it never creates a binding (success is always false). A binding made on a live level-actor component would not persist: a handler belongs in a Blueprint's event graph. When the actor comes from a Blueprint and the event is a bindable delegate, the reply carries suggested_call: the add_component_bound_event call that authors it, with its parameters filled in.
 
 | Parameter | Type | Required | Description |
@@ -17,6 +19,8 @@ Checks an event of a level actor's component; it never creates a binding (succes
 **Returns:** `{ actor_name: string, component_name: string, event_name: string, event_category: string, event_description: string, event_function_signature: string, success: bool, binding_created: bool, is_bindable_delegate: bool, delegate_property_name: string, bound_handler_count: int, message: string, error: string, component_class: string, component_category: string, component_tooltip: string, component_display_name: string, component_is_active: bool, component_is_registered: bool, component_owner: string, component_creation_method: string, suggested_call?: { tool: string, params: { blueprint_name, component_name, delegate_name } } }`
 
 ## `call_component_function`
+
+*Destructive.*
 
 Drive a COMPONENT without ever building its object path: name the actor, name the component CLASS, and it resolves the actor (editor world or a live PIE world via `world`), runs FindComponentByClass, and invokes the UFUNCTION with JSON arguments — the one generalist reflection call that replaces bespoke per-feature helpers (attribute getters, inventory or equipment calls), since almost all gameplay state in a component-based framework lives on components rather than on the actor. Arguments go in a dict named `params` (call_function uses `parameters`, call_object_method uses `args_json`); marshals scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid, and returns return_value + out_params typed alongside the resolved component_path and the identity of the world that answered. WARNING: it uses the FIRST component of (or derived from) that class. An OBJECT/class argument IS passed by path — resolved in the target's own world first, then as an asset, and a path that resolves to nothing is a hard error, never a silent null. In co-op, world='server' is where authoritative component state lives.
 
@@ -33,6 +37,8 @@ Drive a COMPONENT without ever building its object path: name the actor, name th
 
 ## `call_function`
 
+*Destructive.*
+
 Invoke a UFUNCTION on an object instance in the EDITOR world and get its return value and out-params back typed. Arguments go in a dict named `parameters` (each sibling uses a DIFFERENT key — call_object_method uses `args_json`, call_component_function uses `params` — and an unknown key is a hard error, so read the signature with get_function_info first). Marshals scalars, ENUM by entry name, Blueprint STRUCTs as JSON objects, ARRAY/set as JSON arrays, FGameplayTag (validated against the registry) and FGuid. Choose call_object_method to reach a CDO/archetype/live PIE subobject or to pass `world`, call_component_function to hit a component without hand-building its path, and call_library_function for a static/library call with no instance at all. Only BlueprintCallable+Public or BlueprintEvent functions are callable; pass transact=true to make the write undoable and actually dirty an OFPA package.
 
 | Parameter | Type | Required | Description |
@@ -46,6 +52,8 @@ Invoke a UFUNCTION on an object instance in the EDITOR world and get its return 
 
 ## `call_library_function`
 
+*Destructive.*
+
 Invoke a static / BlueprintCallable library function on a class's Class Default Object, addressing the class by NAME or by Blueprint asset path so you never have to hand-build a "Default__X_C" object path. This is the way to reach UKismetSystemLibrary, UGameplayStatics, UGameplayTagLibrary and any Blueprint Function Library when there is no instance to talk to. Arguments go in a dict named `parameters` (call_object_method uses `args_json`, call_component_function uses `params`), with the same marshaling: scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid. Note it always runs on the CDO and takes no `world` selector — use call_object_method(world=...) or call_component_function(world=...) for anything that must run inside a live PIE world.
 
 | Parameter | Type | Required | Description |
@@ -57,6 +65,8 @@ Invoke a static / BlueprintCallable library function on a class's Class Default 
 **Returns:** `{ success: bool, class_name: string, class_path: string, function_name: string, returns_json: object ({ return_value?: any, out_params?: object }) }`
 
 ## `call_object_method`
+
+*Destructive.*
 
 Invoke a UFUNCTION on ANY UObject — component archetype, class default object, asset, or a LIVE PIE subobject — not just level actors, and unlike call_function it takes a `world` selector so the same method can be driven on the server or on a client and the response stamps which world ran it. Arguments go in a dict named `args_json` (call_function uses `parameters`, call_component_function uses `params`); it marshals scalars, ENUM by entry name, STRUCT as a JSON object, ARRAY/set as a JSON array, FGameplayTag (validated) and FGuid, and reports return_value plus out_params typed. Use call_component_function instead when the target is a component you would otherwise have to path by hand, and call_library_function for a static library call. transact=true makes an editor-world write undoable and dirties the owning (OFPA) package; it is refused for pure functions and for PIE targets.
 
@@ -73,6 +83,8 @@ Invoke a UFUNCTION on ANY UObject — component archetype, class default object,
 
 ## `compare_objects`
 
+*Read-only.*
+
 Diff TWO LIVE objects property by property at the same instant, using the ENGINE's own equality (FProperty::Identical + PPF_DeepComparison) rather than exported text, so FText localization identity and object-outer differences are classified as `noise` instead of being reported as real differences. Use it for "instance vs its CDO", "fork vs original", "this actor vs that one". Accepts `world`, which resolves BOTH paths in the SAME world (e.g. two live actors inside the server world); to compare the same actor ACROSS worlds — server vs client — use snapshot_object + diff_object_snapshots, which is what a replication check needs. list_instance_overrides diffs a placed actor against its archetype and also tells you which package carries the override; diff_blueprints diffs the AUTHORED graphs instead of live values.
 
 | Parameter | Type | Required | Description |
@@ -87,6 +99,8 @@ Diff TWO LIVE objects property by property at the same instant, using the ENGINE
 
 ## `find_classes_implementing_interface`
 
+*Read-only.*
+
 Enumerate every loaded class that implements a given UInterface. No inverse index exists in the engine (confirmed against source) -- this is an O(loaded classes) sweep, same idiom as list_subsystem_classes.
 
 | Parameter | Type | Required | Description |
@@ -97,6 +111,8 @@ Enumerate every loaded class that implements a given UInterface. No inverse inde
 **Returns:** `{ interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }`
 
 ## `get_actor_properties_by_class`
+
+*Read-only.*
 
 Enumerate ACTORS by CLASS (or by editor label) and read their PROPERTIES in one call, in the editor world or in a live one. Reads the EDITOR world too (world='editor', with no PIE running), not just a live one. Use it instead of an execute_python loop over GetAllActorsOfClass + get_editor_property: it returns { path, props } per instance and stamps the world that answered, which such a loop does not. Filter with class_name (IsA) and/or actor_label, drill into one `component`, pick which `properties` to read, and use world='server' vs 'client' to separate an authoritative reading from a replicated one.
 
@@ -112,6 +128,8 @@ Enumerate ACTORS by CLASS (or by editor label) and read their PROPERTIES in one 
 
 ## `get_class_functions`
 
+*Read-only.*
+
 List every UFUNCTION a class exposes — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited, and counted separately in declared_function_count / inherited_function_count so "does this class add a function of its own?" is answerable WITHOUT reading the array (declared_only=true returns just those) — with its signature and the flags that decide whether MCP can call it: is_blueprint_callable, is_public, is_static, is_blueprint_pure, is_blueprint_event, is_call_in_editor, category, tooltip and the parameter names/types. This is the lookup to run BEFORE call_function / call_object_method / call_component_function, which refuse anything that is not BlueprintCallable+Public or a BlueprintEvent. WARNING: ZERO own functions is NOT "no Blueprint API": components and data classes usually expose theirs as PROPERTIES (get_class_properties), and a plugin's runtime API often lives in a separate static "*BlueprintLibrary" class rather than on the type itself — both traps show up on MetaHumanComponentBase, whose creator API is in MetaHumanCharacterInstanceBlueprintLibrary. get_function_info drills into ONE function (and separates return values from inputs); get_blueprint_functions_list lists the graphs a Blueprint AUTHORED rather than the compiled class surface.
 
 | Parameter | Type | Required | Description |
@@ -123,6 +141,8 @@ List every UFUNCTION a class exposes — the ones it DECLARES plus every inherit
 
 ## `get_class_hierarchy`
 
+*Read-only.*
+
 Walk the full inheritance chain of a class from itself up to UObject, one record per level with its path, is_native flag, class flags/metadata and implemented interfaces — the answer to "is X a Y?" and "where does the native code stop and the Blueprint chain start?". get_blueprint_parent returns only the IMMEDIATE parent of a Blueprint ASSET; this returns every ancestor of a compiled CLASS. get_blueprint_children goes the other direction (descendants).
 
 | Parameter | Type | Required | Description |
@@ -132,6 +152,8 @@ Walk the full inheritance chain of a class from itself up to UObject, one record
 **Returns:** `{ class_name: string, hierarchy: [{name, path, is_native, is_abstract, is_deprecated, is_placeable, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?}] }`
 
 ## `get_class_properties`
+
+*Read-only.*
 
 List every property VISIBLE on a class — the ones it DECLARES plus every inherited one, each tagged with owner_class and is_inherited so "does this class add anything of its own?" is a FIELD (declared_property_count) and not an eyeball diff against a remembered list of engine members. declared_only=true returns just this class's own. WARNING: a component or data class usually exposes its Blueprint API as PROPERTIES, not functions: get_class_functions coming back with nothing of its own does NOT mean the class has no API — ask here too (e.g. MetaHumanComponentBase: 0 own functions, 12 own properties). Full typed descriptor per property — kind, cpp_type, editable, edit_const, blueprint_visible, replicated, save_game, config, clamp min/max, enum entries, struct fields, tooltip, edit_condition — plus the class's own flags, config name and implemented interfaces. Schema only: NO instance values. Use list_object_properties for the same descriptors WITH the current values of a live object, get_properties when you already know the names, and get_blueprint_variables_list for just the variables a Blueprint itself authored.
 
@@ -144,6 +166,8 @@ List every property VISIBLE on a class — the ones it DECLARES plus every inher
 
 ## `get_component_events`
 
+*Read-only.*
+
 Retrieve lifecycle, activation, registration, transform, and input events available on a component.
 
 | Parameter | Type | Required | Description |
@@ -155,6 +179,8 @@ Retrieve lifecycle, activation, registration, transform, and input events availa
 
 ## `get_enum_info`
 
+*Read-only.*
+
 Read an enum's definition — native or Blueprint (UUserDefinedEnum) — listing every entry (the _MAX sentinel excluded) with index, internal_name, display_name and numeric value. WARNING: the two names DIVERGE on a Blueprint enum: the editor shows the display_name ("Snowy") while the authored entry is the opaque internal_name ("NewEnumerator5"), and the INTERNAL name is what set_property_value / set_component_property / call_function's enum-by-name marshaling accept. Read it here before writing an enum, or the write imports nothing.
 
 | Parameter | Type | Required | Description |
@@ -164,6 +190,8 @@ Read an enum's definition — native or Blueprint (UUserDefinedEnum) — listing
 **Returns:** `{ enum_name: string, enum_path: string, is_user_defined: bool, values: [{index, name, internal_name, display_name, value}] }`
 
 ## `get_function_info`
+
+*Read-only.*
 
 Inspect ONE UFUNCTION on a class and get its exact call contract: input parameters and RETURN/out values split into separate lists (get_class_functions lumps them together), plus is_blueprint_callable / is_public / is_static / is_blueprint_pure / is_call_in_editor, category and tooltip. Run it to learn the PARAMETER NAMES to put in call_function's `parameters`, call_object_method's `args_json` or call_component_function's `params` — those dicts are keyed by name and an unknown key is a hard error.
 
@@ -176,6 +204,8 @@ Inspect ONE UFUNCTION on a class and get its exact call contract: input paramete
 
 ## `get_object_class`
 
+*Read-only.*
+
 Resolve an object instance and report just its type: class name, class path, is_native and immediate super class. The one-line "what IS this thing?" probe before spending a call on inspect_object or list_object_properties; get_class_hierarchy expands the same answer into the whole ancestor chain. Accepts `world`, so the same name can be typed in the editor world or in a LIVE PIE world (server vs client) — useful when a class is swapped at runtime — and the response stamps which world answered.
 
 | Parameter | Type | Required | Description |
@@ -187,6 +217,8 @@ Resolve an object instance and report just its type: class name, class path, is_
 
 ## `get_package_info`
 
+*Read-only.*
+
 Inspect a package that is ALREADY LOADED IN MEMORY: its long name, its is_dirty flag, and every UObject it contains with that object's class. Answers "what actually lives inside this .uasset, besides the asset named after it?" and "does this package have unsaved changes?". WARNING: it resolves with FindFirstObject over loaded UPackages — a package that is on disk but not loaded is reported as not found; use get_asset_by_name / resolve_asset_by_name for on-disk existence, and list_dirty_packages to sweep every dirty package at once.
 
 | Parameter | Type | Required | Description |
@@ -196,6 +228,8 @@ Inspect a package that is ALREADY LOADED IN MEMORY: its long name, its is_dirty 
 **Returns:** `{ package_path: string, package_name: string, is_dirty: bool, objects: [{name, class}], object_count: int }`
 
 ## `get_properties`
+
+*Read-only.*
 
 Batch-read several named properties off ONE object instance in a single call, returning a { name: typed_value } map plus a not_found[] list of the names that do not exist on that class (unlike get_actor_properties_by_class, a misspelling is REPORTED, not silently dropped). Use it instead of N calls to get_property_value; use list_object_properties when you do not know the names yet. Accepts `world`, so the SAME batch can be read on the server and on the client — the cheapest way to prove a value replicated — and the response stamps which world answered.
 
@@ -209,6 +243,8 @@ Batch-read several named properties off ONE object instance in a single call, re
 
 ## `get_property_value`
 
+*Read-only.*
+
 Read ONE property off ONE object you can already name (full object path, on-disk asset, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]"), typed rather than stringified. Cheapest of the property readers: use it for a single value, get_properties to batch several names off the same object, list_object_properties to dump every property with its editor metadata, and get_actor_properties_by_class when you do NOT have a path and want to find instances BY CLASS or LABEL instead. Accepts `world`, so the same property can be read on the server and on the client and the response stamps which world answered.
 
 | Parameter | Type | Required | Description |
@@ -221,6 +257,8 @@ Read ONE property off ONE object you can already name (full object path, on-disk
 
 ## `get_struct_info`
 
+*Read-only.*
+
 Read the definition of a UScriptStruct (native or Blueprint-authored): its path and every member property as a typed descriptor. Use it to learn the FIELD NAMES before passing a struct as a JSON object to call_function / set_property_value, or to read the row layout behind a DataTable. get_struct_members is the Blueprint-struct-authoring view of the same asset; get_enum_info is the enum equivalent.
 
 | Parameter | Type | Required | Description |
@@ -230,6 +268,8 @@ Read the definition of a UScriptStruct (native or Blueprint-authored): its path 
 **Returns:** `{ struct_name: string, struct_path: string, properties: [<typed property descriptor>] }`
 
 ## `inspect_object`
+
+*Read-only.*
 
 One-shot portrait of an object instance: identity (name, class, class path, is_valid), the class-level flags/metadata/implemented interfaces, EVERY reflected property as a { name: typed_value } map, and — when it is an actor — the list of its live components with their classes. The "I know nothing about this object yet" entry point; once you know what you want, get_property_value / get_properties are far cheaper, list_object_properties adds per-property editor metadata the map here omits, and get_actor_components lists components alone. Accepts `world`, so the portrait can be taken of the LIVE server instance or of the client one, and the response stamps which world answered.
 
@@ -241,6 +281,8 @@ One-shot portrait of an object instance: identity (name, class, class path, is_v
 **Returns:** `{ object_path: string, object_name: string, class_name: string, class_path: string, is_valid: bool, is_abstract, is_deprecated, is_placeable, is_native, config_name, implemented_interfaces: [{interface, implemented_by_k2}], class_group?, is_blueprintable?, is_blueprint_type?, display_name?, tooltip?, properties: {prop_name: typed_value}, components: [{name, class}], world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `list_derived_classes`
+
+*Read-only.*
 
 Enumerate every class derived from a base class (native + Blueprint), the generalization of list_subsystem_classes to any UObject hierarchy. With loaded_only=false also surfaces not-yet-loaded Blueprint subclasses via the asset registry (class_name/path only, loaded=false).
 
@@ -255,6 +297,8 @@ Enumerate every class derived from a base class (native + Blueprint), the genera
 
 ## `list_enums`
 
+*Read-only.*
+
 Enumerate loaded UEnum types (native + user-defined/Blueprint), optionally filtered by module or name substring.
 
 | Parameter | Type | Required | Description |
@@ -265,6 +309,8 @@ Enumerate loaded UEnum types (native + user-defined/Blueprint), optionally filte
 **Returns:** `{ enums: [{enum_name, path, module?, entries:[{name, value}]}], count: int }`
 
 ## `list_instance_overrides`
+
+*Read-only.*
 
 Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and list the property values that were authored as per-instance overrides in the level, each with its archetype baseline, plus the physical package that carries them (the rotating-hash OFPA .uasset for a World Partition actor) and whether that package is dirty. The tool that answers "did my write actually land on this instance, or only look like it?" — it catches set_property_value reporting success on an FGameplayTag while storing an empty "()" override. Component baselines are the SCS TEMPLATE, not the Blueprint CDO (a CDO carries no SCS components at all). Resolves in the EDITOR world by design: an instance override is an on-disk concept, not a runtime one.
 
@@ -280,6 +326,8 @@ Audit a PLACED ACTOR (and every one of its components) against its ARCHETYPE and
 
 ## `list_modules`
 
+*Read-only.*
+
 Enumerate known engine/game/plugin modules (loaded or not), optionally filtered by name substring.
 
 | Parameter | Type | Required | Description |
@@ -291,6 +339,8 @@ Enumerate known engine/game/plugin modules (loaded or not), optionally filtered 
 
 ## `list_object_properties`
 
+*Read-only.*
+
 Dump EVERY reflected property of one object instance with its current value AND its full editor metadata (type, editable, edit_const, blueprint_visible, replicated, save_game, clamp, tooltip, enum entries...). The discovery tool of the property family: use it when you do not yet know the property NAMES, then switch to get_property_value (one name) or get_properties (several names) which are far cheaper. get_class_properties gives the same descriptors WITHOUT values for a class you cannot instantiate; get_actor_properties_by_class finds instances by class/label when you have no object path. Accepts `world`, so it can dump the live server instance or the client one.
 
 | Parameter | Type | Required | Description |
@@ -301,6 +351,8 @@ Dump EVERY reflected property of one object instance with its current value AND 
 **Returns:** `{ object_path: string, class_name: string, properties: [<typed descriptor (see get_class_properties) + typed value>], property_count: int, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `list_objects_of_class`
+
+*Read-only.*
 
 Enumerate live instances of a class currently in memory, complementing get_actors_by_class (actors only) with any UObject-derived type. Accepts `world` to SCOPE the sweep to one world — 'server' vs 'client' is what separates an authoritative census from a replicated one, and without it a PIE session returns the instances of EVERY world mixed together (host and client both), which reads as duplicates. The response stamps the world that answered, so count:0 means "not in THIS world" instead of "does not exist".
 
@@ -315,6 +367,8 @@ Enumerate live instances of a class currently in memory, complementing get_actor
 
 ## `list_structs`
 
+*Read-only.*
+
 Enumerate loaded UScriptStruct types (native + user-defined/Blueprint), optionally filtered by module or name substring.
 
 | Parameter | Type | Required | Description |
@@ -325,6 +379,8 @@ Enumerate loaded UScriptStruct types (native + user-defined/Blueprint), optional
 **Returns:** `{ structs: [{struct_name, path, module?, is_user_defined}], count: int }`
 
 ## `poll_delegate_events`
+
+*Read-only.*
 
 Read the events a subscription has recorded so far, including each fire's parameters (non-destructive cursor read).
 
@@ -337,6 +393,8 @@ Read the events a subscription has recorded so far, including each fire's parame
 
 ## `set_properties`
 
+*Destructive, idempotent.*
+
 Batch-write several properties on ONE object instance in a single call, reporting set[] and failed[{property,error}] per name instead of one opaque flag; each write goes through the same CPF_Edit/!EditConst gate and Modify/PreEditChange/PostEditChange notification as set_property_value. WARNING: EDITOR-WORLD ONLY (no `world` parameter) and success only means the import did not error — re-read the values (get_properties / list_instance_overrides) before believing it, especially for FGameplayTag on a placed actor, which reports success and leaves the tag empty.
 
 | Parameter | Type | Required | Description |
@@ -347,6 +405,8 @@ Batch-write several properties on ONE object instance in a single call, reportin
 **Returns:** `{ object_path: string, set: [string], failed: [{property, error}], success: bool }`
 
 ## `set_property_value`
+
+*Destructive, idempotent.*
 
 Write ONE property on ONE object instance (editor world only), through a CPF_Edit/!EditConst gate plus the full Modify/PreEditChange/PostEditChange editor notification so the change is undoable and dirties the package. Use set_properties to write several names at once, set_component_property for a component's own property (it validates gameplay tags, which this does not), and call_function/call_object_method when the value has to go through the object's own setter. WARNING: success:true only means the import raised no error: re-read the value with get_property_value / get_properties / list_instance_overrides before believing it — writing an FGameplayTag onto a PLACED ACTOR is measured to report success and leave the tag empty.
 
@@ -360,6 +420,8 @@ Write ONE property on ONE object instance (editor world only), through a CPF_Edi
 
 ## `subscribe_to_delegate`
 
+*Additive, idempotent.*
+
 Bind a generic observer to any dynamic multicast delegate (0..N parameters) on a live object and start recording every time it fires, including its parameters. Idempotent per (object_path, delegate_name): re-subscribing returns the existing subscription_id.
 
 | Parameter | Type | Required | Description |
@@ -370,6 +432,8 @@ Bind a generic observer to any dynamic multicast delegate (0..N parameters) on a
 **Returns:** `{ subscription_id: int, signature: string, already_existed: bool }`
 
 ## `unsubscribe_delegate`
+
+*Destructive, idempotent.*
 
 Remove a subscription: unbinds the observer from the delegate and frees it. Idempotent (removing an unknown/already-removed subscription_id is a no-op success, not an error).
 

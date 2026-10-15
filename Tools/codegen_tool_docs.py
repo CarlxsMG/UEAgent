@@ -49,11 +49,29 @@ def cell(text: str) -> str:
     return prose(" ".join(str(text).split())).replace("|", "\\|") or " "
 
 
+def hints(annotations: dict | None) -> str:
+    """The tool's MCP annotations, in words: what a call does to the project."""
+    if not annotations:
+        return ""
+    if annotations.get("readOnlyHint"):
+        words = ["read-only"]
+    else:
+        words = ["destructive" if annotations.get("destructiveHint", True) else "additive"]
+        if annotations.get("idempotentHint"):
+            words.append("idempotent")
+    if annotations.get("openWorldHint"):
+        words.append("open world")
+    return "*" + ", ".join(words).capitalize() + ".*"
+
+
 def domain_page(domain: str, commands: list[dict]) -> str:
     lines = [HEADER, "", f"# {domain}", "",
              f"{len(commands)} tools. Back to the [index](README.md).", ""]
     for c in sorted(commands, key=lambda c: c["name"]):
-        lines += [f"## `{c['name']}`", "", prose(c.get("description") or "No description."), ""]
+        lines += [f"## `{c['name']}`", ""]
+        if hints(c.get("annotations")):
+            lines += [hints(c.get("annotations")), ""]
+        lines += [prose(c.get("description") or "No description."), ""]
         params = c.get("params") or []
         if params:
             lines += ["| Parameter | Type | Required | Description |", "|---|---|---|---|"]

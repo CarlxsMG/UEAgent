@@ -630,9 +630,9 @@ TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 5. set_geometry_collection_damage
 // ---------------------------------------------------------------------------
-// MCP:set_geometry_collection_damage - Configure the damage model and thresholds on a geometry collection
+// MCP:set_geometry_collection_damage - Set the damage model and/or the per-level damage thresholds of a UGeometryCollection asset in an undo transaction, then save it. Only the fields given change; damage_thresholds overwrites the whole threshold list, skipping entries that are not numbers. The save result is not checked: success is true even when nothing reached disk. The reply reads back damage_model ("Threshold", "MaterialStrength" or "Unknown") and num_thresholds; get_geometry_collection_info shows them later. Mass: set_geometry_collection_mass; clustering: set_gc_connection_settings.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
-//   @param damage_model - Threshold or Simple, default Threshold
+//   @param damage_model - Threshold (alias UserDefined) or Simple (alias Material, the material-strength model), case-insensitive; any other text means Threshold, and leaving it out keeps the current model.
 //   @param damage_thresholds - Optional array of per-level damage threshold floats
 //   @returns { geometry_collection_path: string, damage_model: string, num_thresholds: int, success: bool }
 TSharedPtr<FJsonObject> HandleSetGeometryCollectionDamage(const TSharedPtr<FJsonObject>& Params)
@@ -1147,7 +1147,7 @@ TSharedPtr<FJsonObject> HandleComputeGCProximity(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // set_gc_connection_settings
 // ---------------------------------------------------------------------------
-// MCP:set_gc_connection_settings - Configure clustering and connection-graph settings on a Geometry Collection
+// MCP:set_gc_connection_settings - Write the five clustering and connection-graph properties of a UGeometryCollection asset (cluster connection type, EnableClustering, ClusterGroupIndex, MaxClusterLevel, bounds filtering margin) in an undo transaction, invalidate it and save it; a failed save makes success false. Every field is written on each call, so an omitted one goes back to its listed default, and an unrecognized connection type becomes PointImplicit. The bone hierarchy is not rebuilt: cluster_geometry_collection builds clusters and compute_gc_proximity the proximity graph. The reply reads back the type, enable_clustering and max_cluster_level.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param cluster_connection_type - PointImplicit, DelaunayTriangulation, MinimalSpanningSubsetDelaunayTriangulation, BoundsOverlapFilteredDelaunayTriangulation, PointImplicitAugmentedWithMinimalDelaunay, or None, default PointImplicit
 //   @param enable_clustering - If true, enable cluster graph generation, default true
@@ -1284,8 +1284,8 @@ TSharedPtr<FJsonObject> HandleGetGCHierarchyInfo(const TSharedPtr<FJsonObject>& 
 // no runtime effect (managed by UGeometryCollectionComponent at runtime).
 // ============================================================================
 
-// MCP:list_geometry_collection_bones - Walk the bone list of a UGeometryCollection. Reads FTransformCollection typed attributes.
-//   @param geometry_collection_path - Required asset path.
+// MCP:list_geometry_collection_bones - List every bone (transform) of a UGeometryCollection asset in index order with its name, parent index (-1 for a root) and simulation type ("Rigid", "Clustered" or "None"), plus transform_count and root_count. Read-only: nothing is generated or saved. A path that does not load or a collection without geometry data is an error. For levels, root indices and whether proximity is computed use get_gc_hierarchy_info; for damage, mass and source settings use get_geometry_collection_info.
+//   @param geometry_collection_path - Asset path of the UGeometryCollection, as a package path (/Game/Chaos/GC_Rock) or an object path (/Game/Chaos/GC_Rock.GC_Rock); required.
 //   @returns { geometry_collection_path, transform_count, root_count, bones: [{name, parent, sim_type}] }
 TSharedPtr<FJsonObject> HandleListGeometryCollectionBones(const TSharedPtr<FJsonObject>& Params)
 {

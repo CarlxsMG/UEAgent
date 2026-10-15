@@ -1007,7 +1007,7 @@ TSharedPtr<FJsonObject> HandleSetIKSolverEnabled(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_ik_solver_bones
 // ---------------------------------------------------------------------------
-// MCP:get_ik_solver_bones - Get the start and end bone names for a solver in an IK Rig.
+// MCP:get_ik_solver_bones - Read the start and end bone of one solver in an IK Rig asset, chosen by its 0-based position in the solver stack. Read-only; an out-of-range solver_index or a rig that does not load is an error. A solver type without an end bone returns "None" as end_bone. get_ik_solver_details adds the type, enabled state and connected goals; set_ik_solver_bones writes the bones.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @returns { asset_path: string, solver_index: int, start_bone: string, end_bone: string }
@@ -1039,7 +1039,7 @@ TSharedPtr<FJsonObject> HandleGetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // set_ik_solver_bones
 // ---------------------------------------------------------------------------
-// MCP:set_ik_solver_bones - Set the start and/or end bone for a solver in an IK Rig.
+// MCP:set_ik_solver_bones - Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton or an end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back. The save result is not reported. get_ik_solver_bones reads them.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @param start_bone - Optional start bone name
@@ -1093,7 +1093,7 @@ TSharedPtr<FJsonObject> HandleSetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // get_ik_solver_details
 // ---------------------------------------------------------------------------
-// MCP:get_ik_solver_details - Get detailed info about a solver: type name, enabled state, bones, connected goals.
+// MCP:get_ik_solver_details - Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the solver struct name, e.g. "IKRigFullBodyIKSolver"), unique_name ("<index+1> - <display name>"), enabled, start and end bone, and the names of the goals connected to it. Read-only; an out-of-range solver_index or a rig that does not load is an error. Use get_ik_solver_bones for just the bones, get_ik_solver_settings for its tunables, get_ik_rig_info for the goals and chains of the whole rig.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @returns { asset_path: string, solver_index: int, solver_type: string, unique_name: string, enabled: bool, start_bone: string, end_bone: string, connected_goal_count: int, connected_goals: [string] }
@@ -1219,13 +1219,13 @@ TSharedPtr<FJsonObject> HandleRenameIKRetargetChain(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // set_ik_retarget_chain_bones
 // ---------------------------------------------------------------------------
-// MCP:set_ik_retarget_chain_bones - Set start bone, end bone, and/or goal for a retarget chain in an IK Rig.
+// MCP:set_ik_retarget_chain_bones - Change the start bone, end bone and/or IK goal of an existing retarget chain in an IK Rig asset through the IK Rig controller (each change an undo transaction), then save the asset. Pass at least one of the three, else an error. A missing chain or a bone not in the rig skeleton is not an error but start_bone_set, end_bone_set or goal_set false; an unknown goal_name sets the goal to "None" with goal_set true, so check goal_name. The save result is not reported. Siblings: add_ik_retarget_chain, rename_ik_retarget_chain.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param chain_name - Name of the retarget chain to mutate
 //   @param start_bone - Optional new start bone
 //   @param end_bone - Optional new end bone
 //   @param goal_name - Optional new associated IK goal
-//   @returns { asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_ok?: bool, end_ok?: bool, goal_ok?: bool }
+//   @returns { asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, start_bone_set: bool, end_bone_set: bool, goal_set: bool }
 
 TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1396,11 +1396,11 @@ TSharedPtr<FJsonObject> HandleRemoveRetargeterOp(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // set_retargeter_chain_mapping
 // ---------------------------------------------------------------------------
-// MCP:set_retargeter_chain_mapping - Map a source chain to a target chain in an IK Retargeter.
+// MCP:set_retargeter_chain_mapping - Make source_chain drive target_chain in an IK Retargeter asset, overwriting the previous mapping, on every op whose chain mapping lists target_chain (or only the op named op_name), in one undo transaction, then save the asset. source_chain is not validated, so a misspelled name is stored as given. set_ok is false when no op lists target_chain; mapped_source is read back from the first matching op. The save result is not reported. get_ik_retargeter_info shows the per-op mappings.
 //   @param ik_retargeter_path - Path to the UIKRetargeter asset
 //   @param source_chain - Name of the source retarget chain
 //   @param target_chain - Name of the target retarget chain to map to
-//   @param op_name - Optional retarget op name to scope the mapping
+//   @param op_name - Optional op name as get_ik_retargeter_info lists it; omitted, every op whose chain mapping lists target_chain is updated
 //   @returns { asset_path: string, source_chain: string, target_chain: string, mapped_source: string, set_ok: bool }
 
 TSharedPtr<FJsonObject> HandleSetRetargeterChainMapping(const TSharedPtr<FJsonObject>& Params)

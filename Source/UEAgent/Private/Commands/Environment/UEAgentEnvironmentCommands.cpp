@@ -155,7 +155,7 @@ TSharedPtr<FJsonObject> HandleSpawnExponentialHeightFog(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_sky_light - Spawns a SkyLight actor and optionally sets intensity / recaptures the sky.
+// MCP:spawn_sky_light - Spawn a new SkyLight actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. intensity, when given, is set on its USkyLightComponent, and recapture=true calls RecaptureSky so the light refreshes its captured sky lighting now. The reply reads intensity back from the component and names the actor (actor_name is the label). Tune an existing sky light with set_sky_light_properties; spawn_sky_atmosphere adds the atmosphere.
 //   @param location - Optional [X, Y, Z] world location (defaults to origin)
 //   @param intensity - Optional SkyLight intensity multiplier; if supplied, applied to the component
 //   @param recapture - If true, call RecaptureSky on the component (optional, default false)

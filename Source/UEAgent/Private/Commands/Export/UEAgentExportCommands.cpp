@@ -468,10 +468,11 @@ TSharedPtr<FJsonObject> HandleExportAssetData(const TSharedPtr<FJsonObject>& Par
     return Answer;
 }
 
-// MCP:export_blueprint_data - Exports blueprint structure and metadata to JSON or TXT format.
+// MCP:export_blueprint_data - Load a Blueprint asset and write a summary of it to a new file Saved/Exports/Blueprints/<Name>_<YYYYMMDD_HHMMSS>.json or .txt in the project: parent class, compile status, counts of function graphs, event graphs and variables, function graph names, and member variables (name, pin type, category; JSON adds public and editable flags). No graph nodes; the Blueprint is not modified or compiled. Errors if the asset is missing or not a Blueprint; an unsupported format writes nothing (export_success=false). For an inline reply use get_blueprint_info; for a full dump, export_asset_as_text.
 //   @param blueprint_path - Full path to the blueprint asset (e.g., '/Game/MyBlueprint').
 //   @param export_format - Export format: 'json' or 'txt'.
 //   @returns { blueprint_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, blueprint_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandleExportBlueprintData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -720,10 +721,10 @@ TSharedPtr<FJsonObject> HandleExportLevelSection(const TSharedPtr<FJsonObject>& 
     return Answer;
 }
 
-// MCP:generate_asset_report - Generates comprehensive asset analysis report with property statistics to JSON or TXT format.
+// MCP:generate_asset_report - Load an asset and write a property report to a new file Saved/Reports/Assets/<Name>_Report_<YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size. Those statistics go only into the file; the reply carries its path, size and status. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_data writes only editable or Blueprint-visible properties; export_asset_as_text returns a canonical dump inline.
 //   @param asset_path - Full path to the asset to analyze (e.g., '/Game/MyAsset').
 //   @param report_format - Report format: 'json' or 'txt'.
-//   @returns { asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_directory: string, total_properties: int, editable_properties: int, blueprint_visible_properties: int, file_size_bytes: int, file_size_mb: number }
+//   @returns { asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_type: string, report_directory: string }
 
 TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>& Params)
 {
