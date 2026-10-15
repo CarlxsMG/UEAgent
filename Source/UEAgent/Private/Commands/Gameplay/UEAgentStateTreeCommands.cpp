@@ -338,9 +338,9 @@ namespace
 // ---------------------------------------------------------------------------
 // create_state_tree
 // ---------------------------------------------------------------------------
-// MCP:create_state_tree - Create and save a UStateTree asset
-//   @param tree_name - Name of the UStateTree asset
-//   @param package_path - Target content package path where the asset is created (default /Game/MCP)
+// MCP:create_state_tree - Create a StateTree asset at package_path/tree_name (or load the one already there), giving it any missing editor data, the plugin UMCPStateTreeSchema when it has no schema and a Root state when it has no states, then compile and save it. Returns tree_path, state_count, created and saved.
+//   @param tree_name - Asset name without path, e.g. "ST_Guard"; an asset of another class with that name is an error.
+//   @param package_path - Content folder for the asset, e.g. "/Game/AI" (default /Game/MCP).
 //   @returns { tree_path, tree_name, state_count, created, saved }
 TSharedPtr<FJsonObject> HandleCreateStateTree(
 	const TSharedPtr<FJsonObject>& Params)
@@ -399,9 +399,9 @@ TSharedPtr<FJsonObject> HandleCreateStateTree(
 // ---------------------------------------------------------------------------
 // add_state
 // ---------------------------------------------------------------------------
-// MCP:add_state - Add a state node to a UStateTree
-//   @param tree_path - Asset path to the UStateTree
-//   @param state_name - Name of the state to add
+// MCP:add_state - Add a top-level state (a new SubTree, never a child of another state) to a StateTree asset, then compile and save it. Idempotent: if any state already has that name nothing changes and already_existed is true. Returns state_count, added and saved.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the new state, e.g. "Patrol"; the other state commands find states by this name.
 //   @returns { tree_path, state_name, state_count, already_existed, added, saved }
 TSharedPtr<FJsonObject> HandleAddState(
 	const TSharedPtr<FJsonObject>& Params)
@@ -439,11 +439,11 @@ TSharedPtr<FJsonObject> HandleAddState(
 // ---------------------------------------------------------------------------
 // add_state_transition
 // ---------------------------------------------------------------------------
-// MCP:add_state_transition - Add a transition between two states on a UStateTree
-//   @param tree_path - Asset path to the UStateTree
-//   @param from_state - Source state name
-//   @param to_state - Target state name
-//   @param event_name - Name of the event
+// MCP:add_state_transition - Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with set_transition_properties. Returns transition_count and saved.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param from_state - Name of the source state, which owns the new transition.
+//   @param to_state - Name of the target state the transition goes to.
+//   @param event_name - Gameplay tag stored as the transition RequiredEvent, e.g. "AI.Event.Alert"; a tag that is not registered is ignored without error.
 //   @returns { tree_path, from_state, to_state, event_name, transition_count, added, saved }
 TSharedPtr<FJsonObject> HandleAddStateTransition(
 	const TSharedPtr<FJsonObject>& Params)
@@ -503,9 +503,9 @@ TSharedPtr<FJsonObject> HandleAddStateTransition(
 // ---------------------------------------------------------------------------
 // set_state_tree_root
 // ---------------------------------------------------------------------------
-// MCP:set_state_tree_root - Set the root state of a UStateTree
-//   @param tree_path - Asset path to the UStateTree
-//   @param root_state_name - Name of the state to make root
+// MCP:set_state_tree_root - Make a top-level state the root of a StateTree asset by moving it to the first SubTree slot, then compile and save it. A nested state is refused. Returns root_state with set and saved, or already_root when it was already first (nothing saved).
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param root_state_name - Name of a top-level state, such as one made by add_state; a state nested under another is refused.
 //   @returns { tree_path, root_state, already_root, set, saved }
 TSharedPtr<FJsonObject> HandleSetStateTreeRoot(
 	const TSharedPtr<FJsonObject>& Params)
@@ -598,8 +598,8 @@ TSharedPtr<FJsonObject> HandleAddTreeParameter(
 // ---------------------------------------------------------------------------
 // get_state_tree_info
 // ---------------------------------------------------------------------------
-// MCP:get_state_tree_info - Read states, transitions, and parameters of a UStateTree
-//   @param tree_path - Asset path to the UStateTree
+// MCP:get_state_tree_info - Read a StateTree asset without changing it: every state with its type, selection behavior and task, enter-condition, child and transition counts, every transition with trigger, priority, event tag and delay, the root parameters, root_state and evaluator, global task and binding counts.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @returns { name, transitions, children, from_state, to_state, trigger, event_tag, type, tree_path, state_count, states, transition_count, parameter_count, parameters, root_state }
 TSharedPtr<FJsonObject> HandleGetStateTreeInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -762,10 +762,10 @@ TSharedPtr<FJsonObject> HandleAddStateEnterCondition(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_enter_condition"));
 }
 
-// MCP:set_state_type - Set a state's type (EStateTreeStateType) on a UStateTree.
-//   @param tree_path - Asset path to the UStateTree
-//   @param state_name - Name of the state to modify
-//   @param state_type - One of State | Group | Linked | LinkedAsset | Subtree
+// MCP:set_state_type - Set the type of a StateTree state (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree) and save the asset without recompiling it. An unknown name is an error. To point a state at another tree prefer set_state_linked_asset, which also sets the linked asset.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state to change; the command fails without it.
+//   @param state_type - Enum value name: State, Group, Linked, LinkedAsset or Subtree (an EStateTreeStateType:: prefix is accepted).
 //   @returns { tree_path, state_name, state_type, set, saved }
 TSharedPtr<FJsonObject> HandleSetStateType(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1488,8 +1488,8 @@ TSharedPtr<FJsonObject> HandleListConditions(
 // ---------------------------------------------------------------------------
 // list_global_tasks — tree-scoped global tasks
 // ---------------------------------------------------------------------------
-// MCP:list_global_tasks - List the tree-scoped global tasks (UStateTreeEditorData::GlobalTasks).
-//   @param tree_path - Asset path to the UStateTree.
+// MCP:list_global_tasks - List the global tasks of a StateTree asset (tasks that run for the whole tree, not one state) without changing it. Returns count and global_tasks [{index, class, instance_id}]; index is what add_state_tree_global_task_property and remove_state_tree_global_task take.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @returns { tree_path, count, global_tasks: [{ index, class, instance_id }] }
 TSharedPtr<FJsonObject> HandleListGlobalTasks(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1508,8 +1508,8 @@ TSharedPtr<FJsonObject> HandleListGlobalTasks(
 // ---------------------------------------------------------------------------
 // list_tree_bindings — parameter bindings on this tree
 // ---------------------------------------------------------------------------
-// MCP:list_tree_bindings - List the editor-data bindings (parameter -> task input wires).
-//   @param tree_path - Asset path to the UStateTree.
+// MCP:list_tree_bindings - List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends (no is_output field). Add bindings with add_state_tree_binding.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @returns { tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id, is_output }] }
 TSharedPtr<FJsonObject> HandleListTreeBindings(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2260,11 +2260,11 @@ TSharedPtr<FJsonObject> HandleSetTaskProperty(
 // ---------------------------------------------------------------------------
 // get_task_property — read one field of a task instance
 // ---------------------------------------------------------------------------
-// MCP:get_task_property - Read a single property of a task instance.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name - Name of the state.
-//   @param task_index - 0-based index.
-//   @param property - FProperty name.
+// MCP:get_task_property - Read one property of a task node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Use get_task_info for the whole node and set_task_property to write.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the task; the command fails without it.
+//   @param task_index - 0-based index into the state Tasks, as listed by list_tasks.
+//   @param property - Name of a property on the task node struct, e.g. "FontScale" on a debug text task; case-insensitive.
 //   @returns { tree_path, state_name, task_index, property, type, value, has_value }
 TSharedPtr<FJsonObject> HandleGetTaskProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2432,11 +2432,11 @@ TSharedPtr<FJsonObject> HandleSetConsiderationProperty(
 // ---------------------------------------------------------------------------
 // get_consideration_property — read one field of a consideration instance
 // ---------------------------------------------------------------------------
-// MCP:get_consideration_property - Read a single property of a consideration instance.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name - Name of the state.
-//   @param consideration_index - 0-based index.
-//   @param property - FProperty name.
+// MCP:get_consideration_property - Read one property of a consideration node on a StateTree state by reflection, without changing the asset. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Find the index with list_considerations.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the consideration; the command fails without it.
+//   @param consideration_index - 0-based index into the state Considerations, as listed by list_considerations.
+//   @param property - Name of a property on the consideration node struct; case-insensitive.
 //   @returns { tree_path, state_name, consideration_index, property, type, value, has_value }
 TSharedPtr<FJsonObject> HandleGetConsiderationProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2467,7 +2467,7 @@ TSharedPtr<FJsonObject> HandleGetConsiderationProperty(
 // ---------------------------------------------------------------------------
 // list_condition_types — enumerate StateTreeConditionBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_condition_types - Enumerate concrete UScriptStructs deriving from FStateTreeConditionBase.
+// MCP:list_condition_types - List the concrete condition struct types (children of FStateTreeConditionBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_enter_condition and add_transition_condition. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListConditionTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2478,12 +2478,12 @@ TSharedPtr<FJsonObject> HandleListConditionTypes(
 // ---------------------------------------------------------------------------
 // get_condition_info — full dump of a condition (state-level or transition-level)
 // ---------------------------------------------------------------------------
-// MCP:get_condition_info - Serialize a condition instance.  For state-level conditions pass condition_index into EnterConditions; for transition-level pass transition_index + condition_index into the transition's Conditions list.
-//   @param tree_path - Asset path.
-//   @param state_name - Name of the state.
-//   @param target_kind - "state" (EnterConditions) or "transition" (transition.Conditions).
-//   @param transition_index - Required only if target_kind=transition (0-based).
-//   @param condition_index - 0-based index into the resolved condition array.
+// MCP:get_condition_info - Dump one condition node of a StateTree state as JSON without changing the asset: an enter condition of the state or, with target_kind "transition", a condition of one of its transitions. Returns class, instance_id and properties, the node struct fields (instance data is not included).
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the condition; the command fails without it.
+//   @param target_kind - Which list to read: "state" (default, the state EnterConditions) or "transition" (the Conditions of transition transition_index); any other value reads the enter conditions.
+//   @param transition_index - 0-based index into the state transitions; read only when target_kind is "transition" and ignored otherwise, so pass 0 for an enter condition.
+//   @param condition_index - 0-based index into the selected condition list, as counted by list_conditions or list_transitions.
 //   @returns { tree_path, state_name, target_kind, transition_index, condition_index, class, instance_id, properties: {...} }
 TSharedPtr<FJsonObject> HandleGetConditionInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2547,14 +2547,14 @@ TSharedPtr<FJsonObject> HandleGetConditionInfo(
 //   Same shape as task property helpers but routed to either EnterConditions
 //   or a transition's Conditions list by `target_kind`.
 // ---------------------------------------------------------------------------
-// MCP:set_condition_property - Set a single field of a condition instance by reflection.
-//   @param tree_path - Asset path.
-//   @param state_name - Name of the state.
-//   @param target_kind - "state" or "transition".
-//   @param transition_index - Required if target_kind=transition.
-//   @param condition_index - 0-based index into the resolved condition array.
-//   @param property - FProperty name on the condition struct.
-//   @param value - JSON value to apply.
+// MCP:set_condition_property - Write one property of a condition node on a StateTree state by reflection and save the asset: an enter condition, or a transition condition with target_kind "transition". Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the condition; the command fails without it.
+//   @param target_kind - Which list holds the condition: "state" (default, EnterConditions) or "transition" (Conditions of transition transition_index); any other value means "state".
+//   @param transition_index - 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails.
+//   @param condition_index - 0-based index into the selected condition list; omitting it fails as out of range.
+//   @param property - Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive.
+//   @param value - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
 //   @returns { tree_path, state_name, target_kind, transition_index, condition_index, property, set, value_changed, saved }
 TSharedPtr<FJsonObject> HandleSetConditionProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2591,13 +2591,13 @@ TSharedPtr<FJsonObject> HandleSetConditionProperty(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_condition_property - Read a single property of a condition instance.
-//   @param tree_path - Asset path to the UStateTree.
-//   @param state_name - Name of the state that owns the condition.
-//   @param property - Name of the property to read off the condition's script struct.
-//   @param target_kind - Which condition list to read from: "state" (EnterConditions, default) or "transition".
-//   @param condition_index - 0-based index into the selected condition list.
-//   @param transition_index - 0-based index into the state's Transitions; required when target_kind is "transition".
+// MCP:get_condition_property - Read one property of a condition node on a StateTree state by reflection, without changing the asset: an enter condition, or a transition condition with target_kind "transition". Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the condition; the command fails without it.
+//   @param property - Name of a property on the condition node struct, e.g. "bInvert" on a compare condition; case-insensitive.
+//   @param target_kind - Which list holds the condition: "state" (default, EnterConditions) or "transition" (Conditions of transition transition_index); any other value means "state".
+//   @param condition_index - 0-based index into the selected condition list; omitting it fails as out of range.
+//   @param transition_index - 0-based index into the state transitions; used only when target_kind is "transition", where omitting it fails.
 //   @returns { tree_path, state_name, target_kind, transition_index, condition_index, property, type, value, has_value }
 TSharedPtr<FJsonObject> HandleGetConditionProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2634,10 +2634,10 @@ TSharedPtr<FJsonObject> HandleGetConditionProperty(
 // ---------------------------------------------------------------------------
 // remove_state_enter_condition — remove an enter condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_state_enter_condition - Remove a state-level enter condition by index. Idempotent at OOR.
-//   @param tree_path - Asset path.
-//   @param state_name - Name of the state.
-//   @param condition_index - 0-based index into EnterConditions.
+// MCP:remove_state_enter_condition - Remove one enter condition, by index, from a state of a StateTree asset and save the asset. An out-of-range index removes nothing and still succeeds, with removed false and a note. Returns removed, remaining and saved; for transition conditions use remove_transition_condition.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the condition; the command fails without it.
+//   @param condition_index - 0-based index into the state EnterConditions, as listed by list_conditions.
 //   @returns { tree_path, state_name, condition_index, removed, remaining, saved, note }
 TSharedPtr<FJsonObject> HandleRemoveStateEnterCondition(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2661,11 +2661,11 @@ TSharedPtr<FJsonObject> HandleRemoveStateEnterCondition(
 // ---------------------------------------------------------------------------
 // remove_transition_condition — remove a transition's condition by index
 // ---------------------------------------------------------------------------
-// MCP:remove_transition_condition - Remove a single condition from a transition by index. Idempotent at OOR.
-//   @param tree_path - Asset path.
-//   @param state_name - Name of the state.
-//   @param transition_index - 0-based index into State->Transitions.
-//   @param condition_index - 0-based index into the transition's Conditions.
+// MCP:remove_transition_condition - Remove one condition, by index, from a transition of a StateTree state and save the asset. An out-of-range transition_index is an error; an out-of-range condition_index removes nothing and still succeeds, with removed false. Returns removed, remaining and saved.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param state_name - Name of the state that owns the transition; the command fails without it.
+//   @param transition_index - 0-based index into the state transitions, as listed by list_transitions.
+//   @param condition_index - 0-based index into the Conditions of that transition.
 //   @returns { tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }
 TSharedPtr<FJsonObject> HandleRemoveTransitionCondition(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2711,7 +2711,7 @@ TSharedPtr<FJsonObject> HandleRemoveTransitionCondition(
 // ---------------------------------------------------------------------------
 // list_evaluator_types — enumerate StateTreeEvaluatorBase derivatives
 // ---------------------------------------------------------------------------
-// MCP:list_evaluator_types - Enumerate concrete UScriptStructs deriving from FStateTreeEvaluatorBase.
+// MCP:list_evaluator_types - List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
 //   @returns { count, types: [{ name, struct_path }] }
 TSharedPtr<FJsonObject> HandleListEvaluatorTypes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2724,9 +2724,9 @@ TSharedPtr<FJsonObject> HandleListEvaluatorTypes(
 //   Tree-scoped evaluator instance dump + reflection-driven get/set. Identical
 //   shape to the task helpers but routed at UStateTreeEditorData::Evaluators.
 // ---------------------------------------------------------------------------
-// MCP:get_evaluator_info - Serialize a tree-scoped evaluator instance.
-//   @param tree_path - Asset path.
-//   @param evaluator_index - 0-based index into ED->Evaluators.
+// MCP:get_evaluator_info - Dump one tree-scoped evaluator of a StateTree asset as JSON without changing it. Returns evaluator_index, class, instance_id and properties, the node struct fields (instance data is not included). Find the index with list_evaluators.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param evaluator_index - 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error.
 //   @returns { tree_path, evaluator_index, class, instance_id, properties: {...} }
 TSharedPtr<FJsonObject> HandleGetEvaluatorInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2755,11 +2755,11 @@ TSharedPtr<FJsonObject> HandleGetEvaluatorInfo(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_evaluator_property - Set a single field of an evaluator instance by reflection.
-//   @param tree_path - Asset path.
-//   @param evaluator_index - 0-based index.
-//   @param property - FProperty name.
-//   @param value - JSON value to apply.
+// MCP:set_evaluator_property - Write one property of a tree-scoped evaluator node of a StateTree asset by reflection and save the asset. Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved; the same value again gives value_changed false. Read it back with get_evaluator_property.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param evaluator_index - 0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error.
+//   @param property - Name of a property on the evaluator node struct; case-insensitive.
+//   @param value - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
 //   @returns { tree_path, evaluator_index, property, set, value_changed, saved }
 TSharedPtr<FJsonObject> HandleSetEvaluatorProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2793,10 +2793,10 @@ TSharedPtr<FJsonObject> HandleSetEvaluatorProperty(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_evaluator_property - Read a single property of an evaluator instance.
-//   @param tree_path - Asset path.
-//   @param evaluator_index - 0-based index.
-//   @param property - FProperty name.
+// MCP:get_evaluator_property - Read one property of a tree-scoped evaluator node of a StateTree asset by reflection, without changing it. Returns the value as JSON with its C++ type and has_value; only node struct properties are reachable, not instance data. Write it with set_evaluator_property.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param evaluator_index - 0-based index into the tree Evaluators, as listed by list_evaluators; omitting it fails as out of range.
+//   @param property - Name of a property on the evaluator node struct, e.g. "Name"; case-insensitive.
 //   @returns { tree_path, evaluator_index, property, type, value, has_value }
 TSharedPtr<FJsonObject> HandleGetEvaluatorProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2827,13 +2827,13 @@ TSharedPtr<FJsonObject> HandleGetEvaluatorProperty(
 // ---------------------------------------------------------------------------
 // remove_tree_binding — drop the binding whose target path matches
 // ---------------------------------------------------------------------------
-// MCP:remove_tree_binding - Remove a binding from the tree by its target property path. Idempotent — removing a non-existent target returns removed:false.
-//   @param tree_path - Asset path.
-//   @param target_kind - "task" | "condition" | "global_task" | "evaluator" | "transition".
-//   @param state_name - Required if target_kind in {task, condition, transition}.
-//   @param transition_index - Required if target_kind=transition.
-//   @param target_index - 0-based node index (task/condition/global_task/evaluator) — required for non-transition kinds.
-//   @param target_property - Property path string on the target struct.
+// MCP:remove_tree_binding - Attempt to remove a StateTree property binding by its target node; in UE 5.8 this always returns an error after resolving the target, because the engine exposes no API to delete a binding, so nothing changes. To rebind a target, call add_state_tree_binding on it, which replaces the old binding.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param target_kind - Node list of the binding target: "task", "condition" (a state enter condition), "transition" (a transition condition), "global_task" or "evaluator".
+//   @param state_name - Name of the state that owns the target node; needed for the task, condition and transition kinds.
+//   @param transition_index - 0-based index into the state transitions; used only by the transition kind.
+//   @param target_index - 0-based index of the target node in its list; for the transition kind, the index into the Conditions of that transition.
+//   @param target_property - Property path of the binding target on that node, e.g. "BindableText"; nothing is removed whatever its value.
 //   @returns { tree_path, target_kind, target_index, target_property, removed, remaining, saved, note }
 TSharedPtr<FJsonObject> HandleRemoveTreeBinding(
 	const TSharedPtr<FJsonObject>& Params)
@@ -2932,10 +2932,10 @@ FStateTreeEditorPropertyBindings* Bindings = ED->GetPropertyEditorBindings();
 // ---------------------------------------------------------------------------
 // set_tree_parameter — update the value of an existing root parameter
 // ---------------------------------------------------------------------------
-// MCP:set_tree_parameter - Update the value of an existing root parameter (the bag already has a property with this name from add_tree_parameter). Idempotent — applying the same value is a no-op.
-//   @param tree_path - Asset path.
-//   @param parameter - Parameter name (must already exist).
-//   @param value - JSON value matching the parameter's EPropertyBagPropertyType.
+// MCP:set_tree_parameter - Set the value of an existing root parameter of a StateTree asset and save it. Works for bool, byte, int32, int64, float, double, name and string parameters; text, array and other types return an error. Add the parameter first with add_tree_parameter. Returns value_changed, new_value and saved.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param parameter - Name of a root parameter that already exists, as listed by list_tree_parameters; an unknown name is an error.
+//   @param value - New value as JSON matching the parameter type: true or false, a number, or a string for name and string parameters.
 //   @returns { tree_path, parameter, set, value_changed, saved, note }
 TSharedPtr<FJsonObject> HandleSetTreeParameter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -3032,11 +3032,11 @@ TSharedPtr<FJsonObject> HandleSetTreeParameter(
 // ---------------------------------------------------------------------------
 // add_state_tree_global_task_property — set a property on a tree-scoped global task
 // ---------------------------------------------------------------------------
-// MCP:add_state_tree_global_task_property - Set a property on a tree-scoped global task instance by reflection. The global task must already exist (call add_state_tree_global_task first); this command edits its properties.
-//   @param tree_path - Asset path.
-//   @param global_task_index - 0-based index into ED->GlobalTasks.
-//   @param property - FProperty name on the global task struct.
-//   @param value - JSON value to apply.
+// MCP:add_state_tree_global_task_property - Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
+//   @param global_task_index - 0-based index into the tree GlobalTasks, as listed by list_global_tasks; out of range is an error.
+//   @param property - Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive.
+//   @param value - New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter.
 //   @returns { tree_path, global_task_index, property, set, value_changed, saved }
 TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTaskProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -3074,8 +3074,8 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTaskProperty(
 // ---------------------------------------------------------------------------
 // validate_state_tree — dry-run compile (no save) with structured error report
 // ---------------------------------------------------------------------------
-// MCP:validate_state_tree - Compile the tree via the editor subsystem and report structured errors/warnings WITHOUT saving the package. Use this to dry-run before committing with compile_state_tree.
-//   @param tree_path - Asset path.
+// MCP:validate_state_tree - Compile a StateTree asset in memory and report its errors and warnings without saving: valid, compiled, error_count, warning_count and the messages. It still marks the package dirty and refreshes the compiled data in memory; compile_state_tree compiles and saves.
+//   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @returns { tree_path, valid, compiled, error_count, warning_count, message_count, saved, errors: [{severity, message}], warnings: [{severity, message}], note }
 TSharedPtr<FJsonObject> HandleValidateStateTree(
 	const TSharedPtr<FJsonObject>& Params)
@@ -3141,8 +3141,8 @@ TSharedPtr<FJsonObject> HandleValidateStateTree(
 // Theme colors + component state tree path
 // ===========================================================================
 
-// MCP:get_state_theme_colors - List the UStateTreeEditorData::Colors theme palette (read-only).
-//   @param state_tree_path - Asset path of the UStateTree
+// MCP:get_state_theme_colors - List the theme color palette of a StateTree asset (UStateTreeEditorData Colors) without changing it. Returns count and colors [{display_name, color_ref, r, g, b, a}], color_ref being the GUID that states point to. Takes state_tree_path, not tree_path; set colors with set_state_theme_color.
+//   @param state_tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard"; named state_tree_path here, unlike its sibling tools.
 //   @returns { count, colors: [{display_name, color_ref, r, g, b, a}] }
 TSharedPtr<FJsonObject> HandleGetStateThemeColors(const TSharedPtr<FJsonObject>& Params)
 {

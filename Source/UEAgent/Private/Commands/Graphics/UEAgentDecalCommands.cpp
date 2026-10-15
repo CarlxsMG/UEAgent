@@ -239,9 +239,9 @@ TSharedPtr<FJsonObject> HandleSetDecalSize(
 // ---------------------------------------------------------------------------
 // set_decal_color {actor_label, color?=[r,g,b,a]}
 // ---------------------------------------------------------------------------
-// MCP:set_decal_color - Set the DecalColor (FLinearColor) on a UDecalComponent.
+// MCP:set_decal_color - Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). No undo, dirty flag or save; returns the resulting r, g, b, a.
 //   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param color - Optional [r, g, b, a] (default: keep current DecalColor).
+//   @param color - Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor.
 //   @returns { actor_label: string, r: float, g: float, b: float, a: float }
 TSharedPtr<FJsonObject> HandleSetDecalColor(
 	const TSharedPtr<FJsonObject>& Params)

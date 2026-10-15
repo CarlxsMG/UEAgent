@@ -181,7 +181,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// MCP:create_soundfield_submix - Create a USoundfieldSubmix asset under /Game/...
+// MCP:create_soundfield_submix - Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
 //   @param submix_path - Full asset path like "/Game/Audio/MySFSubmix" (required).
 //   @returns { submix_path, asset_path, soundfield_encoding_format, encoding_settings_class, created, already_existed, saved }
 // ---------------------------------------------------------------------------
@@ -245,9 +245,9 @@ TSharedPtr<FJsonObject> HandleCreateSoundfieldSubmix(const TSharedPtr<FJsonObjec
 }
 
 // ---------------------------------------------------------------------------
-// MCP:add_soundfield_effect_to_submix - Append a concrete USoundfieldEffectBase to a soundfield submix chain.
+// MCP:add_soundfield_effect_to_submix - Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
-//   @param effect_class_name - Friendly name OR /Script/Path.Class (required).
+//   @param effect_class_name - Full class path of a concrete USoundfieldEffectBase subclass, e.g. "/Script/MyAudioPlugin.MySoundfieldEffect"; it is looked up with no outer, so a bare class name does not resolve
 //   @returns { submix_path, effect_path, effect_class, chain_length, added, already_present, saved, note? }
 // ---------------------------------------------------------------------------
 // 2. add_soundfield_effect_to_submix — Resolve effect_class_name -> UClass*, validate
@@ -339,10 +339,10 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
 }
 
 // ---------------------------------------------------------------------------
-// MCP:set_soundfield_effect_settings - Reflection-write properties on Effect->Settings.
+// MCP:set_soundfield_effect_settings - Validate a soundfield effect slot but never write its settings (always a no-op): USoundfieldEffectBase::GetSettingsClass is protected, so the settings class cannot be found. An out-of-range effect_index is an error; otherwise returns applied_count:0, saved:false and a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
-//   @param settings - JSON object {property_name: value, ...} (required).
+//   @param settings - JSON object {property_name: value, ...}; currently ignored, since no setting is ever written
 //   @returns { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note? }
 // ---------------------------------------------------------------------------
 // 3. set_soundfield_effect_settings — Resolve concrete Settings class via Effect->GetSettingsClass()
@@ -399,7 +399,7 @@ TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJson
 }
 
 // ---------------------------------------------------------------------------
-// MCP:get_soundfield_submix_info - Reader: format + encoding_settings + effect_chain[].
+// MCP:get_soundfield_submix_info - Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_format and resolved_format, encoding_settings {class, path}, and effect_chain entries {index, class, path, settings_class, settings_path} with chain_length. Adds a note when no concrete soundfield effect class is loaded.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @returns { submix_path, soundfield_encoding_format, resolved_format, encoding_settings{class,path},
 //             effect_chain[ {index,class,path,settings_class,settings_path} ],
@@ -461,7 +461,7 @@ TSharedPtr<FJsonObject> HandleGetSoundfieldSubmixInfo(const TSharedPtr<FJsonObje
 }
 
 // ---------------------------------------------------------------------------
-// MCP:remove_soundfield_effect - RemoveAt on SoundfieldEffectChain[effect_index] (soft remove).
+// MCP:remove_soundfield_effect - Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
 //   @returns { submix_path, effect_index, removed_effect_class, removed_effect_path,

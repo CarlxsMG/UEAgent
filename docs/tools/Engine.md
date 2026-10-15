@@ -159,13 +159,13 @@ Creates (or loads, idempotently) an empty UNiagaraSystem asset and saves it.  Us
 
 ## `duplicate_niagara_emitter_handle`
 
-Duplicate an existing emitter handle in a Niagara system.
+Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, then save the system. Returns the actual name and id of the copy plus total_emitters; a failed save is not reported in the reply. Find handle names with get_niagara_emitter_handles.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `source_emitter_name` | string | yes | Display name of the emitter handle to duplicate. |
-| `system_path` | string | no | Asset path of the Niagara System. |
-| `new_emitter_name` | string | no | Optional name for the duplicate; defaults to "&lt;source>_Copy" |
+| `source_emitter_name` | string | yes | Display name of the emitter handle to copy (case-insensitive), as get_niagara_emitter_handles lists it. |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `new_emitter_name` | string | no | Name for the copy (default "&lt;source_emitter_name>_Copy"). |
 
 **Returns:** `{ system_path: string, source_emitter_name: string, new_emitter_name: string, new_emitter_id: string, is_valid: bool, total_emitters: int }`
 
@@ -270,23 +270,23 @@ List the data interface bindings on a Niagara emitter (read-only).  Reads the FV
 
 ## `get_niagara_emitter_handle_info`
 
-Get detailed info for a specific emitter handle.
+Read one emitter handle of a Niagara System asset, chosen by display name or 0-based index: its id, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags. Read-only; list every handle with get_niagara_emitter_handles.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
-| `emitter_name` | string | no | Optional display name of the emitter handle |
-| `emitter_index` | number | no | Optional zero-based index; used if emitter_name not provided |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `emitter_name` | string | no | Display name of the handle (case-insensitive); when non-empty it wins over emitter_index. |
+| `emitter_index` | number | no | 0-based position in the emitter list of the system, used only when emitter_name is absent or empty. |
 
 **Returns:** `{ system_path: string, emitter_name: string, emitter_id: string, emitter_id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }`
 
 ## `get_niagara_emitter_handles`
 
-List all emitter handles on a Niagara system.
+List every emitter handle of a Niagara System asset with its display name, id GUID, enabled and valid flags, plus emitter_count. Read-only; the names feed the other emitter tools, and get_niagara_emitter_handle_info gives one handle in detail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, emitter_count: int, emitter_handles: [{ name, id, is_enabled, is_valid }] }`
 
@@ -429,11 +429,11 @@ Read the render/system flags + fixed bounds of a UNiagaraSystem asset via reflec
 
 ## `get_niagara_system_warmup_time`
 
-Get the warmup / determinism configuration of a Niagara system.
+Read the warmup and determinism settings of a Niagara System asset: warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup and deterministic. Read-only; change them with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count, set_niagara_system_warmup_tick_delta and set_niagara_system_deterministic.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool }`
 
@@ -577,13 +577,13 @@ Remove a Niagara simulation stage from an emitter's stage list by stage_index or
 
 ## `rename_niagara_emitter_handle`
 
-Rename an emitter handle on a Niagara system.
+Rename an emitter handle of a Niagara System asset and save the system. The engine sanitizes the name and makes it unique among the emitters of the system, so read new_name and verified (false when the stored name differs from the request); a failed save is not reported.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `current_name` | string | yes | Current display name of the emitter handle. |
-| `new_name` | string | yes | New display name. |
-| `system_path` | string | no | Asset path of the Niagara System. |
+| `current_name` | string | yes | Current display name of the emitter handle (case-insensitive), as get_niagara_emitter_handles lists it. |
+| `new_name` | string | yes | Requested display name; it may come back sanitized or with a numeric suffix. |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
 
 **Returns:** `{ system_path: string, old_name: string, new_name: string, verified: bool }`
 
@@ -794,14 +794,14 @@ Set a default property (scalar/vector/color) on a UNiagaraDataInterface user-par
 
 ## `set_niagara_decal_renderer_material`
 
-Set UNiagaraDecalRendererProperties::Material by asset path (UMaterialInterface).
+Assign a material to the Decal renderer at renderer_index of one emitter in a Niagara System asset and save the system; a failed save returns success false. Returns the previous and new material paths and changed. For sprite, ribbon or mesh renderers use set_niagara_renderer_material.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Asset path of the UMaterialInterface to assign as the decal Material. |
-| `system_path` | string | no | Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example"). |
-| `emitter_name` | string | no | Name of the emitter handle. |
-| `renderer_index` | number | no | Index of the Decal renderer within the emitter's renderer list. |
+| `material_path` | string | yes | Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood". |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it. |
+| `emitter_name` | string | no | Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it. |
+| `renderer_index` | number | no | 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it. |
 
 ## `set_niagara_effect_type`
 
@@ -855,13 +855,13 @@ Enable or disable an emitter handle on a Niagara system.
 
 ## `set_niagara_emitter_local_space`
 
-Toggle bLocalSpace on a Niagara emitter's FVersionedNiagaraEmitterData.
+Set whether one emitter of a Niagara System asset simulates in local space (bLocalSpace on its emitter data), then save the system. Returns local_space as read back, applied and saved (with save_error); the reply stays success even when the save fails, so check saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `system_path` | string | no | Asset path of the Niagara System. |
-| `local_space` | boolean | no | Boolean to assign to bLocalSpace |
+| `emitter_name` | string | yes | Display name of the emitter handle (case-insensitive). |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `local_space` | boolean | no | true to simulate the particles of the emitter in its local space, false for world space; the call fails without it. |
 
 **Returns:** `{ system_path: string, emitter_name: string, local_space: bool, applied: bool, saved: bool, save_error?: string }`
 
@@ -905,12 +905,12 @@ Configure the simulation target of a Niagara emitter.  Sets SimTarget, and optio
 
 ## `set_niagara_emitter_template_description`
 
-Set the FText TemplateAssetDescription metadata on a UNiagaraEmitter asset.
+Set the TemplateAssetDescription text of a standalone Niagara Emitter asset (not an emitter inside a system) and save the asset; a failed save returns success false. Returns old_description and new_description; an empty string clears the text.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `emitter_asset_path` | string | yes | Asset path of the UNiagaraEmitter (the .uasset, not a system path). |
-| `description` | string | yes | New description text |
+| `emitter_asset_path` | string | yes | Asset path of the UNiagaraEmitter, e.g. "/Game/FX/NE_Sparks" (an emitter asset, not a system path). |
+| `description` | string | yes | New description text, stored as FText; an empty string clears it. |
 
 **Returns:** `{ emitter_asset_path: string, old_description: string, new_description: string, applied: bool, saved: bool, save_error?: string }`
 
@@ -1106,12 +1106,12 @@ Set the warmup tick delta (seconds per tick) on a Niagara system.
 
 ## `set_niagara_system_warmup_time`
 
-Set the warmup time (seconds) on a Niagara system.
+Set the warmup time in seconds of a Niagara System asset and save it; a failed save returns success false. With a non-zero warmup_tick_delta the engine rounds the time down to a whole number of ticks, so read new_warmup_time and warmup_tick_count back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | no | Asset path of the Niagara System. |
-| `warmup_time` | number | no | Warmup time in seconds (>= 0; pass 0 to disable warmup). |
+| `system_path` | string | no | Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it. |
+| `warmup_time` | number | no | Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it. |
 
 **Returns:** `{ system_path: string, old_warmup_time: number, new_warmup_time: number, warmup_tick_count: int, applied: bool, saved: bool }`
 

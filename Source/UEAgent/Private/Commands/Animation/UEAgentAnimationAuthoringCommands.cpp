@@ -390,9 +390,9 @@ TSharedPtr<FJsonObject> HandleCreateBlendSpace(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_anim_notify_name
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify_name - Register an animation-notify name on a USkeleton
+// MCP:add_anim_notify_name - Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.
 //   @param notify_name - The notify name to register (e.g. 'Footstep').
-//   @param skeleton_path - Asset path of the target Skeleton
+//   @param skeleton_path - Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved.
 //   @returns { skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }
 TSharedPtr<FJsonObject> HandleAddAnimNotifyName(const TSharedPtr<FJsonObject>& Params)
 {
@@ -558,7 +558,7 @@ namespace
 // ---------------------------------------------------------------------------
 // add_montage_section
 // ---------------------------------------------------------------------------
-// MCP:add_montage_section - Add (or update) a composite section on a UAnimMontage
+// MCP:add_montage_section - Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param section_name - Name of the section to add (e.g. 'Loop').
 //   @param start_time - Absolute section start time in seconds (default 0)
@@ -613,7 +613,7 @@ TSharedPtr<FJsonObject> HandleAddMontageSection(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_montage_slot
 // ---------------------------------------------------------------------------
-// MCP:add_montage_slot - Add a slot animation track on a UAnimMontage
+// MCP:add_montage_slot - Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to add (e.g. 'UpperBody').
 //   @returns { montage_path, slot_name, slot_count, slots, present, already_existed, added, saved, message }
@@ -660,7 +660,7 @@ TSharedPtr<FJsonObject> HandleAddMontageSlot(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_montage_notify
 // ---------------------------------------------------------------------------
-// MCP:add_montage_notify - Add an anim notify event on a UAnimMontage
+// MCP:add_montage_notify - Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param notify_name - Name of the notify event (e.g. 'Footstep').
 //   @param trigger_time - Absolute notify trigger time in seconds (default 0)
@@ -762,7 +762,7 @@ TSharedPtr<FJsonObject> HandleSetMontageBlendTimes(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_montage_info
 // ---------------------------------------------------------------------------
-// MCP:get_montage_info - Read structural info from a UAnimMontage
+// MCP:get_montage_info - Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_blend_times or set_montage_properties.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @returns { montage_path, skeleton_path, section_count, slot_count, notify_count, sections, slots, notifies, blend_in, blend_out, blend_mode_in, blend_mode_out, enable_auto_blend_out, blend_out_trigger_time, sync_group, sync_slot_index }
 TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Params)
@@ -806,9 +806,9 @@ TSharedPtr<FJsonObject> HandleGetMontageInfo(const TSharedPtr<FJsonObject>& Para
 // Idempotent: a missing section returns success with already_existed=false and the
 // current sections list (no fake removed=true). The caller can branch on the boolean.
 // ---------------------------------------------------------------------------
-// MCP:delete_montage_section - Delete a composite section from a UAnimMontage by name
+// MCP:delete_montage_section - Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
-//   @param section_name - Name of the FCompositeSection to remove (FName). Case-sensitive.
+//   @param section_name - Name of the FCompositeSection to remove; compared as an FName, so case is ignored.
 //   @returns { montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }
 TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -867,7 +867,7 @@ TSharedPtr<FJsonObject> HandleDeleteMontageSection(const TSharedPtr<FJsonObject>
 // Idempotent: out-of-range index returns an error with notify_count for diagnostics
 // (caller can recover by re-listing). We do not fabricate a removed=true result.
 // ---------------------------------------------------------------------------
-// MCP:remove_montage_notify - Remove an FAnimNotifyEvent from a UAnimMontage by index
+// MCP:remove_montage_notify - Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param notify_index - Zero-based index into the montage's Notifies array. Use get_montage_info first to list notifies.
 //   @returns { montage_path, notify_index, removed_notify_name?, notify_count_before, notify_count, notifies[], removed, saved, message }
@@ -1169,7 +1169,7 @@ TSharedPtr<FJsonObject> HandleCreatePoseAsset(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // add_pose_to_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:add_pose_to_pose_asset - Add a named REFERENCE pose to a UPoseAsset
+// MCP:add_pose_to_pose_asset - Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.
 //   @param pose_asset_path - Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example').
 //   @param pose_name - Name of the pose to add (e.g. 'RefPose_A').
 //   @returns { pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, message }
@@ -1285,7 +1285,7 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageRateScale(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // get_anim_asset_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_asset_info - Classify and read info from any animation asset
+// MCP:get_anim_asset_info - Load any animation asset and report its class, skeleton and asset_type (montage, composite, pose, sequence, blendspace or animation_asset) plus the counts of that type: sections/slots/notifies, segments, poses/tracks/curves, length, samples. Read-only; get_montage_info, get_anim_sequence_info and get_blendspace_samples give detail.
 //   @param asset_path - Path to the animation asset (UAnimMontage, UAnimComposite, UPoseAsset, UAnimSequence, or UBlendSpace)
 //   @returns { asset_path, class, skeleton, num_segments, num_poses, section_count, slot_count, notify_count, sequence_length, rate_scale, num_tracks, num_curves, sample_count, asset_type }
 TSharedPtr<FJsonObject> HandleGetAnimAssetInfo(const TSharedPtr<FJsonObject>& Params)
@@ -1722,7 +1722,7 @@ TSharedPtr<FJsonObject> HandleEditBlendspaceSample(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_blendspace_samples
 // ---------------------------------------------------------------------------
-// MCP:get_blendspace_samples - Read back all blend samples from a BlendSpace.
+// MCP:get_blendspace_samples - Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blendspace_sample, edit_blendspace_sample or remove_blendspace_sample.
 //   @param blendspace_path - Full asset path to the UBlendSpace.
 //   @returns { animation, blend_x, blend_y, blend_z, rate_scale, blendspace_path, num_samples, samples }
 TSharedPtr<FJsonObject> HandleGetBlendspaceSamples(const TSharedPtr<FJsonObject>& Params)
@@ -1745,9 +1745,9 @@ TSharedPtr<FJsonObject> HandleGetBlendspaceSamples(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // add_anim_notify
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify - Add a UAnimNotify event to an AnimSequence
+// MCP:add_anim_notify - Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.
 //   @param animation_path - Full asset path to the UAnimSequence.
-//   @param notify_name - Name of the notify class (e.g. 'AN_Footstep').
+//   @param notify_name - Class name of a loaded UAnimNotify subclass, tried as given and then with the AnimNotify_ prefix (e.g. 'AN_Footstep', or "PlaySound" for AnimNotify_PlaySound); a Blueprint notify goes by its generated name ending in _C.
 //   @param time - Notify trigger time in seconds (default 0)
 //   @param track_name - Notify track name (default 'Default')
 //   @returns { animation_path, notify_name, time, success, saved, message }
@@ -1867,9 +1867,9 @@ TSharedPtr<FJsonObject> HandleRemoveAnimNotify(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_anim_notify_state
 // ---------------------------------------------------------------------------
-// MCP:add_anim_notify_state - Add a UAnimNotifyState event (with duration) to an AnimSequence
+// MCP:add_anim_notify_state - Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.
 //   @param animation_path - Full asset path to the UAnimSequence.
-//   @param notify_state_name - Name of the notify state class
+//   @param notify_state_name - Class name of a loaded UAnimNotifyState subclass, tried as given and then with the AnimNotifyState_ prefix (e.g. "Trail" for AnimNotifyState_Trail); a Blueprint notify state goes by its generated name ending in _C.
 //   @param start_time - Notify state start time in seconds (default 0)
 //   @param duration - Notify state duration in seconds (default 1.0)
 //   @param track_name - Notify track name (default 'Default')
@@ -1938,7 +1938,7 @@ TSharedPtr<FJsonObject> HandleAddAnimNotifyState(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_anim_notifies
 // ---------------------------------------------------------------------------
-// MCP:get_anim_notifies - Read back all notify events from an AnimSequence
+// MCP:get_anim_notifies - List the notify events of a UAnimSequence without changing it: name, trigger time, duration, track_index and the notify_class or notify_state_class of each, plus num_notifies. Use get_notify_track_names for track names and get_montage_info for the notifies of a montage.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @returns { name, time, duration, track_index, notify_class, notify_state_class, animation_path, num_notifies, notifies }
 TSharedPtr<FJsonObject> HandleGetAnimNotifies(const TSharedPtr<FJsonObject>& Params)
@@ -2406,7 +2406,7 @@ TSharedPtr<FJsonObject> HandleRenamePoseInPoseAsset(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // remove_pose_from_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_from_pose_asset - Remove a named pose from a UPoseAsset (UPoseAsset::DeletePoses).
+// MCP:remove_pose_from_pose_asset - Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.
 //   @param pose_asset_path - Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example').
 //   @param pose_name - Name of the pose to remove.
 //   @returns { pose_asset_path, pose_name, was_present, removed_count, removed, contains_after, num_poses, pose_names, saved, message }
@@ -2541,7 +2541,7 @@ TSharedPtr<FJsonObject> HandleSetPoseAssetBasePose(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // remove_pose_curve
 // ---------------------------------------------------------------------------
-// MCP:remove_pose_curve - Remove a named curve from a UPoseAsset (UPoseAsset::DeleteCurves).
+// MCP:remove_pose_curve - Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.
 //   @param pose_asset_path - Path to the UPoseAsset.
 //   @param curve_name - Name of the curve to remove.
 //   @returns { pose_asset_path, curve_name, removed_count, removed, num_curves, saved, message }
@@ -2818,9 +2818,9 @@ TSharedPtr<FJsonObject> HandleAddAnimFloatCurve(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // add_anim_sync_marker
 // ---------------------------------------------------------------------------
-// MCP:add_anim_sync_marker - Append an authored sync marker to a UAnimSequence
+// MCP:add_anim_sync_marker - Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
-//   @param marker_name - Sync marker name.
+//   @param marker_name - Name of the sync marker (e.g. "LeftFootDown"); sequences in one sync group line up markers that share a name.
 //   @param time - Sync marker time in seconds (default 0.5)
 //   @returns { anim_sequence_path, marker_name, time, num_sync_markers, success, saved, message }
 TSharedPtr<FJsonObject> HandleAddAnimSyncMarker(const TSharedPtr<FJsonObject>& Params)
@@ -2866,7 +2866,7 @@ TSharedPtr<FJsonObject> HandleAddAnimSyncMarker(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // set_anim_root_motion
 // ---------------------------------------------------------------------------
-// MCP:set_anim_root_motion - Configure root motion settings on a UAnimSequence
+// MCP:set_anim_root_motion - Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param enable_root_motion - Whether to enable root motion extraction (default true)
 //   @param root_motion_root_lock - Root lock mode: RefPose|AnimFirstFrame|Zero (default RefPose)
@@ -2933,7 +2933,7 @@ TSharedPtr<FJsonObject> HandleSetAnimRootMotion(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // get_anim_sequence_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_sequence_info - Read back data-model info for a UAnimSequence.
+// MCP:get_anim_sequence_info - Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, bone track and float curve counts from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq. Use get_anim_curve_names for the track and curve names.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @returns { anim_sequence_path, skeleton, play_length, frame_rate, num_frames, num_bone_tracks, num_float_curves, num_sync_markers, enable_root_motion, success }
 TSharedPtr<FJsonObject> HandleGetAnimSequenceInfo(const TSharedPtr<FJsonObject>& Params)
@@ -3294,7 +3294,7 @@ TSharedPtr<FJsonObject> HandleCreatePoseAssetFromAnimSequence(const TSharedPtr<F
 //   get_anim_curve_names         -- IAnimationDataModel::GetBoneTrackNames + GetFloatCurves + GetTransformCurves
 // ===========================================================================
 
-// MCP:remove_anim_bone_track - Remove a bone track from a UAnimSequence (IAnimationDataController::RemoveBoneTrack).
+// MCP:remove_anim_bone_track - Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack) and save the package; removed=false when no track has that bone name, and the save result is not reported. List tracks with get_anim_curve_names.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of the bone track to remove (must match an existing track).
 //   @returns { sequence_path, bone_name, removed }
@@ -3315,7 +3315,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimBoneTrack(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_anim_curve - Remove a curve from a UAnimSequence.
+// MCP:remove_anim_curve - Remove a float or transform curve by name from a UAnimSequence through its data controller and save the package (the save result is not reported); removed=false when no such curve exists. Any curve_type other than transform targets float curves.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param curve_name - Name of the curve to remove.
 //   @param curve_type - Curve type to target: float (default) or transform
@@ -3343,7 +3343,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimCurve(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_anim_sync_marker - Remove a sync marker by name from a UAnimSequence
+// MCP:remove_anim_sync_marker - Remove every authored sync marker with the given name from a UAnimSequence and save the package (no undo transaction; the save result is not reported). Returns markers_before, markers_after and removed, which is false when no marker had that name.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param marker_name - Name of the marker to remove.
 //   @returns { sequence_path, marker_name, markers_before, markers_after, removed }
@@ -3426,7 +3426,7 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:duplicate_anim_sequence - Duplicate a UAnimSequence into a new package in /Game
+// MCP:duplicate_anim_sequence - Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; the save result is not reported, and a name taken by an asset of another class is refused. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 //   @param source_path - Asset path of the source UAnimSequence.
 //   @param new_name - Name of the new duplicate.
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
@@ -3698,10 +3698,10 @@ int32 OldFlags = 0;
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_anim_curve_interp_mode"));
 }
 
-// MCP:rename_anim_curve - Rename an animation curve on a UAnimSequence
+// MCP:rename_anim_curve - Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param old_curve_name - Current curve name
-//   @param new_curve_name - New curve name
+//   @param old_curve_name - Name of the existing curve to rename, as listed by get_anim_curve_names.
+//   @param new_curve_name - Name the curve gets after the rename.
 //   @param curve_type - Curve type to target: float (default) or transform
 //   @returns { anim_sequence_path, old_curve_name, new_curve_name, renamed, saved }
 TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Params)
@@ -3755,7 +3755,7 @@ TSharedPtr<FJsonObject> HandleRenameAnimCurve(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("rename_anim_curve"));
 }
 
-// MCP:get_anim_curve_data - Read keys and metadata for an animation curve
+// MCP:get_anim_curve_data - Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
 //   @param curve_name - Name of the curve to read
 //   @param curve_type - Curve type to target: float (default) or transform
@@ -3818,9 +3818,9 @@ else if (const FTransformCurve* C = Model->FindTransformCurve(CurveId))
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:reimport_anim_sequence - Reimport a UAnimSequence from its source FBX/asset file
+// MCP:reimport_anim_sequence - Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, unsaved; a missing source returns reimported=false with a note instead of crashing. Caveat: the call passes SourceFileIndex 1 and bAutomated false, so dialogs may appear.
 //   @param anim_sequence_path - Full asset path to the UAnimSequence
-//   @param source_file_path - Override source file to reimport from (defaults to recorded source)
+//   @param source_file_path - Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data.
 //   @returns { anim_sequence_path, source_file_path, reimported, source_validated, note }
 //
 // FReimportManager::Reimport() crashes the editor
@@ -4244,7 +4244,7 @@ TSharedPtr<FJsonObject> HandleRemoveNotifyTrack(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // get_notify_track_names
 // ---------------------------------------------------------------------------
-// MCP:get_notify_track_names - Read back all notify TRACK names from an AnimSequence
+// MCP:get_notify_track_names - List the notify track names of a UAnimSequence in track order (UAnimationBlueprintLibrary::GetAnimationNotifyTrackNames) without changing it; returns track_names and track_count. Use get_anim_notifies for the events and add_notify_track or remove_notify_track to edit tracks.
 //   @param animation_path - Full asset path to the UAnimSequence.
 //   @returns { animation_path, track_names, track_count }
 TSharedPtr<FJsonObject> HandleGetNotifyTrackNames(const TSharedPtr<FJsonObject>& Params)
@@ -4619,14 +4619,14 @@ TSharedPtr<FJsonObject> HandleEditAnimNotify(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("edit_anim_notify"));
 }
 
-// MCP:set_montage_properties - Set UAnimMontage blend-mode + sync / auto-blend-out properties
+// MCP:set_montage_properties - Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param blend_mode_in - BlendModeIn: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
 //   @param blend_mode_out - BlendModeOut: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional.
-//   @param enable_auto_blend_out - bEnableAutoBlendOut (bool). Optional.
+//   @param enable_auto_blend_out - When true the montage blends out by itself near its end (bEnableAutoBlendOut); omitted keeps the current value.
 //   @param blend_out_trigger_time - BlendOutTriggerTime in seconds (<0 = auto from BlendOut time). Optional.
-//   @param sync_group - SyncGroup name (FName). Optional.
-//   @param sync_slot_index - SyncSlotIndex (zero-based int). Optional.
+//   @param sync_group - Sync group name (SyncGroup) the montage joins for marker-based sync; an empty string sets None, omitted keeps the current value.
+//   @param sync_slot_index - Zero-based index of the slot track whose animation drives the sync group (SyncSlotIndex); omitted keeps the current value.
 //   @param enable_root_motion_translation - bEnableRootMotionTranslation (bool, DEPRECATED since 4.5). Optional.
 //   @param enable_root_motion_rotation - bEnableRootMotionRotation (bool, DEPRECATED since 4.5). Optional.
 //   @param root_motion_root_lock - RootMotionRootLock: 'RefPose'|'AnimFirstFrame'|'Zero' (DEPRECATED since 4.5). Optional.
@@ -5157,7 +5157,7 @@ TSharedPtr<FJsonObject> HandleSetAnimMontageSkeleton(const TSharedPtr<FJsonObjec
 // to dirty-marking, but we still MarkPackageDirty explicitly so editor save flows
 // pick the change up the same way as the rest of this file.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_montage_preview_mesh - Set the preview USkeletalMesh on a UAnimMontage (editor preview)
+// MCP:set_anim_montage_preview_mesh - Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param mesh_path - Asset path of the preview USkeletalMesh (e.g. '/Engine/EngineMeshes/SkeletalCube').
 //   @returns { montage_path, mesh_path, prev_mesh_path, applied, saved, message }

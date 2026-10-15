@@ -147,9 +147,9 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_prim_attributes
 // ---------------------------------------------------------------------------
-// MCP:list_usd_prim_attributes - List all USD attributes on a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
+// MCP:list_usd_prim_attributes - List every attribute of a prim on an open USD stage without changing it. Returns count and attributes [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}]; has_value also counts fallback values, has_authored_value only authored opinions.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @returns { prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }
 
 TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject>& Params)
@@ -198,9 +198,9 @@ TSharedPtr<FJsonObject> HandleListUsdPrimAttributes(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // create_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:create_usd_attribute - Create (or retrieve) a USD attribute on a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
+// MCP:create_usd_attribute - Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name (e.g. "size", "displayColor")
 //   @param type_name [string!] - USD type name (e.g. "float", "float3", "token", "asset")
 //   @returns { prim_path: string, name: string, type_name: string, cpp_type: string, created: bool }
@@ -478,10 +478,10 @@ TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_usd_attribute_time_samples
 // ---------------------------------------------------------------------------
-// MCP:get_usd_attribute_time_samples - List the time codes at which a USD attribute has authored samples
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param attr_name [string!] - Attribute name
+// MCP:get_usd_attribute_time_samples - List the time codes at which a USD attribute on a prim of an open stage has authored time samples, without changing the stage. Returns time_samples, count and present; a missing attribute is not an error but present false with an empty list.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
+//   @param attr_name [string!] - Name of the attribute to inspect, e.g. "xformOp:translate".
 //   @returns { prim_path: string, attr_name: string, time_samples: [number], count: int }
 
 TSharedPtr<FJsonObject> HandleGetUsdAttributeTimeSamples(const TSharedPtr<FJsonObject>& Params)
@@ -532,11 +532,11 @@ TSharedPtr<FJsonObject> HandleGetUsdAttributeTimeSamples(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // clear_usd_attribute
 // ---------------------------------------------------------------------------
-// MCP:clear_usd_attribute - Clear a USD attribute's authored value(s)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param attr_name [string!] - Attribute name
-//   @param time [number] - Optional time code; when omitted clears ALL times (Attr.Clear), when present clears just that time (Attr.ClearAtTime)
+// MCP:clear_usd_attribute - Clear authored values of a USD attribute on a prim of an open stage: with time, only the sample at that time code; without it, the default value and every time sample. Edits the stage in memory; save_usd_stage writes it. Returns present and cleared, present false when the attribute is missing.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
+//   @param attr_name [string!] - Name of the attribute to clear, e.g. "size".
+//   @param time [number] - Time code of the single sample to clear (ClearAtTime); omit it to clear the default value and all samples (Clear).
 //   @returns { prim_path: string, attr_name: string, cleared: bool, present: bool, time: number? }
 
 TSharedPtr<FJsonObject> HandleClearUsdAttribute(const TSharedPtr<FJsonObject>& Params)

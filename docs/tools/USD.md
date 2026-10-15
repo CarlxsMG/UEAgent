@@ -74,26 +74,26 @@ Author a new (empty) variant set on a prim at the requested list position; idemp
 
 ## `apply_usd_prim_schema`
 
-Apply a USD schema (API schema) to a prim
+Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a registered USD stage, on the current edit target. Checks CanApplyAPI first: a schema that cannot apply returns applied=false with the USD reason in why_not instead of an error. Not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `schema_name` | string | yes | Schema identifier, e.g. "MaterialBindingAPI", "UsdGeomModelAPI" |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `schema_name` | string | yes | Schema identifier (not the C++ class name), e.g. "MaterialBindingAPI", "GeomModelAPI" |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ applied: bool, schema_name: string, why_not?: string }`
 
 ## `clear_usd_attribute`
 
-Clear a USD attribute's authored value(s)
+Clear authored values of a USD attribute on a prim of an open stage: with time, only the sample at that time code; without it, the default value and every time sample. Edits the stage in memory; save_usd_stage writes it. Returns present and cleared, present false when the attribute is missing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
-| `attr_name` | string | yes | Attribute name |
-| `time` | number | no | Optional time code; when omitted clears ALL times (Attr.Clear), when present clears just that time (Attr.ClearAtTime) |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
+| `attr_name` | string | yes | Name of the attribute to clear, e.g. "size". |
+| `time` | number | no | Time code of the single sample to clear (ClearAtTime); omit it to clear the default value and all samples (Clear). |
 
 **Returns:** `{ prim_path: string, attr_name: string, cleared: bool, present: bool, time: number? }`
 
@@ -132,12 +132,12 @@ Close a USD stage by its LLM-facing stage_name.  Removes the stage from the LLM-
 
 ## `create_usd_attribute`
 
-Create (or retrieve) a USD attribute on a prim
+Create an attribute of a given USD type on a prim of an open stage, or return the existing one with created false. Edits the stage in memory; save_usd_stage writes it. Returns name, type_name, cpp_type and created; author its value with set_usd_attribute_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
 | `attr_name` | string | yes | Attribute name (e.g. "size", "displayColor") |
 | `type_name` | string | yes | USD type name (e.g. "float", "float3", "token", "asset") |
 
@@ -193,13 +193,13 @@ Export a flattened copy of the stage to a .usd/.usda/.usdc/.usdz file (the file 
 
 ## `get_usd_attribute_time_samples`
 
-List the time codes at which a USD attribute has authored samples
+List the time codes at which a USD attribute on a prim of an open stage has authored time samples, without changing the stage. Returns time_samples, count and present; a missing attribute is not an error but present false with an empty list.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
-| `attr_name` | string | yes | Attribute name |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
+| `attr_name` | string | yes | Name of the attribute to inspect, e.g. "xformOp:translate". |
 
 **Returns:** `{ prim_path: string, attr_name: string, time_samples: [number], count: int }`
 
@@ -251,24 +251,24 @@ Read metadata for a single layer in the stage's stack (identifier, real path, di
 
 ## `get_usd_prim_info`
 
-Read identity + relationships for a prim
+Read one prim of a registered USD stage: name, type_name, active, parent_path, direct children_count, applied_schemas, variant_sets and an is_a map for nine common types (Xform, Mesh, Cube, Scope, Camera, four lights). A missing prim returns is_valid=false with a note, not an error. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of the prim to read, e.g. "/World/Cube". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool,`
 
 ## `get_usd_prim_metadata`
 
-Read metadata for a prim (specific key or all)
+Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return; unsupported value types become a placeholder string. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `stage_name` | string | no | Stage cache key |
-| `key` | string | no | Specific key to read. Empty (default) returns GetAllMetadata |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
+| `key` | string | no | Metadata field to read, e.g. "documentation"; empty or omitted (default) returns all entries. |
 
 **Returns:** `{ present: bool, key: string, value: object, metadata: object, count: number, note?: string }`
 
@@ -341,30 +341,30 @@ List the USD file format extensions the engine supports, with optional human-rea
 
 ## `list_usd_prim_attributes`
 
-List all USD attributes on a prim
+List every attribute of a prim on an open USD stage without changing it. Returns count and attributes [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}]; has_value also counts fallback values, has_authored_value only authored opinions.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
 
 **Returns:** `{ prim_path: string, attributes: [{name, type_name, cpp_type, has_value, has_authored_value, time_sample_count}], count: int }`
 
 ## `list_usd_prims`
 
-List child prims under a prefix (recursive or direct)
+List the direct children of one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count. Only active, loaded, defined, non-abstract children appear, and it never recurses: call it again per child to go deeper. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | no | Stage cache key |
-| `prim_path_prefix` | string | no | Path whose children to enumerate. Default: "/" (pseudo root) |
-| `recursive` | boolean | no | If true (default), use GetFilteredChildren (traverse instance proxies). If false, GetChildren (direct only). |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
+| `prim_path_prefix` | string | no | SdfPath of the parent prim whose direct children are listed; it must exist. Default "/" (the pseudo root). |
+| `recursive` | boolean | no | Has no effect: true (default) and false return the same direct children, filtered by the USD default predicate, without traversing instance proxies. |
 
 **Returns:** `{ prims: [object], count: number }`
 
 ## `list_usd_stage_layers`
 
-List every layer in a stage's layer stack
+List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer identifier, real_path, is_muted and dirty, plus count and any captured USD errors. An unregistered stage_name is an error; get_usd_layer_info details one layer by index.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -443,24 +443,24 @@ Remove a USD attribute (or any property) from a prim
 
 ## `remove_usd_prim`
 
-Remove a prim (and its descendants) from the stage
+Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_active with active=false is the reversible way to hide a prim. Not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | SdfPath to remove |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of the prim to remove, e.g. "/World/Cube"; its descendants go with it. |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ removed: bool, prim_path: string }`
 
 ## `remove_usd_prim_schema`
 
-Remove a previously applied schema from a prim
+Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim of a registered USD stage, on the current edit target. A schema the prim does not have returns removed=false and was_applied=false instead of an error. Not saved to disk; inverse of apply_usd_prim_schema.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `schema_name` | string | yes | Schema identifier (e.g. "MaterialBindingAPI") |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `schema_name` | string | yes | Schema identifier as listed in applied_schemas by get_usd_prim_info, e.g. "MaterialBindingAPI". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ removed: bool, schema_name: string }`
 
@@ -514,74 +514,74 @@ Point the stage's edit target at a specific layer in the stack (mutations after 
 
 ## `set_usd_prim_active`
 
-Activate or deactivate a prim
+Activate or deactivate an existing prim on a registered USD stage (active metadata on the current edit target). An inactive prim and its subtree leave composition but stay addressable, the reversible alternative to remove_usd_prim. Returns active and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `stage_name` | string | no | Stage cache key |
-| `active` | boolean | no | true to activate, false to deactivate |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
+| `active` | boolean | no | true to activate, false to deactivate; omitted means true. |
 
 **Returns:** `{ active: bool, prim_path: string }`
 
 ## `set_usd_prim_display_name`
 
-Set the human-readable displayName metadata
+Author the displayName metadata (a UI label; the prim name does not change) on an existing prim of a registered USD stage, at the current edit target. An empty string is written as an empty displayName, not cleared. Returns display_name and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `display_name` | string | yes | New display name |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `display_name` | string | yes | Label that UIs show instead of the prim name, e.g. "Hero Cube"; may be empty. |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ set: bool, display_name: string }`
 
 ## `set_usd_prim_instanceable`
 
-Mark a prim as instanceable (or clear the flag)
+Set or clear the instanceable metadata (USD native instancing) of an existing prim on a registered USD stage, at the current edit target. Returns instanceable (the requested value, or the current one when the write fails) and set. Not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `stage_name` | string | no | Stage cache key |
-| `instanceable` | boolean | no | true to mark instanceable, false to clear |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
+| `instanceable` | boolean | no | true to mark instanceable, false to clear; omitted means true. |
 
 **Returns:** `{ instanceable: bool, prim_path: string }`
 
 ## `set_usd_prim_metadata`
 
-Author a metadata key/value on a prim
+Author one metadata field (e.g. "comment", "documentation", "kind") on an existing prim of a registered USD stage, at the current edit target. USD returns set=false when the value type does not match the field type; the reply echoes the converted value. Not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `key` | string | yes | Metadata key (e.g. "custom:author", "comment", "documentation") |
-| `stage_name` | string | no | Stage cache key |
-| `value` | any | no | {type: "bool\|int\|float\|double\|string\|token", value: &lt;scalar>} OR {value: &lt;scalar>} (type inferred from the JSON runtime type) |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `key` | string | yes | Registered USD prim metadata field, e.g. "comment", "documentation", "kind" or "hidden"; a key USD does not register as prim metadata fails with set=false. |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
+| `value` | any | no | {type?: "bool\|int\|int64\|float\|double\|string\|token\|asset", value: &lt;scalar>} OR a bare scalar; without type the JSON type decides (bool, number stored as double, string). Token fields such as "kind" need type "token". |
 
 **Returns:** `{ set: bool, key: string, value: object }`
 
 ## `set_usd_prim_specifier`
 
-Change a prim's specifier (Def/Over/Class)
+Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. Caveat: an unrecognized value is silently applied as "Def" and the reply echoes the input, not the applied specifier. Returns specifier and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | Target prim path |
-| `specifier` | string | yes | "Def" \| "Over" \| "Class" |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
+| `specifier` | string | yes | "Def", "Over" or "Class", case-insensitive; anything else is applied as "Def". |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ set: bool, specifier: string }`
 
 ## `set_usd_prim_type`
 
-Change the typeName of an EXISTING prim
+Change the typeName of an existing prim on a registered USD stage (define_usd_prim creates new ones), at the current edit target. The name is written as given, not checked against the schema registry. Returns type_name and set; not saved to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prim_path` | string | yes | SdfPath of the prim to retype |
-| `type_name` | string | yes | New USD type name (e.g. Mesh, Xform, Cube) |
-| `stage_name` | string | no | Stage cache key |
+| `prim_path` | string | yes | Absolute SdfPath of the prim to retype, e.g. "/World/Cube"; it must exist. |
+| `type_name` | string | yes | New USD schema type name, e.g. "Mesh", "Xform" or "Cube"; written as given. |
+| `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 
 **Returns:** `{ set: bool, type_name: string }`
 

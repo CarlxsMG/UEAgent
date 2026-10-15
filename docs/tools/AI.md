@@ -17,13 +17,13 @@ Adds a UAIPerceptionStimuliSourceComponent to an actor and registers it as a sou
 
 ## `configure_ai_sight_radius`
 
-Configure UAIPerceptionComponent::ConfigureSense UAISenseConfig_Sight on a runtime AIPerceptionComponent.
+Set SightRadius, and LoseSightRadius to sight_radius times 1.5, on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Required. |
-| `sight_radius` | number | yes | Required float (>0). |
-| `lose_sight_radius` | string | no | Optional float (default = sight_radius * 1.5). |
+| `actor_name` | string | yes | Object name or editor label of the pawn or AIController in the editor world; the first match is used. |
+| `sight_radius` | number | yes | New SightRadius in cm, greater than 0. |
+| `lose_sight_radius` | string | no | Ignored: the code never reads it and always sets LoseSightRadius to sight_radius times 1.5. |
 
 ## `create_ai_controller_blueprint`
 
@@ -48,11 +48,11 @@ Reads the native FGenericTeamId assigned to an actor (or its Controller, for a P
 
 ## `get_ai_perceived_actors`
 
-Currently perceived actors (any sense) on an AI-possessed pawn.
+List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an AIController, currently perceives by any sense, without changing anything. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns count and perceived [{actor_name}]; no last-sensed time is included.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Required. |
+| `actor_name` | string | yes | Object name or editor label of the pawn or AIController in the editor world; the first match is used. |
 
 **Returns:** `{ actor_name, perceived: [{actor_name, last_sensed_seconds}], count }`
 

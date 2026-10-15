@@ -290,8 +290,8 @@ TSharedPtr<FJsonObject> HandleCreateAudioBus(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------- //
 // get_audio_bus
 // ---------------------------------------------------------------------------- //
-// MCP:get_audio_bus - Read the channel layout of an existing UAudioBus asset
-//   @param bus_path - Full content path of the target UAudioBus
+// MCP:get_audio_bus - Read the channel layout of a UAudioBus asset: channels (Mono, Stereo, Quad, FivePointOne or SevenPointOne), channels_int and num_channels. Read-only. is_active is always false because no audio device is queried. Change the layout with set_audio_bus_channels.
+//   @param bus_path - Asset path of the UAudioBus, e.g. "/Game/Audio/AB_Music".
 //   @returns { bus_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, is_active: bool (always false: headless — no audio device) }
 TSharedPtr<FJsonObject> HandleGetAudioBus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -317,9 +317,9 @@ TSharedPtr<FJsonObject> HandleGetAudioBus(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------- //
 // set_audio_bus_channels
 // ---------------------------------------------------------------------------- //
-// MCP:set_audio_bus_channels - Change the channel layout of an existing UAudioBus asset
-//   @param bus_path - Full content path of the target UAudioBus
-//   @param channels - EAudioBusChannels: 'Mono' | 'Stereo' | 'Quad' | 'FiveDotOne' | 'SevenDotOne'
+// MCP:set_audio_bus_channels - Change the channel layout (AudioBusChannels) of an existing UAudioBus asset and save it; success requires the save. Returns channels, channels_int and num_channels read back from the asset. To make a new bus use create_audio_bus.
+//   @param bus_path - Asset path of the UAudioBus, e.g. "/Game/Audio/AB_Music".
+//   @param channels - EAudioBusChannels: 'Mono' | 'Stereo' | 'Quad' | 'FiveDotOne' | 'SevenDotOne', case-insensitive; FivePointOne, 5.1, SevenPointOne and 7.1 are accepted too.
 //   @returns { bus_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, saved: bool }
 TSharedPtr<FJsonObject> HandleSetAudioBusChannels(const TSharedPtr<FJsonObject>& Params)
 {
@@ -465,8 +465,8 @@ TSharedPtr<FJsonObject> HandleCreateSoundSourceBus(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------- //
 // get_sound_source_bus
 // ---------------------------------------------------------------------------- //
-// MCP:get_sound_source_bus - Read the routing fields of an existing USoundSourceBus asset
-//   @param ssb_path - Full content path of the target USoundSourceBus
+// MCP:get_sound_source_bus - Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or Stereo), duration in seconds (0 plays indefinitely) and the UAudioBus it outputs to (audio_bus_path and audio_bus_class, empty when none). Read-only. Writer: set_sound_source_bus_audio_bus.
+//   @param ssb_path - Asset path of the USoundSourceBus, e.g. "/Game/Audio/SSB_Radio".
 //   @returns { ssb_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string }
 TSharedPtr<FJsonObject> HandleGetSoundSourceBus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -489,9 +489,9 @@ TSharedPtr<FJsonObject> HandleGetSoundSourceBus(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------- //
 // set_sound_source_bus_audio_bus
 // ---------------------------------------------------------------------------- //
-// MCP:set_sound_source_bus_audio_bus - Assign or clear the UAudioBus return on a USoundSourceBus
-//   @param ssb_path - Full content path of the target USoundSourceBus
-//   @param audio_bus_path - Full content path of the UAudioBus to assign, or "" to clear the assignment.
+// MCP:set_sound_source_bus_audio_bus - Point the AudioBus output of a USoundSourceBus asset at a UAudioBus, or clear it when audio_bus_path is empty or omitted, then save; success requires the save. Returns audio_bus_path and audio_bus_class read back, plus cleared. A bus path that does not load is an error, not a clear.
+//   @param ssb_path - Asset path of the USoundSourceBus, e.g. "/Game/Audio/SSB_Radio".
+//   @param audio_bus_path - Asset path of the UAudioBus to assign, e.g. "/Game/Audio/AB_Music"; "" or omitted clears the assignment.
 //   @returns { ssb_path: string, audio_bus_path: string, audio_bus_class: string, cleared: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSoundSourceBusAudioBus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -665,10 +665,10 @@ TSharedPtr<FJsonObject> HandleSetSoundSourceBusSendInfo(const TSharedPtr<FJsonOb
 // Custom FRuntimeFloatCurve authoring on a BusSends entry's CustomSendLevelCurve
 // field. Same USoundBase::BusSends array target as send_info above.
 // ---------------------------------------------------------------------------- //
-// MCP:set_sound_source_bus_send_level_curve - Author the CustomSendLevelCurve on USoundBase::BusSends[send_index] via reflection.
+// MCP:set_sound_source_bus_send_level_curve - Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve of a USoundSourceBus asset (BusSends grows with default entries past its end) and save it; success requires the save. Returns the curve read back. The curve only takes effect when that send uses the CustomCurve control method: see set_sound_source_bus_send_info.
 //   @param ssb_path - Full content path of the target USoundSourceBus (USoundBase.BusSends is the target array).
 //   @param send_index - 0-based index into BusSends; the entry is mutated in place. Resized/extended with default-constructed entries if out of range.
-//   @param distance_curve - Object representing FRuntimeFloatCurve authoring data. Usable shape: { 'editor_curve_data': { 'float_curve': { 'keys': [ { 'time': float, 'value': float }, ... ] } } }. Absent keys are left at the struct default.
+//   @param distance_curve - FRuntimeFloatCurve fields by their UPROPERTY names, e.g. {"EditorCurveData": {"Keys": [{"Time": 0.0, "Value": 1.0}, {"Time": 1.0, "Value": 0.0}]}}; Time 0-1 maps to MinSendDistance-MaxSendDistance and Keys replaces the key list. Fields left out keep their current values; unknown keys are ignored without error.
 //   @returns { ssb_path: string, send_index: int, bus_sends_count: int, distance_curve: object, applied_keys: [string], saved: bool }
 TSharedPtr<FJsonObject> HandleSetSoundSourceBusSendLevelCurve(const TSharedPtr<FJsonObject>& Params)
 {

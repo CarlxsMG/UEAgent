@@ -103,7 +103,7 @@ Duplicate a static mesh to an editable location in /Game.
 
 ## `create_render_target_2d`
 
-Create or load a persisted UTextureRenderTarget2D asset
+Create a UTextureRenderTarget2D asset at package_path/name with the given size and format, black clear color, and save it. An existing one there is returned as is: width, height and format are then ignored (already_exists:true). Returns asset_path, width, height, format and pixel_format.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -111,7 +111,7 @@ Create or load a persisted UTextureRenderTarget2D asset
 | `package_path` | string | no | Target content path, defaults to /Game/RenderTargets |
 | `width` | number | no | Render target width in pixels, default 256 |
 | `height` | number | no | Render target height in pixels, default 256 |
-| `format` | string | no | RTF_RGBA8 default, RTF_RGBA16f for HDR, RTF_R8, RTF_RGBA8_SRGB, etc |
+| `format` | string | no | Render target format, default RTF_RGBA8: RTF_R8, RTF_RG8, RTF_RGBA8, RTF_RGBA8_SRGB, RTF_R16f, RTF_RG16f, RTF_RGBA16f (HDR), RTF_R32f, RTF_RG32f, RTF_RGBA32f or RTF_RGB10A2, RTF_ prefix optional; an unknown value falls back to RTF_RGBA8 with format_warning |
 
 **Returns:** `{ render_target_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, width: int, height: int, format: string, pixel_format: string, format_warning: string, save_error: string }`
 
@@ -472,7 +472,7 @@ Lists the asset object paths contained in a collection.          must match the 
 
 ## `get_collections`
 
-Lists every Content Browser collection in the project.
+List every Content Browser collection of the project container, of every share type, without changing anything: name and share_type of each (the share_type that get_collection_assets and the other collection tools need), plus collection_count. Errors when the collection manager is unavailable.
 
 No parameters.
 
@@ -513,7 +513,7 @@ Read metadata for a UTextureRenderTargetCube asset (face size, mip count, format
 
 ## `get_render_target_info`
 
-Read metadata for a UTextureRenderTarget2D asset
+Read the metadata of a UTextureRenderTarget2D asset without reading pixels or changing it: width, height, format (RTF_*), pixel_format and is_srgb. For 2D-array or cube render targets use get_render_target_2d_array_info or get_render_target_cube_info; export_render_target writes the image to disk.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -778,12 +778,12 @@ Sets (or overwrites) a string metadata tag on an asset and saves it.  The asset 
 
 ## `set_static_mesh_collision_complexity`
 
-Set the collision complexity of a static mesh.
+Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh asset, creating its BodySetup when missing, then save it; a failed save is an error. An unrecognized complexity silently becomes default, so check collision_complexity, which is read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `complexity` | string | yes | One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple". |
+| `complexity` | string | yes | One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple", case-insensitive; any other value is stored as default. |
 
 **Returns:** `{ static_mesh_path, collision_complexity, saved }`
 
@@ -813,13 +813,13 @@ Assign a material to an existing material slot of a static mesh.
 
 ## `set_static_mesh_nanite`
 
-Enable or disable Nanite on a static mesh.
+Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. Returns nanite_enabled read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `enabled` | boolean | no | Whether to enable Nanite. |
-| `keep_percent_triangles` | number | no | Fraction of triangles to keep (defaults to 1.0) |
+| `enabled` | boolean | no | true enables Nanite, false disables it; default false, so leaving it out disables Nanite. |
+| `keep_percent_triangles` | number | no | Fraction of the source triangles Nanite keeps, 1.0 keeps them all (default 1.0, written even when omitted). |
 
 **Returns:** `{ static_mesh_path, nanite_enabled, saved }`
 
@@ -856,13 +856,13 @@ Sets sampler/LOD settings on an existing UTexture2D and saves it.  Applies the r
 
 ## `set_texture_settings`
 
-Sets sRGB / compression / LOD-group on an existing UTexture2D and saves it.  Applies the requested settings, then PostEditChange + UpdateResource + save, reading the resulting values back.  compression_settings accepts the enum name without the "TC_" prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR".  lod_group accepts the group name without the "TEXTUREGROUP_" prefix, e.g. "World", "UI", "Character", "Effects".
+Sets the given sRGB, compression and LOD group of a UTexture2D asset, rebuilds its resource when one changed and saves it in every case, returning the values read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `texture_path` | string | yes | Asset path of the texture to modify |
-| `srgb` | boolean | no | Optional bool |
-| `compression_settings` | string | no | Optional TextureCompressionSettings enum string |
-| `lod_group` | string | no | Optional TextureGroup enum string |
+| `srgb` | boolean | no | True treats the texture as sRGB color, false as linear data such as normal or mask maps; omit to keep the current value |
+| `compression_settings` | string | no | TextureCompressionSettings name with or without the TC_ prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR"; omit to keep the current value |
+| `lod_group` | string | no | TextureGroup name with or without the TEXTUREGROUP_ prefix, e.g. "World", "UI", "Character", "Effects"; omit to keep the current value |
 
 **Returns:** `{ texture_name: string, asset_path: string, changed: bool, saved: bool, srgb: bool, compression: string, lod_group: string, compression_warning?: string, lod_group_warning?: string, save_error?: string }`

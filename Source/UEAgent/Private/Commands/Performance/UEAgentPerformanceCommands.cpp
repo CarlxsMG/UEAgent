@@ -747,13 +747,13 @@ TSharedPtr<FJsonObject> HandleListTraces(const TSharedPtr<FJsonObject>& Params)
 // Headless-friendly (no Slate / no render).
 // ===========================================================================
 
-// MCP:create_rvt_asset - Create a URuntimeVirtualTexture asset at /Game/<dir>/<asset_name>
-//   @param asset_name - Asset name (without path)
-//   @param directory_path - /Game-relative directory (default /Game)
-//   @param material_type - One of "BaseColor_Normal_Specular", "BaseColor_Normal_Roughness", "BaseColor_YCoCg", "WorldHeight" (default "BaseColor_Normal_Specular")
-//   @param tile_count - Log2 tile count, 0..12 (default 8)
-//   @param tile_size - Tile size log2 + 6, 0..4 (default 2)
-//   @param continuous_update - bool (default false)
+// MCP:create_rvt_asset - Create a URuntimeVirtualTexture asset at directory_path/asset_name with the given material type, tile count and tile size (both exponents, clamped silently), and save it; the save result is not checked. Returns asset_path, tile_count, tile_size and size in texels. Then use create_rvt_volume and assign_rvt_to_landscape.
+//   @param asset_name - Name of the new RVT asset (e.g. "RVT_Landscape"), without a folder.
+//   @param directory_path - Content folder as a long package path (e.g. "/Game/VirtualTextures"), not a relative one (default /Game).
+//   @param material_type - One of "BaseColor_Normal_Specular", "BaseColor_Normal_Roughness" or "WorldHeight", case-insensitive (default "BaseColor_Normal_Specular"); any other value, BaseColor_YCoCg included, is refused.
+//   @param tile_count - Exponent of the size in tiles: 2^n tiles, clamped to 0..12 (default 8 = 256 tiles); a texel value such as 256 is clamped to 12.
+//   @param tile_size - Exponent of the tile size: 2^(n+6) texels, clamped to 0..4 (default 2 = 256 texels).
+//   @param continuous_update - When true, already mapped pages are re-rendered round-robin (bContinuousUpdate); default false.
 //   @returns { asset_path, material_type, tile_count, tile_size, size }
 TSharedPtr<FJsonObject> HandleCreateRVTAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -828,8 +828,8 @@ TSharedPtr<FJsonObject> HandleCreateRVTAsset(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_rvt_info - Read URuntimeVirtualTexture asset info (read-only).
-//   @param asset_path - /Game path to the asset
+// MCP:get_rvt_info - Read a URuntimeVirtualTexture asset without changing it: material_type (full enum name, e.g. "ERuntimeVirtualTextureMaterialType::WorldHeight"), tile_count in tiles, tile_size and size in texels (not the exponents create_rvt_asset takes), and continuous_update.
+//   @param asset_path - Object or package path of the RVT asset (e.g. "/Game/VirtualTextures/RVT_Landscape").
 //   @returns { asset_path, material_type, tile_count, tile_size, size, continuous_update }
 TSharedPtr<FJsonObject> HandleGetRVTInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1413,7 +1413,7 @@ TSharedPtr<FJsonObject> HandleListActiveRegions(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:get_frame_count - Read the global GFrameCounter and the render-thread counterpart.
+// MCP:get_frame_count - Read the engine frame counters without side effects: frame_count (GFrameCounter, game thread) and frame_count_render_thread (GFrameCounterRenderThread). Read it before and after another call to measure how many frames ticked; for frame times use frame_timing or get_fps_info.
 //   @returns { frame_count: uint64, frame_count_render_thread: uint64 }
 //   Read-only, headless-safe. Single-int sync anchor for dead-reckoning / asset-load timing.
 TSharedPtr<FJsonObject> HandleGetFrameCount(const TSharedPtr<FJsonObject>& Params)

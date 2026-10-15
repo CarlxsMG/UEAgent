@@ -525,23 +525,23 @@ Wire one node's OUTPUT pin to another node's INPUT pin inside one Blueprint grap
 
 ## `create_actor_action_utility`
 
-Create a scripted Actor Action Utility blueprint (parent UActorActionUtility)
+Create, compile and save a Blueprint parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | Destination content folder, e.g. "/Game/MyGame". |
-| `name` | string | yes | Asset name (no extension). |
+| `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored. |
+| `name` | string | yes | Asset name without path or extension, e.g. "EUA_AlignToFloor". |
 
 **Returns:** `success or error payload`
 
 ## `create_asset_action_utility`
 
-Create a scripted Asset Action Utility blueprint (parent UAssetActionUtility)
+Create, compile and save a Blueprint parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | Destination content folder, e.g. "/Game/MyGame". |
-| `name` | string | yes | Asset name (no extension). |
+| `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored. |
+| `name` | string | yes | Asset name without path or extension, e.g. "EUA_RenameTextures". |
 
 **Returns:** `success or error payload`
 
@@ -571,24 +571,24 @@ Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGr
 
 ## `create_editor_utility_blueprint`
 
-Create (and save) a UEditorUtilityBlueprint (a Blutility object)
+Create, compile and save an Editor Utility Blueprint at package_path/name, parented to parent_class. Returns asset_path, parent_class, created, already_existed and saved; an existing Editor Utility Blueprint there is returned unchanged and parent_class is not applied to it. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | /Game folder to create the asset in (e.g. /Game/EditorUtilities) |
-| `name` | string | yes | Asset name (no extension) |
-| `parent_class` | string | no | Parent UClass name or path (default UEditorUtilityObject) |
+| `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored. |
+| `name` | string | yes | Asset name without path or extension, e.g. "EUB_BatchRename". |
+| `parent_class` | string | no | Parent class by name without the U or A prefix, e.g. "EditorUtilityActor", or by path such as "/Script/Blutility.EditorUtilityObject" (default EditorUtilityObject); it must be Blueprintable. |
 
 **Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error }`
 
 ## `create_editor_utility_widget_blueprint`
 
-Create (and save) a UEditorUtilityWidgetBlueprint with a CanvasPanel root
+Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtilityWidget) with a CanvasPanel root at package_path/name. Returns asset_path, root_widget, root_widget_class, created, already_existed and saved; an existing one is returned unchanged. Open it as a tab with run_editor_utility_widget. Refused during PIE unless force.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | /Game folder to create the asset in (e.g. /Game/EditorUtilities) |
-| `name` | string | yes | Asset name (no extension) |
+| `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored. |
+| `name` | string | yes | Asset name without path or extension, e.g. "EUW_LevelTools". |
 
 **Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error }`
 
@@ -888,11 +888,11 @@ Read-only lint of a Blueprint's graphs for four authoring bugs that COMPILE CLEA
 
 ## `list_editor_utility_widgets`
 
-Enumerate UEditorUtilityWidgetBlueprint assets via the Asset Registry.
+List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | no | Optional content path to search under (default /Game) |
+| `path` | string | no | Content folder to search recursively, without a trailing slash, e.g. "/Game/EditorUtilities" (default /Game). |
 
 **Returns:** `{ name, asset_path, package_name, package_path, search_path, count, widgets }`
 
@@ -945,16 +945,16 @@ Move a node to a new [x, y] canvas position. Purely cosmetic layout: no pin, lin
 
 ## `override_interface_member`
 
-One call to override an interface method OR a parent virtual BY NAME: resolves the member and creates the right artifact -- an event OVERRIDE node (kind="event", node_id returned) for members with no return value, or a function-override graph (kind="function", graph_name returned) for members that return data. Idempotent: re-calling reports was_already_overridden without duplicating. Same engine logic as implement_interface_function, with a response shaped around "did I create it" instead of "which graph is it"; prefer this one when overriding an interface EVENT, where a hand-rolled event node can produce a dead node that compiles clean and never fires (lint_blueprint_graph flags that shape as eclipsed_interface_event).
+Override a Blueprint interface member or parent virtual by name: an event override node (kind="event", node_id) when it returns nothing, else a function-override graph (kind="function", graph_name). Idempotent (was_already_overridden); leaves the Blueprint needing a compile, unsaved. Prefer it to hand-placed interface event nodes, which can compile yet never fire.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint asset name or path (must implement the interface / inherit the virtual). |
 | `member_name` | string | yes | Name of the interface or overridable function to override (e.g. "CanInteract"). |
-| `interface_path` | string | no | Optional disambiguator hint; advisory only (resolution is by member name). |
+| `interface_path` | string | no | Ignored: the member is resolved by member_name alone, implemented interfaces first, then parent classes. |
 | `node_position` | any | no | Optional [x, y] canvas position applied to a freshly created event-override node. |
-| `position_x` | number | no |   |
-| `position_y` | number | no |   |
+| `position_x` | number | no | Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins. |
+| `position_y` | number | no | Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins. |
 
 **Returns:** `{ kind, created, was_already_overridden, graph_name[, node_id] }`
 

@@ -167,7 +167,7 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_stage_layers
 // ---------------------------------------------------------------------------
-// MCP:list_usd_stage_layers - List every layer in a stage's layer stack
+// MCP:list_usd_stage_layers - List the layer stack of a USD stage opened with open_usd_stage or create_usd_stage, read-only: each layer identifier, real_path, is_muted and dirty, plus count and any captured USD errors. An unregistered stage_name is an error; get_usd_layer_info details one layer by index.
 //   @param stage_name [string!] - Name the stage was registered under via open_usd_stage or create_usd_stage.
 //   @param include_session_layers [bool] - When true (default) the returned stack also includes the stage's session/auto-generated layers; pass false to get only the persistent root + sublayers.
 //   @returns { stage_name: string, include_session_layers: bool, count: int, layers: [{ identifier: string, real_path: string, is_muted: bool, dirty: bool }], errors: [string]? }

@@ -298,11 +298,11 @@ TSharedPtr<FJsonObject> HandleCreateSoundMix(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------- //
 // create_sound_attenuation
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_attenuation - Create a USoundAttenuation asset with attenuation enabled
+// MCP:create_sound_attenuation - Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_sound_attenuation_properties edits every other field.
 //   @param name - Name of the new Sound Attenuation asset
 //   @param package_path - Target content path, defaults to /Game/Audio
-//   @param falloff_distance - Optional FalloffDistance on FBaseAttenuationSettings
-//   @param radius - Optional sphere radius applied to AttenuationShapeExtents X
+//   @param falloff_distance - FalloffDistance in Unreal units (cm): how far beyond the inner shape the volume fades out. Unchanged when omitted.
+//   @param radius - Inner sphere radius in Unreal units (cm); sets the shape to Sphere and AttenuationShapeExtents to (radius, 0, 0). Unchanged when omitted.
 //   @returns { name: string, package_path: string, asset_path: string, asset_class: string, attenuate: bool, falloff_distance: number, radius: number, shape_extent_x: number, shape_extent_y: number, shape_extent_z: number, applied_falloff_distance: bool, applied_radius: bool, created: bool, already_exists: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateSoundAttenuation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -364,10 +364,10 @@ TSharedPtr<FJsonObject> HandleCreateSoundAttenuation(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // create_sound_concurrency
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_concurrency - Create a USoundConcurrency asset and optionally set MaxCount
+// MCP:create_sound_concurrency - Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_sound_concurrency_properties edits the other concurrency settings.
 //   @param name - Name of the new Sound Concurrency asset
 //   @param package_path - Target content path, defaults to /Game/Audio
-//   @param max_count - Optional MaxCount on FSoundConcurrencySettings, clamped to >= 1
+//   @param max_count - Most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted.
 //   @returns { name: string, package_path: string, asset_path: string, asset_class: string, max_count: int, applied_max_count: bool, created: bool, already_exists: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateSoundConcurrency(const TSharedPtr<FJsonObject>& Params)
 {
@@ -405,7 +405,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundConcurrency(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // create_sound_submix
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_submix - Create a USoundSubmix asset
+// MCP:create_sound_submix - Create an empty USoundSubmix asset at package_path/name, or load the one already there, and save it. Returns asset_path, created, already_exists and saved; add effects with add_submix_effect_to_chain and read them with get_submix_effect_chain.
 //   @param name - Name of the new Sound Submix asset
 //   @param package_path - Target content path, defaults to /Game/Audio
 //   @returns { name: string, package_path: string, asset_path: string, asset_class: string, created: bool, already_exists: bool, saved: bool }
@@ -537,8 +537,8 @@ TSharedPtr<FJsonObject> HandleAddSubmixEffectToChain(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // get_submix_effect_chain  (REAL read)
 // ---------------------------------------------------------------------------- //
-// MCP:get_submix_effect_chain - Read the effect chain of a USoundSubmix
-//   @param submix_path - Full content path of the target USoundSubmix
+// MCP:get_submix_effect_chain - Read the effect chain of a USoundSubmix asset in order: one entry per slot with the name, class and path of its USoundEffectSubmixPreset ("None" for an empty slot), plus chain_length. Read-only; add_submix_effect_to_chain appends to it.
+//   @param submix_path - Asset path of the USoundSubmix, e.g. "/Game/Audio/SM_Master.SM_Master".
 //   @returns { submix_path: string, effects: [object], chain_length: int }
 TSharedPtr<FJsonObject> HandleGetSubmixEffectChain(const TSharedPtr<FJsonObject>& Params)
 {
@@ -582,9 +582,9 @@ TSharedPtr<FJsonObject> HandleGetSubmixEffectChain(const TSharedPtr<FJsonObject>
 // sets child->ParentClass = parent (via the exported editor SetParentClass, which
 // keeps both sides consistent). Saves both packages.
 // ---------------------------------------------------------------------------- //
-// MCP:set_sound_class_parent - Wire a child USoundClass under a parent USoundClass
-//   @param child_sound_class_path - Full content path of the child USoundClass
-//   @param parent_sound_class_path - Full content path of the parent USoundClass
+// MCP:set_sound_class_parent - Make one USoundClass the child of another, wiring ParentClass and ChildClasses, and save both packages. A previous parent loses the child in memory but is not saved; only self-parenting is refused, not cycles. Returns child_count, saved_parent and saved_child, succeeding even when a save fails.
+//   @param child_sound_class_path - Asset path of the USoundClass to re-parent, e.g. "/Game/Audio/SC_Footsteps.SC_Footsteps".
+//   @param parent_sound_class_path - Asset path of the USoundClass that becomes its parent, e.g. "/Game/Audio/SC_SFX.SC_SFX".
 //   @returns { child: string, parent: string, child_path: string, parent_path: string, child_count: int, saved_parent: bool, saved_child: bool }
 TSharedPtr<FJsonObject> HandleSetSoundClassParent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -631,8 +631,8 @@ TSharedPtr<FJsonObject> HandleSetSoundClassParent(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------- //
 // get_sound_class_hierarchy  (REAL read)
 // ---------------------------------------------------------------------------- //
-// MCP:get_sound_class_hierarchy - Read the hierarchy of a USoundClass
-//   @param sound_class_path - Full content path of the USoundClass
+// MCP:get_sound_class_hierarchy - Read one level of the hierarchy of a USoundClass asset: its parent and parent_path (parent "None" for a root), the names of its direct children and child_count. Call it again on a parent or child to walk further. Read-only.
+//   @param sound_class_path - Asset path of the USoundClass, e.g. "/Game/Audio/SC_SFX.SC_SFX".
 //   @returns { name: string, sound_class_path: string, parent: string, parent_path: string, children: [string], child_count: int }
 TSharedPtr<FJsonObject> HandleGetSoundClassHierarchy(const TSharedPtr<FJsonObject>& Params)
 {
@@ -768,7 +768,7 @@ TSharedPtr<FJsonObject> HandleSetSoundConcurrencyProperties(const TSharedPtr<FJs
         TEXT("set_sound_concurrency_properties"));
 }
 
-// MCP:get_sound_concurrency_properties - Read all FSoundConcurrencySettings fields from a USoundConcurrency.
+// MCP:get_sound_concurrency_properties - Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only.
 //   @param concurrency_path - Full content path of the target USoundConcurrency.
 //   @returns { concurrency_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundConcurrencyProperties(const TSharedPtr<FJsonObject>& Params)
@@ -814,7 +814,7 @@ TSharedPtr<FJsonObject> HandleSetSoundAttenuationProperties(const TSharedPtr<FJs
         TEXT("set_sound_attenuation_properties"));
 }
 
-// MCP:get_sound_attenuation_properties - Read all FSoundAttenuationSettings fields from a USoundAttenuation.
+// MCP:get_sound_attenuation_properties - Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only.
 //   @param attenuation_path - Full content path of the target USoundAttenuation.
 //   @returns { attenuation_path: string, asset_class: string, settings: object }
 TSharedPtr<FJsonObject> HandleGetSoundAttenuationProperties(const TSharedPtr<FJsonObject>& Params)

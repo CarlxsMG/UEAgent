@@ -384,8 +384,8 @@ namespace UEAgentExportImpl
     }
 }
 
-// MCP:export_asset_data - Exports asset data to JSON or TXT format.
-//   @param asset_path - Full path to the asset (e.g., '/Game/MyAsset').
+// MCP:export_asset_data - Load an asset and write its class, package and every editable or Blueprint-visible property, as details-panel text, to a new file Saved/Exports/Assets/Name_YYYYMMDD_HHMMSS.json or .txt in the project. Returns export_file_path, export_success and file sizes; an unsupported format writes nothing (export_success=false).
+//   @param asset_path - Package or object path of the asset (e.g., '/Game/MyAsset'); the file is named after its last segment.
 //   @param export_format - Export format: 'json' or 'txt'.
 //   @returns { asset_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }
 

@@ -130,10 +130,10 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // add_virtual_bone
 // ---------------------------------------------------------------------------
-// MCP:add_virtual_bone - Add a virtual bone to a skeleton
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param source_bone - Source bone name, defaults to first bone
-//   @param target_bone - Target bone name, defaults to first different bone
+// MCP:add_virtual_bone - Add a virtual bone from a source bone to a target bone of a USkeleton asset, named "VB <source>_<target>" by the engine, then save. Bone names are not checked against the skeleton; an existing pair returns that bone with already_exists true. Returns virtual_bone_name and virtual_bone_count.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param source_bone - Bone the virtual bone starts from (default the first bone, usually the root); not validated.
+//   @param target_bone - Bone the virtual bone points to (default the first bone that differs from source_bone); not validated.
 //   @returns { asset_path: string, virtual_bone_name: string, source_bone: string, target_bone: string, virtual_bone_count: int, saved: bool, already_exists: bool }
 TSharedPtr<FJsonObject> HandleAddVirtualBone(const TSharedPtr<FJsonObject>& Params)
 {
@@ -225,9 +225,9 @@ TSharedPtr<FJsonObject> HandleAddVirtualBone(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_slot_group
 // ---------------------------------------------------------------------------
-// MCP:add_anim_slot_group - Add an animation slot group to a skeleton
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param group_name - Name of the new slot group
+// MCP:add_anim_slot_group - Add an animation slot group (the groups montage slots belong to) to a USkeleton asset and save it. Idempotent: an existing group returns added false and changes nothing, but the skeleton is still saved; a failed save returns success false. Returns added and slot_group_count.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param group_name - Name of the slot group to add, e.g. "WeaponGroup".
 //   @returns { asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool }
 TSharedPtr<FJsonObject> HandleAddAnimSlotGroup(const TSharedPtr<FJsonObject>& Params)
 {
@@ -257,10 +257,10 @@ TSharedPtr<FJsonObject> HandleAddAnimSlotGroup(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // add_socket_to_skeleton_asset
 // ---------------------------------------------------------------------------
-// MCP:add_socket_to_skeleton_asset - Add a USkeletalMeshSocket to a skeleton on a bone
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param socket_name - Name for the new socket
-//   @param bone_name - Bone to attach the socket to, defaults to root bone
+// MCP:add_socket_to_skeleton_asset - Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save still returns success, so check saved. Mesh-only sockets: add_skeletal_mesh_socket.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param socket_name - Name of the socket; an existing socket with this name is updated instead of duplicated.
+//   @param bone_name - Bone to attach the socket to; must exist in the skeleton (default the root bone).
 //   @param location - Socket location relative to its bone as [x, y, z] (default 0,0,0)
 //   @param rotation - Socket rotation relative to its bone as [pitch, yaw, roll] (default 0,0,0)
 //   @returns { asset_path: string, socket_name: string, bone_name: string, socket_count: int, added: bool, already_existed: bool, saved: bool }
@@ -348,8 +348,8 @@ TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // get_skeleton_info
 // ---------------------------------------------------------------------------
-// MCP:get_skeleton_asset_info - Read summary info for a skeleton asset
-//   @param skeleton_path - Path to the USkeleton asset
+// MCP:get_skeleton_asset_info - Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, every virtual bone with its source and target, slot_group_count and socket_count. Read-only; for up to 100 bone names use get_skeleton_info with load_full_data true.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @returns { asset_path: string, bone_count: int, bones: [string], virtual_bone_count: int, virtual_bone_names: [string], virtual_bones: [{ name: string, source_bone: string, target_bone: string }], slot_group_count: int, socket_count: int }
 TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -408,9 +408,9 @@ TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // remove_virtual_bone
 // ---------------------------------------------------------------------------
-// MCP:remove_virtual_bone - Remove a virtual bone from a skeleton (idempotent).
-//   @param skeleton_path - Path to the USkeleton asset.
-//   @param virtual_bone_name - Name of the virtual bone to remove (the VB-prefixed name).
+// MCP:remove_virtual_bone - Remove a virtual bone from a USkeleton asset, named directly or found by its source and target bones, then save. Idempotent: no match returns removed false and already_absent true without saving. Returns the remaining virtual_bone_names; a failed save returns success false.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param virtual_bone_name - Full virtual bone name with its "VB " prefix, e.g. "VB pelvis_hand_r"; when given, source_bone and target_bone are ignored.
 //   @param source_bone - Source bone name; used with target_bone to resolve the virtual bone when virtual_bone_name is omitted.
 //   @param target_bone - Target bone name; used with source_bone to resolve the virtual bone when virtual_bone_name is omitted.
 //   @returns { asset_path: string, virtual_bone_name: string, removed: bool, already_absent: bool, virtual_bone_count: int, virtual_bone_names: [string], saved: bool }
@@ -549,9 +549,9 @@ TSharedPtr<FJsonObject> HandleRemoveAnimSlotGroup(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // remove_skeleton_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_socket_from_skeleton_asset - Remove a socket from a skeleton (idempotent).
-//   @param skeleton_path - Path to the USkeleton asset.
-//   @param socket_name - Name of the socket to remove.
+// MCP:remove_socket_from_skeleton_asset - Remove a socket from the socket list of a USkeleton asset and save it. Idempotent: a missing socket returns removed false and already_absent true without saving. Returns socket_count and the remaining socket_names; sockets that exist only on a skeletal mesh are untouched (use remove_skeletal_mesh_socket).
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param socket_name - Name of the socket to remove (case-insensitive).
 //   @returns { asset_path: string, socket_name: string, removed: bool, already_absent: bool, socket_count: int, socket_names: [string], saved: bool }
 TSharedPtr<FJsonObject> HandleRemoveSkeletonSocket(const TSharedPtr<FJsonObject>& Params)
 {
@@ -792,9 +792,9 @@ TSharedPtr<FJsonObject> HandleRemoveBone(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // rename_bone
 // ---------------------------------------------------------------------------
-// MCP:rename_bone - Rename a bone in a skeleton's reference skeleton
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param old_name - Current bone name
+// MCP:rename_bone - Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails with an error when old_name is not a bone or new_name is already taken; skeletal meshes and animations that use the old name are not updated. A failed save returns success false.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param old_name - Current bone name; must exist in the reference skeleton.
 //   @param new_name - Desired new bone name (must not already exist)
 //   @returns { asset_path, old_name, new_name, renamed, already_used, not_found, bone_count, saved, op: "rename_bone" }
 TSharedPtr<FJsonObject> HandleRenameBone(const TSharedPtr<FJsonObject>& Params)
@@ -959,8 +959,8 @@ TSharedPtr<FJsonObject> HandleSetBoneParent(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // is_skeleton_shared
 // ---------------------------------------------------------------------------
-// MCP:is_skeleton_shared - Count how many USkeletalMesh assets reference this skeleton.
-//   @param skeleton_path - Path to the USkeleton asset
+// MCP:is_skeleton_shared - Find the skeletal mesh assets bound to a USkeleton asset through an Asset Registry query on their Skeleton tag, returning mesh_count, mesh_paths and shared (true when more than one mesh uses it). Read-only; only the skeleton itself is loaded.
+//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @returns { asset_path, mesh_count, shared, mesh_paths }
 TSharedPtr<FJsonObject> HandleIsSkeletonShared(const TSharedPtr<FJsonObject>& Params)
 {

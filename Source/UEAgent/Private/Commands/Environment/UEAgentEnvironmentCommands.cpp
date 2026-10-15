@@ -65,8 +65,8 @@ namespace UEAgentEnvironmentImpl
     }
 }
 
-// MCP:spawn_sky_atmosphere - Spawns a SkyAtmosphere actor into the editor world.
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+// MCP:spawn_sky_atmosphere - Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& Params)
@@ -89,8 +89,8 @@ TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_volumetric_cloud - Spawns a VolumetricCloud actor into the editor world.
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+// MCP:spawn_volumetric_cloud - Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>& Params)
@@ -206,9 +206,9 @@ TSharedPtr<FJsonObject> HandleSpawnSkyLight(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_post_process_volume - Spawns a PostProcessVolume actor (unbound/infinite-extent by default).
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
-//   @param unbound - If true, volume covers the entire world (optional, default true)
+// MCP:spawn_post_process_volume - Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
+//   @param unbound - true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnPostProcessVolume(const TSharedPtr<FJsonObject>& Params)

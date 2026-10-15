@@ -17,18 +17,18 @@ Add a UMassEntityTraitBase-derived trait to a Mass entity config
 
 ## `add_mass_trait_to_entity`
 
-Runtime tag/fragment addition via archetype migration. Honest headless caveat: archetype mutation in headless mode can race with the simulation tick; prefer spawning fresh entities for deterministic builds. Requires "entity_handle" and "tag" (UScriptStruct name). Returns the new archetype_id; on validation failure the entity is unchanged.
+Add an FMassTag (a tag, not a trait or fragment, despite the name) to a Mass entity of the editor world (not PIE) by archetype migration. Caveat: EVERY entity sharing that archetype gets the tag, not only this one. Returns old_archetype_id, new_archetype_id and changed; inverse: remove_mass_trait_from_entity.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `entity_handle` | string | yes | "{Index}:{SerialNumber}" |
-| `tag` | string | yes | UScriptStruct name/path (a tag, NOT a stateful fragment). |
+| `entity_handle` | string | yes | Entity handle as "Index:SerialNumber", two integers such as "12:3" (no braces); a no-longer-valid entity is an error |
+| `tag` | string | yes | Reflected name of an FMassTag struct without the F prefix, as list_mass_trait_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve |
 
 **Returns:** `{ entity_handle, old_archetype_id, new_archetype_id, tag, changed }`
 
 ## `count_mass_entities`
 
-Total live entities plus per-archetype breakdown.
+Count the live Mass entities of the editor world (not a PIE world), read-only. Returns total, archetype_count and per_archetype [{archetype_id, count}]; list_mass_archetypes adds fragment counts, query_mass_entities counts by fragment or tag.
 
 No parameters.
 
@@ -36,7 +36,7 @@ No parameters.
 
 ## `create_mass_entity_config`
 
-Create and save a UMassEntityConfig asset
+Create a UMassEntityConfigAsset (an empty list of Mass traits) at package_path/config_name and save it; an existing config there is loaded and re-saved instead (created:false). Returns config_path, trait_count and saved. Add traits with add_mass_trait, then link it with set_mass_spawner_entity_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -47,13 +47,13 @@ Create and save a UMassEntityConfig asset
 
 ## `create_mass_spawner_actor`
 
-Spawn a AMassSpawner actor into the level
+Spawn an AMassSpawner actor into the editor world at location (zero rotation) and label it; the level is not saved. config_path is only echoed, not linked (config_linked:false): link configs with set_mass_spawner_entity_types. Use a unique label, since the spawner tools take the first match.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label for the new spawner actor |
 | `config_path` | string | no | Optional entity config asset path (echoed; not linked) |
-| `location` | array | no | Optional spawn location [X, Y, Z] (default origin) |
+| `location` | array | no | Optional spawn location [X, Y, Z] in world units (cm), default the origin; ignored unless it holds exactly 3 numbers |
 
 **Returns:** `{ actor_label, actor_name, config_path, config_linked, note }`
 
@@ -69,7 +69,7 @@ Trigger entity despawning on a AMassSpawner (DoDespawning from the FTSTicker pat
 
 ## `destroy_all_mass_entities`
 
-Destroy every entity currently in the Mass simulation.
+Destroy every Mass entity in the editor world (not a PIE world), archetype by archetype, with no undo. Returns destroyed_count, before_count and after_count. For one entity use destroy_mass_entity; to despawn what one spawner made use despawn_mass_entities.
 
 No parameters.
 
@@ -108,11 +108,11 @@ Read the parent config path of a UMassEntityConfigAsset (inverse of set_mass_con
 
 ## `get_mass_entity_info`
 
-Inspect a single entity: validity, archetype, fragments.
+Inspect one Mass entity of the editor world (not PIE) by handle, read-only: valid, built, archetype_id and the fragment types of its archetype. A destroyed or unknown handle returns valid:false rather than an error; a malformed handle is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `entity_handle` | string | yes | "{Index}:{SerialNumber}" |
+| `entity_handle` | string | yes | Entity handle as "Index:SerialNumber", two integers such as "12:3" (no braces) |
 
 **Returns:** `{ entity_handle, valid, built, archetype_id, fragment_count, fragment_types: [string] }`
 
@@ -138,7 +138,7 @@ Read the EntityTypes array of an AMassSpawner (inverse of set_mass_spawner_entit
 
 ## `get_mass_spawner_info`
 
-Read state of a AMassSpawner actor
+Read an AMassSpawner actor of the editor world, found by actor label (first match), read-only. Returns actor_name, count and entity_types [{entity_config, proportion}] with entity_type_count; the entities it spawned are counted by count_mass_entities instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -160,7 +160,7 @@ Read a property (name or dotted path) of a trait in a Mass config via reflection
 
 ## `list_mass_archetypes`
 
-Enumerate every Mass archetype with its live-entity count.
+List every Mass archetype of the editor world (not a PIE world) with its live-entity and fragment counts, read-only. Returns archetype_count, total_entities and archetypes [{archetype_id, entity_count, fragment_count}]; get_mass_entity_info names the fragments of one entity.
 
 No parameters.
 
@@ -186,7 +186,7 @@ Enumerate every UScriptStruct class derived from FMassTag (the zero-size tag mar
 
 ## `list_mass_traits`
 
-List the traits configured on a UMassEntityConfig
+List the traits a UMassEntityConfigAsset holds itself (not those inherited from its parent config), read-only, in config order. Returns config_path, trait_count and traits [{class, name}]; edit them with add_mass_trait, remove_mass_trait and set_mass_trait_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -220,12 +220,12 @@ Remove a trait from a Mass entity config (inverse of add_mass_trait)
 
 ## `remove_mass_trait_from_entity`
 
-Runtime tag removal via archetype migration.
+Remove an FMassTag from a Mass entity of the editor world (not PIE) by archetype migration; inverse of add_mass_trait_to_entity. Caveat: the tag is removed from EVERY entity sharing that archetype, not only this one. Returns old_archetype_id, new_archetype_id and changed (false when nothing moved).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `entity_handle` | string | yes | "{Index}:{SerialNumber}" |
-| `tag` | string | yes | UScriptStruct name/path (the tag to remove). |
+| `entity_handle` | string | yes | Entity handle as "Index:SerialNumber", two integers such as "12:3" (no braces); a no-longer-valid entity is an error |
+| `tag` | string | yes | Reflected name of the FMassTag struct to remove, without the F prefix, as list_mass_trait_types returns it (e.g. "MassOffLODTag"); /Script paths do not resolve |
 
 **Returns:** `{ entity_handle, old_archetype_id, new_archetype_id, tag, changed }`
 

@@ -85,12 +85,12 @@ Spawn an AWaterBodyExclusionVolume (a brush volume that excludes water bodies), 
 
 ## `create_water_zone`
 
-Spawn an AWaterZone actor in the editor world.
+Spawn a new AWaterZone actor in the editor world at location, unrotated, and label it. Not idempotent: every call adds another zone, even with a label already in use. Nothing is saved. Returns actor_label, actor_name and has_water_mesh; link bodies via water_zone_label of create_lake_water_body and its siblings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label to assign to the new AWaterZone actor |
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | World location [X, Y, Z] in cm; anything but a 3-number array means the origin. |
 
 **Returns:** `{ actor_label: string, actor_name: string, has_water_mesh: bool }`
 

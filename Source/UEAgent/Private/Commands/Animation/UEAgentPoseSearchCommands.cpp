@@ -331,10 +331,10 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // add_pose_search_channel_to_schema
 // ---------------------------------------------------------------------------
-// MCP:add_pose_search_channel_to_schema - Append (or update-weight) a UPoseSearchFeatureChannel_* on a UPoseSearchSchema
+// MCP:add_pose_search_channel_to_schema - Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a channel of that class is already there, overwrite its Weight instead (already_existed=true); then finalize via PostEditChange and save. Returns schema_cardinality and channel_count; success stays true if the save fails: read saved.
 //   @param schema_path - Asset path of the UPoseSearchSchema (required).
 //   @param channel_type - One of 'Pose', 'Trajectory', 'Position', 'Velocity', 'Heading' (required).
-//   @param weight - Channel weight (float, default 1.0).
+//   @param weight - Channel weight (float); default 1.0, which also resets the weight of an existing channel when omitted
 //   @returns { schema_path, channel_type, channel_class, weight, schema_cardinality, channel_count, added, already_existed, weight_updated, saved, message }
 TSharedPtr<FJsonObject> HandleAddPoseSearchChannelToSchema(const TSharedPtr<FJsonObject>& Params)
 {
@@ -587,7 +587,7 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr
 // ---------------------------------------------------------------------------
 // add_animation_asset_to_pose_search_database
 // ---------------------------------------------------------------------------
-// MCP:add_animation_asset_to_pose_search_database - Append an animation asset to a UPoseSearchDatabase
+// MCP:add_animation_asset_to_pose_search_database - Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
 //   @param database_path - Asset path of the UPoseSearchDatabase (required).
 //   @param animation_asset_path - Asset path of a UAnimSequenceBase / UAnimComposite / UAnimMontage / UBlendSpace (required).
 //   @returns { database_path, animation_asset_path, animation_asset_count, added, already_existed, saved, message }

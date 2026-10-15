@@ -562,10 +562,10 @@ TSharedPtr<FJsonObject> HandleGetReflectionCaptureProperties(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_scene_capture_2d_properties - Set data-only properties on an existing SceneCapture2D actor's USceneCaptureComponent2D: CaptureSource (base), ProjectionType, FOVAngle, TextureTarget (UTextureRenderTarget2D by path) and bCaptureEveryFrame (base). Headless-safe: configures fields only, never triggers a GPU capture. Reads every set property back.
+// MCP:set_scene_capture_2d_properties - Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of the USceneCaptureComponent2D on a SceneCapture2D actor in the editor world, without capturing or saving; undoable. An invalid value fails the call, but fields applied before it stay set. Returns each field read back with a *_set flag.
 //   @param actor_name [!] - Label or internal name of the SceneCapture2D actor
 //   @param capture_source [string] - ESceneCaptureSource (e.g. SceneColorHDR | FinalColorLDR | FinalColorHDR | SceneDepth); the SCS_ prefix is optional
-//   @param projection_type [string] - Perspective | Orthographic
+//   @param projection_type [string] - Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call; omit to keep the current one
 //   @param fov_angle [number] - Field-of-view angle in degrees (FOVAngle field)
 //   @param texture_target [string] - Path to a UTextureRenderTarget2D to assign
 //   @param capture_every_frame [boolean] - Whether the component captures every frame (bCaptureEveryFrame)

@@ -112,9 +112,9 @@ namespace
 // ---------------------------------------------------------------------------
 // set_actor_replicates
 // ---------------------------------------------------------------------------
-// MCP:set_actor_replicates - Toggle AActor::SetReplicates for an editor-world actor.
+// MCP:set_actor_replicates - Set bReplicates on an editor-world actor found by label (AActor::SetReplicates, which also sets RemoteRole). Only that placed instance changes, not its class defaults; it is not marked dirty and nothing is saved. replicates echoes the request; read back with get_actor_replication_info.
 //   @param actor_label - Label of the actor in the editor world.
-//   @param replicates - bool, new value for bReplicates.
+//   @param replicates - true makes the actor replicate, false stops it (new value of bReplicates).
 //   @returns { actor_label: string, replicates: bool }
 TSharedPtr<FJsonObject> HandleSetActorReplicates(
     const TSharedPtr<FJsonObject>& Params)
@@ -139,9 +139,9 @@ TSharedPtr<FJsonObject> HandleSetActorReplicates(
 // ---------------------------------------------------------------------------
 // set_actor_replicate_movement
 // ---------------------------------------------------------------------------
-// MCP:set_actor_replicate_movement - Toggle AActor::SetReplicateMovement for an editor-world actor.
+// MCP:set_actor_replicate_movement - Set bReplicateMovement on an editor-world actor found by label (AActor::SetReplicateMovement). Only that placed instance changes, not its class defaults; it is not marked dirty and nothing is saved. replicate_movement echoes the request; read back with get_actor_replication_info.
 //   @param actor_label - Label of the actor in the editor world.
-//   @param replicate_movement - bool, new value for bReplicateMovement.
+//   @param replicate_movement - true replicates the movement of the actor, false stops it (new value of bReplicateMovement).
 //   @returns { actor_label: string, replicate_movement: bool }
 TSharedPtr<FJsonObject> HandleSetActorReplicateMovement(
     const TSharedPtr<FJsonObject>& Params)
@@ -166,9 +166,9 @@ TSharedPtr<FJsonObject> HandleSetActorReplicateMovement(
 // ---------------------------------------------------------------------------
 // set_actor_net_dormancy
 // ---------------------------------------------------------------------------
-// MCP:set_actor_net_dormancy - Set AActor::NetDormancy for an editor-world actor.
+// MCP:set_actor_net_dormancy - Set NetDormancy on an editor-world actor found by label (AActor::SetNetDormancy). Only that placed instance changes; it is not marked dirty and nothing is saved. dormancy in the reply is the parsed enum name (e.g. DORM_DormantAll), not a read-back: use get_actor_replication_info.
 //   @param actor_label - Label of the actor in the editor world.
-//   @param dormancy - Dormancy token, e.g. "DORMANT_DormantAll", "DORMANT_Awake", "DORM_Never", "DORM_Initial".
+//   @param dormancy - ENetDormancy value, case-insensitive, with or without a DORM_ or DORMANT_ prefix: Never, Awake, DormantAll (or All), DormantPartial (or Partial), Initial; e.g. "DORM_DormantAll".
 //   @returns { actor_label: string, dormancy: string }
 TSharedPtr<FJsonObject> HandleSetActorNetDormancy(
     const TSharedPtr<FJsonObject>& Params)
@@ -304,8 +304,8 @@ TSharedPtr<FJsonObject> HandleGetActorReplicationInfo(
 // Read-side inverses of net_update_frequency + net_cull_distance.
 // ---------------------------------------------------------------------------
 
-// MCP:get_actor_net_update_frequency - Read AActor::NetUpdateFrequency + MinNetUpdateFrequency for an actor.
-//   @param actor_name - Engine name of the actor
+// MCP:get_actor_net_update_frequency - Read NetUpdateFrequency and MinNetUpdateFrequency (Hz) of an editor-world actor found by label. Read-only; reads the placed instance, not a PIE copy. The reply actor_name is the engine object name. Writer: set_actor_net_update_frequency.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not engine object names, despite the parameter name); first match.
 //   @returns { actor_name, net_update_frequency, min_net_update_frequency }
 
 TSharedPtr<FJsonObject> HandleGetActorNetUpdateFrequency(const TSharedPtr<FJsonObject>& Params)
@@ -342,8 +342,8 @@ TSharedPtr<FJsonObject> HandleGetActorNetCullDistance(const TSharedPtr<FJsonObje
 // Force / flush / role / priority primitives.
 // ============================================================================
 
-// MCP:force_net_update - AActor::ForceNetUpdate — schedule a replication kick immediately.
-//   @param actor_name - Required.
+// MCP:force_net_update - Call AActor::ForceNetUpdate on an editor-world actor found by label, which asks a net driver to replicate it on its next update. The editor world has no net driver, so nothing is sent and a PIE session is never reached; forced is always true.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @returns { actor_name, forced }
 TSharedPtr<FJsonObject> HandleForceNetUpdate(const TSharedPtr<FJsonObject>& Params)
 {
@@ -357,8 +357,8 @@ TSharedPtr<FJsonObject> HandleForceNetUpdate(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:flush_net_dormancy - AActor::FlushNetDormancy — wake a dormant actor so it re-replicates next tick.
-//   @param actor_name - Required.
+// MCP:flush_net_dormancy - Call AActor::FlushNetDormancy, which makes a dormant replicated actor send its state again, on an editor-world actor found by label. The editor world has no net driver, so nothing is sent and PIE is never reached, but DORM_Initial still becomes DORM_DormantAll. flushed is always true.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @returns { actor_name, flushed }
 TSharedPtr<FJsonObject> HandleFlushNetDormancy(const TSharedPtr<FJsonObject>& Params)
 {
@@ -372,8 +372,8 @@ TSharedPtr<FJsonObject> HandleFlushNetDormancy(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:get_net_role - Read LocalRole + RemoteRole for an actor.
-//   @param actor_name - Required.
+// MCP:get_net_role - Read LocalRole and RemoteRole (number and ENetRole name) of an editor-world actor found by label. Read-only; it reads the placed instance, not a PIE server or client copy, so it shows the authoring-time roles.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @returns { actor_name, local_role, local_role_name, remote_role, remote_role_name }
 TSharedPtr<FJsonObject> HandleGetNetRole(const TSharedPtr<FJsonObject>& Params)
 {
@@ -393,9 +393,9 @@ TSharedPtr<FJsonObject> HandleGetNetRole(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:set_net_priority - AActor::NetPriority is an editable UPROPERTY (writer).
-//   @param actor_name - Required.
-//   @param priority - float in [0.0, 10.0] (UE range).
+// MCP:set_net_priority - Write NetPriority, the relative replication priority when bandwidth is short, on an editor-world actor found by label. Only that placed instance changes; it is not marked dirty or saved. priority is read back after the write. Engine defaults: 1.0 for actors, 3.0 for pawns.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
+//   @param priority - New NetPriority as a float, written as given with no clamping; higher makes the actor more likely to replicate when bandwidth is saturated.
 //   @returns { actor_name, priority }
 TSharedPtr<FJsonObject> HandleSetNetPriority(const TSharedPtr<FJsonObject>& Params)
 {
@@ -416,8 +416,8 @@ TSharedPtr<FJsonObject> HandleSetNetPriority(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:get_net_priority - Reader for NetPriority.
-//   @param actor_name - Required.
+// MCP:get_net_priority - Read NetPriority, the relative replication priority when bandwidth is short, of an editor-world actor found by label. Read-only; reads the placed instance, not a PIE copy. Engine defaults: 1.0 for actors, 3.0 for pawns. Writer: set_net_priority.
+//   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @returns { actor_name, priority }
 TSharedPtr<FJsonObject> HandleGetNetPriority(const TSharedPtr<FJsonObject>& Params)
 {

@@ -138,10 +138,10 @@ namespace
 // ---------------------------------------------------------------------------
 // create_control_bus
 // ---------------------------------------------------------------------------
-// MCP:create_control_bus - Create and save a USoundControlBus asset under /Game
+// MCP:create_control_bus - Creates a USoundControlBus asset at package_path/bus_name, or loads the one already there, and saves it. initial_value is only echoed back as value, never written to the bus; push a runtime value with set_control_bus_value. Returns bus_path, default_value, created, already_existed, saved.
 //   @param bus_name - Name of the control bus (e.g. "Bus_Volume")
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
-//   @param initial_value - Initial bus value echoed back (default 1.0)
+//   @param initial_value - Number echoed back as value in the reply; it is not stored on the bus (default 1.0)
 //   @returns { bus_path, bus_name, value, default_value, created, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateControlBus(
 	const TSharedPtr<FJsonObject>& Params)
@@ -180,7 +180,7 @@ TSharedPtr<FJsonObject> HandleCreateControlBus(
 // ---------------------------------------------------------------------------
 // create_control_bus_mix
 // ---------------------------------------------------------------------------
-// MCP:create_control_bus_mix - Create and save a USoundControlBusMix asset under /Game
+// MCP:create_control_bus_mix - Creates a USoundControlBusMix asset at package_path/mix_name, or loads the one already there, and saves it. A new mix has no stages; add buses with add_bus_to_mix. Returns mix_path, mix_name, bus_count (its stage count), created, saved.
 //   @param mix_name - Name of the control bus mix asset
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @returns { mix_path, mix_name, bus_count, created, saved }
@@ -215,10 +215,10 @@ TSharedPtr<FJsonObject> HandleCreateControlBusMix(
 // ---------------------------------------------------------------------------
 // set_control_bus_value  (push a value into the bus at runtime via statics)
 // ---------------------------------------------------------------------------
-// MCP:set_control_bus_value - Set the runtime value of a USoundControlBus
+// MCP:set_control_bus_value - Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_modulation_info.
 //   @param bus_path - Asset path to the USoundControlBus
 //   @param value - New runtime bus value to push (required float)
-//   @param fade_time - Fade time in seconds; negative uses the mix default (default -1.0)
+//   @param fade_time - Fade time in seconds; a negative value reuses the last fade time of the global stage, or 0.1 s if none was set (default -1.0)
 //   @returns { bus_path, value, fade_time, applied }
 TSharedPtr<FJsonObject> HandleSetControlBusValue(
 	const TSharedPtr<FJsonObject>& Params)
@@ -257,7 +257,7 @@ TSharedPtr<FJsonObject> HandleSetControlBusValue(
 // ---------------------------------------------------------------------------
 // add_bus_to_mix
 // ---------------------------------------------------------------------------
-// MCP:add_bus_to_mix - Add a USoundControlBus to a USoundControlBusMix
+// MCP:add_bus_to_mix - Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose target value is default_value, and saves the mix. A bus already in the mix is left unchanged (already_in_mix true, not saved); edit a stage with set_control_bus_mix_stage_value. Returns mix_path, bus_path, bus_count, added, saved.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @param bus_path - Asset path to the USoundControlBus
 //   @param default_value - Target value for the new mix stage (default 1.0)
@@ -318,13 +318,13 @@ TSharedPtr<FJsonObject> HandleAddBusToMix(
 // ---------------------------------------------------------------------------
 // create_modulation_generator_lfo
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_generator_lfo - Create and save a modulation generator (LFO) asset
+// MCP:create_modulation_generator_lfo - Creates a USoundModulationGeneratorLFO asset at package_path/generator_name (or loads the one there), writes waveform, frequency, amplitude and offset, enables looping and saves it, overwriting an existing LFO. An unknown waveform silently becomes Sine but is echoed as sent. Returns generator_path, the written values, created, saved.
 //   @param generator_name - Name of the modulation generator asset
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @param frequency - LFO frequency in Hz (default 1.0)
 //   @param amplitude - LFO amplitude (default 1.0)
 //   @param offset - LFO output offset (default 0.0)
-//   @param waveform - LFO shape: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine)
+//   @param waveform - LFO shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine; any other value also gives Sine)
 //   @returns { generator_path, generator_name, waveform, frequency, amplitude, offset, created, saved }
 TSharedPtr<FJsonObject> HandleCreateModulationGeneratorLFO(
 	const TSharedPtr<FJsonObject>& Params)
@@ -385,7 +385,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationGeneratorLFO(
 // ---------------------------------------------------------------------------
 // get_modulation_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_info - Read state and metadata of a USoundControlBus
+// MCP:get_modulation_info - Reads a USoundControlBus asset and its live value in the editor world, without changing anything. Returns bus_path, default_value, current_value (the live modulator value; the engine returns 1.0 for a bus that is not active) and subsystem_active (whether the editor world has a modulation manager).
 //   @param bus_path - Asset path to the USoundControlBus
 //   @returns { bus_path, default_value, current_value, subsystem_active }
 TSharedPtr<FJsonObject> HandleGetModulationInfo(
@@ -427,7 +427,7 @@ TSharedPtr<FJsonObject> HandleGetModulationInfo(
 // ---------------------------------------------------------------------------
 // get_control_bus_mix_info
 // ---------------------------------------------------------------------------
-// MCP:get_control_bus_mix_info - Read the mix-stage table of a USoundControlBusMix
+// MCP:get_control_bus_mix_info - Reads the stages of a USoundControlBusMix asset without changing it. Returns mix_path, stage_count and stages, one per stage with bus_path (empty when the bus reference is cleared), target_value, attack_time and release_time. Edit a stage with set_control_bus_mix_stage_value.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @returns { mix_path, stage_count, stages: [{ bus_path, target_value, attack_time, release_time }] }
 TSharedPtr<FJsonObject> HandleGetControlBusMixInfo(
@@ -537,7 +537,7 @@ TSharedPtr<FJsonObject> HandleSetControlBusMixStageValue(
 // ---------------------------------------------------------------------------
 // remove_bus_from_mix
 // ---------------------------------------------------------------------------
-// MCP:remove_bus_from_mix - Remove a bus's stage from a USoundControlBusMix
+// MCP:remove_bus_from_mix - Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix. When the bus is not in the mix nothing is saved and the call reports failure, with already_absent true in its data. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
 //   @param mix_path - Asset path to the USoundControlBusMix
 //   @param bus_path - Asset path to the USoundControlBus to remove from the mix
 //   @returns { mix_path, bus_path, removed, already_absent, stage_count, saved }
@@ -582,7 +582,7 @@ TSharedPtr<FJsonObject> HandleRemoveBusFromMix(
 // ---------------------------------------------------------------------------
 // create_sound_modulation_patch
 // ---------------------------------------------------------------------------
-// MCP:create_sound_modulation_patch - Create and save a USoundModulationPatch asset under /Game
+// MCP:create_sound_modulation_patch - Creates a USoundModulationPatch asset at package_path/patch_name with no inputs or output, bypassed by default (bBypass true), and saves it; a patch already there is returned untouched, not re-saved. Returns patch_path, bBypass, input_count, output_parameter_path, created, already_existed, saved. Fill it with add_modulation_input_to_patch and set_modulation_patch_output_parameter.
 //   @param patch_name - Name of the modulation patch asset (e.g. "Patch_Volume")
 //   @param package_path - Target content package path where the asset is created (default /Game/MCP)
 //   @returns { patch_path, patch_name, bBypass, input_count, output_parameter_path, created, already_existed, saved }
@@ -641,10 +641,10 @@ TSharedPtr<FJsonObject> HandleCreateSoundModulationPatch(
 // ---------------------------------------------------------------------------
 // add_modulation_input_to_patch
 // ---------------------------------------------------------------------------
-// MCP:add_modulation_input_to_patch - Append a USoundControlBus input to a USoundModulationPatch
+// MCP:add_modulation_input_to_patch - Appends a USoundControlBus as an input of a USoundModulationPatch asset and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param bus_path - Asset path to the USoundControlBus to add as an input
-//   @param input_name - Optional friendly name for the input (default "")
+//   @param input_name - Ignored: the engine input struct has no name field, so the value is only written to the log (default empty)
 //   @returns { patch_path, bus_path, input_count, added, already_present, saved }
 TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 	const TSharedPtr<FJsonObject>& Params)
@@ -709,7 +709,7 @@ TSharedPtr<FJsonObject> HandleAddModulationInputToPatch(
 // ---------------------------------------------------------------------------
 // remove_modulation_input_from_patch
 // ---------------------------------------------------------------------------
-// MCP:remove_modulation_input_from_patch - Remove a bus's input from a USoundModulationPatch
+// MCP:remove_modulation_input_from_patch - Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch. When no input matches nothing is saved and the call reports failure, with already_removed true in its data. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param bus_path - Asset path to the USoundControlBus whose input is removed
 //   @returns { patch_path, bus_path, removed, already_removed, input_count, saved }
@@ -755,7 +755,7 @@ TSharedPtr<FJsonObject> HandleRemoveModulationInputFromPatch(
 // ---------------------------------------------------------------------------
 // set_modulation_patch_bypass
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_patch_bypass - Set the bBypass flag on a USoundModulationPatch
+// MCP:set_modulation_patch_bypass - Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed patch stays active but outputs the default value of its output parameter; new patches start bypassed. Returns patch_path, bBypass as stored, updated, saved.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param bypass - New bypass value (required bool)
 //   @returns { patch_path, bBypass, updated, saved }
@@ -789,7 +789,7 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchBypass(
 // ---------------------------------------------------------------------------
 // set_modulation_patch_output_parameter
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_patch_output_parameter - Assign the USoundModulationParameter of a USoundModulationPatch
+// MCP:set_modulation_patch_output_parameter - Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @param parameter_path - Asset path to the USoundModulationParameter (or empty string to clear)
 //   @returns { patch_path, parameter_path, parameter_class, updated, cleared, saved }
@@ -837,7 +837,7 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchOutputParameter(
 // ---------------------------------------------------------------------------
 // get_sound_modulation_patch_info
 // ---------------------------------------------------------------------------
-// MCP:get_sound_modulation_patch_info - Read state of a USoundModulationPatch (bBypass, output, inputs)
+// MCP:get_sound_modulation_patch_info - Reads a USoundModulationPatch asset without changing it. Returns patch_path, bBypass, output_parameter ({ path, class }, or null when unset), inputs (one { bus: { path }, name } per input; name is always empty) and input_count.
 //   @param patch_path - Asset path to the USoundModulationPatch
 //   @returns { patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path } }], input_count }
 TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
@@ -894,9 +894,9 @@ TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
 // ---------------------------------------------------------------------------
 // create_modulation_parameter
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_parameter - Create and save a USoundModulationParameter asset under /Game
+// MCP:create_modulation_parameter - Creates a USoundModulationParameter asset of the chosen concrete class at parameter_path and saves it. An existing parameter there is returned untouched with its real class (not saved). Returns parameter_path, parameter_name, parameter_class, created, already_existed, saved. Tune it with set_modulation_parameter_settings.
 //   @param parameter_path - Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name
-//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFFrequency, HPFFrequency, Bipolar, Additive, Scaled
+//   @param parameter_class - Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled. The filter names take ONE F: "LPFFrequency" and "HPFFrequency" are refused, although the error message lists them
 //   @returns { parameter_path, parameter_name, parameter_class, created, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -957,7 +957,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationParameter(
 // ---------------------------------------------------------------------------
 // set_modulation_parameter_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_parameter_settings - Set USoundModulationParameterSettings fields on a parameter asset
+// MCP:set_modulation_parameter_settings - Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
 //   @param parameter_path - Asset path to the USoundModulationParameter
 //   @param value_normalized - Optional float in [0,1]; sets Settings.ValueNormalized
 //   @param clamp_to_normalized_range - Optional bool; sets Settings.bClampToNormalizedRange
@@ -1010,7 +1010,7 @@ TSharedPtr<FJsonObject> HandleSetModulationParameterSettings(
 // ---------------------------------------------------------------------------
 // get_modulation_parameter_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_parameter_info - Read state of a USoundModulationParameter (Settings + class)
+// MCP:get_modulation_parameter_info - Reads a USoundModulationParameter asset without changing it. Returns parameter_path, parameter_class (the concrete class, e.g. SoundModulationParameterVolume) and its settings value_normalized, clamp_to_normalized_range and value_unit. Change them with set_modulation_parameter_settings.
 //   @param parameter_path - Asset path to the USoundModulationParameter
 //   @returns { parameter_path, parameter_class, value_normalized, clamp_to_normalized_range, value_unit }
 TSharedPtr<FJsonObject> HandleGetModulationParameterInfo(
@@ -1035,7 +1035,7 @@ TSharedPtr<FJsonObject> HandleGetModulationParameterInfo(
 // ---------------------------------------------------------------------------
 // create_modulation_generator
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_generator - Create and save a USoundModulationGenerator asset under /Game
+// MCP:create_modulation_generator - Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path, with engine default settings, and saves it. An existing generator there is returned untouched with its own class (not saved). Returns generator_path, generator_name, generator_class, created, already_existed, saved. Configure it with set_modulation_generator_settings.
 //   @param generator_path - Full asset path (e.g. /Game/MyGame/Gen_LFO)
 //   @param generator_class - Concrete class name (case-insensitive). One of: LFO, ADEnvelope, EnvelopeFollower
 //   @returns { generator_path, generator_name, generator_class, created, already_existed, saved }
@@ -1088,7 +1088,7 @@ TSharedPtr<FJsonObject> HandleCreateModulationGenerator(
 // ---------------------------------------------------------------------------
 // set_modulation_generator_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_generator_settings - Set USoundModulationGenerator settings (typed by class)
+// MCP:set_modulation_generator_settings - Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored, other generator classes are refused, and the LFO shape cannot be set here. Returns generator_path, generator_class, settings as stored, updated, saved.
 //   @param generator_path - Asset path to the USoundModulationGenerator
 //   @param frequency - LFO only: oscillation frequency in Hz (optional float)
 //   @param amplitude - LFO only: output amplitude/gain multiplier (optional float)
@@ -1169,7 +1169,7 @@ TSharedPtr<FJsonObject> HandleSetModulationGeneratorSettings(
 // ---------------------------------------------------------------------------
 // get_modulation_generator_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_generator_info - Read state of a USoundModulationGenerator (class + typed settings)
+// MCP:get_modulation_generator_info - Reads a USoundModulationGenerator asset without changing it. Returns generator_path, generator_class and settings by class: LFO shape, frequency, amplitude, offset, phase; ADEnvelope attack_time, decay_time; EnvelopeFollower attack_time, release_time, gain, audio_bus_path; empty for any other class.
 //   @param generator_path - Asset path to the USoundModulationGenerator
 //   @returns { generator_path, generator_class, settings: {...} }
 TSharedPtr<FJsonObject> HandleGetModulationGeneratorInfo(

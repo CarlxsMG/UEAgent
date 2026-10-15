@@ -85,10 +85,10 @@ namespace UEAgentMediaImpl
 // UMediaTexture ("<name>_T") and links it via UMediaTexture::SetMediaPlayer.
 // PlayOnOpen / Loop are configurable; Loop is set via the public SetLooping().
 // ---------------------------------------------------------------------------
-// MCP:create_media_player - Creates (or loads, idempotently) a persisted UMediaPlayer asset
+// MCP:create_media_player - Create a UMediaPlayer asset at package_path/name with PlayOnOpen and looping set, optionally with a linked UMediaTexture named "<name>_T" beside it, and save both. An existing player is returned unchanged (flags not applied). Returns asset_path, play_on_open, loop, media_texture_path, saved and texture_saved.
 //   @param name - Name of the media player asset to create.
 //   @param package_path - Target content package path where the asset is created (default /Game/Media)
-//   @param create_output_texture - Also create + link a sibling media texture (default true)
+//   @param create_output_texture - Also create a UMediaTexture "<name>_T" next to the player and link it (default true).
 //   @param play_on_open - Set the player's PlayOnOpen flag (default true)
 //   @param loop - Set the player to loop via SetLooping (default false)
 //   @returns { media_player_name, asset_path, created, already_exists, play_on_open, loop, texture_created, media_texture_path, saved, texture_saved, save_error, texture_save_error }
@@ -209,9 +209,9 @@ TSharedPtr<FJsonObject> HandleCreateMediaPlayer(const TSharedPtr<FJsonObject>& P
 // NewObject<UFileMediaSource> -> SetFilePath(file_path) -> save. No real movie
 // file is required; the asset simply references a path string.
 // ---------------------------------------------------------------------------
-// MCP:create_file_media_source - Creates (or loads, idempotently) a persisted UFileMediaSource asset
+// MCP:create_file_media_source - Create a UFileMediaSource asset at package_path/name that points at a movie file path, register it and save it; the file does not need to exist. An existing asset is returned unchanged (file_path is not applied). Returns asset_path, the stored file_path, created and saved.
 //   @param name - Name of the file media source asset to create.
-//   @param file_path - The movie file path the source references (e.g.
+//   @param file_path - Movie file on disk, absolute or "./"-relative to the project Content folder, e.g. "./Movies/Intro.mp4"; a path inside Content is stored in that relative form.
 //   @param package_path - Target content package path where the asset is created (default /Game/Media)
 //   @returns { media_source_name, asset_path, created, already_exists, file_path, saved, save_error }
 TSharedPtr<FJsonObject> HandleCreateFileMediaSource(const TSharedPtr<FJsonObject>& Params)
@@ -259,7 +259,7 @@ TSharedPtr<FJsonObject> HandleCreateFileMediaSource(const TSharedPtr<FJsonObject
 // create_media_texture
 // NewObject<UMediaTexture> -> UpdateResource -> save. Not linked to any player.
 // ---------------------------------------------------------------------------
-// MCP:create_media_texture - Creates (or loads, idempotently) a persisted UMediaTexture asset
+// MCP:create_media_texture - Create a UMediaTexture asset at package_path/name (AutoClear on, no player linked) and save it; an existing texture is returned unchanged, with its linked player if any. Link a player with link_media_texture_to_player. Returns asset_path, created, has_media_player and saved.
 //   @param name - Name of the media texture asset to create.
 //   @param package_path - Target content package path where the asset is created (default /Game/Media)
 //   @returns { media_texture_name, asset_path, created, already_exists, has_media_player, media_player_path, saved, save_error }
@@ -378,8 +378,8 @@ TSharedPtr<FJsonObject> HandleLinkMediaTextureToPlayer(const TSharedPtr<FJsonObj
 //   UMediaTexture      -> has_media_player, media_player_path
 //   UFileMediaSource   -> file_path
 // ---------------------------------------------------------------------------
-// MCP:get_media_info - Reads metadata for a Media asset (read-only)
-//   @param asset_path - Asset path of the media asset (player, texture, or file
+// MCP:get_media_info - Read a media asset by path: class and media_type ("MediaPlayer", "MediaTexture", "FileMediaSource" or "Other"), plus play_on_open and loop for a player, the linked player and auto_clear for a texture, or file_path for a file source. Read-only.
+//   @param asset_path - Path of a UMediaPlayer, UMediaTexture or UFileMediaSource asset, e.g. "/Game/Media/MP_Intro"; any other asset reports only its name and class.
 //   @returns { asset_path, asset_name, class, media_type, play_on_open, loop, has_media_player, media_player_path, auto_clear, file_path }
 TSharedPtr<FJsonObject> HandleGetMediaInfo(const TSharedPtr<FJsonObject>& Params)
 {

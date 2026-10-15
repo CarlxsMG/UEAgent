@@ -19,11 +19,11 @@ Register a custom project collision channel (claims the first free ECC_GameTrace
 
 ## `add_collision_profile`
 
-Create (or update, if profile_name already exists) a project collision profile.
+Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `profile_name` | string | yes | Profile name |
+| `profile_name` | string | yes | Name of the collision profile to create or replace, e.g. "MyPawnProfile" |
 | `object_type_name` | string | yes | Channel this profile's object type resolves to, e.g. "WorldDynamic" or a custom channel's friendly name |
 | `collision_enabled` | string | no | "NoCollision" \| "QueryOnly" \| "PhysicsOnly" \| "QueryAndPhysics" \| "ProbeOnly" \| "QueryAndProbe". Defaults to "QueryAndPhysics". |
 | `custom_responses` | array | no | [{channel: string, response: "Block"\|"Ignore"\|"Overlap"}, ...] per-channel overrides |
@@ -46,24 +46,24 @@ Diff THIS project's Config/Default*.ini against ANOTHER project's, aligned by se
 
 ## `get_collision_profile`
 
-Read a collision profile's full definition by name.
+Read one project collision profile by name, read-only: object_type_name, collision_enabled, can_modify, help_message and custom_responses [{channel, response}], which lists only the per-channel overrides. An unknown name is an error; add_collision_profile is the writer.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `profile_name` | string | yes | Profile name |
+| `profile_name` | string | yes | Name of an existing collision profile, e.g. "BlockAll" or "Pawn" |
 
 **Returns:** `{ profile_name: string, object_type_name: string, collision_enabled: string, can_modify: bool, help_message: string, custom_responses: [{channel: string, response: string}] }`
 
 ## `get_component_properties`
 
-Dump every editable / blueprint-visible property of ONE component with its current value, plus whether the component is active and registered -- the read-back oracle for set_component_property and the fastest way to see how a component is configured without reflection Python. Reaches two different things depending on which you pass: `actor_name` for a component on a placed level actor, or `blueprint_name` for a Blueprint's own component TEMPLATE (its SCS/CDO defaults, no world involved). Honours a `world` selector, which matters in co-op: the default 'editor' reads frozen pre-BeginPlay defaults, while 'server' / 'client' / 'pie:N' read the LIVE component, so runtime-mutated values only show up if you ask for the running world -- and a value read on the server proves nothing about the client.
+Read every editable or Blueprint-visible property of one component, with its current value as text, plus whether it is active and registered, without changing anything: the read-back for set_component_property. Pass actor_name for a placed actor (world picks the editor instance or a live PIE world) or blueprint_name for a Blueprint component template.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `component_name` | string | yes | Name of the component to get properties from |
-| `actor_name` | string | no | Name of the actor containing the component |
+| `component_name` | string | yes | Name of the component: its object name on a placed actor, or its SCS variable or native subobject name in a Blueprint. |
+| `actor_name` | string | no | Object name, else editor label, of the placed actor that owns the component; ignored when blueprint_name is given. |
 | `world` | string | no | Optional world selector: absent/'editor' (default) reads the frozen editor archetype/CDO (pre-BeginPlay defaults); 'server' (the PIE world with authority -- what you want for replicated state in co-op) \| 'client' \| 'pie:N' \| 'pie' (ambiguous) resolve the LIVE running PIE actor+component so runtime-mutated values (e.g. Health after BeginPlay) are returned; 'game' is an alias of 'pie'. Only affects the actor_name path; ignored for blueprint_name. |
-| `blueprint_name` | string | no |   |
+| `blueprint_name` | string | no | Blueprint whose component template to read, by short name (searched under /Game/Blueprints, then the whole project) or asset path such as "/Game/Characters/BP_Hero"; it wins over actor_name, and world is ignored. |
 
 **Returns:** `{ actor_name: string, component_name: string, component_class: string, properties: [{...}], properties_count: int, editable_properties_count: int, blueprint_visible_properties_count: int, public_properties_count: int, component_owner: string, component_is_active: bool, component_is_registered: bool, component_creation_method: string, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
@@ -79,7 +79,7 @@ Read UGameMapsSettings EditorStartupMap and GameDefaultMap from the in-memory CD
 
 ## `get_project_info`
 
-Read the project name and metadata from UGeneralProjectSettings
+Read the project metadata from the in-memory UGeneralProjectSettings defaults (Project Settings, Description), read-only. Returns project_name, project_version, company_name, company_distinguished_name, copyright_notice, description, homepage, licensing_terms, privacy_policy and support_contact, as strings that may be empty.
 
 No parameters.
 
@@ -87,12 +87,12 @@ No parameters.
 
 ## `get_project_settings_value`
 
-Read a UDeveloperSettings property as a text string
+Read one property of a settings class default object (CDO) as its ExportText string; this is the in-memory value, not re-read from the .ini on disk. Returns class_name, property_name and value; an unknown class or property is an error. set_project_settings_value is the writer.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `class_name` | string | yes | Class short name or /Script/Module.Class path |
-| `property_name` | string | yes | Name of the property on the settings class |
+| `class_name` | string | yes | Short name of a loaded UDeveloperSettings subclass without the U prefix (e.g. "PhysicsSettings"), or a /Script/Module.Class path |
+| `property_name` | string | yes | Name of the property on the settings class, e.g. "DefaultGravityZ" |
 
 **Returns:** `{ class_name: string, property_name: string, value: string }`
 
@@ -106,7 +106,7 @@ No parameters.
 
 ## `list_project_setting_sections`
 
-List every loaded UDeveloperSettings-derived class
+List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.
 
 No parameters.
 

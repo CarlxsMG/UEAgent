@@ -124,7 +124,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_sound_cue
 // ---------------------------------------------------------------------------
-// MCP:create_sound_cue - Create and save an empty USoundCue asset under /Game
+// MCP:create_sound_cue - Create an empty USoundCue (no nodes, no first node) at package_path/name and save it; an existing cue there is returned unchanged (already_existed:true). Returns cue_path, asset_path, node_count and saved. Build the graph with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node.
 //   @param name - Asset name, e.g. SC_Footsteps
 //   @param package_path - Target content path, defaults to /Game/SoundCues
 //   @returns { name: string, package_path: string, asset_path: string, cue_path: string, created: bool, already_existed: bool, node_count: int, saved: bool, message: string }
@@ -494,9 +494,9 @@ TSharedPtr<FJsonObject> HandleDisconnectSoundCueNodes(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // set_sound_cue_first_node
 // ---------------------------------------------------------------------------
-// MCP:set_sound_cue_first_node - Set the cue's output or root node
+// MCP:set_sound_cue_first_node - Make the node at node_id the root (FirstNode, the output) of a USoundCue graph, undoably, and save the asset. Returns first_node_class, first_node_set and saved; an out-of-range node_id is an error. Get node ids from add_sound_cue_node or get_sound_cue_graph.
 //   @param cue_path - Full asset path of the cue
-//   @param node_id - node_id to use as the root of the cue graph
+//   @param node_id - node_id (index in the cue AllNodes array) to use as the root of the cue graph
 //   @returns { cue_path: string, node_id: int, first_node_class: string, first_node_set: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSoundCueFirstNode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -597,7 +597,7 @@ TSharedPtr<FJsonObject> HandleSetSoundCueNodeProperties(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // get_sound_cue_graph
 // ---------------------------------------------------------------------------
-// MCP:get_sound_cue_graph - Read back a Sound Cue's node graph
+// MCP:get_sound_cue_graph - Read the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id other sound cue tools take), class, child_ids (-1 for an empty slot), max_child_nodes and editable properties, plus first_node_id (-1 when unset) and node_count.
 //   @param cue_path - Full asset path of the cue
 //   @returns { cue_path: string, asset_path: string, nodes: [object], node_count: int, first_node_id: int, has_first_node: bool }
 TSharedPtr<FJsonObject> HandleGetSoundCueGraph(const TSharedPtr<FJsonObject>& Params)

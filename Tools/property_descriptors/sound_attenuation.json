@@ -7,5 +7,5 @@
   "struct_field": "Attenuation",
   "set_desc": "Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial merge + clamp).",
   "settings_desc": "Object of FSoundAttenuationSettings/FBaseAttenuationSettings fields to merge; absent keys untouched. e.g. bAttenuate, bSpatialize, attenuationShape(Sphere/Capsule/Box/Cone), distanceAlgorithm, falloffDistance, dBAttenuationAtMax(-60..0), attenuationShapeExtents{x,y,z}, bAttenuateWithLPF, lPFFrequencyAtMin/Max, bEnableOcclusion, occlusionVolumeAttenuation, bEnableReverbSend, reverbWetLevelMin/Max. Nested plugin sub-objects (pluginSettings, audioLinkSettingsOverride) are NOT authored here.",
-  "get_desc": "Read all FSoundAttenuationSettings fields from a USoundAttenuation."
+  "get_desc": "Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only."
 }

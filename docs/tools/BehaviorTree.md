@@ -84,7 +84,7 @@ Create and save a new UBehaviorTree asset, optionally binding a blackboard.
 
 ## `create_blackboard_data`
 
-Create and save a new UBlackboardData asset.
+Create an empty UBlackboardData asset at package_path/name and save it; success requires the save. Idempotent: an existing blackboard there is returned with already_exists=true and is not re-saved. Returns blackboard_path and key_count; add keys with add_blackboard_key.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -115,11 +115,11 @@ Reader: runtime BT status + active task name (if any) on an AI pawn.
 
 ## `get_blackboard_component`
 
-Get the blackboard component from an actor
+Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. Read-only. Editor world only, never PIE, where pawns are not auto-possessed; for asset keys use get_blackboard_keys_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to query for blackboard component |
+| `actor_name` | string | yes | Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, in the editor world (first match). |
 
 **Returns:** `{ actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }]? }`
 
@@ -136,11 +136,11 @@ Retrieve all key-value pairs and complete data from an actor's blackboard
 
 ## `get_blackboard_keys`
 
-List all available keys in an actor's blackboard
+List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Read-only; returns keys and key_count. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Name of the actor whose blackboard to enumerate (optional, use blackboard_path for asset-based read) |
+| `actor_name` | string | no | Object name or label of an editor-world actor whose live blackboard to read; takes precedence over blackboard_path. |
 | `blackboard_path` | string | no | Path to a UBlackboardData asset (alternative to actor_name) |
 
 **Returns:** `{ actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }], key_count: number }`
@@ -157,7 +157,7 @@ Read key definitions from a UBlackboardData asset (no live component needed).
 
 ## `get_blackboard_value`
 
-Retrieve a specific value from an actor's blackboard
+Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -168,11 +168,11 @@ Retrieve a specific value from an actor's blackboard
 
 ## `pause_behavior_tree`
 
-Pause the runtime BT on an AI-possessed pawn (UBehaviorTreeComponent::PauseLogic).
+Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Required. |
+| `actor_name` | string | yes | Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, in the editor world (first match). |
 
 **Returns:** `{ actor_name, paused, was_running }`
 
@@ -243,7 +243,7 @@ Remove a leaf task node (Wait/MoveTo/...) from a BehaviorTree composite.  Invers
 
 ## `restart_behavior_tree`
 
-Restart the runtime BT from the root (RestartTree).
+Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -251,7 +251,7 @@ Restart the runtime BT from the root (RestartTree).
 
 ## `resume_behavior_tree`
 
-Resume the runtime BT on a paused AI pawn.
+Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -259,12 +259,12 @@ Resume the runtime BT on a paused AI pawn.
 
 ## `run_behavior_tree`
 
-Start execution of a behavior tree on an actor
+Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to run the behavior tree on |
-| `behavior_tree_path` | string | yes | Path or name of the behavior tree asset to execute |
+| `actor_name` | string | yes | Object name or label of the pawn or AIController in the editor world (first match). |
+| `behavior_tree_path` | string | yes | Asset path of the UBehaviorTree, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved. |
 
 **Returns:** `{ actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }`
 
@@ -294,13 +294,13 @@ Constrain an existing blackboard key's subsettings on a UBlackboardData asset an
 
 ## `set_blackboard_value`
 
-Set a value in an actor's blackboard
+Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Name of the actor whose blackboard to modify |
 | `key_name` | string | yes | Name of the blackboard key to set |
-| `value` | string | no | Value to set in the blackboard (as string, converted by key type) |
+| `value` | string | no | Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none). |
 
 **Returns:** `{ actor_name: string, key_name: string, key_type: string, value: string, set: bool }`
 

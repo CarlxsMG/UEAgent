@@ -121,10 +121,10 @@ namespace
 // ---------------------------------------------------------------------------
 // create_behavior_config
 // ---------------------------------------------------------------------------
-// MCP:create_behavior_config - Create (or load, idempotent) a UGameplayBehaviorConfig data asset.
-//   @param config_name - Name of the new config asset.
+// MCP:create_behavior_config - Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves, then save it. An unresolved behavior_class is ignored without error, so check behavior_class in the reply; created tells new from existing.
+//   @param config_name - Asset name of the config, e.g. "BC_Patrol"
 //   @param package_path - Destination /Game folder (default /Game/MCP).
-//   @param behavior_class - Optional UGameplayBehavior subclass name to assign as BehaviorClass (set via reflection).
+//   @param behavior_class - Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; a short name never resolves, and a miss is ignored
 //   @returns { config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleCreateBehaviorConfig(
     const TSharedPtr<FJsonObject>& Params)
@@ -220,8 +220,8 @@ TSharedPtr<FJsonObject> HandleSetBehaviorClass(
 // ---------------------------------------------------------------------------
 // get_behavior_config_info
 // ---------------------------------------------------------------------------
-// MCP:get_behavior_config_info - Read the BehaviorClass from a UGameplayBehaviorConfig (via reflection).
-//   @param config_path - Content path of the UGameplayBehaviorConfig.
+// MCP:get_behavior_config_info - Read the protected BehaviorClass of a UGameplayBehaviorConfig asset by reflection: behavior_class (class name), behavior_class_path and has_behavior_class. Read-only; set it with set_behavior_class, or list every config with list_behavior_configs.
+//   @param config_path - Path of the UGameplayBehaviorConfig asset, e.g. "/Game/MCP/BC_Patrol"
 //   @returns { config_path: string, behavior_class: string, behavior_class_path: string, has_behavior_class: bool }
 TSharedPtr<FJsonObject> HandleGetBehaviorConfigInfo(
     const TSharedPtr<FJsonObject>& Params)
@@ -345,7 +345,7 @@ TSharedPtr<FJsonObject> HandleEndBehaviorOnActor(
 // ---------------------------------------------------------------------------
 // get_behavior_subsystem_info
 // ---------------------------------------------------------------------------
-// MCP:get_behavior_subsystem_info - Probe the UGameplayBehaviorSubsystem availability in the editor world.
+// MCP:get_behavior_subsystem_info - Report whether the editor world has a UGameplayBehaviorSubsystem (UGameplayBehaviorSubsystem::GetCurrent): world_name, subsystem_available and, when it exists, subsystem_class. Read-only, no parameters; trigger_behavior_on_actor and end_behavior_on_actor fail without it.
 //   @returns { world_name: string, subsystem_available: bool, subsystem_class: string }
 TSharedPtr<FJsonObject> HandleGetBehaviorSubsystemInfo(
     const TSharedPtr<FJsonObject>& /*Params*/)

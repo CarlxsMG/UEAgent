@@ -216,7 +216,7 @@ namespace
 // --------------------------------------------------------------------------- //
 // create_string_table
 // --------------------------------------------------------------------------- //
-// MCP:create_string_table - Create and save a new UStringTable localization asset
+// MCP:create_string_table - Creates a UStringTable asset at package_path/name with the given namespace and no entries, then saves it. A string table already there is returned unchanged (namespace not applied, already_exists true). Returns asset_path, string_table_id, namespace, entry_count, created, saved. Add entries with set_string_table_entry.
 //   @param name - Name of the new StringTable asset
 //   @param package_path - Target content path, defaults to /Game/StringTables
 //   @param namespace - Optional namespace for all entries, defaults to asset name
@@ -348,7 +348,7 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableEntry(const TSharedPtr<FJsonObjec
 // --------------------------------------------------------------------------- //
 // get_string_table_entries
 // --------------------------------------------------------------------------- //
-// MCP:get_string_table_entries - List all Key to SourceString entries in a UStringTable
+// MCP:get_string_table_entries - Lists every entry of a UStringTable asset without changing it. Returns string_table_name, string_table_id, namespace, count and entries, each with key, source (the source string) and its metadata as an id to value object with metadata_count. Edit entries with set_string_table_entry.
 //   @param string_table_path - Full asset path to the UStringTable
 //   @returns { string_table_path: string, string_table_name: string, string_table_id: string, namespace: string, entries: [object], count: int }
 TSharedPtr<FJsonObject> HandleGetStringTableEntries(const TSharedPtr<FJsonObject>& Params)

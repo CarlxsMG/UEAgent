@@ -2433,11 +2433,13 @@ TSharedPtr<FJsonObject> HandleImplementInterfaceFunction(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:override_interface_member - One call to override an interface method OR a parent virtual BY NAME: resolves the member and creates the right artifact -- an event OVERRIDE node (kind="event", node_id returned) for members with no return value, or a function-override graph (kind="function", graph_name returned) for members that return data. Idempotent: re-calling reports was_already_overridden without duplicating. Same engine logic as implement_interface_function, with a response shaped around "did I create it" instead of "which graph is it"; prefer this one when overriding an interface EVENT, where a hand-rolled event node can produce a dead node that compiles clean and never fires (lint_blueprint_graph flags that shape as eclipsed_interface_event).
+// MCP:override_interface_member - Override a Blueprint interface member or parent virtual by name: an event override node (kind="event", node_id) when it returns nothing, else a function-override graph (kind="function", graph_name). Idempotent (was_already_overridden); leaves the Blueprint needing a compile, unsaved. Prefer it to hand-placed interface event nodes, which can compile yet never fire.
 //   @param blueprint_name - Blueprint asset name or path (must implement the interface / inherit the virtual).
 //   @param member_name - Name of the interface or overridable function to override (e.g. "CanInteract").
-//   @param interface_path - Optional disambiguator hint; advisory only (resolution is by member name).
+//   @param interface_path - Ignored: the member is resolved by member_name alone, implemented interfaces first, then parent classes.
 //   @param node_position - Optional [x, y] canvas position applied to a freshly created event-override node.
+//   @param position_x - Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins.
+//   @param position_y - Ignored by this tool: the new node is only moved when node_position is given, and node_position then wins.
 //   @returns { kind, created, was_already_overridden, graph_name[, node_id] }
 //     kind="event": an event OVERRIDE node was created/reused in the event graph (node_id returned).
 //     kind="function": an editable function-override graph is ready to wire (use graph_name).

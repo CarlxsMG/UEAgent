@@ -571,9 +571,9 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeInfo(const TSharedPtr<FJsonObject>&
 // Runtime: run / stop
 //----------------------------------------------------------------------//
 
-// MCP:run_behavior_tree - Start execution of a behavior tree on an actor
-//   @param actor_name - Name of the actor to run the behavior tree on
-//   @param behavior_tree_path - Path or name of the behavior tree asset to execute
+// MCP:run_behavior_tree - Start a BehaviorTree asset with AAIController::RunBehaviorTree on an AIController or the pawn it possesses. The actor is searched in the editor world only, never PIE, where pawns are not auto-possessed, so it usually errors with no AIController. Returns started and ai_controller; nothing is saved.
+//   @param actor_name - Object name or label of the pawn or AIController in the editor world (first match).
+//   @param behavior_tree_path - Asset path of the UBehaviorTree, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved.
 //   @returns { actor_name: string, behavior_tree_path: string, started: bool, ai_controller: string }
 
 TSharedPtr<FJsonObject> HandleRunBehaviorTree(const TSharedPtr<FJsonObject>& Params)
@@ -667,8 +667,8 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 // Runtime blackboard
 //----------------------------------------------------------------------//
 
-// MCP:get_blackboard_component - Get the blackboard component from an actor
-//   @param actor_name - Name of the actor to query for blackboard component
+// MCP:get_blackboard_component - Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. Read-only. Editor world only, never PIE, where pawns are not auto-possessed; for asset keys use get_blackboard_keys_asset.
+//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, in the editor world (first match).
 //   @returns { actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }]? }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardComponent(const TSharedPtr<FJsonObject>& Params)
@@ -701,10 +701,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardComponent(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_blackboard_value - Set a value in an actor's blackboard
+// MCP:set_blackboard_value - Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
 //   @param actor_name - Name of the actor whose blackboard to modify
 //   @param key_name - Name of the blackboard key to set
-//   @param value - Value to set in the blackboard (as string, converted by key type)
+//   @param value - Value as a string, converted by key type: "42", "0.5", "true" or "1", a name, an enum index, a vector "X=1 Y=2 Z=3", a rotator "P=0 Y=90 R=0", an object or class path. Omitted means empty (0, false, none).
 //   @returns { actor_name: string, key_name: string, key_type: string, value: string, set: bool }
 
 TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& Params)
@@ -796,7 +796,7 @@ TSharedPtr<FJsonObject> HandleSetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_value - Retrieve a specific value from an actor's blackboard
+// MCP:get_blackboard_value - Read one key of the running blackboard of an editor-world actor (its AIController blackboard, else one on the actor). value is a number for Int, Float and Enum keys, a bool for Bool, else a string (objects as paths). Read-only; editor world only, never PIE.
 //   @param actor_name - Name of the actor whose blackboard to query
 //   @param key_name - Name of the blackboard key to retrieve
 //   @returns { actor_name: string, key_name: string, key_type: string, value: number|string|bool }
@@ -870,8 +870,8 @@ TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_keys - List all available keys in an actor's blackboard
-//   @param actor_name - Name of the actor whose blackboard to enumerate (optional, use blackboard_path for asset-based read)
+// MCP:get_blackboard_keys - List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Read-only; returns keys and key_count. Editor world only, never PIE.
+//   @param actor_name - Object name or label of an editor-world actor whose live blackboard to read; takes precedence over blackboard_path.
 //   @param blackboard_path - Path to a UBlackboardData asset (alternative to actor_name)
 //   @returns { actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool }], key_count: number }
 
@@ -998,7 +998,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
 // Asset authoring (Blackboard + BehaviorTree)
 //----------------------------------------------------------------------//
 
-// MCP:create_blackboard_data - Create and save a new UBlackboardData asset.
+// MCP:create_blackboard_data - Create an empty UBlackboardData asset at package_path/name and save it; success requires the save. Idempotent: an existing blackboard there is returned with already_exists=true and is not re-saved. Returns blackboard_path and key_count; add keys with add_blackboard_key.
 //   @param name - Asset name (e.g. "BB_Enemy").
 //   @param package_path - Target /Game package path (optional, default "/Game/AI")
 //   @returns { name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string? }
@@ -2274,8 +2274,8 @@ TSharedPtr<FJsonObject> HandleRemoveBTService(const TSharedPtr<FJsonObject>& Par
 // Runtime BT lifecycle (pause/resume/restart/status) + AI perception (sight radius / perceived actors)
 // ============================================================================
 
-// MCP:pause_behavior_tree - Pause the runtime BT on an AI-possessed pawn (UBehaviorTreeComponent::PauseLogic).
-//   @param actor_name - Required.
+// MCP:pause_behavior_tree - Pause the behavior tree of an editor-world actor (its AIController brain component, else a UBehaviorTreeComponent on the actor) with PauseLogic. paused is always true, not read back; was_running is measured. Editor world only, never PIE. Continue it with resume_behavior_tree.
+//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with a UBehaviorTreeComponent, in the editor world (first match).
 //   @returns { actor_name, paused, was_running }
 TSharedPtr<FJsonObject> HandlePauseBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2295,7 +2295,7 @@ TSharedPtr<FJsonObject> HandlePauseBehaviorTree(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:resume_behavior_tree - Resume the runtime BT on a paused AI pawn.
+// MCP:resume_behavior_tree - Resume a behavior tree paused by pause_behavior_tree (ResumeLogic) on an editor-world actor, through its AIController brain component or a UBehaviorTreeComponent on the actor. Returns was_paused and is_paused, both read from the component. Editor world only, never PIE.
 //   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to resume.
 TSharedPtr<FJsonObject> HandleResumeBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2315,7 +2315,7 @@ TSharedPtr<FJsonObject> HandleResumeBehaviorTree(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:restart_behavior_tree - Restart the runtime BT from the root (RestartTree).
+// MCP:restart_behavior_tree - Restart the current behavior tree of an editor-world actor from its root (RestartTree), through its AIController brain component or a UBehaviorTreeComponent on the actor. restarted is always true, not measured: check get_behavior_tree_status. Editor world only, never PIE.
 //   @param actor_name - Name or label of the AI-possessed pawn (or AIController) whose UBehaviorTreeComponent to restart.
 TSharedPtr<FJsonObject> HandleRestartBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {

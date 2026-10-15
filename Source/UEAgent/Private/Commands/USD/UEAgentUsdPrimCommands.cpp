@@ -203,9 +203,9 @@ TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Par
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_usd_prim - Remove a prim (and its descendants) from the stage
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath to remove
+// MCP:remove_usd_prim - Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_active with active=false is the reversible way to hide a prim. Not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of the prim to remove, e.g. "/World/Cube"; its descendants go with it.
 //   @returns { removed: bool, prim_path: string }
 TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Params)
 {
@@ -226,10 +226,10 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Param
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_type - Change the typeName of an EXISTING prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath of the prim to retype
-//   @param type_name [string!] - New USD type name (e.g. Mesh, Xform, Cube)
+// MCP:set_usd_prim_type - Change the typeName of an existing prim on a registered USD stage (define_usd_prim creates new ones), at the current edit target. The name is written as given, not checked against the schema registry. Returns type_name and set; not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of the prim to retype, e.g. "/World/Cube"; it must exist.
+//   @param type_name [string!] - New USD schema type name, e.g. "Mesh", "Xform" or "Cube"; written as given.
 //   @returns { set: bool, type_name: string }
 TSharedPtr<FJsonObject> HandleSetUsdPrimType(const TSharedPtr<FJsonObject>& Params)
 {
@@ -258,10 +258,10 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimType(const TSharedPtr<FJsonObject>& Para
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_active - Activate or deactivate a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param active [bool!] - true to activate, false to deactivate
+// MCP:set_usd_prim_active - Activate or deactivate an existing prim on a registered USD stage (active metadata on the current edit target). An inactive prim and its subtree leave composition but stay addressable, the reversible alternative to remove_usd_prim. Returns active and set; not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param active [bool!] - true to activate, false to deactivate; omitted means true.
 //   @returns { active: bool, prim_path: string }
 TSharedPtr<FJsonObject> HandleSetUsdPrimActive(const TSharedPtr<FJsonObject>& Params)
 {
@@ -294,10 +294,10 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimActive(const TSharedPtr<FJsonObject>& Pa
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_specifier - Change a prim's specifier (Def/Over/Class)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param specifier [string!] - "Def" | "Over" | "Class"
+// MCP:set_usd_prim_specifier - Change the specifier ("Def", "Over" or "Class") of an existing prim on a registered USD stage, at the current edit target. Caveat: an unrecognized value is silently applied as "Def" and the reply echoes the input, not the applied specifier. Returns specifier and set; not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param specifier [string!] - "Def", "Over" or "Class", case-insensitive; anything else is applied as "Def".
 //   @returns { set: bool, specifier: string }
 TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>& Params)
 {
@@ -331,11 +331,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_metadata - Author a metadata key/value on a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param key [string!] - Metadata key (e.g. "custom:author", "comment", "documentation")
-//   @param value [object!] - {type: "bool|int|float|double|string|token", value: <scalar>} OR {value: <scalar>} (type inferred from the JSON runtime type)
+// MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "documentation", "kind") on an existing prim of a registered USD stage, at the current edit target. USD returns set=false when the value type does not match the field type; the reply echoes the converted value. Not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param key [string!] - Registered USD prim metadata field, e.g. "comment", "documentation", "kind" or "hidden"; a key USD does not register as prim metadata fails with set=false.
+//   @param value [object!] - {type?: "bool|int|int64|float|double|string|token|asset", value: <scalar>} OR a bare scalar; without type the JSON type decides (bool, number stored as double, string). Token fields such as "kind" need type "token".
 //   @returns { set: bool, key: string, value: object }
 TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
@@ -384,10 +384,10 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_usd_prim_metadata - Read metadata for a prim (specific key or all)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param key [string] - Specific key to read. Empty (default) returns GetAllMetadata
+// MCP:get_usd_prim_metadata - Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return; unsupported value types become a placeholder string. Read-only.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param key [string] - Metadata field to read, e.g. "documentation"; empty or omitted (default) returns all entries.
 //   @returns { present: bool, key: string, value: object, metadata: object, count: number, note?: string }
 TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
@@ -447,10 +447,10 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_display_name - Set the human-readable displayName metadata
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param display_name [string!] - New display name
+// MCP:set_usd_prim_display_name - Author the displayName metadata (a UI label; the prim name does not change) on an existing prim of a registered USD stage, at the current edit target. An empty string is written as an empty displayName, not cleared. Returns display_name and set; not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param display_name [string!] - Label that UIs show instead of the prim name, e.g. "Hero Cube"; may be empty.
 //   @returns { set: bool, display_name: string }
 TSharedPtr<FJsonObject> HandleSetUsdPrimDisplayName(const TSharedPtr<FJsonObject>& Params)
 {
@@ -479,10 +479,10 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimDisplayName(const TSharedPtr<FJsonObject
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_usd_prims - List child prims under a prefix (recursive or direct)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path_prefix [string] - Path whose children to enumerate. Default: "/" (pseudo root)
-//   @param recursive [bool] - If true (default), use GetFilteredChildren (traverse instance proxies). If false, GetChildren (direct only).
+// MCP:list_usd_prims - List the direct children of one prim (default the pseudo root "/") on a registered USD stage, each with prim_path, type_name and active, plus count. Only active, loaded, defined, non-abstract children appear, and it never recurses: call it again per child to go deeper. Read-only.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path_prefix [string] - SdfPath of the parent prim whose direct children are listed; it must exist. Default "/" (the pseudo root).
+//   @param recursive [bool] - Has no effect: true (default) and false return the same direct children, filtered by the USD default predicate, without traversing instance proxies.
 //   @returns { prims: [object], count: number }
 TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params)
 {
@@ -532,9 +532,9 @@ TSharedPtr<FJsonObject> HandleListUsdPrims(const TSharedPtr<FJsonObject>& Params
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_usd_prim_info - Read identity + relationships for a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
+// MCP:get_usd_prim_info - Read one prim of a registered USD stage: name, type_name, active, parent_path, direct children_count, applied_schemas, variant_sets and an is_a map for nine common types (Xform, Mesh, Cube, Scope, Camera, four lights). A missing prim returns is_valid=false with a note, not an error. Read-only.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of the prim to read, e.g. "/World/Cube".
 //   @returns { name: string, prim_path: string, type_name: string, active: bool, is_valid: bool, is_pseudo_root: bool,
 //             parent_path: string, children_count: number, applied_schemas: [string],
 //             variant_sets: [string], is_a: object<string,bool> }
@@ -610,10 +610,10 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimInfo(const TSharedPtr<FJsonObject>& Para
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:apply_usd_prim_schema - Apply a USD schema (API schema) to a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param schema_name [string!] - Schema identifier, e.g. "MaterialBindingAPI", "UsdGeomModelAPI"
+// MCP:apply_usd_prim_schema - Apply a USD API schema (e.g. "MaterialBindingAPI") to an existing prim of a registered USD stage, on the current edit target. Checks CanApplyAPI first: a schema that cannot apply returns applied=false with the USD reason in why_not instead of an error. Not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param schema_name [string!] - Schema identifier (not the C++ class name), e.g. "MaterialBindingAPI", "GeomModelAPI"
 //   @returns { applied: bool, schema_name: string, why_not?: string }
 TSharedPtr<FJsonObject> HandleApplyUsdPrimSchema(const TSharedPtr<FJsonObject>& Params)
 {
@@ -661,10 +661,10 @@ TSharedPtr<FJsonObject> HandleApplyUsdPrimSchema(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_usd_prim_schema - Remove a previously applied schema from a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param schema_name [string!] - Schema identifier (e.g. "MaterialBindingAPI")
+// MCP:remove_usd_prim_schema - Remove an applied API schema (e.g. "MaterialBindingAPI") from an existing prim of a registered USD stage, on the current edit target. A schema the prim does not have returns removed=false and was_applied=false instead of an error. Not saved to disk; inverse of apply_usd_prim_schema.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param schema_name [string!] - Schema identifier as listed in applied_schemas by get_usd_prim_info, e.g. "MaterialBindingAPI".
 //   @returns { removed: bool, schema_name: string }
 TSharedPtr<FJsonObject> HandleRemoveUsdPrimSchema(const TSharedPtr<FJsonObject>& Params)
 {
@@ -698,10 +698,10 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrimSchema(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_instanceable - Mark a prim as instanceable (or clear the flag)
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param instanceable [bool!] - true to mark instanceable, false to clear
+// MCP:set_usd_prim_instanceable - Set or clear the instanceable metadata (USD native instancing) of an existing prim on a registered USD stage, at the current edit target. Returns instanceable (the requested value, or the current one when the write fails) and set. Not saved to disk.
+//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
+//   @param instanceable [bool!] - true to mark instanceable, false to clear; omitted means true.
 //   @returns { instanceable: bool, prim_path: string }
 TSharedPtr<FJsonObject> HandleSetUsdPrimInstanceable(const TSharedPtr<FJsonObject>& Params)
 {

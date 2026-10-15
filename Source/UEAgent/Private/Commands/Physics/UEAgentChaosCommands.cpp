@@ -226,8 +226,8 @@ namespace
 // ---------------------------------------------------------------------------
 // 1. create_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:create_geometry_collection - Create a UGeometryCollection asset, optionally populated from a StaticMesh
-//   @param package_path - Package path for the asset, e.g. /Game/Chaos/Collections
+// MCP:create_geometry_collection - Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; rebuilt true); an unloadable source_mesh_path is silently skipped. created is always true and the save result is not checked.
+//   @param package_path - Content folder for the asset, e.g. /Game/Chaos/Collections; a path without a leading slash is placed under /Game/
 //   @param name - Name of the geometry collection asset, e.g. GC_Wall
 //   @param source_mesh_path - Optional StaticMesh to convert and append, e.g. /Engine/BasicShapes/Cube
 //   @returns { asset_path: string, geometry_collection_name: string, num_materials: int, created: bool, rebuilt: bool }
@@ -349,7 +349,7 @@ TSharedPtr<FJsonObject> HandleCreateGeometryCollection(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // 2. get_geometry_collection_info
 // ---------------------------------------------------------------------------
-// MCP:get_geometry_collection_info - Read geometry collection asset metadata and structure stats
+// MCP:get_geometry_collection_info - Reads a UGeometryCollection asset without changing it: material, source and damage-threshold counts, damage model ("Threshold", "MaterialStrength" or "Unknown"), mass settings and element counts (transforms, vertices, faces, geometry; 0 without collection data). Use get_gc_hierarchy_info for the bone tree.
 //   @param geometry_collection_path - Full asset path, e.g. /Game/Chaos/GC_Wall
 //   @returns { asset_path: string, num_materials: int, num_geometry_sources: int, damage_model: string, num_damage_thresholds: int, is_empty: bool, num_transforms: int, num_vertices: int, num_faces: int, num_geometry: int, mass: float, mass_as_density: bool, minimum_mass_clamp: float, density_from_physics_material: bool, has_physics_material: bool }
 TSharedPtr<FJsonObject> HandleGetGeometryCollectionInfo(const TSharedPtr<FJsonObject>& Params)
@@ -402,12 +402,12 @@ TSharedPtr<FJsonObject> HandleGetGeometryCollectionInfo(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // 3. fracture_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:fracture_geometry_collection - Apply Voronoi fracturing to a geometry collection
+// MCP:fracture_geometry_collection - Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it (save result unchecked). Fails when no fracture is made. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
-//   @param num_sites - Number of random Voronoi sites to generate, default 20
-//   @param random_seed - Optional seed for site generation
-//   @param chance_to_fracture - Optional 0 to 1 chance per site, default 1
-//   @param grout - Optional grout amount for the cuts
+//   @param num_sites - Number of random Voronoi sites to generate, minimum 1, default 20
+//   @param random_seed - Seed for the random site positions and the per-transform fracture chance, default 0
+//   @param chance_to_fracture - Chance from 0 to 1 that each selected transform is fractured, default 1
+//   @param grout - Width of the gap left between cut pieces, in cm (default 0)
 //   @param split_islands - Optional, split resulting islands, default false
 //   @returns { geometry_collection_path: string, num_fractures: int, num_sites: int, random_seed: int, success: bool }
 TSharedPtr<FJsonObject> HandleFractureGeometryCollection(const TSharedPtr<FJsonObject>& Params)
@@ -500,10 +500,10 @@ TSharedPtr<FJsonObject> HandleFractureGeometryCollection(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // 4. cluster_geometry_collection
 // ---------------------------------------------------------------------------
-// MCP:cluster_geometry_collection - Run auto-clustering on a geometry collection
+// MCP:cluster_geometry_collection - Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it (save result unchecked). Returns the cluster count used and the transform counts before and after.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param cluster_size_method - Small, Medium, or Large, default Medium
-//   @param site_count - Base site count used by the size method, default 10
+//   @param site_count - Target cluster count before cluster_size_method scales it, minimum 1, default 10
 //   @returns { geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool }
 TSharedPtr<FJsonObject> HandleClusterGeometryCollection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -644,7 +644,7 @@ TSharedPtr<FJsonObject> HandleSetGeometryCollectionDamage(const TSharedPtr<FJson
 // ---------------------------------------------------------------------------
 // 5b. set_geometry_collection_mass
 // ---------------------------------------------------------------------------
-// MCP:set_geometry_collection_mass - Configure the mass / density model on a geometry collection
+// MCP:set_geometry_collection_mass - Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, minimum_mass_clamp, density_from_physics_material), only for the fields given, then saves it; undoable. Returns the four values as stored, success, saved; fails when the save fails. Read them back with get_geometry_collection_info.
 //   @param geometry_collection_path - Full asset path to the UGeometryCollection
 //   @param mass - Optional total mass (kg), or density (kg/m^3) when mass_as_density is true
 //   @param mass_as_density - Optional, interpret 'mass' as a density in kg/m^3, default unchanged
@@ -888,11 +888,11 @@ TSharedPtr<FJsonObject> HandleRemoveGeometryCollectionSource(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // plane_cut_fracture
 // ---------------------------------------------------------------------------
-// MCP:plane_cut_fracture - Fracture a Geometry Collection with random cutting planes
+// MCP:plane_cut_fracture - Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. success needs the save AND a transform count that did not shrink, so it is also true when nothing was cut: check new_fracture_count.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
-//   @param num_planes - Number of random cutting planes to generate, default 3
+//   @param num_planes - Number of random cutting planes to generate, minimum 1, default 3
 //   @param random_seed - Optional seed for plane generation, default 1337
-//   @param grout - Optional grout amount for the cuts
+//   @param grout - Width of the gap left between cut pieces, in cm (default 0)
 //   @param split_islands - Optional, split resulting islands, default true
 //   @returns { geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }
 TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Params)
@@ -974,13 +974,13 @@ TSharedPtr<FJsonObject> HandlePlaneCutFracture(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // slice_fracture
 // ---------------------------------------------------------------------------
-// MCP:slice_fracture - Fracture a Geometry Collection with a regular slicing grid
+// MCP:slice_fracture - Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. success needs the save and a transform count that did not shrink; check new_fracture_count.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @param slices_x - Number of evenly spaced X slices, default 2
 //   @param slices_y - Number of evenly spaced Y slices, default 2
 //   @param slices_z - Number of evenly spaced Z slices, default 1
-//   @param random_seed - Optional seed for variation, default 1337
-//   @param grout - Optional grout amount for the cuts
+//   @param random_seed - Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little
+//   @param grout - Width of the gap left between cut pieces, in cm (default 0)
 //   @returns { geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1071,7 +1071,7 @@ TSharedPtr<FJsonObject> HandleSliceFracture(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // compute_gc_proximity
 // ---------------------------------------------------------------------------
-// MCP:compute_gc_proximity - Compute the proximity adjacency graph of a Geometry Collection
+// MCP:compute_gc_proximity - Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place and saves it; undoable. Returns proximity_pairs (unordered pairs of neighboring pieces, from a precise proximity pass), transform_count, success and saved; fails when the save fails. Afterwards get_gc_hierarchy_info reports proximity_computed true.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @returns { geometry_collection_path: string, proximity_pairs: int, transform_count: int, success: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleComputeGCProximity(const TSharedPtr<FJsonObject>& Params)
@@ -1184,7 +1184,7 @@ TSharedPtr<FJsonObject> HandleSetGCConnectionSettings(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // get_gc_hierarchy_info
 // ---------------------------------------------------------------------------
-// MCP:get_gc_hierarchy_info - Read the bone hierarchy of a Geometry Collection
+// MCP:get_gc_hierarchy_info - Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_indices, and per bone its level, name and simulation type ("Rigid", "Clustered" or "None"), plus proximity_computed. Generates the Level attribute in memory if needed, without saving. For parent indices use list_geometry_collection_bones.
 //   @param geometry_collection_path - Asset path of the UGeometryCollection
 //   @returns { geometry_collection_path: string, transform_count: int, root_indices: [int], levels: [int], bone_names: [string], simulation_types: [string], proximity_computed: bool, success: bool }
 TSharedPtr<FJsonObject> HandleGetGCHierarchyInfo(const TSharedPtr<FJsonObject>& Params)

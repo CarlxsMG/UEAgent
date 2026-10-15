@@ -385,8 +385,8 @@ namespace UEAgentGameplayAbilitiesImpl
 
 // --- Reading an actor's ability system component -------------------------------
 
-// MCP:get_ability_system_component - Retrieve ability system component information for an actor
-//   @param actor_name - Name of the actor to query for ability system component
+// MCP:get_ability_system_component - Read the ability system component of an editor-world actor (the IAbilitySystemInterface answer, else its first UAbilitySystemComponent): component_name, active_abilities_count (all granted specs, active or not) and active_effects_count. Read-only; a missing actor or component is an error, not has_ability_system=false.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @returns { actor_name, has_ability_system, component_name, active_abilities_count, active_effects_count }
 TSharedPtr<FJsonObject> HandleGetAbilitySystemComponent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -409,8 +409,8 @@ TSharedPtr<FJsonObject> HandleGetAbilitySystemComponent(const TSharedPtr<FJsonOb
     return Reply;
 }
 
-// MCP:get_active_abilities - Get list of active abilities for an actor
-//   @param actor_name - Name of the actor to query for abilities
+// MCP:get_active_abilities - List every ability granted to an editor-world actor ability system component, running or not (all activatable specs, despite the tool name): ability_name (the class default object name), ability_class, level and is_active, plus count. Read-only; get_ability_info reads one.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @returns { ability_name, ability_class, level, is_active, actor_name, abilities, count }
 TSharedPtr<FJsonObject> HandleGetActiveAbilities(const TSharedPtr<FJsonObject>& Params)
 {
@@ -446,8 +446,8 @@ TSharedPtr<FJsonObject> HandleGetActiveAbilities(const TSharedPtr<FJsonObject>& 
     return Reply;
 }
 
-// MCP:get_active_effects - Get list of active gameplay effects on an actor
-//   @param actor_name - Name of the actor to query for effects
+// MCP:get_active_effects - List the gameplay effects currently active on an editor-world actor ability system component: effect_name (the definition object name), effect_class and level for each, plus count. Read-only; effects whose definition is gone are skipped. get_gameplay_effect_info reads one.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @returns { effect_name, effect_class, level, actor_name, effects, count }
 TSharedPtr<FJsonObject> HandleGetActiveEffects(const TSharedPtr<FJsonObject>& Params)
 {
@@ -479,9 +479,9 @@ TSharedPtr<FJsonObject> HandleGetActiveEffects(const TSharedPtr<FJsonObject>& Pa
 
 // --- Abilities: grant, activate, cancel, inspect, remove -------------------------
 
-// MCP:activate_ability - Activate a specific ability for an actor
-//   @param actor_name - Name of the actor whose ability to activate
-//   @param ability_name - Name of the ability to activate
+// MCP:activate_ability - Try to activate one granted ability on an editor-world actor ability system component with TryActivateAbility; activated is the engine verdict, false when the activation checks of the ability refuse it. Use grant_ability first, and cancel_ability to stop it.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, ability_name, activated }
 TSharedPtr<FJsonObject> HandleActivateAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -503,9 +503,9 @@ TSharedPtr<FJsonObject> HandleActivateAbility(const TSharedPtr<FJsonObject>& Par
     return Reply;
 }
 
-// MCP:cancel_ability - Cancel an active ability for an actor
-//   @param actor_name - Name of the actor whose ability to cancel
-//   @param ability_name - Name of the ability to cancel
+// MCP:cancel_ability - Cancel one granted ability on an editor-world actor ability system component (CancelAbilityHandle), reading its spec before and after: returns was_active, still_active and cancelled. success is false, with an error, when the ability is still active afterwards (it may not allow cancelling).
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, ability_name, was_active, still_active, cancelled } -- read back from the spec: cancelled means was_active and not still_active
 TSharedPtr<FJsonObject> HandleCancelAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -541,9 +541,9 @@ TSharedPtr<FJsonObject> HandleCancelAbility(const TSharedPtr<FJsonObject>& Param
     return Reply;
 }
 
-// MCP:get_ability_info - Get detailed information about a specific ability
-//   @param actor_name - Name of the actor that owns the ability
-//   @param ability_name - Name of the ability to get information about
+// MCP:get_ability_info - Read one ability granted to an editor-world actor ability system component: ability_class, level, is_active and input_id of the first matching spec. Read-only; an error when no granted spec matches ability_name. Use get_active_abilities to list them all.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, ability_name, ability_class, level, is_active, input_id }
 TSharedPtr<FJsonObject> HandleGetAbilityInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -571,10 +571,10 @@ TSharedPtr<FJsonObject> HandleGetAbilityInfo(const TSharedPtr<FJsonObject>& Para
     return Reply;
 }
 
-// MCP:grant_ability - Grant a new ability to an actor
-//   @param actor_name - Name of the actor to grant the ability to
-//   @param ability_class - Full class path of the ability to grant
-//   @param level - GameplayEffect/ability level (default 1)
+// MCP:grant_ability - Grant an ability class to an editor-world actor ability system component with GiveAbility at a whole-number level; granted tells whether a valid spec handle came back. Runtime state only (not saved with the level), and granting the same class again adds another spec.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_class - Class path of a UGameplayAbility subclass: "/Game/Abilities/GA_Jump.GA_Jump_C" for a Blueprint, "/Script/MyGame.MyAbility" for C++
+//   @param level - Spec level, a whole number; default 1
 //   @returns { actor_name, ability_class, level, granted }
 TSharedPtr<FJsonObject> HandleGrantAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -609,9 +609,9 @@ TSharedPtr<FJsonObject> HandleGrantAbility(const TSharedPtr<FJsonObject>& Params
     return Reply;
 }
 
-// MCP:remove_ability - Remove an ability from an actor
-//   @param actor_name - Name of the actor to remove the ability from
-//   @param ability_name - Name of the ability to remove
+// MCP:remove_ability - Remove one granted ability from an editor-world actor ability system component with ClearAbility. An active ability is only marked, and leaves when it ends (pending_removal=true); removed=true means the spec is gone. success is false with an error otherwise.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_name - Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, ability_name, removed, pending_removal } -- read back: removed means the spec is gone; an active ability is only marked, and leaves when it ends (pending_removal)
 TSharedPtr<FJsonObject> HandleRemoveAbility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -645,10 +645,10 @@ TSharedPtr<FJsonObject> HandleRemoveAbility(const TSharedPtr<FJsonObject>& Param
 
 // --- Gameplay effects applied to a component -------------------------------------
 
-// MCP:apply_gameplay_effect - Apply a gameplay effect to an actor
-//   @param actor_name - Name of the actor to apply the effect to
-//   @param effect_class - Full class path of the gameplay effect to apply
-//   @param level - GameplayEffect/ability level (default 1.0)
+// MCP:apply_gameplay_effect - Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. apply_multiple_gameplay_effects applies a list.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param effect_class - Class path of a UGameplayEffect subclass; a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C"
+//   @param level - Effect level for scalable magnitudes, fractions allowed; default 1.0
 //   @returns { actor_name, effect_class, level, applied }
 TSharedPtr<FJsonObject> HandleApplyGameplayEffect(const TSharedPtr<FJsonObject>& Params)
 {
@@ -688,9 +688,9 @@ TSharedPtr<FJsonObject> HandleApplyGameplayEffect(const TSharedPtr<FJsonObject>&
     return Reply;
 }
 
-// MCP:remove_gameplay_effect - Remove an active gameplay effect from an actor
-//   @param actor_name - Name of the actor to remove the effect from
-//   @param effect_name - Name of the gameplay effect to remove
+// MCP:remove_gameplay_effect - Remove the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name, with all its stacks (RemoveActiveGameplayEffect). removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param effect_name - Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, effect_name, removed } -- removed is what the engine reports, confirmed by the effect not being active afterwards
 TSharedPtr<FJsonObject> HandleRemoveGameplayEffect(const TSharedPtr<FJsonObject>& Params)
 {
@@ -726,9 +726,9 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffect(const TSharedPtr<FJsonObject>
     return Reply;
 }
 
-// MCP:get_gameplay_effect_info - Get detailed information about an active gameplay effect
-//   @param actor_name - Name of the actor that has the effect
-//   @param effect_name - Name of the gameplay effect to get information about
+// MCP:get_gameplay_effect_info - Read the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name: effect_class and level. Read-only; an error when none matches. For an effect asset that is not applied, use get_gameplay_effect_modifiers instead.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param effect_name - Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins
 //   @returns { actor_name, effect_name, effect_class, level }
 TSharedPtr<FJsonObject> HandleGetGameplayEffectInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -794,9 +794,9 @@ TSharedPtr<FJsonObject> HandleGetAttributes(const TSharedPtr<FJsonObject>& Param
     return Reply;
 }
 
-// MCP:get_attribute_value - Get the value of a specific attribute
-//   @param actor_name - Name of the actor that owns the attribute
-//   @param attribute_name - Name of the attribute to get the value for
+// MCP:get_attribute_value - Read one attribute from the attribute sets registered on an editor-world actor ability system component: value (current, modifiers included), base_value and attribute_set. Read-only; an unknown attribute is not an error but found=false. get_attributes lists every attribute.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param attribute_name - Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive; the first registered attribute that matches wins
 //   @returns { actor_name, attribute_name, found, value, base_value, attribute_set }
 TSharedPtr<FJsonObject> HandleGetAttributeValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -828,9 +828,9 @@ TSharedPtr<FJsonObject> HandleGetAttributeValue(const TSharedPtr<FJsonObject>& P
     return Reply;
 }
 
-// MCP:set_attribute_base_value - Set the base value of an attribute
-//   @param actor_name - Name of the actor that owns the attribute
-//   @param attribute_name - Name of the attribute to set
+// MCP:set_attribute_base_value - Set the base value of one attribute on an editor-world actor ability system component (SetNumericAttributeBase); active modifiers keep applying on top. Returns the read-back base_value and current value; set=false, not an error, when no registered attribute set has that attribute.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param attribute_name - Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive; the first registered attribute that matches wins
 //   @param value - The new base value for the attribute
 //   @returns { actor_name, attribute_name, value, set, base_value }
 TSharedPtr<FJsonObject> HandleSetAttributeBaseValue(const TSharedPtr<FJsonObject>& Params)
@@ -961,10 +961,10 @@ namespace
 //   UGameplayEffect, EGameplayEffectDurationType               GameplayEffect.h
 //   UAbilitySystemComponent::ApplyGameplayEffectSpecToSelf     AbilitySystemComponent.h
 
-// MCP:add_ability_task - Add a UGameplayTask to a UGameplayAbility instance
-//   @param actor_name - Actor label in the level
-//   @param ability_class - Gameplay ability class path
-//   @param task_class - UGameplayTask-derived class path
+// MCP:add_ability_task - Create an ability task on the primary instance of an ability already granted to an editor-world actor; the task is initialized (AwaitingActivation), never activated. task_class is only validated: it always builds the abstract base UAbilityTask, which logs a warning and an ensure.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param ability_class - Class path of an ability already granted to the actor, e.g. "/Game/Abilities/GA_Jump.GA_Jump_C"; it must be instanced (have a primary instance)
+//   @param task_class - Class path of a UAbilityTask subclass, e.g. "/Script/GameplayAbilities.AbilityTask_WaitDelay"; checked, but not used to build the task
 //   @param instance_name - Name for the new task instance (default "Default")
 //   @returns { actor_name, ability_class, task_class, instance_name, task_name, added, task_state }
 TSharedPtr<FJsonObject> HandleAddAbilityTask(const TSharedPtr<FJsonObject>& Params)
@@ -1046,8 +1046,8 @@ TSharedPtr<FJsonObject> HandleAddAbilityTask(const TSharedPtr<FJsonObject>& Para
     return ResultObj;
 }
 
-// MCP:get_ability_tasks - List UGameplayTask instances owned by a UGameplayAbility
-//   @param actor_name - Actor label in the level
+// MCP:get_ability_tasks - List the UGameplayTask objects outered to a GameplayTasksComponent of an editor-world actor (its ability system component counts): task_name, task_class, task_state, is_ability_task, plus counts. Tasks built by NewAbilityTask, add_ability_task included, are outered to the transient package and are not listed.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
 //   @returns { task_name, task_class, task_state, is_ability_task, actor_name, task_count, ability_task_count, generic_task_count, tasks }
 TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1123,10 +1123,10 @@ TSharedPtr<FJsonObject> HandleGetAbilityTasks(const TSharedPtr<FJsonObject>& Par
     return ResultObj;
 }
 
-// MCP:create_gameplay_effect_container - Create and save a UGameplayEffectContainer asset
-//   @param name - Asset name (no path)
+// MCP:create_gameplay_effect_container - Create and save a native UGameplayEffect asset (despite the name, not a container and not a Blueprint) at package_path/name. An existing asset there is returned untouched (already_existed=true). apply_gameplay_effect needs a class, so use create_gameplay_effect_blueprint for an effect it can apply.
+//   @param name - Asset name without a path, e.g. "GE_Damage"
 //   @param package_path - Target content package path where the asset is created (default /Game/GameplayEffects)
-//   @param duration_policy - Duration type: Instant, HasDuration, or Infinite (default Instant)
+//   @param duration_policy - Duration type, case-insensitive: Instant, HasDuration or Infinite (default Instant)
 //   @param duration_magnitude - Duration in seconds, applied when policy is HasDuration (default 0.0)
 //   @returns { name, asset_path, already_existed, duration_policy, duration_magnitude, created }
 TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJsonObject>& Params)
@@ -1214,9 +1214,9 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectContainer(const TSharedPtr<FJs
     return ResultObj;
 }
 
-// MCP:apply_multiple_gameplay_effects - Apply several UGameplayEffects to an actor in one call
-//   @param actor_name - Target actor label
-//   @param effect_classes - Array of UGameplayEffect class paths
+// MCP:apply_multiple_gameplay_effects - Apply several GameplayEffect classes at one level to an editor-world actor ability system component; each entry is loaded and applied separately, so a bad path does not stop the rest. Returns requested, applied_count, failed_count and the per-entry applied and failed lists.
+//   @param actor_name - Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names
+//   @param effect_classes - JSON array of UGameplayEffect class path strings, e.g. ["/Game/Effects/GE_Burn.GE_Burn_C"]; non-string entries go to failed
 //   @param level - GameplayEffect/ability level applied to all effects (default 1.0)
 //   @returns { error, effect_class, applied, active_handle, actor_name, requested, applied_count, failed_count, failed }
 TSharedPtr<FJsonObject> HandleApplyMultipleGameplayEffects(const TSharedPtr<FJsonObject>& Params)
@@ -1308,9 +1308,9 @@ TSharedPtr<FJsonObject> HandleApplyMultipleGameplayEffects(const TSharedPtr<FJso
     return ResultObj;
 }
 
-// MCP:set_gameplay_effect_duration_policy - Change the duration policy of a UGameplayEffect
-//   @param effect_path - Asset path to the UGameplayEffect
-//   @param duration_policy - One of "instant|duration|infinite"
+// MCP:set_gameplay_effect_duration_policy - Set DurationPolicy on a GameplayEffect asset (a native UGameplayEffect asset, or the class default object of a Blueprint GE) and save its package; with HasDuration it also sets a constant DurationMagnitude. Returns old_duration_policy and duration_policy. Fails while PIE runs, because the save is refused.
+//   @param effect_path - GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset
+//   @param duration_policy - One of "Instant", "HasDuration" or "Infinite", any case ("duration" alone is refused)
 //   @param duration_magnitude - Duration in seconds, applied when policy is HasDuration (default 0.0)
 //   @returns { effect_path, old_duration_policy, duration_policy, duration_magnitude, set }
 TSharedPtr<FJsonObject> HandleSetGameplayEffectDurationPolicy(const TSharedPtr<FJsonObject>& Params)
@@ -1365,8 +1365,8 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDurationPolicy(const TSharedPtr<F
     return ResultObj;
 }
 
-// MCP:get_gameplay_effect_modifiers - Read attribute modifiers from a UGameplayEffect
-//   @param effect_path - Asset path to the UGameplayEffect
+// MCP:get_gameplay_effect_modifiers - Read the attribute modifiers of a GameplayEffect asset (native asset, or Blueprint GE class default object): attribute, attribute_set, modifier_op and, when static, the magnitude at level 1, plus duration_policy and modifier_count. Read-only; magnitude_type always says ScalableFloat, whatever the real type.
+//   @param effect_path - GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset
 //   @returns { attribute, attribute_set, modifier_op, magnitude_type, magnitude_value_at_level_1, effect_path, duration_policy, modifier_count, modifiers }
 TSharedPtr<FJsonObject> HandleGetGameplayEffectModifiers(const TSharedPtr<FJsonObject>& Params)
 {

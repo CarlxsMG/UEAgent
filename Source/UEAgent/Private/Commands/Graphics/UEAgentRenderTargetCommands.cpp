@@ -191,12 +191,12 @@ namespace
 // requested) / InitAutoFormat, which both create the FTextureResource. The asset
 // is a real saveable /Game asset (NOT a transient render target).
 // ---------------------------------------------------------------------------
-// MCP:create_render_target_2d - Create or load a persisted UTextureRenderTarget2D asset
+// MCP:create_render_target_2d - Create a UTextureRenderTarget2D asset at package_path/name with the given size and format, black clear color, and save it. An existing one there is returned as is: width, height and format are then ignored (already_exists:true). Returns asset_path, width, height, format and pixel_format.
 //   @param name - Name of the render target asset to create
 //   @param package_path - Target content path, defaults to /Game/RenderTargets
 //   @param width - Render target width in pixels, default 256
 //   @param height - Render target height in pixels, default 256
-//   @param format - RTF_RGBA8 default, RTF_RGBA16f for HDR, RTF_R8, RTF_RGBA8_SRGB, etc
+//   @param format - Render target format, default RTF_RGBA8: RTF_R8, RTF_RG8, RTF_RGBA8, RTF_RGBA8_SRGB, RTF_R16f, RTF_RG16f, RTF_RGBA16f (HDR), RTF_R32f, RTF_RG32f, RTF_RGBA32f or RTF_RGB10A2, RTF_ prefix optional; an unknown value falls back to RTF_RGBA8 with format_warning
 //   @returns { render_target_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, width: int, height: int, format: string, pixel_format: string, format_warning: string, save_error: string }
 TSharedPtr<FJsonObject> HandleCreateRenderTarget2D(const TSharedPtr<FJsonObject>& Params)
 {
@@ -290,7 +290,7 @@ TSharedPtr<FJsonObject> HandleCreateRenderTarget2D(const TSharedPtr<FJsonObject>
 // Reads SizeX/SizeY, the high-level render-target format, the resolved pixel
 // format and sRGB flag from the asset.
 // ---------------------------------------------------------------------------
-// MCP:get_render_target_info - Read metadata for a UTextureRenderTarget2D asset
+// MCP:get_render_target_info - Read the metadata of a UTextureRenderTarget2D asset without reading pixels or changing it: width, height, format (RTF_*), pixel_format and is_srgb. For 2D-array or cube render targets use get_render_target_2d_array_info or get_render_target_cube_info; export_render_target writes the image to disk.
 //   @param render_target_path - Asset path of the render target, e.g. /Game/RenderTargets/RT_Example
 //   @returns { render_target_name: string, asset_path: string, width: int, height: int, format: string, pixel_format: string, is_srgb: bool }
 TSharedPtr<FJsonObject> HandleGetRenderTargetInfo(const TSharedPtr<FJsonObject>& Params)

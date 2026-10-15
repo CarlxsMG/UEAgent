@@ -100,13 +100,13 @@ Author a ragdoll constraint (joint) inside a UPhysicsAsset between two bones.  C
 
 ## `add_simple_collision_to_static_mesh`
 
-Add a simple (analytic) collision primitive to a UStaticMesh
+Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bounds of a UStaticMesh to its BodySetup and saves the mesh; a mesh outside /Game is first duplicated to dest_path. Not idempotent: each call adds one more (clear them with remove_static_mesh_collision).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Path to the source UStaticMesh. |
-| `dest_path` | string | yes | /Game path to duplicate a read-only source mesh into first |
-| `shape` | string | no | Collision primitive shape to add (defaults to Box) |
+| `dest_path` | string | yes | Path under /Game to copy a mesh that is not under /Game into before editing (required then; an existing mesh there is reused and edited) |
+| `shape` | string | no | Box, Sphere or Capsule, case-insensitive, sized from the mesh bounds (default Box; any other value also adds a Box) |
 
 **Returns:** `{ static_mesh_path, shape, box_count, sphere_count, capsule_count, element_count, collision_added, duplicated_to_game, saved, save_error }`
 
@@ -123,19 +123,19 @@ Wipe ALL instances from an InstancedStaticMeshComponent in one call (the compone
 
 ## `cluster_geometry_collection`
 
-Run auto-clustering on a geometry collection
+Runs auto-clustering on all transforms of a UGeometryCollection asset, targeting site_count clusters ("Small" doubles it, "Large" halves it, any other method keeps it) with connectivity enforced, then saves it (save result unchecked). Returns the cluster count used and the transform counts before and after.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
 | `cluster_size_method` | string | no | Small, Medium, or Large, default Medium |
-| `site_count` | number | no | Base site count used by the size method, default 10 |
+| `site_count` | number | no | Target cluster count before cluster_size_method scales it, minimum 1, default 10 |
 
 **Returns:** `{ geometry_collection_path: string, cluster_size_method: string, site_count: int, num_transforms_before: int, num_transforms_after: int, success: bool }`
 
 ## `compute_gc_proximity`
 
-Compute the proximity adjacency graph of a Geometry Collection
+Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place and saves it; undoable. Returns proximity_pairs (unordered pairs of neighboring pieces, from a precise proximity pass), transform_count, success and saved; fails when the save fails. Afterwards get_gc_hierarchy_info reports proximity_computed true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -156,11 +156,11 @@ Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset 
 
 ## `create_geometry_collection`
 
-Create a UGeometryCollection asset, optionally populated from a StaticMesh
+Creates a UGeometryCollection asset at package_path/name, optionally filled from one StaticMesh, and saves it. An existing collection there is RESET first (all geometry and sources discarded; rebuilt true); an unloadable source_mesh_path is silently skipped. created is always true and the save result is not checked.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | Package path for the asset, e.g. /Game/Chaos/Collections |
+| `package_path` | string | yes | Content folder for the asset, e.g. /Game/Chaos/Collections; a path without a leading slash is placed under /Game/ |
 | `name` | string | yes | Name of the geometry collection asset, e.g. GC_Wall |
 | `source_mesh_path` | string | no | Optional StaticMesh to convert and append, e.g. /Engine/BasicShapes/Cube |
 
@@ -182,27 +182,27 @@ Create and save a UPhysicalMaterial asset, optionally setting surface/object pro
 
 ## `create_physics_asset`
 
-Create and save a UPhysicsAsset for a skeletal mesh
+Creates a UPhysicsAsset at package_path/name, generating bodies and constraints from a skeletal mesh, sets that mesh as its preview mesh and saves it; the mesh is not pointed at the new asset. An existing one there is returned unchanged. Returns bodies, constraints, skeleton_bones, bodies_generated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name (e.g. 'PA_Cube'). |
-| `package_path` | string | no | Target content package path where the asset is created (check the body for the default) |
-| `skeletal_mesh_path` | string | no | Source skeletal mesh path (defaults to engine SkeletalCube) |
+| `package_path` | string | no | Content folder for the new asset (default /Game/Physics; an empty string also uses it) |
+| `skeletal_mesh_path` | string | no | Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load |
 
 **Returns:** `{ package_path, already_existed, created, saved, bodies_generated, generation_message, save_error }`
 
 ## `fracture_geometry_collection`
 
-Apply Voronoi fracturing to a geometry collection
+Applies Voronoi fracturing to all transforms of a UGeometryCollection asset, using num_sites random sites in its bounds, then saves it (save result unchecked). Fails when no fracture is made. Re-fracturing grows a collection geometrically and can stall the editor; fracture a fresh one from create_geometry_collection.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Full asset path to the UGeometryCollection |
-| `num_sites` | number | no | Number of random Voronoi sites to generate, default 20 |
-| `random_seed` | number | no | Optional seed for site generation |
-| `chance_to_fracture` | number | no | Optional 0 to 1 chance per site, default 1 |
-| `grout` | number | no | Optional grout amount for the cuts |
+| `num_sites` | number | no | Number of random Voronoi sites to generate, minimum 1, default 20 |
+| `random_seed` | number | no | Seed for the random site positions and the per-transform fracture chance, default 0 |
+| `chance_to_fracture` | number | no | Chance from 0 to 1 that each selected transform is fractured, default 1 |
+| `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 | `split_islands` | boolean | no | Optional, split resulting islands, default false |
 
 **Returns:** `{ geometry_collection_path: string, num_fractures: int, num_sites: int, random_seed: int, success: bool }`
@@ -231,17 +231,17 @@ Read ONE placed primitive component's collision setup and physics state: collisi
 
 ## `get_field_system_info`
 
-Read back the authored field commands of a UFieldSystem.
+Read the field commands authored in a UFieldSystem asset, in order: each with physics_type, target_attribute, command_name and max_magnitude (not its node graph), plus command_count. Read-only; the array index is what remove_field_node takes, and add_field_node authors new commands.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `field_system_path` | string | yes | Asset path of the UFieldSystem |
+| `field_system_path` | string | yes | Asset path of the UFieldSystem, e.g. "/Game/MyGame/FS_Example" or "/Game/MyGame/FS_Example.FS_Example". |
 
 **Returns:** `{ field_system_path: string, command_count: int, commands: [{ physics_type, target_attribute, command_name, max_magnitude }], success: bool }`
 
 ## `get_gc_hierarchy_info`
 
-Read the bone hierarchy of a Geometry Collection
+Reads the bone hierarchy of a UGeometryCollection asset: transform_count, root_indices, and per bone its level, name and simulation type ("Rigid", "Clustered" or "None"), plus proximity_computed. Generates the Level attribute in memory if needed, without saving. For parent indices use list_geometry_collection_bones.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -251,7 +251,7 @@ Read the bone hierarchy of a Geometry Collection
 
 ## `get_geometry_collection_info`
 
-Read geometry collection asset metadata and structure stats
+Reads a UGeometryCollection asset without changing it: material, source and damage-threshold counts, damage model ("Threshold", "MaterialStrength" or "Unknown"), mass settings and element counts (transforms, vertices, faces, geometry; 0 without collection data). Use get_gc_hierarchy_info for the bone tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -339,14 +339,14 @@ Sphere / box / capsule overlap query against the world: "what is inside this vol
 
 ## `plane_cut_fracture`
 
-Fracture a Geometry Collection with random cutting planes
+Cuts all transforms of a UGeometryCollection asset with num_planes random planes inside its bounds (no noise, islands split by default), then saves it. success needs the save AND a transform count that did not shrink, so it is also true when nothing was cut: check new_fracture_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `geometry_collection_path` | string | yes | Asset path of the UGeometryCollection |
-| `num_planes` | number | no | Number of random cutting planes to generate, default 3 |
+| `num_planes` | number | no | Number of random cutting planes to generate, minimum 1, default 3 |
 | `random_seed` | number | no | Optional seed for plane generation, default 1337 |
-| `grout` | number | no | Optional grout amount for the cuts |
+| `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 | `split_islands` | boolean | no | Optional, split resulting islands, default true |
 
 **Returns:** `{ geometry_collection_path: string, num_planes: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }`
@@ -479,7 +479,7 @@ Configure the damage model and thresholds on a geometry collection
 
 ## `set_geometry_collection_mass`
 
-Configure the mass / density model on a geometry collection
+Writes the mass settings of a UGeometryCollection asset (mass, mass_as_density, minimum_mass_clamp, density_from_physics_material), only for the fields given, then saves it; undoable. Returns the four values as stored, success, saved; fails when the save fails. Read them back with get_geometry_collection_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -568,15 +568,15 @@ Set the linear/angular motion types and limits of an existing constraint inside 
 
 ## `set_physics_body_advanced_properties`
 
-Set FBodyInstance advanced fields (damping, mass/inertia scale, COM nudge, gravity) on one body of a UPhysicsAsset (read-modify-write; only supplied fields change; idempotent). Asset-only edit on the body's DefaultInstance; reports AUTHORED struct values (not live GetBodyMass, which is 0 with no running sim).
+Writes only the given advanced FBodyInstance fields (damping, mass scale, inertia scale, COM nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or bone_name, and saves it. Fails when no field is given. Returns the authored values read back, applied_count, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
-| `body_index` | number | no | Explicit body index (or use bone_name). |
+| `body_index` | number | no | Index of the body in the asset; wins over bone_name when both are given |
 | `bone_name` | string | no | Bone name to resolve the body (alternative to body_index). |
-| `linear_damping` | number | no | Linear drag. |
-| `angular_damping` | number | no | Angular drag. |
+| `linear_damping` | number | no | Drag that slows linear movement (FBodyInstance LinearDamping, unitless, engine default 0.01); omit to keep the current value |
+| `angular_damping` | number | no | Drag that slows rotation (FBodyInstance AngularDamping, unitless, engine default 0); omit to keep the current value |
 | `mass_scale` | number | no | Per-instance mass multiplier (>= 0.001). |
 | `inertia_tensor_scale` | array | no | [x,y,z] inertia scale. |
 | `com_nudge` | array | no | [x,y,z] center-of-mass offset. |
@@ -676,7 +676,7 @@ Configure ONE entry of a UChaosWheeledVehicleMovementComponent's WheelSetups arr
 
 ## `slice_fracture`
 
-Fracture a Geometry Collection with a regular slicing grid
+Slices all transforms of a UGeometryCollection asset with a regular grid of slices_x by slices_y by slices_z cuts across its bounds (no angle or offset variation, islands split), then saves it. success needs the save and a transform count that did not shrink; check new_fracture_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -684,8 +684,8 @@ Fracture a Geometry Collection with a regular slicing grid
 | `slices_x` | number | no | Number of evenly spaced X slices, default 2 |
 | `slices_y` | number | no | Number of evenly spaced Y slices, default 2 |
 | `slices_z` | number | no | Number of evenly spaced Z slices, default 1 |
-| `random_seed` | number | no | Optional seed for variation, default 1337 |
-| `grout` | number | no | Optional grout amount for the cuts |
+| `random_seed` | number | no | Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little |
+| `grout` | number | no | Width of the gap left between cut pieces, in cm (default 0) |
 
 **Returns:** `{ geometry_collection_path: string, slices_x: int, slices_y: int, slices_z: int, new_fracture_count: int, transform_count: int, success: bool, saved: bool }`
 

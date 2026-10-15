@@ -104,13 +104,13 @@ Destroy the UProceduralMeshComponent on a named actor in the editor world (inver
 
 ## `set_procedural_mesh_material`
 
-Assign a UMaterialInterface to a UProceduralMeshComponent material slot.
+Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label of the actor carrying the component |
-| `material_path` | string | yes | /Game path to the UMaterialInterface |
-| `element_index` | number | no | Optional material slot index (default 0) |
+| `actor_label` | string | yes | Editor label or object name of the actor; the first actor matching either is used |
+| `material_path` | string | yes | Material or material instance asset path, e.g. "/Game/Materials/M_Rock" |
+| `element_index` | number | no | Material slot index, usually the section index; default 0 (not range-checked) |
 
 **Returns:** `{ actor_label, material_path, element_index, material_set, previous_material_path? }`
 

@@ -482,18 +482,18 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshLodInfo(
 // ---------------------------------------------------------------------------
 // set_skeletal_mesh_lod_build_settings
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_lod_build_settings - Modify per-LOD build settings on a skeletal mesh.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index to modify (default 0)
-//   @param recompute_normals - bool, recompute normals
-//   @param recompute_tangents - bool, recompute tangents
-//   @param use_mikk_t_space - bool, use Mikk T space
-//   @param compute_weighted_normals - bool, compute weighted normals
-//   @param remove_degenerates - bool, remove degenerate triangles
-//   @param high_precision_tangents - bool, use high precision tangent basis
-//   @param high_precision_weights - bool, use high precision skin weights
-//   @param full_precision_uvs - bool, use full precision UVs
-//   @param bone_influence_limit - int, max bones influencing each vertex
+// MCP:set_skeletal_mesh_lod_build_settings - Change the stored build settings of one LOD of a skeletal mesh asset, only the fields you pass, and save the mesh. The mesh is not rebuilt here, so the settings take effect at its next build or reimport; a failed save returns an error. Returns settings_applied.
+//   @param skeletal_mesh_path - Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero".
+//   @param lod_index - 0-based LOD index (default 0); an index the mesh does not have fails the call.
+//   @param recompute_normals - Ignore the imported normals and recompute them (bRecomputeNormals).
+//   @param recompute_tangents - Ignore the imported tangents and recompute them (bRecomputeTangents).
+//   @param use_mikk_t_space - Use MikkTSpace when computing tangents (bUseMikkTSpace).
+//   @param compute_weighted_normals - Weight computed normals by triangle area and corner angle (bComputeWeightedNormals).
+//   @param remove_degenerates - Remove degenerate triangles at build time (bRemoveDegenerates).
+//   @param high_precision_tangents - Store tangents at 16-bit instead of 8-bit precision (bUseHighPrecisionTangentBasis).
+//   @param high_precision_weights - Use 16-bit instead of 8-bit skin weights for rendering (bUseHighPrecisionSkinWeights).
+//   @param full_precision_uvs - Store UVs at full floating-point precision (bUseFullPrecisionUVs).
+//   @param bone_influence_limit - Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect.
 //   @returns { lod_index: int, settings_applied: {...}, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodBuildSettings(
@@ -962,10 +962,10 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshMorphTarget(
 // ---------------------------------------------------------------------------
 // rename_skeletal_mesh_morph_target
 // ---------------------------------------------------------------------------
-// MCP:rename_skeletal_mesh_morph_target - Rename a morph target on a skeletal mesh.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param old_name - Current name of the morph target
-//   @param new_name - New name for the morph target
+// MCP:rename_skeletal_mesh_morph_target - Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_name is not a morph target of the mesh or new_name already exists; a failed save also returns an error although the rename stays in memory. Returns old_name, new_name and renamed.
+//   @param skeletal_mesh_path - Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero".
+//   @param old_name - Current morph target name, as get_skeletal_mesh_morph_targets lists it.
+//   @param new_name - New morph target name; must not already exist on the mesh.
 //   @returns { old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool }
 
 TSharedPtr<FJsonObject> HandleRenameSkeletalMeshMorphTarget(
@@ -1553,10 +1553,10 @@ Mesh->Modify();
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_skeletal_mesh_lod_screen_size - Set per-LOD ScreenSize.Default on a skeletal mesh.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index to modify
-//   @param screen_size - New ScreenSize.Default value
+// MCP:set_skeletal_mesh_lod_screen_size - Set ScreenSize.Default (the screen size at which this LOD switches in) of one LOD of a skeletal mesh asset. Marks the mesh dirty but does NOT save it, so follow with save_asset; per-platform overrides are left as they are. Returns old_screen_size and screen_size.
+//   @param skeletal_mesh_path - Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero".
+//   @param lod_index - 0-based LOD index; must be below the LOD count of the mesh.
+//   @param screen_size - New ScreenSize.Default value, e.g. 0.3; the call fails without it.
 //   @returns { skeletal_mesh_path: string, lod_index: int, old_screen_size: float, screen_size: float, applied: bool }
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodScreenSize(const TSharedPtr<FJsonObject>& Params)
 {

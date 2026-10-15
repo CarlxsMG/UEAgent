@@ -483,9 +483,9 @@ namespace
 // Dynamic-mesh actor commands: spawn an ADynamicMeshActor, then build and edit its live UDynamicMesh. Every
 // mutation here is verified by reading the triangle / vertex count back off the live mesh.
 
-// MCP:spawn_dynamic_mesh_actor - Spawn an ADynamicMeshActor into the editor world
-//   @param location - Optional [x, y, z] world location
-//   @param rotation - Optional [pitch, yaw, roll] world rotation
+// MCP:spawn_dynamic_mesh_actor - Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in an undoable transaction. Returns the label of the new actor as actor_name, its internal name and triangle_count (0). Remove it with remove_dynamic_mesh_actor.
+//   @param location - World location [x, y, z] in cm (default the world origin).
+//   @param rotation - World rotation in degrees as [pitch, yaw, roll] (default no rotation).
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }
 TSharedPtr<FJsonObject> HandleSpawnDynamicMeshActor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1128,8 +1128,8 @@ TSharedPtr<FJsonObject> HandleWeldMeshEdges(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_unused_vertices - Remove unreferenced vertices from a DynamicMeshActor's dynamic mesh
-//   @param actor_name [!] - Label or name of the target DynamicMeshActor
+// MCP:remove_unused_vertices - Remove the vertices no triangle references from a DynamicMeshActor's live dynamic mesh in the editor world and refresh its render data. Remaining vertex IDs are not renumbered and a clean mesh is a no-op; returns vertex_count_before, vertex_count, vertices_removed and removed.
+//   @param actor_name [!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
 //   @returns { actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }
 TSharedPtr<FJsonObject> HandleRemoveUnusedVertices(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2217,11 +2217,11 @@ TSharedPtr<FJsonObject> HandleSetNumUVChannels(
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:translate_mesh_uvs - Translate UVs in-place on a UV channel.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param uv_channel [number!] - UV channel index (required)
-//   @param translate_u [number!] - U translation (required)
-//   @param translate_v [number!] - V translation (required)
+// MCP:translate_mesh_uvs - Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false). No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
+//   @param translate_u [number!] - Offset added to every U coordinate (1.0 shifts by one full tile).
+//   @param translate_v [number!] - Offset added to every V coordinate (1.0 shifts by one full tile).
 //   @returns { actor_name: string, uv_channel: int, translate_u: number, translate_v: number,
 //             translated: bool, note?: string }
 TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
@@ -2266,13 +2266,13 @@ TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:scale_mesh_uvs - Scale UVs in-place on a UV channel.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param uv_channel [number!] - UV channel index (required)
-//   @param scale_u [number!] - U scale (required, non-zero)
-//   @param scale_v [number!] - V scale (required, non-zero)
-//   @param scale_origin_u [number] - Optional U scale origin (default 0)
-//   @param scale_origin_v [number] - Optional V scale origin (default 0)
+// MCP:scale_mesh_uvs - Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors; zero factors are refused and 1, 1 changes nothing (scaled false). No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
+//   @param scale_u [number!] - Scale factor along U; must be non-zero (1 keeps U unchanged).
+//   @param scale_v [number!] - Scale factor along V; must be non-zero (1 keeps V unchanged).
+//   @param scale_origin_u [number] - U coordinate of the point the scaling is centred on (default 0).
+//   @param scale_origin_v [number] - V coordinate of the point the scaling is centred on (default 0).
 //   @returns { actor_name: string, uv_channel: int, scale_u: number, scale_v: number,
 //             scale_origin: {u, v}, scaled: bool }
 TSharedPtr<FJsonObject> HandleScaleMeshUVs(
@@ -2405,8 +2405,8 @@ TSharedPtr<FJsonObject> HandleCopyMeshUVChannel(
 // Typed actor remove + material set + clear mesh
 // ===========================================================================
 
-// MCP:remove_dynamic_mesh_actor - Destroy a spawned DynamicMeshActor from the editor world.
-//   @param actor_name [string!] - Label or name of the ADynamicMeshActor to destroy (required).
+// MCP:remove_dynamic_mesh_actor - Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_dynamic_mesh_actor.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the DynamicMeshActor to destroy.
 //   @returns { actor_name: string, actor_internal_name: string, destroyed: bool, triangle_count_before: int, note?: string }
 TSharedPtr<FJsonObject> HandleRemoveDynamicMeshActor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2552,12 +2552,12 @@ TSharedPtr<FJsonObject> HandleClearDynamicMesh(const TSharedPtr<FJsonObject>& Pa
 // of an ADynamicMeshActor (same resolution path as the UV setters and spatial queries).
 // ---------------------------------------------------------------------------
 
-// MCP:rotate_mesh_uvs - Rotate UVs in-place on a UV channel.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param uv_channel [number!] - UV channel index (required)
-//   @param rotation_angle_deg [number!] - Rotation in degrees (required)
-//   @param rotation_origin_u [number] - Optional U rotation origin (default 0)
-//   @param rotation_origin_v [number] - Optional V rotation origin (default 0)
+// MCP:rotate_mesh_uvs - Rotate all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by an angle in degrees around a UV-space pivot; 0 degrees changes nothing (rotated false). No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
+//   @param rotation_angle_deg [number!] - Rotation angle in degrees; 0 leaves the UVs untouched.
+//   @param rotation_origin_u [number] - U coordinate of the rotation pivot (default 0).
+//   @param rotation_origin_v [number] - V coordinate of the rotation pivot (default 0).
 //   @returns { actor_name, uv_channel, rotation_angle_deg, rotation_origin: {u, v}, rotated: bool }
 TSharedPtr<FJsonObject> HandleRotateMeshUVs(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2602,12 +2602,12 @@ TSharedPtr<FJsonObject> HandleRotateMeshUVs(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_mesh_uv_element_position - Set a single UV element's position by index.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param uv_channel [number!] - UV channel index (required)
-//   @param element_id [number!] - UV element ID (vertex, edge, or triangle) (required)
-//   @param u [number!] - New U position (required)
-//   @param v [number!] - New V position (required)
+// MCP:set_mesh_uv_element_position - Set the (u, v) of one element of a UV channel overlay on a DynamicMeshActor's live dynamic mesh in the editor world; an invalid element ID writes nothing and returns is_valid_element false, not an error. No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
+//   @param element_id [number!] - ID of the element in the UV overlay of that channel, not a vertex, edge or triangle ID.
+//   @param u [number!] - New U coordinate of the element.
+//   @param v [number!] - New V coordinate of the element.
 //   @returns { actor_name, uv_channel, element_id, new_position: {u, v}, is_valid_element, set: bool }
 TSharedPtr<FJsonObject> HandleSetMeshUVElementPosition(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2882,9 +2882,9 @@ TSharedPtr<FJsonObject> HandleRepackMeshUVs(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:delete_triangle_from_mesh - Delete a single triangle by ID from the mesh.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param triangle_id [number!] - Triangle ID to delete (required)
+// MCP:delete_triangle_from_mesh - Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the editor world; a missing ID is not an error, deleted just comes back false. No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param triangle_id [number!] - Non-negative integer ID of the triangle to delete.
 //   @returns { actor_name, triangle_id, deleted, triangle_count, previous_triangle_count }
 TSharedPtr<FJsonObject> HandleDeleteTriangleFromMesh(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2916,9 +2916,9 @@ TSharedPtr<FJsonObject> HandleDeleteTriangleFromMesh(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:delete_selected_triangles_from_mesh - Delete triangles by a triangle-selection.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
-//   @param triangle_ids [array!] - Triangle IDs to delete (required, non-empty)
+// MCP:delete_selected_triangles_from_mesh - Delete the listed triangle IDs from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count. No undo entry; reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
+//   @param triangle_ids [array!] - Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call.
 //   @returns { actor_name, num_deleted, requested_count, triangle_count, previous_triangle_count }
 TSharedPtr<FJsonObject> HandleDeleteSelectedTrianglesFromMesh(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2962,8 +2962,8 @@ TSharedPtr<FJsonObject> HandleDeleteSelectedTrianglesFromMesh(const TSharedPtr<F
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_num_open_border_edges - Count open boundary edges (complement of get_mesh_open_border_loops).
-//   @param actor_name [string!] - DynamicMeshActor name (required)
+// MCP:get_num_open_border_edges - Count the open boundary edges (edges with a single adjacent triangle) of a DynamicMeshActor's live dynamic mesh in the editor world; 0 means the mesh is closed. Read-only; get the loops with get_mesh_open_border_loops. Reply actor_name is the component name, not the actor label.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
 //   @returns { actor_name, num_open_border_edges }
 TSharedPtr<FJsonObject> HandleGetNumOpenBorderEdges(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2978,8 +2978,8 @@ TSharedPtr<FJsonObject> HandleGetNumOpenBorderEdges(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_num_extended_polygroup_layers - Count extended polygroup layers on the mesh.
-//   @param actor_name [string!] - DynamicMeshActor name (required)
+// MCP:get_num_extended_polygroup_layers - Count the extended polygroup layers (those beyond the default polygroup layer) on a DynamicMeshActor's live dynamic mesh in the editor world, as num_polygroup_layers. Read-only; reply actor_name is the component name, not the actor label. Change the count with set_num_extended_polygroup_layers.
+//   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
 //   @returns { actor_name, num_polygroup_layers }
 TSharedPtr<FJsonObject> HandleGetNumExtendedPolygroupLayers(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4135,7 +4135,7 @@ TSharedPtr<FJsonObject> HandleGetMeshSelectionBounds(const TSharedPtr<FJsonObjec
 // projection plane. The engine ships three projections and two auto-unwrappers; these expose them.
 // ============================================================================
 
-// MCP:set_mesh_uvs_from_projection - Project UVs onto a DynamicMeshActor's live dynamic mesh from a plane, a box or a cylinder, via UGeometryScriptLibrary_MeshUVFunctions::SetMeshUVsFrom{Planar,Box,Cylinder}Projection. BOX is the one to reach for on plank-and-post geometry (each face takes the projection axis it faces, so nothing stretches); PLANAR only makes sense for a flat piece; CYLINDER for anything wrapped. Can be limited to a region, so different parts of one mesh can take different projections. NOTE: this REPLACES the UVs of the selected triangles on that channel.
+// MCP:set_mesh_uvs_from_projection - Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world with a box, plane or cylinder projection, optionally only inside a region. Box suits plank-and-post geometry (each face takes the axis it faces), plane only flat pieces, cylinder wrapped shapes. Returns triangles_affected and applied.
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor.
 //   @param projection [string] - 'box' (default) | 'plane' | 'cylinder'.
 //   @param uv_channel [int] - UV channel to write (default 0).
@@ -4154,7 +4154,7 @@ TSharedPtr<FJsonObject> HandleGetMeshSelectionBounds(const TSharedPtr<FJsonObjec
 //   @param source_material_id [int] - Region parameter for region='material_id'.
 //   @param polygroup_id [int] - Region parameter for region='polygroup'.
 //   @param min_triangle_points [int] - Region parameter, 1-3.
-//   @param invert [bool] - Region parameter.
+//   @param invert [bool] - Select the complement of a box, sphere, plane or normal_angle region (default false); the other regions ignore it.
 //   @returns { actor_name, projection, uv_channel, region, triangles_affected: int, uv_channel_count: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetMeshUVsFromProjection(const TSharedPtr<FJsonObject>& Params)
 {

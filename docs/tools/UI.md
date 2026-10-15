@@ -244,11 +244,11 @@ Report which UMG widget currently has FOCUS in the running PIE session -- the as
 
 ## `get_widget_animations`
 
-List the UWidgetAnimations on a Widget Blueprint.
+List the UWidgetAnimations of a Widget Blueprint asset, each with its object name, display_name and has_movie_scene, plus animation_count and the resolved asset_path. Read-only; add_widget_animation creates one and remove_widget_animation accepts either name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
+| `widget_bp_path` | string | yes | Asset path of the Widget Blueprint, e.g. "/Game/UI/WBP_MainMenu"; it must exist. |
 
 **Returns:** `{ widget_bp_path: string, asset_path: string, animations: [{name, display_name, has_movie_scene}], animation_count: int }`
 
@@ -479,7 +479,7 @@ Move a widget to a new parent panel (optionally at a specific child index), via 
 
 ## `scaffold_menu_screen`
 
-Build a COMPLETE, styled, contrast-safe menu screen in ONE call: the Widget Blueprint, a background panel, a centred title and N labelled buttons, each with its OnClicked already wired to a handler in the event graph. This exists because authoring a menu widget-by-widget costs ~40 MCP calls (add the widget, parent it, set its slot, style it, bind it -- times every button), and that cost, not any missing capability, is why a project ends up with a default-grey UMG screen nobody wants to touch. THE DEFAULTS PASS OUR OWN AUDITOR: the button/text colours are chosen so audit_widget_accessibility reports no contrast issue, and the achieved ratio is returned in the payload as contrast_ratio_normal_text so the claim is checkable rather than promised. Everything is a plain solid brush with no ResourceObject, which is exactly what makes that ratio computable at all. Idempotent at every level: an existing asset is reused, an existing widget name is reused, and an existing OnClicked binding is not duplicated -- so re-running to add one more entry is safe. WARNING: layout is authored, NOT measured -- a label longer than the panel is wide will still clip, and nothing here detects that (render_widget_preview is the cheap oracle). WARNING: text is written inline, so it gets an auto-generated localisation key, not a String Table identity.
+Build a styled menu screen: create or reuse the Widget Blueprint at package_path/name with a centred panel, optional title and one button per entry bound to an event-graph OnClicked handler, then compile and save. Re-runs reuse widgets and bindings. Returns contrast_ratio_normal_text; the default colors pass audit_widget_accessibility. Layout is not measured (long labels can clip) and text is inline, not String Table.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -492,8 +492,8 @@ Build a COMPLETE, styled, contrast-safe menu screen in ONE call: the Widget Blue
 | `panel_color` | string | no | Background panel colour. "#RRGGBBAA", [r,g,b,a] (LINEAR 0..1) or {R,G,B,A}. Default is a near-black panel. |
 | `button_color` | string | no | Button resting colour, same formats. If you override this, you own the contrast: the returned ratio tells you what you got. |
 | `text_color` | string | no | Label colour for title and buttons, same formats. Default white. |
-| `title_font_size` | number | no | Default 36. |
-| `button_font_size` | number | no | Default 20. Anything under 12 is what audit_widget_accessibility flags as small_text. |
+| `title_font_size` | number | no | Title text size in Slate font points, truncated to a whole number; default 36. Unused when title is empty. |
+| `button_font_size` | number | no | Button label size in Slate font points, truncated to a whole number; default 20. It also sets the contrast floor checked (3:1 at 18 or more, else 4.5:1); under 12 is what audit_widget_accessibility flags as small_text. |
 | `panel_width` | number | no | Panel width in pixels (default 480). |
 | `panel_height` | number | no | Panel height in pixels (default 560). |
 | `bind_events` | boolean | no | Wire each button's OnClicked to a handler in the event graph (default true). false builds the visuals only. |

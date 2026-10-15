@@ -247,7 +247,7 @@ List the variables a Blueprint AUTHORED itself (UBlueprint::NewVariables) with n
 
 ## `snapshot_object`
 
-Capture an object's full property and component state to a named handle so it can be diffed LATER with diff_object_snapshots. compare_objects diffs two live objects at one instant; this one stores a state, which is what lets you compare ACROSS TIME (before/after an action, the honest oracle for "did that call actually change anything?") or ACROSS WORLDS (the editor CDO/defaults against the running PIE instance, or the server instance against the client's -- the co-op check that a server-side reading can never make alone). Accepts `world` including 'server' / 'client' / 'pie:N', and the response stamps which world it read. persist=true writes the snapshot under Saved/MCPAudits/snapshots/ so a baseline SURVIVES an editor restart -- without it the store is a process-lifetime map and the baseline vanishes exactly when a mandatory restart makes you need it. return_snapshot=true hands the snapshot back inline to pass straight into diff_object_snapshots.
+Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/&lt;handle>.json to survive a restart. compare_objects diffs two live objects instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -257,7 +257,7 @@ Capture an object's full property and component state to a named handle so it ca
 | `persist` | boolean | no | Also write the snapshot to Saved/MCPAudits/snapshots/&lt;handle>.json so it SURVIVES an editor restart. The in-memory store is a process-lifetime map: without this, a baseline captured before a mandatory restart is gone exactly when you need to compare against it. Default false. |
 | `return_snapshot` | boolean | no | Return the full snapshot inline in the response (so the caller can hold it and pass it back as diff_object_snapshots' snapshot_a/snapshot_b). Default false. |
 | `include_component_templates` | boolean | no | For a Blueprint / BPGC / Blueprint CDO target, also capture the SCS + ICH component TEMPLATES (a Blueprint CDO owns ONLY its native components, so without this a CDO snapshot cannot verify a single SCS/ICH override). Default true. |
-| `snapshot_id` | string | no |   |
+| `snapshot_id` | string | no | Alias of handle: the name to store the snapshot under, used only when handle is absent or empty; an existing snapshot with that name is overwritten |
 
 **Returns:** `{ handle, object_path, resolved_path, class, world (the coarse "pie"/"editor" family label the snapshot itself carries), world_selector (what was asked for), property_count, component_count, component_template_count, persisted, snapshot_path?, persist_error?, snapshot?, world_name, world_package, world_type, net_mode, pie_instance }`
 

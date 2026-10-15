@@ -139,21 +139,21 @@ Remove one implicit row from a UChooserTable (inverse of add_chooser_row). A cho
 
 ## `set_chooser_column_default`
 
-Set the per-column DefaultRowValue on a UChooserTable column -- the value every NEW row inherits when add_chooser_row appends one without explicit per-cell values, so set this BEFORE bulk-adding rows. Which fields you may pass depends on the column's struct type (FloatRange: min/max/b_no_min/b_no_max; Bool: default_value; Enum: comparison/value; Object and OutputObject: asset_path) and a field that does not belong to that type is an honest error, not a silent no-op. Idempotent: re-running with the same values returns already_existed=true.
+Set the DefaultRowValue of one UChooserTable column, the cell value rows appended by add_chooser_row inherit; set it before adding rows. The fields that apply depend on the column type (see the params); others are ignored. Compiles and saves only on a change (already_existed=true otherwise).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
 | `column_index` | number | yes | 0-based column index to update. |
-| `default_value` | any | yes | Bool column: default cell match, one of "MatchFalse", "MatchTrue", "MatchAny". |
+| `default_value` | any | yes | Bool column: "MatchFalse", "MatchTrue" or "MatchAny"; OutputFloat: a number; OutputBool: a bool; OutputName: a name string; Randomize: a probability weight. Ignored by other column types. |
 | `min` | number | no | FloatRange column: default lower bound of the row's float range. |
 | `max` | number | no | FloatRange column: default upper bound of the row's float range. |
 | `b_no_min` | boolean | no | FloatRange column: when true, disables the lower bound (row matches any value &lt;= max). |
 | `b_no_max` | boolean | no | FloatRange column: when true, disables the upper bound (row matches any value >= min). |
-| `comparison` | string | no | Enum column: default comparison operator, one of "MatchEqual", "MatchNotEqual", "MatchAny", "Modulus". |
-| `value` | any | no | Enum column: default enum ordinal to compare against (clamped to 0-255). |
+| `comparison` | string | no | Enum and Name columns: "MatchEqual", "MatchNotEqual", "MatchAny" or "Modulus"; ObjectClass column: "Equal", "NotEqual", "SubClassOf" (default), "NotSubClassOf" or "Any". Case-insensitive. |
+| `value` | any | no | Enum and OutputEnum columns: enum ordinal (clamped to 0-255); Name column: the name string to compare; MultiEnum column: the bitmask as an integer. |
 | `asset_path` | string | no | Object/OutputObject column: long package path of the UObject bound as the default row value. |
-| `class_path` | string | no |   |
+| `class_path` | string | no | ObjectClass column: path of the UClass to match (e.g. "/Script/Engine.Pawn" or "/Game/BP_Enemy.BP_Enemy_C"), used with comparison (default SubClassOf). |
 
 **Returns:** `{ table_path, column_index, column_type, default_value?, asset_path?, comparison?, already_existed, saved }`
 

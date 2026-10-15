@@ -6,17 +6,17 @@
 
 ## `interchange_can_reset_actor`
 
-Check whether an actor can be reset via Interchange
+Report, read-only, whether Interchange can reset an actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor, which needs a bound UInterchangeSceneImportAsset); returns actor_path and can_reset. The actor is found by full object path or by object name in the persistent level, not by label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_path` | string | yes | Actor path (full editor path, e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or short label |
+| `actor_path` | string | yes | Full object path of the actor (e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or its object name in the persistent level of the editor world (e.g. "StaticMeshActor_3"); labels are not matched. |
 
 **Returns:** `{ actor_path: string, can_reset: bool }`
 
 ## `interchange_can_reset_world`
 
-Check whether a world can be reset via Interchange
+Report, read-only, whether Interchange can reset a world (UInterchangeEditorScriptLibrary::CanResetWorld): the map asset world_path names, loaded if needed, or the current editor world. Returns can_reset, is_editor_world and resolved_world_path. Run the reset with interchange_reset_level_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -156,17 +156,17 @@ Reimport an existing asset from its stored UInterchangeAssetImportData (UInterch
 
 ## `interchange_reset_actors`
 
-Reset a batch of actors via Interchange
+Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the editor-world actors listed by object path or persistent-level object name; the library skips actors that fail CanResetActor, and the reply does not say which were reset. Returns count, resolved and unresolved_paths. Check first with interchange_can_reset_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_paths` | array | yes | Array of actor paths (full editor paths or short labels) |
+| `actor_paths` | array | yes | Actors to reset, each a full object path (e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or an object name in the persistent level; labels are not matched, and empty or unknown entries land in unresolved_paths. |
 
 **Returns:** `{ count: number, resolved: number, unresolved_paths: [string], note: string }`
 
 ## `interchange_reset_level_asset`
 
-Reset a level (UWorld) via Interchange
+Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing. It does not save. Returns reset, can_reset, cvar_enabled and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -176,7 +176,7 @@ Reset a level (UWorld) via Interchange
 
 ## `interchange_reset_scene_import_asset`
 
-Reset a UInterchangeSceneImportAsset via Interchange
+Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. reset is always true: read cvar_enabled, since the library does nothing while the Interchange.FeatureFlags.InterchangeReset CVar is 0. Use interchange_reset_level_asset for a level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -153,10 +153,10 @@ UClass* ResolveEditorUtilityParentClass(const FString& ParentClass, FString& Out
 // ---------------------------------------------------------------------------
 // create_editor_utility_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_editor_utility_blueprint - Create (and save) a UEditorUtilityBlueprint (a Blutility object)
-//   @param package_path - /Game folder to create the asset in (e.g. /Game/EditorUtilities)
-//   @param name - Asset name (no extension)
-//   @param parent_class - Parent UClass name or path (default UEditorUtilityObject)
+// MCP:create_editor_utility_blueprint - Create, compile and save an Editor Utility Blueprint at package_path/name, parented to parent_class. Returns asset_path, parent_class, created, already_existed and saved; an existing Editor Utility Blueprint there is returned unchanged and parent_class is not applied to it. Refused during PIE unless force.
+//   @param package_path - Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored.
+//   @param name - Asset name without path or extension, e.g. "EUB_BatchRename".
+//   @param parent_class - Parent class by name without the U or A prefix, e.g. "EditorUtilityActor", or by path such as "/Script/Blutility.EditorUtilityObject" (default EditorUtilityObject); it must be Blueprintable.
 //   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error }
 TSharedPtr<FJsonObject> HandleCreateEditorUtilityBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -233,9 +233,9 @@ TSharedPtr<FJsonObject> HandleCreateEditorUtilityBlueprint(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 // create_editor_utility_widget_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_editor_utility_widget_blueprint - Create (and save) a UEditorUtilityWidgetBlueprint with a CanvasPanel root
-//   @param package_path - /Game folder to create the asset in (e.g. /Game/EditorUtilities)
-//   @param name - Asset name (no extension)
+// MCP:create_editor_utility_widget_blueprint - Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtilityWidget) with a CanvasPanel root at package_path/name. Returns asset_path, root_widget, root_widget_class, created, already_existed and saved; an existing one is returned unchanged. Open it as a tab with run_editor_utility_widget. Refused during PIE unless force.
+//   @param package_path - Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored.
+//   @param name - Asset name without path or extension, e.g. "EUW_LevelTools".
 //   @returns { name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error }
 TSharedPtr<FJsonObject> HandleCreateEditorUtilityWidgetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -388,8 +388,8 @@ TSharedPtr<FJsonObject> HandleRunEditorUtilityWidget(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // list_editor_utility_widgets
 // ---------------------------------------------------------------------------
-// MCP:list_editor_utility_widgets - Enumerate UEditorUtilityWidgetBlueprint assets via the Asset Registry.
-//   @param path - Optional content path to search under (default /Game)
+// MCP:list_editor_utility_widgets - List the Editor Utility Widget Blueprint assets under a content folder and its subfolders, read from the Asset Registry without loading them. Returns search_path, count and widgets [{name, asset_path, package_name, package_path}]; open one as an editor tab with run_editor_utility_widget.
+//   @param path - Content folder to search recursively, without a trailing slash, e.g. "/Game/EditorUtilities" (default /Game).
 //   @returns { name, asset_path, package_name, package_path, search_path, count, widgets }
 TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -521,9 +521,9 @@ TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // create_asset_action_utility
 // ---------------------------------------------------------------------------
-// MCP:create_asset_action_utility - Create a scripted Asset Action Utility blueprint (parent UAssetActionUtility)
-//   @param package_path - Destination content folder, e.g. "/Game/MyGame".
-//   @param name - Asset name (no extension).
+// MCP:create_asset_action_utility - Create, compile and save a Blueprint parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+//   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
+//   @param name - Asset name without path or extension, e.g. "EUA_RenameTextures".
 //   @returns success or error payload
 TSharedPtr<FJsonObject> HandleCreateAssetActionUtility(const TSharedPtr<FJsonObject>& Params)
 {
@@ -533,9 +533,9 @@ TSharedPtr<FJsonObject> HandleCreateAssetActionUtility(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // create_actor_action_utility
 // ---------------------------------------------------------------------------
-// MCP:create_actor_action_utility - Create a scripted Actor Action Utility blueprint (parent UActorActionUtility)
-//   @param package_path - Destination content folder, e.g. "/Game/MyGame".
-//   @param name - Asset name (no extension).
+// MCP:create_actor_action_utility - Create, compile and save a Blueprint parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+//   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
+//   @param name - Asset name without path or extension, e.g. "EUA_AlignToFloor".
 //   @returns success or error payload
 TSharedPtr<FJsonObject> HandleCreateActorActionUtility(const TSharedPtr<FJsonObject>& Params)
 {

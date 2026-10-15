@@ -67,9 +67,9 @@ namespace
 // ---------------------------------------------------------------------------
 // show_notification
 // ---------------------------------------------------------------------------
-// MCP:show_notification - Show a transient editor toast notification (Slate notification).
+// MCP:show_notification - Show a fire-and-forget toast in the editor (Slate notification manager) with a message, an optional completion state and a lifetime in seconds. Returns shown and echoes message, completion_state and duration; an unrecognized completion_state silently falls back to None. Changes nothing else.
 //   @param message - The text to display in the notification.
-//   @param completion_state - Optional completion state: "None" (default), "Pending", "Success", "Fail".
+//   @param completion_state - Completion state, case-insensitive: "None" (default), "Pending", "Success" or "Fail"; any other value counts as "None".
 //   @param duration - Notification lifetime in seconds (default 4.0).
 //   @returns { shown: bool, message: string, completion_state: string, duration: float }
 

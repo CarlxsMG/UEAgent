@@ -81,12 +81,12 @@ Place a UAnimGraphNode_* (by class name) into an AnimGraph or a state's inner gr
 
 ## `add_anim_notify`
 
-Add a UAnimNotify event to an AnimSequence
+Add an instance of a UAnimNotify class at a time on a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and an unknown class is an error. Returns time and success. For montages use add_montage_notify; for durations add_anim_notify_state.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `animation_path` | string | yes | Full asset path to the UAnimSequence. |
-| `notify_name` | string | yes | Name of the notify class (e.g. 'AN_Footstep'). |
+| `notify_name` | string | yes | Class name of a loaded UAnimNotify subclass, tried as given and then with the AnimNotify_ prefix (e.g. 'AN_Footstep', or "PlaySound" for AnimNotify_PlaySound); a Blueprint notify goes by its generated name ending in _C. |
 | `time` | number | no | Notify trigger time in seconds (default 0) |
 | `track_name` | string | no | Notify track name (default 'Default') |
 
@@ -94,23 +94,23 @@ Add a UAnimNotify event to an AnimSequence
 
 ## `add_anim_notify_name`
 
-Register an animation-notify name on a USkeleton
+Register a notify name in the AnimationNotifies list of a USkeleton (no duplicate is added; already_existed tells) inside an undo transaction and save the skeleton package; returns present, notify_count and saved. Without skeleton_path it edits /Engine/EngineMeshes/SkeletalCube_Skeleton.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `notify_name` | string | yes | The notify name to register (e.g. 'Footstep'). |
-| `skeleton_path` | string | no | Asset path of the target Skeleton |
+| `skeleton_path` | string | no | Asset path of the USkeleton to edit (/Game/...); when omitted or empty the engine asset /Engine/EngineMeshes/SkeletalCube_Skeleton is edited and saved. |
 
 **Returns:** `{ skeleton_path, notify_name, present, added, already_existed, notify_count, saved, message }`
 
 ## `add_anim_notify_state`
 
-Add a UAnimNotifyState event (with duration) to an AnimSequence
+Add an instance of a UAnimNotifyState class with a start time and duration to a UAnimSequence notify track (created when missing) and save the sequence; each call adds another event, and unknown classes are refused. Returns start_time, duration and success. For instant notifies use add_anim_notify.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `animation_path` | string | yes | Full asset path to the UAnimSequence. |
-| `notify_state_name` | string | yes | Name of the notify state class |
+| `notify_state_name` | string | yes | Class name of a loaded UAnimNotifyState subclass, tried as given and then with the AnimNotifyState_ prefix (e.g. "Trail" for AnimNotifyState_Trail); a Blueprint notify state goes by its generated name ending in _C. |
 | `start_time` | number | no | Notify state start time in seconds (default 0) |
 | `duration` | number | no | Notify state duration in seconds (default 1.0) |
 | `track_name` | string | no | Notify track name (default 'Default') |
@@ -119,12 +119,12 @@ Add a UAnimNotifyState event (with duration) to an AnimSequence
 
 ## `add_anim_slot_group`
 
-Add an animation slot group to a skeleton
+Add an animation slot group (the groups montage slots belong to) to a USkeleton asset and save it. Idempotent: an existing group returns added false and changes nothing, but the skeleton is still saved; a failed save returns success false. Returns added and slot_group_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `group_name` | string | yes | Name of the new slot group |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `group_name` | string | yes | Name of the slot group to add, e.g. "WeaponGroup". |
 
 **Returns:** `{ asset_path: string, group_name: string, added: bool, slot_group_count: int, saved: bool }`
 
@@ -153,12 +153,12 @@ Add a state-machine node to the AnimGraph of an Animation Blueprint.
 
 ## `add_anim_sync_marker`
 
-Append an authored sync marker to a UAnimSequence
+Append an authored sync marker (name and time, on marker track 0) to a UAnimSequence in an undo transaction and save it; duplicates are not checked, nor is the time checked against the sequence length. Returns num_sync_markers. Remove with remove_anim_sync_marker.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `marker_name` | string | yes | Sync marker name. |
+| `marker_name` | string | yes | Name of the sync marker (e.g. "LeftFootDown"); sequences in one sync group line up markers that share a name. |
 | `time` | number | no | Sync marker time in seconds (default 0.5) |
 
 **Returns:** `{ anim_sequence_path, marker_name, time, num_sync_markers, success, saved, message }`
@@ -194,7 +194,7 @@ Create a source->target transition in an anim state machine.
 
 ## `add_animation_asset_to_pose_search_database`
 
-Append an animation asset to a UPoseSearchDatabase
+Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -242,15 +242,15 @@ Add an IK goal to an IK Rig, associated with a bone.  If bone_name is omitted, a
 
 ## `add_ik_retarget_chain`
 
-Add a retarget bone chain to an IK Rig.
+Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
+| `ik_rig_path` | string | yes | IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero". |
 | `chain_name` | string | yes | Name for the new retarget chain (uniquified by the engine) |
-| `start_bone` | string | yes | First bone in the chain |
-| `end_bone` | string | yes | Last bone in the chain |
-| `goal_name` | string | no | Optional IK goal to attach the chain to |
+| `start_bone` | string | yes | First bone of the chain; must exist in the skeleton of the rig. |
+| `end_bone` | string | yes | Last bone of the chain; must exist in the skeleton of the rig. |
+| `goal_name` | string | no | IK goal to attach the chain to (default none); not checked against the goals of the rig. |
 
 **Returns:** `{ asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, chain_count: int, saved: bool, save_error?: string }`
 
@@ -267,7 +267,7 @@ Add an IK solver to the bottom of an IK Rig's solver stack.  Solver type is one 
 
 ## `add_montage_notify`
 
-Add an anim notify event on a UAnimMontage
+Append a name-only notify event (no UAnimNotify class) to a UAnimMontage at an absolute trigger time on notify track 0 and save the montage; every call appends another event. Returns trigger_time, notify_count and the notifies name list. Remove with remove_montage_notify.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -279,7 +279,7 @@ Add an anim notify event on a UAnimMontage
 
 ## `add_montage_section`
 
-Add (or update) a composite section on a UAnimMontage
+Add a composite section to a UAnimMontage at an absolute start time, or move the existing section of that name there; it does not link sections (use link_montage_sections). Saves the montage in an undo transaction and returns start_time, section_count, sections and already_existed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -305,7 +305,7 @@ Append an animation segment referencing a real UAnimSequence to a montage slot
 
 ## `add_montage_slot`
 
-Add a slot animation track on a UAnimMontage
+Add an empty slot animation track with the given slot name to a UAnimMontage and save it; an existing slot of that name is left as is (already_existed=true). Returns slot_count, the slots list and present. Fill it with add_montage_segment; inverse: remove_montage_slot.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -338,13 +338,13 @@ Add a named notify TRACK to an AnimSequence (the track itself, not events on it)
 
 ## `add_pose_search_channel_to_schema`
 
-Append (or update-weight) a UPoseSearchFeatureChannel_* on a UPoseSearchSchema
+Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a channel of that class is already there, overwrite its Weight instead (already_existed=true); then finalize via PostEditChange and save. Returns schema_cardinality and channel_count; success stays true if the save fails: read saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `schema_path` | string | yes | Asset path of the UPoseSearchSchema (required). |
 | `channel_type` | string | yes | One of 'Pose', 'Trajectory', 'Position', 'Velocity', 'Heading' (required). |
-| `weight` | number | no | Channel weight (float, default 1.0). |
+| `weight` | number | no | Channel weight (float); default 1.0, which also resets the weight of an existing channel when omitted |
 
 **Returns:** `{ schema_path, channel_type, channel_class, weight, schema_cardinality, channel_count, added, already_existed, weight_updated, saved, message }`
 
@@ -363,7 +363,7 @@ Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable und
 
 ## `add_pose_to_pose_asset`
 
-Add a named REFERENCE pose to a UPoseAsset
+Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -385,13 +385,13 @@ Add a retarget op to an IK Retargeter's op stack. Default type: FK Chains op.
 
 ## `add_rig_bone`
 
-Add a bone to a Control Rig's hierarchy.
+Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at the root, then compile and save the blueprint. The engine keeps names unique, so element_key is the name the bone really got. Refused while PIE runs unless force is set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
 | `bone_name` | string | yes | Name of the new bone |
-| `parent_name` | string | no | Optional existing bone name to parent the new bone under. |
+| `parent_name` | string | no | Existing BONE to parent the new bone under; omitted or empty puts it at the root |
 | `location` | array | no | Optional [x, y, z] world location for the new bone. |
 | `rotation` | array | no | Optional [pitch, yaw, roll] world rotation for the new bone. |
 | `scale` | array | no | Optional [x, y, z] scale for the new bone. |
@@ -478,13 +478,13 @@ Add a socket to a skeletal mesh on a named bone.
 
 ## `add_socket_to_skeleton_asset`
 
-Add a USkeletalMeshSocket to a skeleton on a bone
+Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save still returns success, so check saved. Mesh-only sockets: add_skeletal_mesh_socket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `socket_name` | string | yes | Name for the new socket |
-| `bone_name` | string | no | Bone to attach the socket to, defaults to root bone |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `socket_name` | string | yes | Name of the socket; an existing socket with this name is updated instead of duplicated. |
+| `bone_name` | string | no | Bone to attach the socket to; must exist in the skeleton (default the root bone). |
 | `location` | array | no | Socket location relative to its bone as [x, y, z] (default 0,0,0) |
 | `rotation` | array | no | Socket rotation relative to its bone as [pitch, yaw, roll] (default 0,0,0) |
 
@@ -492,13 +492,13 @@ Add a USkeletalMeshSocket to a skeleton on a bone
 
 ## `add_virtual_bone`
 
-Add a virtual bone to a skeleton
+Add a virtual bone from a source bone to a target bone of a USkeleton asset, named "VB &lt;source>_&lt;target>" by the engine, then save. Bone names are not checked against the skeleton; an existing pair returns that bone with already_exists true. Returns virtual_bone_name and virtual_bone_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `source_bone` | string | no | Source bone name, defaults to first bone |
-| `target_bone` | string | no | Target bone name, defaults to first different bone |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `source_bone` | string | no | Bone the virtual bone starts from (default the first bone, usually the root); not validated. |
+| `target_bone` | string | no | Bone the virtual bone points to (default the first bone that differs from source_bone); not validated. |
 
 **Returns:** `{ asset_path: string, virtual_bone_name: string, source_bone: string, target_bone: string, virtual_bone_count: int, saved: bool, already_exists: bool }`
 
@@ -566,7 +566,7 @@ Request an async build of the PoseSearch index for a database
 
 ## `clear_anim_graph_node_pin_binding`
 
-Remove a UAnimGraphNode_Base property binding from an input pin (the inverse of set_anim_graph_node_pin_binding). Use to drop a stale/invalid binding without deleting+recreating the node. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+Remove the property binding from one input pin of an AnimGraph node (inverse of set_anim_graph_node_pin_binding), dropping a stale binding without recreating the node. Returns was_bound, is_bound and cleared; an unbound pin gives cleared=false, not an error. Undoable; saves the AnimBP without recompiling (run compile_anim_blueprint).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -574,8 +574,8 @@ Remove a UAnimGraphNode_Base property binding from an input pin (the inverse of 
 | `pin_name` | string | yes | The bound property/pin name whose binding to clear (e.g. "TransformTrajectory"). |
 | `anim_blueprint_path` | string | no | Path or name of the UAnimBlueprint (aliases: anim_blueprint, blueprint_name). |
 | `graph_name` | string | no | Target graph (optional; deep-resolved; default the top-level AnimGraph). |
-| `anim_blueprint` | string | no |   |
-| `blueprint_name` | string | no |   |
+| `anim_blueprint` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty. |
+| `blueprint_name` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty. |
 
 **Returns:** `{ node_id, pin_name, was_bound, is_bound, cleared, saved }`
 
@@ -626,7 +626,7 @@ Mark a skeleton dirty + save it. YOU DO NOT NEED THIS after add_bone / remove_bo
 
 ## `compile_anim_blueprint`
 
-Compile an Animation Blueprint and report its status.
+Compile an Animation Blueprint synchronously and save its package, even when the compile fails; returns status (EBlueprintStatus name), is_up_to_date, has_error and the error and warning messages with their counts. Refused while PIE runs unless force=true. Use get_anim_blueprint_info to inspect without compiling.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -636,12 +636,12 @@ Compile an Animation Blueprint and report its status.
 
 ## `configure_animation_events`
 
-Configure animation event settings for a skeletal mesh component
+Switch the tick of a skeletal mesh component in the editor world (or the one the world param picks): despite the name, it only toggles component ticking and tick-when-paused. Returns the previous and current tick flags; nothing is marked dirty or saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `component_name` | string | yes | Name of the skeletal mesh component to configure |
-| `event_settings` | string | yes | Event configuration mode: 'enable', 'disable', or 'custom' |
+| `component_name` | string | yes | Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins |
+| `event_settings` | string | yes | Tick mode, any case: 'enable' (tick on, not while paused), 'disable' (tick off) or 'custom' (tick on, paused setting kept) |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
 
 **Returns:** `{ component_name: string, requested_settings: string, events_configured: bool, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
@@ -691,7 +691,7 @@ Copy a set of AnimGraph nodes (with internal FAnimNode settings + intra-selectio
 
 ## `create_anim_blueprint`
 
-Create and save a UAnimBlueprint targeting a skeleton.
+Create an Animation Blueprint (parent UAnimInstance) for a skeleton at package_path/name with the editor factory, compile it and save it; an existing Animation Blueprint at that path is returned unchanged (already_existed=true). Refused while PIE runs unless force=true. Returns asset_path, generated_class and target_skeleton_set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -758,12 +758,12 @@ Create and save a UBlendSpace (or UBlendSpace1D) asset under /Game
 
 ## `create_control_rig_blueprint`
 
-Create and save a UControlRigBlueprint asset.
+Create a Control Rig Blueprint (non-modular) at package_path/name with UControlRigBlueprintFactory, compile it and save it. Idempotent: an existing Control Rig Blueprint there is returned unchanged (already_existed=true). Returns asset_path, generated_class, is_control_rig and saved; refused while PIE runs unless force is set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | UE content folder, e.g. /Game/MyGame |
-| `name` | string | yes | Asset name for the new Control Rig blueprint |
+| `package_path` | string | yes | Content folder starting with "/", e.g. "/Game/Rigs"; a trailing slash is ignored |
+| `name` | string | yes | Asset name of the Control Rig Blueprint, e.g. "CR_Hero" |
 
 **Returns:** `{ asset_path: string, name: string, generated_class: string, is_control_rig: bool, created: bool, already_existed: bool, saved: bool, save_error: string }`
 
@@ -890,12 +890,12 @@ Create a new empty morph target on a skeletal mesh.
 
 ## `delete_montage_section`
 
-Delete a composite section from a UAnimMontage by name
+Delete the first composite section with that name (FName match, case ignored) from a UAnimMontage and save it; a missing name is a success with removed=false and nothing saved. Links from other sections (NextSectionName) are not updated. Returns removed_index, section_count and the remaining sections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
-| `section_name` | string | yes | Name of the FCompositeSection to remove (FName). Case-sensitive. |
+| `section_name` | string | yes | Name of the FCompositeSection to remove; compared as an FName, so case is ignored. |
 
 **Returns:** `{ montage_path, section_name, removed_index?, already_existed, removed, section_count, sections[], saved, message }`
 
@@ -928,7 +928,7 @@ Disconnect a goal from a solver, removing that solver's per-goal effector/settin
 
 ## `duplicate_anim_sequence`
 
-Duplicate a UAnimSequence into a new package in /Game
+Copy a UAnimSequence to a new asset package_path/new_name with the same skeleton (StaticDuplicateObject) and save it; the save result is not reported, and a name taken by an asset of another class is refused. Returns duplicate_path and duplicate_class. For other asset types use duplicate_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -997,7 +997,7 @@ Report the AnimMontage(s) currently playing on a live PIE actor's skeletal mesh 
 
 ## `get_anim_asset_info`
 
-Classify and read info from any animation asset
+Load any animation asset and report its class, skeleton and asset_type (montage, composite, pose, sequence, blendspace or animation_asset) plus the counts of that type: sections/slots/notifies, segments, poses/tracks/curves, length, samples. Read-only; get_montage_info, get_anim_sequence_info and get_blendspace_samples give detail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1007,7 +1007,7 @@ Classify and read info from any animation asset
 
 ## `get_anim_blueprint_info`
 
-Read structural info about an Animation Blueprint.
+Read an Animation Blueprint without compiling or changing it: target skeleton, parent and generated class, is_anim_instance, is_template, graph_count, and the state machines of its top-level AnimGraph with their state counts (conduits not counted). list_anim_state_machines scans every function graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1017,7 +1017,7 @@ Read structural info about an Animation Blueprint.
 
 ## `get_anim_curve_data`
 
-Read keys and metadata for an animation curve
+Read one curve of a UAnimSequence without changing it: for a float curve its flags, num_keys and keys as time/value pairs; for a transform curve only flags and a summed num_keys. found=false (still a success) when the curve does not exist.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1051,7 +1051,7 @@ Read the internal FAnimNode struct of an AnimGraphNode as typed JSON (the runtim
 
 ## `get_anim_notifies`
 
-Read back all notify events from an AnimSequence
+List the notify events of a UAnimSequence without changing it: name, trigger time, duration, track_index and the notify_class or notify_state_class of each, plus num_notifies. Use get_notify_track_names for track names and get_montage_info for the notifies of a montage.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1061,7 +1061,7 @@ Read back all notify events from an AnimSequence
 
 ## `get_anim_sequence_info`
 
-Read back data-model info for a UAnimSequence.
+Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, bone track and float curve counts from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq. Use get_anim_curve_names for the track and curve names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1093,7 +1093,7 @@ Retrieve metadata and optional full data for an Animation Blueprint asset
 
 ## `get_blendspace_samples`
 
-Read back all blend samples from a BlendSpace.
+Read every sample of a UBlendSpace or UBlendSpace1D in index order (animation path, blend_x/blend_y/blend_z, rate_scale) plus num_samples and the per-axis input smoothing under interpolation. Read-only; change samples with add_blendspace_sample, edit_blendspace_sample or remove_blendspace_sample.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1202,7 +1202,7 @@ Get detailed solver-specific settings for a solver in an IK Rig.  Returns all so
 
 ## `get_montage_info`
 
-Read structural info from a UAnimMontage
+Read a UAnimMontage without changing it: skeleton_path, section, slot and notify counts with their name lists, blend_in/blend_out times, blend modes, enable_auto_blend_out, blend_out_trigger_time, sync_group and sync_slot_index. Change them with set_montage_blend_times or set_montage_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1225,7 +1225,7 @@ Read back the vertex deltas of a morph target on a specific LOD (inverse of set_
 
 ## `get_notify_track_names`
 
-Read back all notify TRACK names from an AnimSequence
+List the notify track names of a UAnimSequence in track order (UAnimationBlueprintLibrary::GetAnimationNotifyTrackNames) without changing it; returns track_names and track_count. Use get_anim_notifies for the events and add_notify_track or remove_notify_track to edit tracks.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1281,11 +1281,11 @@ Read a Control Rig control's current value (typed per ERigControlType) and its l
 
 ## `get_rig_hierarchy`
 
-Read the full element hierarchy of a Control Rig.
+Read every element of a Control Rig Blueprint hierarchy in traversal order as elements [{name, type}], plus bone_count, null_count, control_count, curve_count, other_count (sockets, connectors and the rest) and total. Read-only: nothing is compiled or saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
 
 **Returns:** `{ asset_path: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, elements: [{name, type}] }`
 
@@ -1353,11 +1353,11 @@ Get section data for a LOD: material index, triangle count, vertex count, flags.
 
 ## `get_skeleton_asset_info`
 
-Read summary info for a skeleton asset
+Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, every virtual bone with its source and target, slot_group_count and socket_count. Read-only; for up to 100 bone names use get_skeleton_info with load_full_data true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
 
 **Returns:** `{ asset_path: string, bone_count: int, bones: [string], virtual_bone_count: int, virtual_bone_names: [string], virtual_bones: [{ name: string, source_bone: string, target_bone: string }], slot_group_count: int, socket_count: int }`
 
@@ -1404,11 +1404,11 @@ Read-only walk of a UPoseSearchSchema's public fields + FinalizedChannels. An em
 
 ## `is_skeleton_shared`
 
-Count how many USkeletalMesh assets reference this skeleton.
+Find the skeletal mesh assets bound to a USkeleton asset through an Asset Registry query on their Skeleton tag, returning mesh_count, mesh_paths and shared (true when more than one mesh uses it). Read-only; only the skeleton itself is loaded.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
 
 **Returns:** `{ asset_path, mesh_count, shared, mesh_paths }`
 
@@ -1426,7 +1426,7 @@ Chain one montage section to the next by setting its NextSectionName.  add_monta
 
 ## `list_anim_state_machines`
 
-List every AnimGraphNode_StateMachine in the AnimBP (read-only).
+List the state machine nodes at the top level of every function graph of an Animation Blueprint (the AnimGraph included), read-only and without compiling: count and state_machines [{name, graph_name}]. Machines nested inside states are not listed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1458,11 +1458,11 @@ Move a solver from one position to another in the IK Rig solver stack.
 
 ## `play_animation`
 
-Play an animation montage on a skeletal mesh component
+Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Play at play_rate, then jump to start_section if playback started. Editor world unless the world param says otherwise; the component needs an anim instance. playing/success mean Montage_Play returned a length above 0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `component_name` | string | yes | Name of the skeletal mesh component to play animation on |
+| `component_name` | string | yes | Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins |
 | `montage_path` | string | yes | Full asset path to the AnimMontage (e.g. '/Game/Animations/MyMontage.MyMontage') |
 | `play_rate` | number | no | Playback rate multiplier (optional, default 1.0) |
 | `start_section` | string | no | Name of the section to jump to after play starts (optional) |
@@ -1482,12 +1482,12 @@ Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bo
 
 ## `reimport_anim_sequence`
 
-Reimport a UAnimSequence from its source FBX/asset file
+Reimport a UAnimSequence, or any reimportable asset (the class is not checked), from source_file_path or its first recorded source via FReimportManager, unsaved; a missing source returns reimported=false with a note instead of crashing. Caveat: the call passes SourceFileIndex 1 and bAutomated false, so dialogs may appear.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
-| `source_file_path` | string | no | Override source file to reimport from (defaults to recorded source) |
+| `source_file_path` | string | no | Absolute path of the file to reimport from on disk (e.g. "D:/Art/Walk.fbx"); defaults to the first source file recorded in the asset import data. |
 
 **Returns:** `{ anim_sequence_path, source_file_path, reimported, source_validated, note }`
 
@@ -1503,7 +1503,7 @@ Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
 
 ## `remove_anim_bone_track`
 
-Remove a bone track from a UAnimSequence (IAnimationDataController::RemoveBoneTrack).
+Remove the animation track of one bone from a UAnimSequence through its data controller (IAnimationDataController::RemoveBoneTrack) and save the package; removed=false when no track has that bone name, and the save result is not reported. List tracks with get_anim_curve_names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1547,7 +1547,7 @@ Remove a conduit node (and its bound rule subgraph) from a state machine.
 
 ## `remove_anim_curve`
 
-Remove a curve from a UAnimSequence.
+Remove a float or transform curve by name from a UAnimSequence through its data controller and save the package (the save result is not reported); removed=false when no such curve exists. Any curve_type other than transform targets float curves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1624,7 +1624,7 @@ Remove a state node (and its bound animation subgraph) from a state machine.
 
 ## `remove_anim_sync_marker`
 
-Remove a sync marker by name from a UAnimSequence
+Remove every authored sync marker with the given name from a UAnimSequence and save the package (no undo transaction; the save result is not reported). Returns markers_before, markers_after and removed, which is false when no marker had that name.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1746,7 +1746,7 @@ Remove a solver from an IK Rig's solver stack by index.
 
 ## `remove_montage_notify`
 
-Remove an FAnimNotifyEvent from a UAnimMontage by index
+Remove the notify event at a zero-based index from the Notifies array of a UAnimMontage and save it; an index past the end changes nothing and still returns success with removed=false. Returns removed_notify_name, notify_count_before, notify_count and the remaining notify names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1800,7 +1800,7 @@ Delete a UPoseAsset asset after verifying the asset is a UPoseAsset.
 
 ## `remove_pose_curve`
 
-Remove a named curve from a UPoseAsset (UPoseAsset::DeleteCurves).
+Delete the named curve from a UPoseAsset (UPoseAsset::DeleteCurves) in an undo transaction and save the asset; an absent curve gives removed=false and removed_count 0 but the asset is saved anyway. Returns removed_count, removed and num_curves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1811,7 +1811,7 @@ Remove a named curve from a UPoseAsset (UPoseAsset::DeleteCurves).
 
 ## `remove_pose_from_pose_asset`
 
-Remove a named pose from a UPoseAsset (UPoseAsset::DeletePoses).
+Delete the named pose from a UPoseAsset (UPoseAsset::DeletePoses, which also fixes the base pose index) in an undo transaction and save the asset, even when the name is absent (then removed=false). Returns was_present, removed_count, contains_after, num_poses and the remaining pose_names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1889,13 +1889,13 @@ Remove a retarget op from an IK Retargeter by index.
 
 ## `remove_rig_element`
 
-Remove an element from a Control Rig's hierarchy.
+Remove one element (by name and type) from a Control Rig Blueprint hierarchy with RemoveElement, then compile and save the blueprint. Errors on an unknown type or a missing element. Returns the per-type counts afterwards; refused while PIE runs unless force is set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
 | `element_name` | string | yes | Name of the element to remove |
-| `element_type` | string | yes | Element type ("Bone"/"Null"/"Control"/"Curve"/"Socket"/"Connector") |
+| `element_type` | string | yes | Element type, any case: "Bone", "Null" (or "Space"), "Control", "Curve", "Socket" or "Connector" |
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, removed: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
@@ -1945,23 +1945,23 @@ Remove a socket from a skeletal mesh (and its skeleton twin). Idempotent: re-run
 
 ## `remove_socket_from_skeleton_asset`
 
-Remove a socket from a skeleton (idempotent).
+Remove a socket from the socket list of a USkeleton asset and save it. Idempotent: a missing socket returns removed false and already_absent true without saving. Returns socket_count and the remaining socket_names; sockets that exist only on a skeletal mesh are untouched (use remove_skeletal_mesh_socket).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset. |
-| `socket_name` | string | yes | Name of the socket to remove. |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `socket_name` | string | yes | Name of the socket to remove (case-insensitive). |
 
 **Returns:** `{ asset_path: string, socket_name: string, removed: bool, already_absent: bool, socket_count: int, socket_names: [string], saved: bool }`
 
 ## `remove_virtual_bone`
 
-Remove a virtual bone from a skeleton (idempotent).
+Remove a virtual bone from a USkeleton asset, named directly or found by its source and target bones, then save. Idempotent: no match returns removed false and already_absent true without saving. Returns the remaining virtual_bone_names; a failed save returns success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset. |
-| `virtual_bone_name` | string | no | Name of the virtual bone to remove (the VB-prefixed name). |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `virtual_bone_name` | string | no | Full virtual bone name with its "VB " prefix, e.g. "VB pelvis_hand_r"; when given, source_bone and target_bone are ignored. |
 | `source_bone` | string | no | Source bone name; used with target_bone to resolve the virtual bone when virtual_bone_name is omitted. |
 | `target_bone` | string | no | Target bone name; used with source_bone to resolve the virtual bone when virtual_bone_name is omitted. |
 
@@ -1980,38 +1980,38 @@ Remove a FMotionWarpingTarget from a UMotionWarpingComponent by FName. Wraps UMo
 
 ## `rename_anim_curve`
 
-Rename an animation curve on a UAnimSequence
+Rename a float or transform curve on a UAnimSequence through its data controller (one undo step) and save it; errors when the source curve does not exist or the rename is refused. Any curve_type other than transform means float. Returns renamed and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_sequence_path` | string | yes | Full asset path to the UAnimSequence |
-| `old_curve_name` | string | yes | Current curve name |
-| `new_curve_name` | string | yes | New curve name |
+| `old_curve_name` | string | yes | Name of the existing curve to rename, as listed by get_anim_curve_names. |
+| `new_curve_name` | string | yes | Name the curve gets after the rename. |
 | `curve_type` | string | no | Curve type to target: float (default) or transform |
 
 **Returns:** `{ anim_sequence_path, old_curve_name, new_curve_name, renamed, saved }`
 
 ## `rename_bone`
 
-Rename a bone in a skeleton's reference skeleton
+Rename a bone in the reference skeleton of a USkeleton asset and save it. Fails with an error when old_name is not a bone or new_name is already taken; skeletal meshes and animations that use the old name are not updated. A failed save returns success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `old_name` | string | yes | Current bone name |
+| `skeleton_path` | string | yes | USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `old_name` | string | yes | Current bone name; must exist in the reference skeleton. |
 | `new_name` | string | yes | Desired new bone name (must not already exist) |
 
 **Returns:** `{ asset_path, old_name, new_name, renamed, already_used, not_found, bone_count, saved, op: "rename_bone" }`
 
 ## `rename_ik_retarget_chain`
 
-Rename a retarget chain in an IK Rig.
+Rename a retarget chain of an IK Rig asset and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. The save result is not reported.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `chain_name` | string | yes | Current name of the retarget chain |
-| `new_name` | string | yes | New name to assign |
+| `ik_rig_path` | string | yes | IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero". |
+| `chain_name` | string | yes | Current name of the retarget chain, as get_ik_rig_info lists it. |
+| `new_name` | string | yes | Requested new name; the engine may add a suffix to keep it unique. |
 
 **Returns:** `{ asset_path: string, old_name: string, new_name: string, renamed: bool }`
 
@@ -2054,13 +2054,13 @@ Rename an element in a Control Rig's hierarchy.  Idempotent: renaming to the cur
 
 ## `rename_skeletal_mesh_morph_target`
 
-Rename a morph target on a skeletal mesh.
+Rename a morph target on a skeletal mesh asset and save the mesh. Fails if old_name is not a morph target of the mesh or new_name already exists; a failed save also returns an error although the rename stays in memory. Returns old_name, new_name and renamed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `old_name` | string | yes | Current name of the morph target |
-| `new_name` | string | yes | New name for the morph target |
+| `skeletal_mesh_path` | string | yes | Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero". |
+| `old_name` | string | yes | Current morph target name, as get_skeletal_mesh_morph_targets lists it. |
+| `new_name` | string | yes | New morph target name; must not already exist on the mesh. |
 
 **Returns:** `{ old_name: string, new_name: string, skeletal_mesh_path: string, renamed: bool }`
 
@@ -2078,19 +2078,19 @@ Rename a socket on a skeletal mesh (and its skeleton twin).
 
 ## `scaffold_aim_offset_blend_space`
 
-Create a UAimOffsetBlendSpace (2D AimOffset) asset for character aim-offset blending (typically Yaw x Pitch). Idempotent on re-run. Same protected-axis caveat as `scaffold_blend_space_2d`.
+Create a UAimOffsetBlendSpace for a skeleton at package_path/asset_name and save it, or re-save the one already there (already_existed=true); a failed save still succeeds with saved=false. Yaw/pitch ranges and grid counts are only echoed, not written: set axes with set_blendspace_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | /Game/... folder (required) |
-| `asset_name` | string | yes | Display name (required) |
-| `skeleton_path` | string | yes | USkeleton (required) |
-| `yaw_min` | number | no | Optional yaw axis lower bound (default -90.0 degrees) |
-| `yaw_max` | number | no | Optional yaw axis upper bound (default 90.0) |
-| `pitch_min` | number | no | Optional pitch axis lower bound (default -90.0) |
-| `pitch_max` | number | no | Optional pitch axis upper bound (default 90.0) |
-| `num_grid_points_yaw` | number | no | Optional yaw grid density (default 4) |
-| `num_grid_points_pitch` | number | no | Optional pitch grid density (default 4) |
+| `package_path` | string | yes | Content folder for the new asset, e.g. /Game/Animation/AimOffsets (a trailing slash is ignored). |
+| `asset_name` | string | yes | Name of the aim offset asset (e.g. "AO_Rifle"); the object path becomes package_path/asset_name.asset_name. |
+| `skeleton_path` | string | yes | Asset path of the USkeleton the new aim offset targets (e.g. "/Game/Characters/Mannequin/SK_Mannequin_Skeleton"); a reused asset keeps its own skeleton. |
+| `yaw_min` | number | no | Yaw lower bound echoed in the reply (default -90.0 degrees); not written to the asset. |
+| `yaw_max` | number | no | Yaw upper bound echoed in the reply (default 90.0); not written to the asset. |
+| `pitch_min` | number | no | Pitch lower bound echoed in the reply (default -90.0); not written to the asset. |
+| `pitch_max` | number | no | Pitch upper bound echoed in the reply (default 90.0); not written to the asset. |
+| `num_grid_points_yaw` | number | no | Yaw grid divisions echoed in the reply (default 4); not written to the asset. |
+| `num_grid_points_pitch` | number | no | Pitch grid divisions echoed in the reply (default 4); not written to the asset. |
 
 **Returns:** `{ asset_path, skeleton_path, yaw_min, yaw_max, pitch_min, pitch_max, num_grid_points_yaw, num_grid_points_pitch, already_existed, saved, note? }`
 
@@ -2231,17 +2231,17 @@ Set the sampling frame rate of a UAnimSequence (IAnimationDataController::SetFra
 
 ## `set_anim_graph_node_pin_binding`
 
-Bind an AnimGraph node's input pin (property) to a variable/property path via UAnimGraphNode_Base property bindings (the detail-panel "bind" chip). set_anim_graph_node_property writes the internal FAnimNode struct; this writes the pin BINDING map instead -- e.g. bind a Pose History node's "TransformTrajectory" pin to a "Trajectory" variable. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_anim_graph_node_property edits the FAnimNode struct instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `node_id` | string | yes | NodeGuid of the target UAnimGraphNode_* (from get_graph_nodes). |
 | `pin_name` | string | yes | The bound property/pin name (e.g. "TransformTrajectory"). |
-| `binding_path` | string | yes | The variable/property path to bind the pin to (e.g. "Trajectory", or nested "MyStruct.Member"). |
+| `binding_path` | string | yes | The variable/property path to bind the pin to (e.g. "Trajectory", or nested "MyStruct.Member"). This tool does not check that the path resolves. |
 | `anim_blueprint_path` | string | no | Path or name of the UAnimBlueprint (aliases: anim_blueprint, blueprint_name). |
 | `graph_name` | string | no | Target graph (optional; deep-resolved; default the top-level AnimGraph). |
-| `anim_blueprint` | string | no |   |
-| `blueprint_name` | string | no |   |
+| `anim_blueprint` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty. |
+| `blueprint_name` | string | no | Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty. |
 
 **Returns:** `{ node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved }`
 
@@ -2262,7 +2262,7 @@ Write a property of an AnimGraphNode's internal FAnimNode struct by (dotted) nam
 
 ## `set_anim_montage_preview_mesh`
 
-Set the preview USkeletalMesh on a UAnimMontage (editor preview)
+Set the editor preview USkeletalMesh of a UAnimMontage (SetPreviewMesh, one undo step) and save the montage; it only changes what the asset editor shows, and the mesh skeleton is not checked against the montage. Returns mesh_path, prev_mesh_path and applied.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2320,7 +2320,7 @@ Set a UAnimSequence's retarget source (and optionally its retarget reference-pos
 
 ## `set_anim_root_motion`
 
-Configure root motion settings on a UAnimSequence
+Write the three root motion settings of a UAnimSequence (bEnableRootMotion, RootMotionRootLock, bForceRootLock) and save it. All three are written on every call, so an omitted one is reset to its default; an unknown root lock name applies RefPose while the reply echoes the given text.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2333,7 +2333,7 @@ Configure root motion settings on a UAnimSequence
 
 ## `set_anim_transition_rule_automatic`
 
-Configure the automatic-rule UPROPERTYs of a transition.
+Set the automatic rule of one transition (source_state to target_state) in a state machine of an Animation Blueprint: bAutomaticRuleBasedOnSequencePlayerInState and AutomaticRuleTriggerTime, both written every call (omitted means false and 0). Marks it structurally modified and saves without compiling; refused while PIE runs unless force=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2341,7 +2341,7 @@ Configure the automatic-rule UPROPERTYs of a transition.
 | `machine_name` | string | yes | Name of the state machine that owns the transition |
 | `source_state` | string | yes | Name of the source state (transition origin) |
 | `target_state` | string | yes | Name of the target state (transition destination) |
-| `enabled` | boolean | no | bAutomaticRuleBasedOnSequencePlayerInState (default false) |
+| `enabled` | boolean | no | True lets the transition fire on its own when the sequence player of the source state nears its end (bAutomaticRuleBasedOnSequencePlayerInState); omitted writes false. |
 | `trigger_time` | number | no | AutomaticRuleTriggerTime in seconds (default 0.0; negative = blend lead) |
 
 **Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, enabled, trigger_time, rule_graph_has_result_node, saved, save_error? }`
@@ -2553,17 +2553,17 @@ Set the blend-in / blend-out times on a UAnimMontage
 
 ## `set_montage_properties`
 
-Set UAnimMontage blend-mode + sync / auto-blend-out properties
+Set only the supplied blend modes, auto blend out, trigger time, sync group/slot and deprecated root motion fields of a UAnimMontage in one undo step and save it; bad enum names, or no field, are refused before any change. For blend times use set_montage_blend_times.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
 | `blend_mode_in` | string | no | BlendModeIn: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional. |
 | `blend_mode_out` | string | no | BlendModeOut: 'Standard' or 'Inertialization' (EMontageBlendMode). Optional. |
-| `enable_auto_blend_out` | boolean | no | bEnableAutoBlendOut (bool). Optional. |
+| `enable_auto_blend_out` | boolean | no | When true the montage blends out by itself near its end (bEnableAutoBlendOut); omitted keeps the current value. |
 | `blend_out_trigger_time` | number | no | BlendOutTriggerTime in seconds (&lt;0 = auto from BlendOut time). Optional. |
-| `sync_group` | string | no | SyncGroup name (FName). Optional. |
-| `sync_slot_index` | number | no | SyncSlotIndex (zero-based int). Optional. |
+| `sync_group` | string | no | Sync group name (SyncGroup) the montage joins for marker-based sync; an empty string sets None, omitted keeps the current value. |
+| `sync_slot_index` | number | no | Zero-based index of the slot track whose animation drives the sync group (SyncSlotIndex); omitted keeps the current value. |
 | `enable_root_motion_translation` | boolean | no | bEnableRootMotionTranslation (bool, DEPRECATED since 4.5). Optional. |
 | `enable_root_motion_rotation` | boolean | no | bEnableRootMotionRotation (bool, DEPRECATED since 4.5). Optional. |
 | `root_motion_root_lock` | string | no | RootMotionRootLock: 'RefPose'\|'AnimFirstFrame'\|'Zero' (DEPRECATED since 4.5). Optional. |
@@ -2634,11 +2634,11 @@ Mark morph targets on a skeletal mesh as generated-by-engine (the runtime optimi
 
 ## `set_motion_warping_component_search_in_anims`
 
-Toggle UMotionWarpingComponent::bSearchForWindowsInAnimsWithinMontages (component-wide, no per-target args).
+Set bSearchForWindowsInAnimsWithinMontages on the UMotionWarpingComponent of an editor-world actor found by internal name (not label): when true, warping windows are also searched in animations inside montages. Marks the level dirty, not saved; returns previous and new values and changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Engine name of the actor carrying the UMotionWarpingComponent |
+| `actor_name` | string | yes | Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match. |
 | `enabled` | boolean | yes | Sets bSearchForWindowsInAnimsWithinMontages: when true, motion-warping windows are also searched in animations nested inside montages (required, no default) |
 
 **Returns:** `{ actor_name, previous_search_in_anims: bool, new_search_in_anims: bool, changed: bool }`
@@ -2657,11 +2657,11 @@ Set the BoneName on an existing FMotionWarpingTarget (resolves the existing Comp
 
 ## `set_motion_warping_target_follow_component`
 
-Toggle bFollowComponent on an existing FMotionWarpingTarget (keeps BoneName/offsets).
+Set bFollowComponent on an existing component-based warp target of an editor-world actor found by internal name, keeping its Component, BoneName and offsets. A missing target, or one without a Component, is an error. WarpTargets is Transient, so the change is not saved with the level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Engine name of the actor carrying the UMotionWarpingComponent |
+| `actor_name` | string | yes | Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match. |
 | `warp_target_name` | string | yes | FName of the existing warp target on the component |
 | `follow` | boolean | yes | When true the target tracks the Component's live transform each frame; when false it snapshots the current transform (required, no default) |
 
@@ -2694,13 +2694,13 @@ Set LocationOffset (FVector) on an existing FMotionWarpingTarget (keeps BoneName
 
 ## `set_motion_warping_target_rotation`
 
-Set FRotator on an existing FMotionWarpingTarget (keeps current Location).
+Set the rotation of an existing warp target of an editor-world actor (found by internal name), keeping its Location. The target is rebuilt as a plain transform target, so a component-based one loses its Component, BoneName, follow flag and offsets. WarpTargets is Transient: not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Engine name of the actor carrying the UMotionWarpingComponent |
+| `actor_name` | string | yes | Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match. |
 | `warp_target_name` | string | yes | FName of the existing warp target on the component |
-| `rotation` | array | no | New [pitch, yaw, roll] rotation in degrees (world space) |
+| `rotation` | array | no | New world rotation in degrees as [pitch, yaw, roll]; omitted means [0, 0, 0]. |
 
 **Returns:** `{ actor_name, warp_target_name, previous_pitch, previous_yaw, previous_roll, new_pitch, new_yaw, new_roll, changed: bool }`
 
@@ -2878,13 +2878,13 @@ Set a Control Rig control's pose value (Initial + Current), type-correct per the
 
 ## `set_rigvm_pin_default`
 
-Set the default value of a RigVM pin
+Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. success reflects the save even when the write failed: check set, pin_found and current_value, which is read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
 | `pin_path` | string | yes | Pin path NodeName.PinName, e.g. SetTransform.bInitial |
-| `value` | string | yes | UE export-text form of the value, e.g. true or 1.0 |
+| `value` | string | yes | Value in UE export-text form, e.g. "true", "1.0" or "(X=0.0,Y=0.0,Z=1.0)"; array pins are resized to the given element count. |
 
 **Returns:** `{ asset_path: string, pin_path: string, value: string, set: bool, pin_found: bool, current_value: string, saved: bool, save_error: string }`
 
@@ -2913,21 +2913,21 @@ Repoint a Blueprint's skeletal mesh component AnimClass to a (fork) AnimBlueprin
 
 ## `set_skeletal_mesh_lod_build_settings`
 
-Modify per-LOD build settings on a skeletal mesh.
+Change the stored build settings of one LOD of a skeletal mesh asset, only the fields you pass, and save the mesh. The mesh is not rebuilt here, so the settings take effect at its next build or reimport; a failed save returns an error. Returns settings_applied.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | no | LOD index to modify (default 0) |
-| `recompute_normals` | boolean | no | bool, recompute normals |
-| `recompute_tangents` | boolean | no | bool, recompute tangents |
-| `use_mikk_t_space` | boolean | no | bool, use Mikk T space |
-| `compute_weighted_normals` | boolean | no | bool, compute weighted normals |
-| `remove_degenerates` | boolean | no | bool, remove degenerate triangles |
-| `high_precision_tangents` | boolean | no | bool, use high precision tangent basis |
-| `high_precision_weights` | boolean | no | bool, use high precision skin weights |
-| `full_precision_uvs` | boolean | no | bool, use full precision UVs |
-| `bone_influence_limit` | number | no | int, max bones influencing each vertex |
+| `skeletal_mesh_path` | string | yes | Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero". |
+| `lod_index` | number | no | 0-based LOD index (default 0); an index the mesh does not have fails the call. |
+| `recompute_normals` | boolean | no | Ignore the imported normals and recompute them (bRecomputeNormals). |
+| `recompute_tangents` | boolean | no | Ignore the imported tangents and recompute them (bRecomputeTangents). |
+| `use_mikk_t_space` | boolean | no | Use MikkTSpace when computing tangents (bUseMikkTSpace). |
+| `compute_weighted_normals` | boolean | no | Weight computed normals by triangle area and corner angle (bComputeWeightedNormals). |
+| `remove_degenerates` | boolean | no | Remove degenerate triangles at build time (bRemoveDegenerates). |
+| `high_precision_tangents` | boolean | no | Store tangents at 16-bit instead of 8-bit precision (bUseHighPrecisionTangentBasis). |
+| `high_precision_weights` | boolean | no | Use 16-bit instead of 8-bit skin weights for rendering (bUseHighPrecisionSkinWeights). |
+| `full_precision_uvs` | boolean | no | Store UVs at full floating-point precision (bUseFullPrecisionUVs). |
+| `bone_influence_limit` | number | no | Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect. |
 
 **Returns:** `{ lod_index: int, settings_applied: {...}, saved: bool }`
 
@@ -2964,13 +2964,13 @@ Author a LOD's FSkeletalMeshOptimizationSettings (ReductionSettings) — the dat
 
 ## `set_skeletal_mesh_lod_screen_size`
 
-Set per-LOD ScreenSize.Default on a skeletal mesh.
+Set ScreenSize.Default (the screen size at which this LOD switches in) of one LOD of a skeletal mesh asset. Marks the mesh dirty but does NOT save it, so follow with save_asset; per-platform overrides are left as they are. Returns old_screen_size and screen_size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | yes | LOD index to modify |
-| `screen_size` | number | no | New ScreenSize.Default value |
+| `skeletal_mesh_path` | string | yes | Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero". |
+| `lod_index` | number | yes | 0-based LOD index; must be below the LOD count of the mesh. |
+| `screen_size` | number | no | New ScreenSize.Default value, e.g. 0.3; the call fails without it. |
 
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, old_screen_size: float, screen_size: float, applied: bool }`
 
@@ -3105,11 +3105,11 @@ Sort a montage slot track's segments by start time ascending
 
 ## `stop_animation`
 
-Stop animation montage playback on a skeletal mesh component
+Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 s blend-out: only montage_path when given, otherwise every active montage. Editor world unless the world param says otherwise; an unknown montage_path is an error. was_playing and playing cover any montage.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `component_name` | string | yes | Name of the skeletal mesh component to stop animation on |
+| `component_name` | string | yes | Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins |
 | `montage_path` | string | no | Full asset path of a specific AnimMontage to stop; if omitted, stops all montages (optional) |
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). |
 
@@ -3117,12 +3117,12 @@ Stop animation montage playback on a skeletal mesh component
 
 ## `validate_anim_state_machine`
 
-Validate a state machine's structure without compiling.
+Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. Caveat: state_count includes conduits and transitions and transition_count stays 0, so that warning always fires.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Asset path of the UAnimBlueprint |
-| `state_machine_name` | string | yes | Name of the state machine |
+| `state_machine_name` | string | yes | Name of a state machine in the top-level AnimGraph, matched without case (see list_anim_state_machines). |
 
 **Returns:** `{ is_valid, errors[], warnings[], info[], state_count, transition_count }`
 

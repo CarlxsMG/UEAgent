@@ -99,11 +99,11 @@ Spawn a new camera actor in the editor world with optional initial transform.
 
 ## `create_camera_asset`
 
-Creates a UCameraAsset (Gameplay Camera System, Experimental). Idempotent.
+Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged (already_existed:true), another asset class there is an error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (required) |
+| `name` | string | yes | Name of the UCameraAsset to create, e.g. "CA_Player"; also the last segment of its path |
 | `package_path` | string | no | Target content folder (default "/Game/Cameras") |
 
 **Returns:** `{ name, asset_path, asset_class, already_existed, saved }`
@@ -121,11 +121,11 @@ Creates a UCameraRigAsset (Gameplay Camera System, Experimental). Idempotent (re
 
 ## `create_camera_rig_crane`
 
-Spawn a CameraRig_Crane actor in the editor world.
+Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitch, yaw and arm length; it is always labelled "CameraRigCrane_MCP", so address it later by the returned internal_name. Returns location and the read-back crane values; the level is not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000) |
 | `crane_pitch` | number | no | Crane pitch angle in degrees (optional, default 0) |
 | `crane_yaw` | number | no | Crane yaw angle in degrees (optional, default 0) |
 | `arm_length` | number | no | Crane arm length (optional, default 500.0, valid 0-100000) |
@@ -134,11 +134,11 @@ Spawn a CameraRig_Crane actor in the editor world.
 
 ## `create_camera_rig_rail`
 
-Spawn a CameraRig_Rail actor in the editor world.
+Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 points the rail is rebuilt as a straight 500-unit line along local X. Always labelled "CameraRigRail_MCP", so address it by the returned internal_name, e.g. in set_camera_rig_rail_position. Not saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000) |
 | `num_spline_points` | number | no | Number of spline points on the rail (optional, default 2, valid 2-100) |
 
 **Returns:** `{ actor_name: string, internal_name: string, location: [number, number, number], num_spline_points: number, success: bool }`
@@ -196,7 +196,7 @@ Reports a camera rig's RootNode class and its camera-parameter fields (name + va
 
 ## `get_camera_transform`
 
-Retrieve the current location and rotation of a camera.
+Read the world location and rotation of a camera actor (ACameraActor or CineCameraActor) in the editor world, found by object name or label (case-insensitive, first match). Returns location [X, Y, Z] and rotation [Pitch, Yaw, Roll] in degrees; set_camera_transform is the writer.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -245,7 +245,7 @@ Wires a USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRigAsse
 
 ## `set_camera_fov`
 
-Set the field of view (FOV) for a camera.
+Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_camera_fov reads it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -345,7 +345,7 @@ Set the aperture (f-stop) on a CineCameraActor for depth-of-field control.
 
 ## `set_cine_camera_filmback`
 
-Configure the filmback (sensor size) on a CineCameraActor.
+Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-world actor found by name or label; sensor offsets are reset to 0. No undo transaction, nothing saved. Returns the read-back sensor_width, sensor_height and aspect_ratio; success is false when they do not match.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -368,7 +368,7 @@ Set the focal length (mm) on a CineCameraActor's CineCameraComponent.
 
 ## `set_cine_camera_focus`
 
-Configure focus settings on a CineCameraActor.
+Replace the focus settings of the CineCameraComponent on an editor-world actor found by name or label: method, manual focus distance and smoothing; other focus fields, including the tracked actor, reset to defaults. Returns the read-back focus_method and focus_distance; no undo, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -381,7 +381,7 @@ Configure focus settings on a CineCameraActor.
 
 ## `set_cine_camera_lens`
 
-Configure lens constraints on a CineCameraActor.
+Replace the lens limits of the CineCameraComponent on an editor-world actor found by name or label: focal length and f-stop ranges plus blade count; minimum focus distance resets to 0 and squeeze factor to 1. Returns the read-back focal range; no undo, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

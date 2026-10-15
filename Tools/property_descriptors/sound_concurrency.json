@@ -7,5 +7,5 @@
   "struct_field": "Concurrency",
   "set_desc": "Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial merge + clamp).",
   "settings_desc": "Object of FSoundConcurrencySettings fields to merge (maxCount(int>=1), bLimitToOwner(bool), resolutionRule(enum name), retriggerTime, volumeScale(0..1), volumeScaleMode(enum), bVolumeScaleCanRelease, volumeScaleAttackTime, volumeScaleReleaseTime, voiceStealReleaseTime); absent keys untouched.",
-  "get_desc": "Read all FSoundConcurrencySettings fields from a USoundConcurrency."
+  "get_desc": "Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only."
 }

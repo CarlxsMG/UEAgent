@@ -404,8 +404,8 @@ TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:delete_level_sequence - Delete a Level Sequence asset from the project
-//   @param sequence_name - Name of the sequence to delete
+// MCP:delete_level_sequence - Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Reports success even when the delete did not happen: check actually_deleted, true only when the delete reported success and the asset is gone.
+//   @param sequence_name - Asset name of the Level Sequence to delete, not its path (e.g. "LS_Intro")
 //   @returns { sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, actually_deleted: bool }
 TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>& Params)
 {
@@ -440,9 +440,9 @@ TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>&
 
 // --- Playback length and frame rate stored in an asset ------------------------------
 
-// MCP:set_sequence_duration - Change the playback duration of a Level Sequence
-//   @param sequence_name - Name of the sequence to modify
-//   @param duration - New duration in seconds, 0 to 3600
+// MCP:set_sequence_duration - Sets the playback range of a Level Sequence (found by asset name under /Game) to [0, duration) and marks the package dirty without saving; not undoable. Returns previous_duration, actual_duration, duration_set (within 0.01 s), and start_frame and end_frame in tick-resolution frames.
+//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
+//   @param duration - New length in seconds, greater than 0 and at most 3600 (0 is refused)
 //   @returns { sequence_name: string, requested_duration: number, previous_duration: number, actual_duration: number, duration_set: bool, start_frame: int, end_frame: int }
 TSharedPtr<FJsonObject> HandleSetSequenceDuration(const TSharedPtr<FJsonObject>& Params)
 {
@@ -490,8 +490,8 @@ TSharedPtr<FJsonObject> HandleSetSequenceDuration(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_sequence_duration - Retrieve the playback duration of a Level Sequence
-//   @param sequence_name - Name of the sequence to query
+// MCP:get_sequence_duration - Reads the playback range of a Level Sequence, the first under /Game whose asset name matches (case-insensitive), without changing it. Returns duration in seconds, and start_frame and end_frame in tick-resolution frames, not display frames; get_timeline_info also gives both rates.
+//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
 //   @returns { sequence_name: string, duration: number, start_frame: int, end_frame: int }
 TSharedPtr<FJsonObject> HandleGetSequenceDuration(const TSharedPtr<FJsonObject>& Params)
 {
@@ -572,8 +572,8 @@ TSharedPtr<FJsonObject> HandleSetSequenceFrameRate(const TSharedPtr<FJsonObject>
         bSet ? FString() : FString(TEXT("set_sequence_frame_rate: the movie scene does not read back the requested rate.")));
 }
 
-// MCP:get_sequence_frame_rate - Retrieve the frame rate of a Level Sequence
-//   @param sequence_name - Name of the sequence to query
+// MCP:get_sequence_frame_rate - Reads the tick resolution of a Level Sequence (found by asset name under /Game), NOT its display rate, without changing it. Returns frame_rate as a decimal plus numerator and denominator. Read the display rate with get_timeline_info; change both with set_sequence_frame_rate.
+//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
 //   @returns { sequence_name: string, frame_rate: number, numerator: int, denominator: int }
 TSharedPtr<FJsonObject> HandleGetSequenceFrameRate(const TSharedPtr<FJsonObject>& Params)
 {
@@ -668,7 +668,7 @@ TSharedPtr<FJsonObject> HandlePlayLevelSequenceRuntime(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:pause_level_sequence_runtime - Pause playback of an active Level Sequence player
+// MCP:pause_level_sequence_runtime - Pauses, at its current position, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned. Players live in the PIE or game world and stop resolving once it ends. Returns player_key, paused, playing and current_time in seconds; read it later with get_level_sequence_status_runtime.
 //   @param player_key - Player key returned from play_level_sequence_runtime
 //   @returns { player_key: string, paused: bool, playing: bool, current_time: number }
 TSharedPtr<FJsonObject> HandlePauseLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
@@ -693,7 +693,7 @@ TSharedPtr<FJsonObject> HandlePauseLevelSequenceRuntime(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:stop_level_sequence_runtime - Stop playback and destroy a Level Sequence player
+// MCP:stop_level_sequence_runtime - Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (always true) and playing as read just after Stop. Use pause_level_sequence_runtime to keep the player.
 //   @param player_key - Player key returned from play_level_sequence_runtime
 //   @returns { player_key: string, stopped: bool, playing: bool }
 TSharedPtr<FJsonObject> HandleStopLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
@@ -811,8 +811,8 @@ TSharedPtr<FJsonObject> HandleGetLevelSequenceStatusRuntime(const TSharedPtr<FJs
 // result describing why, never a fake success.
 // ---------------------------------------------------------------------------
 
-// MCP:get_timeline_info - Read timeline summary for a Level Sequence
-//   @param sequence_name - Name of the target level sequence
+// MCP:get_timeline_info - Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.
+//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
 //   @returns { sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int }
 TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Params)
 {

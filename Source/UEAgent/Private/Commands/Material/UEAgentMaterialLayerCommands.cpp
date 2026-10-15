@@ -154,8 +154,8 @@ namespace
 // ---------------------------------------------------------------------------
 // create_material_layer
 // ---------------------------------------------------------------------------
-// MCP:create_material_layer - Create and save a UMaterialFunctionMaterialLayer asset
-//   @param package_path - UE content folder, e.g. /Game/MyGame
+// MCP:create_material_layer - Creates a UMaterialFunctionMaterialLayer asset (usage MaterialLayer, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
+//   @param package_path - Content folder starting with a slash, e.g. /Game/MyGame; a trailing slash is ignored
 //   @param name - Asset name for the new material layer function
 //   @returns { asset_path: string, name: string, class: string, usage: string, created: bool, already_existed: bool, saved: bool, save_error: string }
 TSharedPtr<FJsonObject> HandleCreateMaterialLayer(const TSharedPtr<FJsonObject>& Params)
@@ -170,8 +170,8 @@ TSharedPtr<FJsonObject> HandleCreateMaterialLayer(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // create_material_layer_blend
 // ---------------------------------------------------------------------------
-// MCP:create_material_layer_blend - Create and save a UMaterialFunctionMaterialLayerBlend asset
-//   @param package_path - UE content folder, e.g. /Game/MyGame
+// MCP:create_material_layer_blend - Creates a UMaterialFunctionMaterialLayerBlend asset (usage MaterialLayerBlend, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
+//   @param package_path - Content folder starting with a slash, e.g. /Game/MyGame; a trailing slash is ignored
 //   @param name - Asset name for the new material layer blend function
 //   @returns { asset_path: string, name: string, class: string, usage: string, created: bool, already_existed: bool, saved: bool, save_error: string }
 TSharedPtr<FJsonObject> HandleCreateMaterialLayerBlend(const TSharedPtr<FJsonObject>& Params)
@@ -201,9 +201,9 @@ namespace UEAgentMaterialLayerImpl
 // ---------------------------------------------------------------------------
 // add_material_attribute_layers_node
 // ---------------------------------------------------------------------------
-// MCP:add_material_attribute_layers_node - Add a MaterialAttributeLayers expression node to an existing UMaterial
+// MCP:add_material_attribute_layers_node - Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions.
 //   @param material_path - Object path to the UMaterial, e.g. /Game/MyGame/M_Example
-//   @param node_name - Optional advisory node name
+//   @param node_name - Label echoed back in the reply only; it does not name or find any node in the graph
 //   @returns { material_path: string, expression_added: bool, expression_class: string, connected_material_attributes: bool, use_material_attributes: bool, num_expressions: int, recompiled: bool, saved: bool, node_name: string, save_error: string }
 TSharedPtr<FJsonObject> HandleAddMaterialAttributeLayersNode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -263,8 +263,8 @@ TSharedPtr<FJsonObject> HandleAddMaterialAttributeLayersNode(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // get_material_layer_info
 // ---------------------------------------------------------------------------
-// MCP:get_material_layer_info - Read a material layer or blend function's metadata
-//   @param layer_path - Object path to a UMaterialFunctionMaterialLayer or UMaterialFunctionMaterialLayerBlend, e.g. /Game/MyGame/M_Layer_Example
+// MCP:get_material_layer_info - Reads a material function asset (layer, blend or plain function) without changing it. Returns asset_path, class, usage ("MaterialLayer", "MaterialLayerBlend" or "Default"), num_inputs, num_outputs, num_expressions, and is_layer and is_blend (from the class or the usage).
+//   @param layer_path - Path of a material layer, layer blend or any other material function, e.g. /Game/MyGame/M_Layer_Example
 //   @returns { asset_path: string, class: string, usage: string, num_inputs: int, num_outputs: int, num_expressions: int, is_layer: bool, is_blend: bool }
 TSharedPtr<FJsonObject> HandleGetMaterialLayerInfo(const TSharedPtr<FJsonObject>& Params)
 {

@@ -641,22 +641,22 @@ static void MakeFoliageTypePropsJson(UFoliageType* FT, TSharedPtr<FJsonObject>& 
     Data->SetBoolField(TEXT("affect_dynamic_indirect_lighting"), FT->bAffectDynamicIndirectLighting != 0);
 }
 
-// MCP:set_foliage_type_properties - Tune a FoliageType asset in one call: density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- instead of reflection Python per field. Only the fields you pass change; intervals are {"min":x,"max":y}; mobility is Static/Stationary/Movable. Returns the read-back values plus applied_count and saved, so the reply is its own oracle. Edits the ASSET only: instances already placed in the level keep their transforms.
-//   @param foliage_path - Asset path of the UFoliageType (e.g. "/Game/Foliage/FT_Example")
-//   @param density - Optional float
-//   @param density_adjustment_factor - Optional float
-//   @param radius - Optional float
-//   @param scale_x - Optional {min,max} float interval
-//   @param scale_y - Optional {min,max} float interval
-//   @param scale_z - Optional {min,max} float interval
-//   @param z_offset - Optional {min,max} float interval
-//   @param cull_distance - Optional {min,max} int interval
-//   @param mobility - Optional string (Static/Stationary/Movable)
-//   @param align_to_normal - Optional bool
-//   @param random_yaw - Optional bool
-//   @param collision_with_world - Optional bool
-//   @param cast_shadow - Optional bool
-//   @param affect_dynamic_indirect_lighting - Optional bool
+// MCP:set_foliage_type_properties - Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.
+//   @param foliage_path - Asset path of a UFoliageType_InstancedStaticMesh, e.g. "/Game/Foliage/FT_Example"; actor foliage types are not found.
+//   @param density - Instances per 1000 x 1000 uu area (10 m by 10 m) when painting.
+//   @param density_adjustment_factor - Density multiplier used when reapplying: above 1 adds instances, below 1 removes them.
+//   @param radius - Minimum distance in cm between foliage instances.
+//   @param scale_x - X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
+//   @param scale_y - Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
+//   @param scale_z - Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored.
+//   @param z_offset - Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out.
+//   @param cull_distance - Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables.
+//   @param mobility - Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call.
+//   @param align_to_normal - Tilt instances to the normal of the surface they are placed on.
+//   @param random_yaw - Give each instance a random yaw around its vertical axis.
+//   @param collision_with_world - Test for overlap with world geometry before placing each instance.
+//   @param cast_shadow - Whether the foliage components cast shadows.
+//   @param affect_dynamic_indirect_lighting - Whether the foliage injects light into dynamic indirect lighting; used only when cast_shadow is true.
 //   @returns { asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting, applied_count, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetFoliageTypeProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3264,25 +3264,25 @@ TSharedPtr<FJsonObject> HandleCreateLandscapeGrassType(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_landscape_grass_type"), SaveError);
 }
 
-// MCP:set_landscape_grass_type_properties - Tune landscape grass: author one variety of a LandscapeGrassType asset (mesh, density, jitter, cull distances, min LOD, scaling mode, scale ranges, rotation/alignment, shadow and decal flags) and save, without hand-writing reflection Python. Only fields you pass change; the variety is addressed by variety_index (default 0, appended if the array is empty); intervals are {"min":x,"max":y}; scaling is Uniform/Free/LockXY. Returns the read-back values plus applied_count and saved. Two measured traps: grass_density is instances per TEN square metres, so getting it wrong is a x10 error in the instance budget, and start_cull_distance produces NO fade unless the grass material uses a PerInstanceFadeAmount node -- without it clusters simply pop at end_cull_distance.
-//   @param grass_path - Asset path of the ULandscapeGrassType
+// MCP:set_landscape_grass_type_properties - Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
+//   @param grass_path - Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field".
 //   @param variety_index [integer!] - Index of the FGrassVariety to edit, default 0 (appends if the array is empty)
-//   @param grass_mesh - Optional StaticMesh path
-//   @param grass_density - Optional float (instances per 10 square meters)
-//   @param placement_jitter - Optional float [0..1]
-//   @param start_cull_distance - Optional int
-//   @param end_cull_distance - Optional int
-//   @param min_lod - Optional int (-1 uses the mesh asset's MinLOD)
-//   @param scaling - Optional string (Uniform/Free/LockXY)
-//   @param scale_x - Optional {min,max} float interval
-//   @param scale_y - Optional {min,max} float interval
-//   @param scale_z - Optional {min,max} float interval
-//   @param random_rotation - Optional bool
-//   @param align_to_surface - Optional bool
-//   @param use_grid - Optional bool
-//   @param cast_dynamic_shadow - Optional bool
-//   @param receives_decals - Optional bool
-//   @param keep_instance_buffer_cpu_copy - Optional bool
+//   @param grass_mesh - Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call.
+//   @param grass_density - Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget.
+//   @param placement_jitter - Jitter of the grid placement from 0 to 1; only used when use_grid is true.
+//   @param start_cull_distance - Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it.
+//   @param end_cull_distance - Distance in cm beyond which a whole grass cluster is culled, an integer.
+//   @param min_lod - Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset.
+//   @param scaling - Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call.
+//   @param scale_x - X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; a string value is ignored.
+//   @param scale_y - Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; a string value is ignored.
+//   @param scale_z - Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; a string value is ignored.
+//   @param random_rotation - Give each instance a random rotation instead of a shared one.
+//   @param align_to_surface - Tilt instances to the landscape normal instead of keeping them vertical.
+//   @param use_grid - Place instances on a jittered grid instead of a Halton sequence.
+//   @param cast_dynamic_shadow - Whether instances cast shadows with non-precomputed (dynamic) shadowing.
+//   @param receives_decals - Whether the grass instances receive decals.
+//   @param keep_instance_buffer_cpu_copy - Keep a CPU copy of the instance buffer, which the overlap-count queries of the grass component need.
 //   @returns { asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy, applied_count, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetLandscapeGrassTypeProperties(const TSharedPtr<FJsonObject>& Params)
 {

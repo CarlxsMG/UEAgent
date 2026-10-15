@@ -871,8 +871,8 @@ TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
     return Report;
 }
 
-// MCP:delete_asset - Deletes an asset from the project.
-//   @param asset_path - Full asset path to delete
+// MCP:delete_asset - Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Returns delete_success, asset_verified_deleted and file_still_exists; a failed delete still reports status success, so read delete_success.
+//   @param asset_path - Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box")
 //   @returns { asset_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool?, deletion_timestamp: string? }
 
 TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
@@ -979,8 +979,8 @@ TSharedPtr<FJsonObject> HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
 
 // Plugin status and settings
 
-// MCP:get_plugin_status - Retrieves detailed status and metadata of a plugin.
-//   @param plugin_name - Name of the plugin to query
+// MCP:get_plugin_status - Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
+//   @param plugin_name - Name of the plugin to query, as its .uplugin file is named (e.g. "UEAgent")
 //   @returns { plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }
 
 TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Params)
@@ -1025,7 +1025,7 @@ TSharedPtr<FJsonObject> HandleGetPluginStatus(const TSharedPtr<FJsonObject>& Par
     return Status;
 }
 
-// MCP:configure_plugin_setting - Configures a setting for a specific plugin.
+// MCP:configure_plugin_setting - Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. An unknown plugin gives configuration_success:false, not an error. For versioned settings use set_project_settings_value.
 //   @param plugin_name - Name of the plugin to configure
 //   @param setting_name - Name of the plugin setting to configure
 //   @param setting_value - Value to set for the plugin setting

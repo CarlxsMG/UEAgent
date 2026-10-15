@@ -80,15 +80,15 @@ Join two existing landscape spline control points with a segment -- the second h
 
 ## `add_light`
 
-Spawn a light actor in the editor world
+Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `light_type` | string | yes | Directional, Point, Spot, Rect, or Sky |
-| `location` | array | no | Optional [x, y, z] world location |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation |
-| `intensity` | number | no | Optional light intensity |
-| `color` | array | no | Optional [r, g, b] light color |
+| `light_type` | string | yes | Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error. |
+| `location` | array | no | [x, y, z] world location in cm; default [0, 0, 0], also when the array has fewer than 3 numbers. |
+| `rotation` | array | no | World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis. |
+| `intensity` | number | no | Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted. |
+| `color` | array | no | [r, g, b] linear color, usually 0..1; default white. Any other form (an object, a hex string, fewer than 3 numbers) sets black. |
 
 **Returns:** `{ light_type: string, actor_name: string }`
 
@@ -179,11 +179,11 @@ Breaks an ALevelInstance actor, un-nesting its sub-level content into the curren
 
 ## `build_lighting`
 
-Build lighting for the current level
+Start an asynchronous static lighting build of all levels in the editor world (not only the current one) and return started without waiting for the result. Side effect: writes the quality and OnlyBuildCurrentLevel=false into LightingBuildOptions of the editor per-project settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `quality` | string | no | Preview, Medium, High, or Production, default Preview |
+| `quality` | string | no | Preview, Medium, High or Production (case-insensitive); any other value silently builds at Preview. Default Preview. |
 
 **Returns:** `{ quality: string, started: bool, note: string }`
 
@@ -197,12 +197,12 @@ No parameters.
 
 ## `capture_pie_screenshot`
 
-Snapshot the active game/editor viewport to a PNG. Writes a synchronous scene readback (returns output_path + dimensions), but FViewport::ReadPixels does NOT include the UMG/Slate HUD. When PIE is active AND include_ui=true it ALSO queues a with-UI engine screenshot; on a later render frame our UGameViewportClient::OnScreenshotCaptured() handler CPU-crops the composited whole-window bitmap down to the game viewport (editor chrome removed, HUD kept) and overwrites the SAME output_path (ui_overwrite_next_frame=true); re-read output_path after this call for the HUD-inclusive image. PIE-active is preferred but not required.
+Write a PNG of the game viewport (else the active editor viewport) from a synchronous ReadPixels, which omits the UMG/Slate HUD; returns output_path, width, height and bytes_written. With include_ui=true during PIE, a cropped HUD version overwrites output_path a frame later (ui_overwrite_next_frame).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `output_path` | string | no | Optional string. If empty, auto-names into &lt;Project>/Saved/MCP/PIE_&lt;utc>.png. |
-| `include_ui` | boolean | no |   |
+| `include_ui` | boolean | no | When true and PIE is running with rendering, also request an engine screenshot with the HUD that a later frame crops to the game viewport (editor chrome removed) and writes over output_path; SDR only, given up after 8 s. Default false. |
 
 **Returns:** `{ saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note? }`
 
@@ -1055,23 +1055,23 @@ Sets collision on a PLACED actor's UPrimitiveComponent (the placed-actor twin of
 
 ## `set_actor_folder`
 
-Move an actor to an outliner folder
+Move an editor-world actor, found by internal name or label (first match), into an outliner folder; an empty folder_path moves it back to the root. Undoable, marks the level dirty, not saved; returns the internal actor_name and folder_path as given. get_actor_folder reads it back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Current actor name or label in the world outliner |
-| `folder_path` | string | yes | Target folder path, e.g. Lighting/Sky |
+| `folder_path` | string | yes | Outliner folder path with "/" between levels, e.g. "Lighting/Sky"; an empty string moves the actor to the root. |
 
 **Returns:** `{ actor_name: string, folder_path: string }`
 
 ## `set_actor_label`
 
-Rename an actor's display label in the level
+Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Current actor name or label in the world outliner |
-| `new_label` | string | yes | New label to apply |
+| `new_label` | string | yes | Display label to set, e.g. "Lamp_Kitchen"; leading and trailing spaces are trimmed. |
 
 **Returns:** `{ actor_name: string, label: string }`
 
@@ -1193,25 +1193,25 @@ Sets the EDataLayerType ("Editor" or "Runtime") of a UDataLayerAsset and saves i
 
 ## `set_foliage_type_properties`
 
-Tune a FoliageType asset in one call: density, radius, scale and z-offset ranges, cull distances, mobility, align-to-normal, random yaw, world collision, shadow and indirect-lighting flags -- instead of reflection Python per field. Only the fields you pass change; intervals are {"min":x,"max":y}; mobility is Static/Stationary/Movable. Returns the read-back values plus applied_count and saved, so the reply is its own oracle. Edits the ASSET only: instances already placed in the level keep their transforms.
+Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fields you pass, then save it. Returns the read-back values with applied_count and saved; an invalid mobility fails the call. Edits the asset only: instances already placed keep their transforms. Read it with get_foliage_type_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `foliage_path` | string | yes | Asset path of the UFoliageType (e.g. "/Game/Foliage/FT_Example") |
-| `density` | number | no | Optional float |
-| `density_adjustment_factor` | number | no | Optional float |
-| `radius` | number | no | Optional float |
-| `scale_x` | string | no | Optional {min,max} float interval |
-| `scale_y` | string | no | Optional {min,max} float interval |
-| `scale_z` | string | no | Optional {min,max} float interval |
-| `z_offset` | string | no | Optional {min,max} float interval |
-| `cull_distance` | object | no | Optional {min,max} int interval |
-| `mobility` | string | no | Optional string (Static/Stationary/Movable) |
-| `align_to_normal` | boolean | no | Optional bool |
-| `random_yaw` | boolean | no | Optional bool |
-| `collision_with_world` | boolean | no | Optional bool |
-| `cast_shadow` | boolean | no | Optional bool |
-| `affect_dynamic_indirect_lighting` | boolean | no | Optional bool |
+| `foliage_path` | string | yes | Asset path of a UFoliageType_InstancedStaticMesh, e.g. "/Game/Foliage/FT_Example"; actor foliage types are not found. |
+| `density` | number | no | Instances per 1000 x 1000 uu area (10 m by 10 m) when painting. |
+| `density_adjustment_factor` | number | no | Density multiplier used when reapplying: above 1 adds instances, below 1 removes them. |
+| `radius` | number | no | Minimum distance in cm between foliage instances. |
+| `scale_x` | string | no | X scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
+| `scale_y` | string | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
+| `scale_z` | string | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, either bound optional; a string value is ignored. |
+| `z_offset` | string | no | Z location offset range in cm as a JSON object {"min":-5,"max":0}; either bound may be left out. |
+| `cull_distance` | object | no | Integer interval {"min":start,"max":end} in cm: instances fade from min (only with a PerInstanceFadeAmount material node) and clusters cull beyond max; 0 disables. |
+| `mobility` | string | no | Component mobility: Static, Stationary or Movable, case-insensitive; any other value fails the call. |
+| `align_to_normal` | boolean | no | Tilt instances to the normal of the surface they are placed on. |
+| `random_yaw` | boolean | no | Give each instance a random yaw around its vertical axis. |
+| `collision_with_world` | boolean | no | Test for overlap with world geometry before placing each instance. |
+| `cast_shadow` | boolean | no | Whether the foliage components cast shadows. |
+| `affect_dynamic_indirect_lighting` | boolean | no | Whether the foliage injects light into dynamic indirect lighting; used only when cast_shadow is true. |
 
 **Returns:** `{ asset_path, foliage_class, density, density_adjustment_factor, radius, scale_x:{min,max}, scale_y, scale_z, z_offset, cull_distance:{min,max}, mobility, align_to_normal, random_yaw, collision_with_world, cast_shadow, affect_dynamic_indirect_lighting, applied_count, saved, save_error? }`
 
@@ -1228,28 +1228,28 @@ Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling
 
 ## `set_landscape_grass_type_properties`
 
-Tune landscape grass: author one variety of a LandscapeGrassType asset (mesh, density, jitter, cull distances, min LOD, scaling mode, scale ranges, rotation/alignment, shadow and decal flags) and save, without hand-writing reflection Python. Only fields you pass change; the variety is addressed by variety_index (default 0, appended if the array is empty); intervals are {"min":x,"max":y}; scaling is Uniform/Free/LockXY. Returns the read-back values plus applied_count and saved. Two measured traps: grass_density is instances per TEN square metres, so getting it wrong is a x10 error in the instance budget, and start_cull_distance produces NO fade unless the grass material uses a PerInstanceFadeAmount node -- without it clusters simply pop at end_cull_distance.
+Set fields of one grass variety of a LandscapeGrassType asset, only those you pass, and save it; an empty variety list gets one appended for index 0, and density and cull distances change only their per-platform Default value. Returns the read-back variety with applied_count and saved; read it with get_landscape_grass_type_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `grass_path` | string | yes | Asset path of the ULandscapeGrassType |
+| `grass_path` | string | yes | Asset path of the LandscapeGrassType, e.g. "/Game/Foliage/GT_Field". |
 | `variety_index` | integer | yes | Index of the FGrassVariety to edit, default 0 (appends if the array is empty) |
-| `grass_mesh` | string | no | Optional StaticMesh path |
-| `grass_density` | number | no | Optional float (instances per 10 square meters) |
-| `placement_jitter` | number | no | Optional float [0..1] |
-| `start_cull_distance` | number | no | Optional int |
-| `end_cull_distance` | number | no | Optional int |
-| `min_lod` | number | no | Optional int (-1 uses the mesh asset's MinLOD) |
-| `scaling` | string | no | Optional string (Uniform/Free/LockXY) |
-| `scale_x` | string | no | Optional {min,max} float interval |
-| `scale_y` | string | no | Optional {min,max} float interval |
-| `scale_z` | string | no | Optional {min,max} float interval |
-| `random_rotation` | boolean | no | Optional bool |
-| `align_to_surface` | boolean | no | Optional bool |
-| `use_grid` | boolean | no | Optional bool |
-| `cast_dynamic_shadow` | boolean | no | Optional bool |
-| `receives_decals` | boolean | no | Optional bool |
-| `keep_instance_buffer_cpu_copy` | boolean | no | Optional bool |
+| `grass_mesh` | string | no | Path of the StaticMesh for this variety, e.g. "/Game/Foliage/SM_Grass"; an unknown path fails the call. |
+| `grass_density` | number | no | Instances per 10 square metres (25 means 2.5 per m2), so a wrong guess is a 10x error in the instance budget. |
+| `placement_jitter` | number | no | Jitter of the grid placement from 0 to 1; only used when use_grid is true. |
+| `start_cull_distance` | number | no | Distance in cm where instances start to fade, an integer; it does nothing unless the grass material uses a PerInstanceFadeAmount node, and 0 disables it. |
+| `end_cull_distance` | number | no | Distance in cm beyond which a whole grass cluster is culled, an integer. |
+| `min_lod` | number | no | Smallest mesh LOD to render, from -1 to 8; -1 uses the MinLOD of the static mesh asset. |
+| `scaling` | string | no | Scale mode: Uniform, Free or LockXY, case-insensitive; any other value fails the call. |
+| `scale_x` | string | no | X scale range as a JSON object {"min":0.8,"max":1.2}, also used for every axis with Uniform scaling; a string value is ignored. |
+| `scale_y` | string | no | Y scale range as a JSON object {"min":0.8,"max":1.2}, used only with Free scaling; a string value is ignored. |
+| `scale_z` | string | no | Z scale range as a JSON object {"min":0.8,"max":1.2}, used with Free or LockXY scaling; a string value is ignored. |
+| `random_rotation` | boolean | no | Give each instance a random rotation instead of a shared one. |
+| `align_to_surface` | boolean | no | Tilt instances to the landscape normal instead of keeping them vertical. |
+| `use_grid` | boolean | no | Place instances on a jittered grid instead of a Halton sequence. |
+| `cast_dynamic_shadow` | boolean | no | Whether instances cast shadows with non-precomputed (dynamic) shadowing. |
+| `receives_decals` | boolean | no | Whether the grass instances receive decals. |
+| `keep_instance_buffer_cpu_copy` | boolean | no | Keep a CPU copy of the instance buffer, which the overlap-count queries of the grass component need. |
 
 **Returns:** `{ asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy, applied_count, saved, save_error? }`
 

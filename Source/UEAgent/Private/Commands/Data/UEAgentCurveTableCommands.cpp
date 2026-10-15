@@ -436,7 +436,7 @@ TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>&
 // --------------------------------------------------------------------------- //
 // create_composite_curve_table
 // --------------------------------------------------------------------------- //
-// MCP:create_composite_curve_table - Create and save a UCompositeCurveTable that stacks parent UCurveTables.
+// MCP:create_composite_curve_table - Creates a UCompositeCurveTable at package_path/name that stacks the given UCurveTables as parents, and saves it. An existing composite there is reused and only gets parents if it has none; parents that fail to load are skipped and listed in missing_parents. Returns parent_count, row_count, created, saved.
 //   @param name - Name of the new CompositeCurveTable asset.
 //   @param package_path - Content folder; defaults to /Game/CurveTables
 //   @param parent_table_paths - Optional list of UCurveTable asset paths to stack as parents

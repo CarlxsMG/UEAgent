@@ -274,10 +274,10 @@ TSharedPtr<FJsonObject> HandleAddRigVMNode(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // set_rigvm_pin_default
 // ---------------------------------------------------------------------------
-// MCP:set_rigvm_pin_default - Set the default value of a RigVM pin
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
+// MCP:set_rigvm_pin_default - Set the default value of a pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::SetPinDefaultValue, no undo entry), then compile and save it. success reflects the save even when the write failed: check set, pin_found and current_value, which is read back.
+//   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
 //   @param pin_path - Pin path NodeName.PinName, e.g. SetTransform.bInitial
-//   @param value - UE export-text form of the value, e.g. true or 1.0
+//   @param value - Value in UE export-text form, e.g. "true", "1.0" or "(X=0.0,Y=0.0,Z=1.0)"; array pins are resized to the given element count.
 //   @returns { asset_path: string, pin_path: string, value: string, set: bool, pin_found: bool, current_value: string, saved: bool, save_error: string }
 TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& Params)
 {

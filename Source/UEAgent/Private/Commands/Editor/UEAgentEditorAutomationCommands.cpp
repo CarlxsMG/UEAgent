@@ -992,9 +992,9 @@ TSharedPtr<FJsonObject> HandleFindUnusedAssets(
 // ---------------------------------------------------------------------------
 // 5. export_assets
 // ---------------------------------------------------------------------------
-// MCP:export_assets - Export multiple assets to disk via IAssetTools::ExportAssets
-//   @param asset_paths - List of asset paths to export
-//   @param export_path - Destination directory on disk
+// MCP:export_assets - Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), written under export_path mirroring the package path; unloadable or unexportable ones are skipped. exported_count counts only new files directly in export_path, so it usually reads 0: check the folder.
+//   @param asset_paths - Asset object or package paths to export (e.g. ["/Game/Meshes/SM_Rock"]); empty strings are ignored.
+//   @param export_path - Destination directory on disk (e.g. "D:/Exports"), created if missing; each file lands in subfolders named after its package path.
 //   @returns { exported_count: int, failed_count: int, requested_count: int, export_path: string }
 TSharedPtr<FJsonObject> HandleExportAssets(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1063,10 +1063,10 @@ TSharedPtr<FJsonObject> HandleExportAssets(
 // ---------------------------------------------------------------------------
 // 6. migrate_assets
 // ---------------------------------------------------------------------------
-// MCP:migrate_assets - Migrate assets to another project via IAssetTools::MigratePackages
-//   @param asset_paths - List of asset paths to migrate
+// MCP:migrate_assets - Copy assets, and their dependencies unless ignore_dependencies, into another project Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. migrated_count is a new-file count that falls back to the requested count when nothing new appears, so verify the destination.
+//   @param asset_paths - Asset object or package paths to migrate (e.g. ["/Game/Props/SM_Crate"]); each is reduced to its package name.
 //   @param destination_path - Target content folder, e.g. D:/OtherProject/Content
-//   @param ignore_dependencies - If true, skip copying package dependencies
+//   @param ignore_dependencies - When true only the listed packages are copied, without their dependencies (default false).
 //   @returns { migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool }
 TSharedPtr<FJsonObject> HandleMigrateAssets(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1144,7 +1144,7 @@ TSharedPtr<FJsonObject> HandleMigrateAssets(
 // ---------------------------------------------------------------------------
 // 7. consolidate_assets
 // ---------------------------------------------------------------------------
-// MCP:consolidate_assets - Replace all references to source assets with the target
+// MCP:consolidate_assets - Redirect every reference to the source assets onto the target with UEditorAssetSubsystem::ConsolidateAssets, which DELETES the sources (leaving redirectors) and saves what it changed. Only class-compatible sources are used; others are listed in skipped_incompatible and unloadable ones are dropped silently. dry_run=true only reports.
 //   @param target_asset_path - The asset to keep, all references point here
 //   @param source_asset_paths - Assets to consolidate into the target
 //   @param dry_run - If true, skip ConsolidateAssets entirely and only report what would happen, default false

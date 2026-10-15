@@ -47,9 +47,9 @@ namespace UEAgentSceneCommandsImpl
     }
 }
 
-// MCP:set_actor_label - Rename an actor's display label in the level
+// MCP:set_actor_label - Set the outliner label of an editor-world actor found by internal name or current label (first match). The engine trims it and keeps the old label when the new one is invalid, for example empty, so check label in the reply. Marks the level dirty without an undo entry.
 //   @param actor_name - Current actor name or label in the world outliner
-//   @param new_label - New label to apply
+//   @param new_label - Display label to set, e.g. "Lamp_Kitchen"; leading and trailing spaces are trimmed.
 //   @returns { actor_name: string, label: string }
 TSharedPtr<FJsonObject> HandleSetActorLabel(const TSharedPtr<FJsonObject>& Params)
 {
@@ -86,9 +86,9 @@ TSharedPtr<FJsonObject> HandleGetActorLabel(const TSharedPtr<FJsonObject>& Param
     return Reply;
 }
 
-// MCP:set_actor_folder - Move an actor to an outliner folder
+// MCP:set_actor_folder - Move an editor-world actor, found by internal name or label (first match), into an outliner folder; an empty folder_path moves it back to the root. Undoable, marks the level dirty, not saved; returns the internal actor_name and folder_path as given. get_actor_folder reads it back.
 //   @param actor_name - Current actor name or label in the world outliner
-//   @param folder_path - Target folder path, e.g. Lighting/Sky
+//   @param folder_path - Outliner folder path with "/" between levels, e.g. "Lighting/Sky"; an empty string moves the actor to the root.
 //   @returns { actor_name: string, folder_path: string }
 TSharedPtr<FJsonObject> HandleSetActorFolder(const TSharedPtr<FJsonObject>& Params)
 {
@@ -292,12 +292,12 @@ TSharedPtr<FJsonObject> HandleFocusViewport(const TSharedPtr<FJsonObject>& Param
     return Result;
 }
 
-// MCP:add_light - Spawn a light actor in the editor world
-//   @param light_type - Directional, Point, Spot, Rect, or Sky
-//   @param location - Optional [x, y, z] world location
-//   @param rotation - Optional [pitch, yaw, roll] world rotation
-//   @param intensity - Optional light intensity
-//   @param color - Optional [r, g, b] light color
+// MCP:add_light - Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
+//   @param light_type - Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error.
+//   @param location - [x, y, z] world location in cm; default [0, 0, 0], also when the array has fewer than 3 numbers.
+//   @param rotation - World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis.
+//   @param intensity - Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted.
+//   @param color - [r, g, b] linear color, usually 0..1; default white. Any other form (an object, a hex string, fewer than 3 numbers) sets black.
 //   @returns { light_type: string, actor_name: string }
 TSharedPtr<FJsonObject> HandleAddLight(const TSharedPtr<FJsonObject>& Params)
 {
@@ -358,8 +358,8 @@ TSharedPtr<FJsonObject> HandleAddLight(const TSharedPtr<FJsonObject>& Params)
     return Result;
 }
 
-// MCP:build_lighting - Build lighting for the current level
-//   @param quality - Preview, Medium, High, or Production, default Preview
+// MCP:build_lighting - Start an asynchronous static lighting build of all levels in the editor world (not only the current one) and return started without waiting for the result. Side effect: writes the quality and OnlyBuildCurrentLevel=false into LightingBuildOptions of the editor per-project settings.
+//   @param quality - Preview, Medium, High or Production (case-insensitive); any other value silently builds at Preview. Default Preview.
 //   @returns { quality: string, started: bool, note: string }
 TSharedPtr<FJsonObject> HandleBuildLighting(const TSharedPtr<FJsonObject>& Params)
 {

@@ -194,7 +194,7 @@ No parameters.
 
 ## `consolidate_assets`
 
-Replace all references to source assets with the target
+Redirect every reference to the source assets onto the target with UEditorAssetSubsystem::ConsolidateAssets, which DELETES the sources (leaving redirectors) and saves what it changed. Only class-compatible sources are used; others are listed in skipped_incompatible and unloadable ones are dropped silently. dry_run=true only reports.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -250,12 +250,12 @@ Create a Blueprint enum asset from an ordered list of enumerator DISPLAY names -
 
 ## `create_file_media_source`
 
-Creates (or loads, idempotently) a persisted UFileMediaSource asset
+Create a UFileMediaSource asset at package_path/name that points at a movie file path, register it and save it; the file does not need to exist. An existing asset is returned unchanged (file_path is not applied). Returns asset_path, the stored file_path, created and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the file media source asset to create. |
-| `file_path` | string | yes | The movie file path the source references (e.g. |
+| `file_path` | string | yes | Movie file on disk, absolute or "./"-relative to the project Content folder, e.g. "./Movies/Intro.mp4"; a path inside Content is stored in that relative form. |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Media) |
 
 **Returns:** `{ media_source_name, asset_path, created, already_exists, file_path, saved, save_error }`
@@ -274,13 +274,13 @@ Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a m
 
 ## `create_media_player`
 
-Creates (or loads, idempotently) a persisted UMediaPlayer asset
+Create a UMediaPlayer asset at package_path/name with PlayOnOpen and looping set, optionally with a linked UMediaTexture named "&lt;name>_T" beside it, and save both. An existing player is returned unchanged (flags not applied). Returns asset_path, play_on_open, loop, media_texture_path, saved and texture_saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the media player asset to create. |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/Media) |
-| `create_output_texture` | boolean | no | Also create + link a sibling media texture (default true) |
+| `create_output_texture` | boolean | no | Also create a UMediaTexture "&lt;name>_T" next to the player and link it (default true). |
 | `play_on_open` | boolean | no | Set the player's PlayOnOpen flag (default true) |
 | `loop` | boolean | no | Set the player to loop via SetLooping (default false) |
 
@@ -288,7 +288,7 @@ Creates (or loads, idempotently) a persisted UMediaPlayer asset
 
 ## `create_media_texture`
 
-Creates (or loads, idempotently) a persisted UMediaTexture asset
+Create a UMediaTexture asset at package_path/name (AutoClear on, no player linked) and save it; an existing texture is returned unchanged, with its linked player if any. Link a player with link_media_texture_to_player. Returns asset_path, created, has_media_player and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -415,12 +415,12 @@ Execute a Python (.py) file inside the running Unreal Editor. PIE TRAP: same hol
 
 ## `export_assets`
 
-Export multiple assets to disk via IAssetTools::ExportAssets
+Export assets to files via IAssetTools::ExportAssets (preferred format, FBX/PNG/EXR first), written under export_path mirroring the package path; unloadable or unexportable ones are skipped. exported_count counts only new files directly in export_path, so it usually reads 0: check the folder.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_paths` | array | yes | List of asset paths to export |
-| `export_path` | string | yes | Destination directory on disk |
+| `asset_paths` | array | yes | Asset object or package paths to export (e.g. ["/Game/Meshes/SM_Rock"]); empty strings are ignored. |
+| `export_path` | string | yes | Destination directory on disk (e.g. "D:/Exports"), created if missing; each file lands in subfolders named after its package path. |
 
 **Returns:** `{ exported_count: int, failed_count: int, requested_count: int, export_path: string }`
 
@@ -500,7 +500,7 @@ No parameters.
 
 ## `get_automation_test_results`
 
-Return the cached result of the most recent run_automation_test
+Returns the cached result of the last synchronous test completed through run_automation_test or start_gauntlet_run, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
 
 No parameters.
 
@@ -538,13 +538,13 @@ Reads a console variable's live value, help text, and flags.
 
 ## `get_engine_ini_value`
 
-Read a value from a specific INI section.
+Read one key from the merged in-memory config (GConfig) of an INI such as Engine or Game. Read-only; returns value and found (false, with an empty value, when the section or key is missing). Pass config_file without .ini. Writer: set_engine_ini_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `section` | string | yes | Section name (e.g. "/Script/Engine.RendererSettings") |
-| `key` | string | yes | Key name |
-| `config_file` | string | no | INI file base name (default "Engine") |
+| `key` | string | yes | Key inside the section, e.g. "r.DefaultFeature.AntiAliasing". |
+| `config_file` | string | no | Config base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; "Engine.ini" is not resolved. |
 
 **Returns:** `{ section, key, value, found }`
 
@@ -560,11 +560,11 @@ Get (or, with create=true, bring into being) the current level's Level Blueprint
 
 ## `get_media_info`
 
-Reads metadata for a Media asset (read-only)
+Read a media asset by path: class and media_type ("MediaPlayer", "MediaTexture", "FileMediaSource" or "Other"), plus play_on_open and loop for a player, the linked player and auto_clear for a texture, or file_path for a file source. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Asset path of the media asset (player, texture, or file |
+| `asset_path` | string | yes | Path of a UMediaPlayer, UMediaTexture or UFileMediaSource asset, e.g. "/Game/Media/MP_Intro"; any other asset reports only its name and class. |
 
 **Returns:** `{ asset_path, asset_name, class, media_type, play_on_open, loop, has_media_player, media_player_path, auto_clear, file_path }`
 
@@ -604,7 +604,7 @@ Read the single per-editor-session log buffer UEAgent attaches to GLog (general 
 
 ## `get_python_status`
 
-Report the editor Python plugin status and interpreter version.
+Reports whether the editor Python plugin is loaded, available, configured and initialized, with the interpreter path and engine version; when Python is initialized it also evaluates sys.version for python_version (empty otherwise). Changes nothing; check it before execute_python or execute_python_file.
 
 No parameters.
 
@@ -680,7 +680,7 @@ No parameters.
 
 ## `get_viewport_state`
 
-Read the current state of the active editor viewport
+Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
 
 No parameters.
 
@@ -757,12 +757,12 @@ Lists registered console variables whose name contains a substring.  Iterates IC
 
 ## `list_cvars_with_prefix`
 
-List cvars whose name starts with prefix (read-only).
+List console variables and commands whose name starts with prefix (case-insensitive); each entry has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a substring search use search_cvars.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `prefix` | string | yes | Required prefix |
-| `max` | number | no | Max results (default 100) |
+| `prefix` | string | yes | Name prefix to match, case-insensitive, e.g. "r.Shadow." or "t.". |
+| `max` | number | no | Maximum number of entries to return (default 100, minimum 1). |
 
 **Returns:** `{ count, cvars: [...] }`
 
@@ -780,12 +780,12 @@ What is UNSAVED in the editor right now: every dirty package with its disk path,
 
 ## `list_engine_ini_sections`
 
-List section names in an INI file.
+List the section names GConfig holds for one INI (count, sections, file_path). Read-only. Caveat: it asks GConfig for config_file plus .ini, a form GConfig does not match to its known config files (get_engine_ini_value avoids it), so count can be 0 for a file that has sections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `config_file` | string | no | One of "Engine", "Game", "Input", "Editor", "Scalability" (default "Engine") |
-| `include_base` | boolean | no | Whether to include Base.ini (default false) |
+| `config_file` | string | no | INI base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; not validated. |
+| `include_base` | boolean | no | Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed. |
 
 **Returns:** `{ count, sections: [...] }`
 
@@ -803,13 +803,13 @@ Open a map in the editor (by /Game path or disk .umap), replacing the current wo
 
 ## `migrate_assets`
 
-Migrate assets to another project via IAssetTools::MigratePackages
+Copy assets, and their dependencies unless ignore_dependencies, into another project Content folder with IAssetTools::MigratePackages, with no prompt and skipping files that already exist there. migrated_count is a new-file count that falls back to the requested count when nothing new appears, so verify the destination.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_paths` | array | yes | List of asset paths to migrate |
+| `asset_paths` | array | yes | Asset object or package paths to migrate (e.g. ["/Game/Props/SM_Crate"]); each is reduced to its package name. |
 | `destination_path` | string | yes | Target content folder, e.g. D:/OtherProject/Content |
-| `ignore_dependencies` | boolean | no | If true, skip copying package dependencies |
+| `ignore_dependencies` | boolean | no | When true only the listed packages are copied, without their dependencies (default false). |
 
 **Returns:** `{ migrated_count: int, failed_count: int, requested_count: int, destination_path: string, ignore_dependencies: bool }`
 
@@ -1019,7 +1019,7 @@ Start a Play-in-Editor session that runs the named AFunctionalTest BP and return
 
 ## `run_smoke_tests`
 
-Run all registered smoke-filter tests (synchronous, headless-safe)
+Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. For one test with its log entries use run_automation_test.
 
 No parameters.
 
@@ -1050,12 +1050,12 @@ Write the editor's current level (.umap) to disk; it REFUSES while PIE is runnin
 
 ## `search_cvars`
 
-Search cvar names by substring (read-only).
+Search console variables and commands whose name contains term (case-insensitive); each hit has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a prefix listing use list_cvars_with_prefix; for one cvar in full, get_cvar.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `term` | string | yes | Substring to search (case-insensitive) |
-| `max` | number | no | Max results (default 50) |
+| `max` | number | no | Maximum number of entries to return (default 50, minimum 1). |
 
 **Returns:** `{ count, cvars: [{name, value, help}] }`
 
@@ -1096,11 +1096,11 @@ Toggle cinematic-control on the active editor viewport (Sequencer overrride)
 
 ## `set_camera_speed`
 
-Set the editor viewport camera movement speed (float multiplier)
+Set the camera movement speed of the active level editor viewport (the focused one, else the first). Affects this editor session only and saves nothing. Returns requested and camera_speed, the value read back from the viewport afterwards.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `speed` | number | yes | Camera speed (positive float; the editor clamps to its valid range) |
+| `speed` | number | yes | Camera speed as a positive float; 0 or less is an error. Compare camera_speed in the reply to see what the viewport kept. |
 
 **Returns:** `{ applied: bool, requested: number, camera_speed: number }`
 
@@ -1137,14 +1137,14 @@ Apply many cvars in one call. JSON shape: {"name":"value", ...}
 
 ## `set_engine_ini_value`
 
-Write a value to a specific INI section, verified by read-back.
+Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/&lt;Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `section` | string | yes | Section name |
-| `key` | string | yes | Key name |
-| `value` | string | yes | Value to write |
-| `config_file` | string | no | INI file base name (default "Engine") |
+| `section` | string | yes | INI section, e.g. "/Script/Engine.RendererSettings"; created when missing. |
+| `key` | string | yes | Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced. |
+| `value` | string | yes | Value as text, written verbatim; an empty string is allowed. |
+| `config_file` | string | no | Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved. |
 
 **Returns:** `{ applied, section, key, value, readback_value }`
 
@@ -1254,7 +1254,7 @@ Move the active editor viewport camera to a new location and or rotation
 
 ## `set_viewport_exposure`
 
-Set fixed-exposure settings on the active editor viewport
+Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_exposure reads them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1295,12 +1295,12 @@ Set the rendering view mode of the active editor viewport
 
 ## `show_notification`
 
-Show a transient editor toast notification (Slate notification).
+Show a fire-and-forget toast in the editor (Slate notification manager) with a message, an optional completion state and a lifetime in seconds. Returns shown and echoes message, completion_state and duration; an unrecognized completion_state silently falls back to None. Changes nothing else.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `message` | string | yes | The text to display in the notification. |
-| `completion_state` | string | no | Optional completion state: "None" (default), "Pending", "Success", "Fail". |
+| `completion_state` | string | no | Completion state, case-insensitive: "None" (default), "Pending", "Success" or "Fail"; any other value counts as "None". |
 | `duration` | number | no | Notification lifetime in seconds (default 4.0). |
 
 **Returns:** `{ shown: bool, message: string, completion_state: string, duration: float }`

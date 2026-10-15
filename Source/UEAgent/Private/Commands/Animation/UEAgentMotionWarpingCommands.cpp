@@ -707,10 +707,10 @@ namespace
 // FMotionWarpingTarget instance with the same RPC/replication identity. The component-ref based setters read
 // the existing component from the BlueprintReadOnly TWeakObjectPtr stored on the target itself.
 
-// MCP:set_motion_warping_target_rotation - Set FRotator on an existing FMotionWarpingTarget (keeps current Location).
-//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
+// MCP:set_motion_warping_target_rotation - Set the rotation of an existing warp target of an editor-world actor (found by internal name), keeping its Location. The target is rebuilt as a plain transform target, so a component-based one loses its Component, BoneName, follow flag and offsets. WarpTargets is Transient: not saved.
+//   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
 //   @param warp_target_name - FName of the existing warp target on the component
-//   @param rotation - New [pitch, yaw, roll] rotation in degrees (world space)
+//   @param rotation - New world rotation in degrees as [pitch, yaw, roll]; omitted means [0, 0, 0].
 //   @returns { actor_name, warp_target_name, previous_pitch, previous_yaw, previous_roll, new_pitch, new_yaw, new_roll, changed: bool }
 TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetRotation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -782,8 +782,8 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetBoneName(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Obj);
 }
 
-// MCP:set_motion_warping_target_follow_component - Toggle bFollowComponent on an existing FMotionWarpingTarget (keeps BoneName/offsets).
-//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
+// MCP:set_motion_warping_target_follow_component - Set bFollowComponent on an existing component-based warp target of an editor-world actor found by internal name, keeping its Component, BoneName and offsets. A missing target, or one without a Component, is an error. WarpTargets is Transient, so the change is not saved with the level.
+//   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
 //   @param warp_target_name - FName of the existing warp target on the component
 //   @param follow - When true the target tracks the Component's live transform each frame; when false it snapshots the current transform (required, no default)
 //   @returns { actor_name, warp_target_name, previous_follow: bool, new_follow: bool, changed: bool }
@@ -867,8 +867,8 @@ TSharedPtr<FJsonObject> HandleSetMotionWarpingTargetLocationOffset(const TShared
     return mcp_common::MakeOkReply(Obj);
 }
 
-// MCP:set_motion_warping_component_search_in_anims - Toggle UMotionWarpingComponent::bSearchForWindowsInAnimsWithinMontages (component-wide, no per-target args).
-//   @param actor_name - Engine name of the actor carrying the UMotionWarpingComponent
+// MCP:set_motion_warping_component_search_in_anims - Set bSearchForWindowsInAnimsWithinMontages on the UMotionWarpingComponent of an editor-world actor found by internal name (not label): when true, warping windows are also searched in animations inside montages. Marks the level dirty, not saved; returns previous and new values and changed.
+//   @param actor_name - Internal object name of the actor with the UMotionWarpingComponent, e.g. "BP_Hero_C_0"; the outliner label does not match.
 //   @param enabled - Sets bSearchForWindowsInAnimsWithinMontages: when true, motion-warping windows are also searched in animations nested inside montages (required, no default)
 //   @returns { actor_name, previous_search_in_anims: bool, new_search_in_anims: bool, changed: bool }
 TSharedPtr<FJsonObject> HandleSetMotionWarpingComponentSearchInAnims(const TSharedPtr<FJsonObject>& Params)

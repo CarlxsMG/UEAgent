@@ -344,7 +344,7 @@ namespace
 // validate_asset
 // ---------------------------------------------------------------------------
 
-// MCP:validate_asset - Run all registered data validators on a single asset.
+// MCP:validate_asset - Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid, Script use case) on one asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings. Read-only; validators_run counts the enabled validators, not those that applied.
 //   @param asset_path - Object/package path of the asset, e.g. "/Game/MyGame/M_Example".
 //   @returns { asset_path: string, resolved_object_path: string, validation_result: string, is_valid: bool, errors: [string], warnings: [string], error_count: number, warning_count: number, validators_run: number }
 
@@ -531,7 +531,7 @@ TSharedPtr<FJsonObject> HandleValidateAssetsInPath(const TSharedPtr<FJsonObject>
 // list_validators
 // ---------------------------------------------------------------------------
 
-// MCP:list_validators - List all enabled editor data validator classes.
+// MCP:list_validators - List the editor data validators the DataValidation subsystem has enabled (ForEachEnabledValidator): class_name, class_path and enabled for each, plus validator_count. Read-only; errors when the DataValidation plugin subsystem is unavailable. validate_asset runs them on one asset.
 //   @returns { validators: [{ class_name: string, class_path: string, enabled: bool }], validator_count: number }
 
 TSharedPtr<FJsonObject> HandleListValidators(const TSharedPtr<FJsonObject>& Params)

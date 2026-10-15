@@ -48,7 +48,7 @@ Audit a fork subtree for references that still point at the SOURCE tree it was c
 
 ## `configure_plugin_setting`
 
-Configures a setting for a specific plugin.
+Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. An unknown plugin gives configuration_success:false, not an error. For versioned settings use set_project_settings_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -61,11 +61,11 @@ Configures a setting for a specific plugin.
 
 ## `delete_asset`
 
-Deletes an asset from the project.
+Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Returns delete_success, asset_verified_deleted and file_still_exists; a failed delete still reports status success, so read delete_success.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Full asset path to delete |
+| `asset_path` | string | yes | Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box") |
 
 **Returns:** `{ asset_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool?, deletion_timestamp: string? }`
 
@@ -103,11 +103,11 @@ No parameters.
 
 ## `get_asset_bundle_data`
 
-Read the AssetBundles registry tag for an asset
+Read the AssetBundles tag of one asset from the Asset Registry without loading it: each bundle with bundle_name, asset_paths and num_assets, plus bundle_count and asset_found. An asset with no bundles, or not found, returns an empty list rather than an error. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object path, e.g. /Game/MyGame/M_Example.M_Example |
+| `asset_path` | string | yes | Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not resolve to the asset. |
 
 **Returns:** `{ bundle_name, asset_paths, num_assets, asset_path, asset_found, bundles, bundle_count }`
 
@@ -124,11 +124,11 @@ Get the bundle entry for a specific primary asset and bundle name.
 
 ## `get_plugin_status`
 
-Retrieves detailed status and metadata of a plugin.
+Read one plugin by name, read-only: Enabled or Disabled, version, author, category, base dir, .uplugin file, dependencies and modules. An unknown name returns plugin_status "Not Found" with "N/A" fields, not an error. plugin_loaded only mirrors plugin_enabled, and plugin_created_date holds the CreatedByURL.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plugin_name` | string | yes | Name of the plugin to query |
+| `plugin_name` | string | yes | Name of the plugin to query, as its .uplugin file is named (e.g. "UEAgent") |
 
 **Returns:** `{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }`
 
@@ -144,11 +144,11 @@ Read the Priority / ChunkId / bApplyRecursively / CookRule for a single primary 
 
 ## `get_primary_asset_id`
 
-Resolve the Primary Asset Id for an asset path
+Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error. get_primary_asset_id_from_path is the same lookup without the split fields.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object path, e.g. /Game/MyGame/M_Example.M_Example |
+| `asset_path` | string | yes | Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not match. |
 
 **Returns:** `{ asset_path, primary_asset_id, is_valid, primary_asset_type, primary_asset_name }`
 
@@ -164,18 +164,18 @@ Get the primary asset ID for a given object path.
 
 ## `get_primary_asset_ids_by_type`
 
-Get all primary asset IDs of a given type.
+List the Primary Asset Ids the running Asset Manager has registered for one type: asset_ids entries with type, name and full_id, plus count; success is false when none are found, unknown type included. Only scanned assets appear (see scan_primary_assets). Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_type_name` | string | yes | Name of the primary asset type |
-| `filter` | string | no | Optional filter ("unloaded_only" to list only unloaded) |
+| `asset_type_name` | string | yes | Name of the primary asset type, e.g. "Item". |
+| `filter` | string | no | "unloaded_only" keeps only assets with no current or pending bundle state (not loaded through the Asset Manager); omitted or any other value lists all. |
 
 **Returns:** `{ type, name, full_id, asset_type_name, success, asset_ids, count }`
 
 ## `get_primary_asset_type_info`
 
-Get detailed info about a specific primary asset type.
+Read what the running Asset Manager holds for one primary asset type: asset_class, has_blueprint_classes, is_editor_only, num_assets from the last scan and its directories. found=false for a type it does not know, not an error; get_primary_asset_types reads the configured rules instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -206,11 +206,11 @@ Moves an asset to a new folder while keeping its name. GUARDED exactly like rena
 
 ## `remove_primary_asset_rule`
 
-Remove a primary asset type entry from UAssetManagerSettings
+Remove every PrimaryAssetTypesToScan entry of one type from the Asset Manager project settings and write DefaultGame.ini; an unknown type is an error. Returns removed_count, type_count_after and saved. The running Asset Manager is not refreshed, so its scanned data for the type remains.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `primary_asset_type` | string | yes | Name of the primary asset type to remove. |
+| `primary_asset_type` | string | yes | Name of the primary asset type to remove, e.g. "Item". |
 
 **Returns:** `{ primary_asset_type, removed_count, type_count_after, saved }`
 
@@ -244,11 +244,11 @@ Spawn a SEPARATE headless UnrealEditor-Cmd.exe to run a python script against an
 
 ## `scan_primary_assets`
 
-Scan the configured Primary Asset directories synchronously
+Synchronously rescan the directories and specific assets of every PrimaryAssetTypesToScan rule (or only primary_asset_type) so the Asset Manager registers their primary assets; rules without paths are skipped. Returns num_assets_found, types_scanned and per-type scanned_types. Run it after add_primary_asset_rule.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `primary_asset_type` | string | no | Optional type name to limit the scan to |
+| `primary_asset_type` | string | no | Configured type name to scan alone, e.g. "Item"; omitted or empty scans every rule, and an unknown name scans nothing (types_scanned=0). |
 
 **Returns:** `{ type, num_assets_found, num_paths, scanned, types_scanned, scanned_types }`
 

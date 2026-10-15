@@ -6,13 +6,13 @@
 
 ## `add_collection_scalar_param`
 
-Append a scalar parameter to a Material Parameter Collection
+Add a scalar parameter (new GUID) to a Material Parameter Collection asset and save it; an existing scalar of that name only gets its default overwritten (already_existed=true). Returns scalar_count_before, scalar_count, default_value and id. For a color use add_collection_vector_param.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Name of the new scalar parameter |
-| `default_value` | number | no | Optional float default, default 0 |
+| `default_value` | number | no | Default float value; default 0. An existing scalar of that name gets this value too, even when it is omitted |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, param_added: bool, already_existed: bool, scalar_count_before: int, scalar_count: int, default_value: number, id: string, saved: bool }`
 
@@ -30,12 +30,12 @@ Append a vector RGBA parameter to a Material Parameter Collection
 
 ## `add_material_attribute_layers_node`
 
-Add a MaterialAttributeLayers expression node to an existing UMaterial
+Adds a new MaterialAttributeLayers expression to a UMaterial asset, turns on bUseMaterialAttributes (the separate pins such as Base Color stop driving the material), wires the node into MaterialAttributes, recompiles and saves. Not idempotent: each call adds another node. Fails when the save fails; returns connected_material_attributes and num_expressions.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Object path to the UMaterial, e.g. /Game/MyGame/M_Example |
-| `node_name` | string | no | Optional advisory node name |
+| `node_name` | string | no | Label echoed back in the reply only; it does not name or find any node in the graph |
 
 **Returns:** `{ material_path: string, expression_added: bool, expression_class: string, connected_material_attributes: bool, use_material_attributes: bool, num_expressions: int, recompiled: bool, saved: bool, node_name: string, save_error: string }`
 
@@ -53,15 +53,15 @@ Insert a call to a UMaterialFunction into a UMaterial graph: a MaterialFunctionC
 
 ## `add_material_function_input`
 
-Add a UMaterialExpressionFunctionInput node to a material function.
+Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and delete_material_function_input, plus num_inputs and added.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
-| `input_name` | string | yes | Name of the new input pin |
+| `input_name` | string | yes | Name of the new input pin, stored as given: a name another input already uses is not made unique. |
 | `input_type` | string | no | One of the 13 EFunctionInputType values: Scalar\|Vector2\|Vector3\|Vector4\|Texture2D\|TextureCube\|Texture2DArray\|VolumeTexture\|StaticBool\|MaterialAttributes\|TextureExternal\|Bool\|Substrate (optional, default "Scalar") |
 | `description` | string | no | Optional tooltip/description string for the input pin |
-| `preview_value` | string | no | Optional {x,y,z,w} (FVector4f) preview value used when previewing / as default |
+| `preview_value` | string | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default. |
 | `use_preview_value_as_default` | string | no | Optional bool; if true, the preview value becomes the input's default |
 | `sort_priority` | string | no | Optional int controlling the input's display order relative to other inputs |
 
@@ -112,11 +112,11 @@ Force the world's MPCI back to the parent's default values
 
 ## `compile_material`
 
-Recompile/refresh a material asset.
+Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: refreshes its child material instances and the viewports and marks the package dirty, without saving. recompiled is always true and does not report shader errors. Material functions use recompile_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Material asset path |
+| `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance or function path fails with Material not found. |
 
 **Returns:** `{ material: string, recompiled: bool }`
 
@@ -160,14 +160,14 @@ Connect the Slab BSDF output to the material's Front Material input.  GATED by S
 
 ## `connect_to_material_output`
 
-Connect a material expression output to a material property.
+Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Material asset path. |
+| `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found. |
 | `from_node_id` | string | yes | Id of the source expression (from create_material_expression / get_material_expressions). |
-| `output_property` | string | yes | BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ... |
-| `from_pin` | string | no | Optional source output pin name (default: first available) |
+| `output_property` | string | yes | Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor. |
+| `from_pin` | string | no | Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output. |
 
 **Returns:** `{ material: string, from_node_id: string, output_property: string, connected: bool }`
 
@@ -231,13 +231,13 @@ Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.
 
 ## `create_material_function`
 
-Create and save a new Material Function asset (UMaterialFunction).
+Create a UMaterialFunction asset at package_path/name through the editor factory, exposed to the function library, and save it. Idempotent: an existing function is returned untouched with already_exists=true; another asset class at that path is an error. Returns function_path, num_inputs, num_outputs and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | /Game package directory, e.g. '/Game/MyGame' |
 | `name` | string | yes | Asset name for the new material function |
-| `description` | string | no | Optional description for the material function |
+| `description` | string | no | Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists. |
 
 **Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists: bool? }`
 
@@ -303,34 +303,34 @@ Create a runtime-only Material Instance Dynamic (MID) from a parent material
 
 ## `create_material_layer`
 
-Create and save a UMaterialFunctionMaterialLayer asset
+Creates a UMaterialFunctionMaterialLayer asset (usage MaterialLayer, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | UE content folder, e.g. /Game/MyGame |
+| `package_path` | string | yes | Content folder starting with a slash, e.g. /Game/MyGame; a trailing slash is ignored |
 | `name` | string | yes | Asset name for the new material layer function |
 
 **Returns:** `{ asset_path: string, name: string, class: string, usage: string, created: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `create_material_layer_blend`
 
-Create and save a UMaterialFunctionMaterialLayerBlend asset
+Creates a UMaterialFunctionMaterialLayerBlend asset (usage MaterialLayerBlend, exposed to the library) at package_path/name and saves it, like the editor factory. Idempotent: any material function already at that path is returned as is, whatever its class. Success even when the save fails: read saved and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | UE content folder, e.g. /Game/MyGame |
+| `package_path` | string | yes | Content folder starting with a slash, e.g. /Game/MyGame; a trailing slash is ignored |
 | `name` | string | yes | Asset name for the new material layer blend function |
 
 **Returns:** `{ asset_path: string, name: string, class: string, usage: string, created: bool, already_existed: bool, saved: bool, save_error: string }`
 
 ## `create_material_parameter_collection`
 
-Create and save a new UMaterialParameterCollection asset
+Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned with created=false and already_exists=true, while another asset type at that path is an error. Returns collection_path, scalar_count, vector_count and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. MPC_Global |
-| `package_path` | string | no | Target content path, defaults to /Game/MaterialCollections |
+| `name` | string | yes | Asset name without a path, e.g. "MPC_Global" |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/MaterialCollections" (the default) |
 
 **Returns:** `{ name: string, package_path: string, collection_path: string, asset_path: string, collection_class: string, scalar_count: int, vector_count: int, created: bool, already_exists: bool, success: bool, saved: bool, message: string }`
 
@@ -404,7 +404,7 @@ Delete ONE node from a material graph by name. Deliberately one at a time, and t
 
 ## `delete_material_function`
 
-Delete a UMaterialFunction asset from the project.
+Force-delete the asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check and no class check (any asset there goes), open editors close and undo history may be cleared. Permanent. Returns deleted; success stays true when deleted is false, so read it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -478,31 +478,31 @@ Disconnect a material output property (inverse of connect_to_material_output).  
 
 ## `duplicate_material_expression`
 
-Duplicate a material expression (in-place) and optionally rename.
+Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_path` | string | yes | Full asset path of the UMaterial. |
-| `node_id` | string | yes | Name of the source expression. |
-| `new_node_name` | string | no | Optional rename for the duplicate (optional) |
+| `node_id` | string | yes | Object name of the expression to copy, as listed by get_material_expressions. |
+| `new_node_name` | string | no | Object name for the copy; when taken, a unique variant is used (read duplicate_node). Default: a name the engine picks. |
 
 **Returns:** `{ material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number }`
 
 ## `duplicate_mpc`
 
-Duplicate a Material Parameter Collection to a new path
+Duplicate a Material Parameter Collection asset, parameters included with their names, Ids and defaults, to package_path/new_name and save the copy. Refuses when the target already exists. Returns collection_path, scalar_count, vector_count, saved and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `source_path` | string | yes | Full /Game path of the source MPC |
-| `new_name` | string | yes | Name for the duplicated MPC |
-| `package_path` | string | no | Target package path, defaults to source's folder |
+| `source_path` | string | yes | Source MPC path, e.g. "/Game/MPC/MPC_A" or the object path "/Game/MPC/MPC_A.MPC_A" |
+| `new_name` | string | yes | Asset name of the copy, e.g. "MPC_B"; must not be empty |
+| `package_path` | string | no | Target folder; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections" |
 
 **Returns:** `{ source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error: string }`
 
 ## `get_collection_info`
 
-Read all parameters of a Material Parameter Collection
+Read every parameter of a Material Parameter Collection asset: scalar_params (name, default, id), vector_params (name, id, default object and default_rgba), scalar_count, vector_count and total_count. Read-only; get_collection_param_info reads one parameter, get_mpci_info the live per-world values.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -512,13 +512,13 @@ Read all parameters of a Material Parameter Collection
 
 ## `get_collection_param_info`
 
-Read detailed info about one parameter in a collection
+Read one parameter of a Material Parameter Collection asset: id, index in its array and default (default_value for a scalar, an RGBA default object for a vector). Read-only; it searches only the array param_type selects and errors when the name is not there.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Name of the parameter to query |
-| `param_type` | string | no | scalar or vector, default scalar |
+| `param_type` | string | no | Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, id: string, default_value: number, default: object, index: int, collection_class: string }`
 
@@ -567,11 +567,11 @@ Enumerate a UMaterialFunction's internal expression graph: every UMaterialExpres
 
 ## `get_material_function_inputs`
 
-Enumerate UMaterialFunctionInput / UMaterialFunctionOutput expressions inside a UMaterialFunction.
+List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs. Read-only. Function instances are not accepted; for the whole node graph use get_material_function_graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_function_path` | string | yes | Asset path of the UMaterialFunction |
+| `material_function_path` | string | yes | Asset path of the UMaterialFunction or material layer, e.g. "/Game/Materials/MF_Blend". |
 
 **Returns:** `{ material_function_path: string, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }`
 
@@ -655,11 +655,11 @@ Read a static-switch (static bool) parameter value from a Material Instance Cons
 
 ## `get_material_layer_info`
 
-Read a material layer or blend function's metadata
+Reads a material function asset (layer, blend or plain function) without changing it. Returns asset_path, class, usage ("MaterialLayer", "MaterialLayerBlend" or "Default"), num_inputs, num_outputs, num_expressions, and is_layer and is_blend (from the class or the usage).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `layer_path` | string | yes | Object path to a UMaterialFunctionMaterialLayer or UMaterialFunctionMaterialLayerBlend, e.g. /Game/MyGame/M_Layer_Example |
+| `layer_path` | string | yes | Path of a material layer, layer blend or any other material function, e.g. /Game/MyGame/M_Layer_Example |
 
 **Returns:** `{ asset_path: string, class: string, usage: string, num_inputs: int, num_outputs: int, num_expressions: int, is_layer: bool, is_blend: bool }`
 
@@ -761,12 +761,12 @@ Get all parameters and their current values from a Material Instance Dynamic
 
 ## `get_mpci_info`
 
-Read MPCI state, parent collection, and live parameter values
+Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Read-only, never creates the instance; scalar_override_count and vector_override_count are only the parameter counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively |
 
 **Returns:** `{ collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }`
 
@@ -782,23 +782,23 @@ One-call overview of a material instance: parent material and class, plus COUNTS
 
 ## `recompile_material_function`
 
-Recompile (UpdateMaterialFunction) a UMaterialFunction and save it.
+Recompile a material function, layer or function instance (UpdateMaterialFunction): loaded materials using it recompile and dependent function instances are marked dirty but not saved, then the function itself is saved; success requires that save. recompiled is always true, not a shader-error report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_function_path` | string | yes | Asset path of the UMaterialFunction |
+| `material_function_path` | string | yes | Asset path of the UMaterialFunctionInterface (function, layer or function instance), e.g. "/Game/Materials/MF_Blend". |
 
 **Returns:** `{ material_function_path: string, function_class: string, recompiled: bool, saved: bool }`
 
 ## `regenerate_collection_param_id`
 
-Regenerate the FGuid of a collection parameter
+Assign a new random FGuid Id to one parameter of a Material Parameter Collection asset and save it; returns new_id. It searches only the array param_type selects (default scalar) and errors when the name is not there.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Name of the parameter to regenerate the id for |
-| `param_type` | string | no | scalar or vector, default scalar |
+| `param_type` | string | no | Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, new_id: string, regenerated: bool, saved: bool }`
 
@@ -816,27 +816,27 @@ Remove a parameter from a Material Parameter Collection by name
 
 ## `rename_collection_param`
 
-Rename a parameter in a Material Parameter Collection
+Rename one parameter of a Material Parameter Collection asset, keeping its Id, and save it. Refuses when new_name is already used in the same array, and errors when param_name is not in the array param_type selects (default scalar).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Current parameter name |
 | `new_name` | string | yes | New parameter name, must not collide with another |
-| `param_type` | string | no | scalar or vector, default scalar |
+| `param_type` | string | no | Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar |
 
 **Returns:** `{ collection_path: string, param_name: string, new_name: string, param_type: string, renamed: bool, saved: bool }`
 
 ## `set_collection_param_default`
 
-Set the default value of an existing collection parameter
+Set the default of an existing scalar or vector parameter of a Material Parameter Collection asset and save it: a scalar takes scalar_value, a vector takes vector [r, g, b, a]. Errors when neither array has the name or the needed value is missing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path to the MPC asset |
 | `param_name` | string | yes | Name of the existing parameter to update |
 | `scalar_value` | number | no | Optional new float value for a scalar parameter |
-| `vector` | string | no | Optional new [r, g, b, a] color for a vector parameter |
+| `vector` | string | no | New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }`
 
@@ -853,24 +853,24 @@ Set a material's domain (EMaterialDomain) and recompile it.          'LightFunct
 
 ## `set_material_function_input_props`
 
-Set properties on an existing UMaterialExpressionFunctionInput (located by node_id).  Partial update (idempotent): only fields present in Params are written; mirrors everything get_material_function_inputs reads. ValidateName is re-run when input_name changes. Also writes InputType/SortPriority/bUsePreviewValueAsDefault, which the reader exposes.
+Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_inputs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `function_path` | string | yes | Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example' |
 | `node_id` | string | yes | The input node id (UMaterialExpression name) from add_material_function_input |
-| `input_name` | string | no | Optional new pin name (re-validated for uniqueness) |
+| `input_name` | string | no | New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material). |
 | `input_type` | string | no | Optional EFunctionInputType (the 13 values; same parser as add_material_function_input) |
-| `description` | string | no | Optional tooltip/description string |
-| `preview_value` | string | no | Optional {x,y,z,w} (FVector4f) preview value |
-| `use_preview_value_as_default` | string | no | Optional bool |
-| `sort_priority` | string | no | Optional int display-order |
+| `description` | string | no | New tooltip text of the input pin. |
+| `preview_value` | string | no | JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. |
+| `use_preview_value_as_default` | string | no | Bool: true makes the preview value the default of the input when its pin is left unconnected. |
+| `sort_priority` | string | no | Integer that orders this input pin relative to the other inputs of the function. |
 
 **Returns:** `{ function_path: string, node_id: string, input_name: string, input_type: string, applied: bool }`
 
 ## `set_material_function_instance_parent`
 
-Re-parent a UMaterialFunctionInstance and save it.
+Re-parent a UMaterialFunctionInstance asset to another material function or function instance in one undoable transaction, then save it; success requires the save. Returns old_parent and new_parent, read back from the asset ("(none)" when empty).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -909,12 +909,12 @@ Set one or more base property overrides (BasePropertyOverrides) on a Material In
 
 ## `set_material_instance_param`
 
-Set a parameter on a Material Instance Constant, then RE-READ it and report what the asset actually holds. `set` is derived from that re-read, NOT from the engine setter's return value -- UMaterialEditingLibrary::SetMaterialInstance*ParameterValue always returns false (its bResult is never assigned), which would make this tool report a failure it had not had. Vector values are parsed explicitly in three formats and a malformed one is a hard ERROR instead of a silent (0,0,0,1).
+Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `instance_path` | string | yes | Material instance asset path. |
-| `param_name` | string | yes | Parameter name. |
+| `instance_path` | string | yes | Asset path of the UMaterialInstanceConstant, e.g. "/Game/Materials/MI_Rock". |
+| `param_name` | string | yes | Parameter name as defined in the parent material, e.g. "BaseTint"; only global parameters are reached, not layer parameters. |
 | `value` | any | no | Value. Scalar: a number (JSON number or numeric string). Vector: '(R=..,G=..,B=..,A=..)', '[r,g,b,a]', '[r,g,b]', 'r,g,b,a', 'r,g,b', or a real JSON array of 3-4 numbers; anything else is REJECTED (never written as black). Texture: an asset path. Static switch: a bool or 'true'/'false'. |
 | `param_type` | string | no | "scalar" \| "vector" \| "texture" \| "static_switch" (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case) |
 

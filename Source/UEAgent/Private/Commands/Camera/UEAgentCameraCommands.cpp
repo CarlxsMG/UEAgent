@@ -143,8 +143,8 @@ TSharedPtr<FJsonObject> HandleCreateCameraRigAsset(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_camera_rig_asset"));
 }
 
-// MCP:create_camera_asset - Creates a UCameraAsset (Gameplay Camera System, Experimental). Idempotent.
-//   @param name - Asset name (required)
+// MCP:create_camera_asset - Create a UCameraAsset (Gameplay Camera System, Experimental plugin) at package_path/name and save it; one already there is returned unchanged (already_existed:true), another asset class there is an error. Returns asset_path and saved. Next: set_camera_asset_director, then add_gameplay_camera_component.
+//   @param name - Name of the UCameraAsset to create, e.g. "CA_Player"; also the last segment of its path
 //   @param package_path - Target content folder (default "/Game/Cameras")
 //   @returns { name, asset_path, asset_class, already_existed, saved }
 TSharedPtr<FJsonObject> HandleCreateCameraAsset(const TSharedPtr<FJsonObject>& Params)
@@ -837,7 +837,7 @@ TSharedPtr<FJsonObject> HandleSetCameraTransform(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_camera_transform - Retrieve the current location and rotation of a camera.
+// MCP:get_camera_transform - Read the world location and rotation of a camera actor (ACameraActor or CineCameraActor) in the editor world, found by object name or label (case-insensitive, first match). Returns location [X, Y, Z] and rotation [Pitch, Yaw, Roll] in degrees; set_camera_transform is the writer.
 //   @param camera_name - Name of the camera to query (matches actor name or label).
 //   @returns { camera_name: string, location: [number, number, number], rotation: [number, number, number] }
 
@@ -860,7 +860,7 @@ TSharedPtr<FJsonObject> HandleGetCameraTransform(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_camera_fov - Set the field of view (FOV) for a camera.
+// MCP:set_camera_fov - Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_camera_fov reads it.
 //   @param camera_name - Name of the camera to modify (matches actor name or label).
 //   @param fov - Field of view in degrees. Must be between 0.0 and 180.0.
 //   @returns { camera_name: string, requested_fov: number, previous_fov: number, actual_fov: number, fov_set: bool, camera_valid: bool }
@@ -1063,7 +1063,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraAperture(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // 3. set_cine_camera_focus
 // ---------------------------------------------------------------------------
-// MCP:set_cine_camera_focus - Configure focus settings on a CineCameraActor.
+// MCP:set_cine_camera_focus - Replace the focus settings of the CineCameraComponent on an editor-world actor found by name or label: method, manual focus distance and smoothing; other focus fields, including the tracked actor, reset to defaults. Returns the read-back focus_method and focus_distance; no undo, nothing saved.
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param focus_method - Focus method — one of "Manual", "Tracking", or "Disable".
 //   @param focus_distance - Manual focus distance in cm (optional, default 1000.0)
@@ -1138,7 +1138,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFocus(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // 4. set_cine_camera_filmback
 // ---------------------------------------------------------------------------
-// MCP:set_cine_camera_filmback - Configure the filmback (sensor size) on a CineCameraActor.
+// MCP:set_cine_camera_filmback - Set the sensor size (filmback, in mm) of the CineCameraComponent on an editor-world actor found by name or label; sensor offsets are reset to 0. No undo transaction, nothing saved. Returns the read-back sensor_width, sensor_height and aspect_ratio; success is false when they do not match.
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param sensor_width - Sensor width in mm. Must be positive and <= 200.
 //   @param sensor_height - Sensor height in mm. Must be positive and <= 200.
@@ -1199,7 +1199,7 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFilmback(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // 5. set_cine_camera_lens
 // ---------------------------------------------------------------------------
-// MCP:set_cine_camera_lens - Configure lens constraints on a CineCameraActor.
+// MCP:set_cine_camera_lens - Replace the lens limits of the CineCameraComponent on an editor-world actor found by name or label: focal length and f-stop ranges plus blade count; minimum focus distance resets to 0 and squeeze factor to 1. Returns the read-back focal range; no undo, nothing saved.
 //   @param camera_actor_name - Name or label of the CineCameraActor to modify.
 //   @param min_focal_length - Minimum focal length in mm. Must be positive.
 //   @param max_focal_length - Maximum focal length in mm. Must be >= min_focal_length.
@@ -1286,8 +1286,8 @@ TSharedPtr<FJsonObject> HandleSetCineCameraLens(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // 6. create_camera_rig_rail
 // ---------------------------------------------------------------------------
-// MCP:create_camera_rig_rail - Spawn a CameraRig_Rail actor in the editor world.
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+// MCP:create_camera_rig_rail - Spawn an unrotated CameraRig_Rail actor in the editor world; with more than 2 points the rail is rebuilt as a straight 500-unit line along local X. Always labelled "CameraRigRail_MCP", so address it by the returned internal_name, e.g. in set_camera_rig_rail_position. Not saved.
+//   @param location - Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000)
 //   @param num_spline_points - Number of spline points on the rail (optional, default 2, valid 2-100)
 //   @returns { actor_name: string, internal_name: string, location: [number, number, number], num_spline_points: number, success: bool }
 
@@ -1409,8 +1409,8 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRailPosition(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // 8. create_camera_rig_crane
 // ---------------------------------------------------------------------------
-// MCP:create_camera_rig_crane - Spawn a CameraRig_Crane actor in the editor world.
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+// MCP:create_camera_rig_crane - Spawn an unrotated CameraRig_Crane actor in the editor world with the given pitch, yaw and arm length; it is always labelled "CameraRigCrane_MCP", so address it later by the returned internal_name. Returns location and the read-back crane values; the level is not saved.
+//   @param location - Optional [X, Y, Z] world location (defaults to origin; each axis within -100000 to 100000)
 //   @param crane_pitch - Crane pitch angle in degrees (optional, default 0)
 //   @param crane_yaw - Crane yaw angle in degrees (optional, default 0)
 //   @param arm_length - Crane arm length (optional, default 500.0, valid 0-100000)

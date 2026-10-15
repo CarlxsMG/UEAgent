@@ -623,7 +623,7 @@ TSharedPtr<FJsonObject> HandleExecutePythonFile(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_python_status - Report the editor Python plugin status and interpreter version.
+// MCP:get_python_status - Reports whether the editor Python plugin is loaded, available, configured and initialized, with the interpreter path and engine version; when Python is initialized it also evaluates sys.version for python_version (empty otherwise). Changes nothing; check it before execute_python or execute_python_file.
 //   @returns { engine_version, module_loaded, python_available, python_configured, python_initialized, interpreter_path, python_version }
 TSharedPtr<FJsonObject> HandleGetPythonStatus(const TSharedPtr<FJsonObject>& Params)
 {
@@ -774,7 +774,7 @@ TSharedPtr<FJsonObject> HandleRunAutomationTest(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeErrorReply(TEXT("RunAutomationTestCommon returned no result (internal error)"));
 }
 
-// MCP:run_smoke_tests - Run all registered smoke-filter tests (synchronous, headless-safe)
+// MCP:run_smoke_tests - Runs every registered automation test with the smoke filter, synchronously in the editor, and returns only the aggregate: ran, all_passed and a note. Under a commandlet the engine skips them, so ran and all_passed come back false. For one test with its log entries use run_automation_test.
 //   @returns { ran, all_passed, note }
 TSharedPtr<FJsonObject> HandleRunSmokeTests(const TSharedPtr<FJsonObject>& Params)
 {
@@ -802,7 +802,7 @@ TSharedPtr<FJsonObject> HandleRunSmokeTests(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_automation_test_results - Return the cached result of the most recent run_automation_test
+// MCP:get_automation_test_results - Returns the cached result of the last synchronous test completed through run_automation_test or start_gauntlet_run, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
 //   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count }
 TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObject>& Params)
 {

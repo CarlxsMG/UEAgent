@@ -700,10 +700,10 @@ TSharedPtr<FJsonObject> HandleRemoveProceduralMeshComponent(const TSharedPtr<FJs
 	return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:set_procedural_mesh_material - Assign a UMaterialInterface to a UProceduralMeshComponent material slot.
-//   @param actor_label - Editor label of the actor carrying the component
-//   @param material_path - /Game path to the UMaterialInterface
-//   @param element_index - Optional material slot index (default 0)
+// MCP:set_procedural_mesh_material - Assign a material to one slot of the first UProceduralMeshComponent on an editor-world actor (found by label or object name) with SetMaterial, marking the actor package dirty without saving. Returns the loaded material_path, element_index and previous_material_path when the slot had a material.
+//   @param actor_label - Editor label or object name of the actor; the first actor matching either is used
+//   @param material_path - Material or material instance asset path, e.g. "/Game/Materials/M_Rock"
+//   @param element_index - Material slot index, usually the section index; default 0 (not range-checked)
 //   @returns { actor_label, material_path, element_index, material_set, previous_material_path? }
 
 TSharedPtr<FJsonObject> HandleSetProceduralMeshMaterial(const TSharedPtr<FJsonObject>& Params)

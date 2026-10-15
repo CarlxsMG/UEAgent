@@ -559,8 +559,8 @@ TSharedPtr<FJsonObject> HandleGetAudioComponentProperties(const TSharedPtr<FJson
     return Report;
 }
 
-// MCP:set_audio_volume - Sets the volume multiplier for an audio component.
-//   @param audio_component_name - Name of the audio component to modify
+// MCP:set_audio_volume - Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on an audio component of the editor world, matched by object name against the first audio component of each actor. No undo, no dirty mark. Returns old_volume, new_volume and volume_set.
+//   @param audio_component_name - Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched.
 //   @param volume - Volume multiplier between 0.0 and 10.0
 //   @returns { audio_component_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z }, audio_owner_name: string }
 
@@ -769,8 +769,8 @@ TSharedPtr<FJsonObject> HandlePlaySound(const TSharedPtr<FJsonObject>& Params)
     return Report;
 }
 
-// MCP:stop_sound - Stops playback of sound on an audio component.
-//   @param audio_component_name - Name of the audio component to stop
+// MCP:stop_sound - Stop playback on an audio component of the editor world (UAudioComponent::Stop), matched by object name against the first audio component of each actor; components in a running PIE world are not reached. Returns was_playing and playing; success is always true. Start playback with play_sound.
+//   @param audio_component_name - Object name of the audio component to stop (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched.
 //   @returns { audio_component_name: string, playing: bool, was_playing: bool, success: bool }
 
 TSharedPtr<FJsonObject> HandleStopSound(const TSharedPtr<FJsonObject>& Params)

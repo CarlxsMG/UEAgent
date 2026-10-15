@@ -309,9 +309,9 @@ namespace
 // ---------------------------------------------------------------------------
 // create_control_rig_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_control_rig_blueprint - Create and save a UControlRigBlueprint asset.
-//   @param package_path - UE content folder, e.g. /Game/MyGame
-//   @param name - Asset name for the new Control Rig blueprint
+// MCP:create_control_rig_blueprint - Create a Control Rig Blueprint (non-modular) at package_path/name with UControlRigBlueprintFactory, compile it and save it. Idempotent: an existing Control Rig Blueprint there is returned unchanged (already_existed=true). Returns asset_path, generated_class, is_control_rig and saved; refused while PIE runs unless force is set.
+//   @param package_path - Content folder starting with "/", e.g. "/Game/Rigs"; a trailing slash is ignored
+//   @param name - Asset name of the Control Rig Blueprint, e.g. "CR_Hero"
 //   @returns { asset_path: string, name: string, generated_class: string, is_control_rig: bool, created: bool, already_existed: bool, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleCreateControlRigBlueprint(const TSharedPtr<FJsonObject>& Params)
@@ -358,10 +358,10 @@ TSharedPtr<FJsonObject> HandleCreateControlRigBlueprint(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // add_rig_bone
 // ---------------------------------------------------------------------------
-// MCP:add_rig_bone - Add a bone to a Control Rig's hierarchy.
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
+// MCP:add_rig_bone - Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at the root, then compile and save the blueprint. The engine keeps names unique, so element_key is the name the bone really got. Refused while PIE runs unless force is set.
+//   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @param bone_name - Name of the new bone
-//   @param parent_name - Optional existing bone name to parent the new bone under.
+//   @param parent_name - Existing BONE to parent the new bone under; omitted or empty puts it at the root
 //   @param location - Optional [x, y, z] world location for the new bone.
 //   @param rotation - Optional [pitch, yaw, roll] world rotation for the new bone.
 //   @param scale - Optional [x, y, z] scale for the new bone.
@@ -531,8 +531,8 @@ TSharedPtr<FJsonObject> HandleAddRigControl(const TSharedPtr<FJsonObject>& Param
 // ---------------------------------------------------------------------------
 // get_rig_hierarchy
 // ---------------------------------------------------------------------------
-// MCP:get_rig_hierarchy - Read the full element hierarchy of a Control Rig.
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
+// MCP:get_rig_hierarchy - Read every element of a Control Rig Blueprint hierarchy in traversal order as elements [{name, type}], plus bone_count, null_count, control_count, curve_count, other_count (sockets, connectors and the rest) and total. Read-only: nothing is compiled or saved.
+//   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @returns { asset_path: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, elements: [{name, type}] }
 
 TSharedPtr<FJsonObject> HandleGetRigHierarchy(const TSharedPtr<FJsonObject>& Params)
@@ -560,10 +560,10 @@ TSharedPtr<FJsonObject> HandleGetRigHierarchy(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // remove_rig_element
 // ---------------------------------------------------------------------------
-// MCP:remove_rig_element - Remove an element from a Control Rig's hierarchy.
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
+// MCP:remove_rig_element - Remove one element (by name and type) from a Control Rig Blueprint hierarchy with RemoveElement, then compile and save the blueprint. Errors on an unknown type or a missing element. Returns the per-type counts afterwards; refused while PIE runs unless force is set.
+//   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @param element_name - Name of the element to remove
-//   @param element_type - Element type ("Bone"/"Null"/"Control"/"Curve"/"Socket"/"Connector")
+//   @param element_type - Element type, any case: "Bone", "Null" (or "Space"), "Control", "Curve", "Socket" or "Connector"
 //   @returns { asset_path: string, element_key: string, element_type: string, removed: bool, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleRemoveRigElement(const TSharedPtr<FJsonObject>& Params)

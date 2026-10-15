@@ -486,8 +486,8 @@ TSharedPtr<FJsonObject> HandleInitializeDataRegistry(
 // Reads registry type / item struct / id format / initialized state / item
 // names and the configured source list.
 // ---------------------------------------------------------------------------
-// MCP:get_data_registry_info - Read metadata for a UDataRegistry.
-//   @param registry_path - Content path to the UDataRegistry asset.
+// MCP:get_data_registry_info - Read a UDataRegistry asset: registry_type, item_struct, initialized, its sources (name, class, data_table) and item_names. Read-only. item_names lists cached items only, so it stays empty until the registry is initialized (initialize_data_registry); null source slots are skipped, unlike get_data_registry_source_count.
+//   @param registry_path - Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items".
 //   @returns { registry_path: string, registry_type: string, item_struct: string, initialized: bool, sources: [{name, class, data_table}], source_count: int, item_names: [string], item_count: int }
 
 TSharedPtr<FJsonObject> HandleGetDataRegistryInfo(
@@ -602,7 +602,7 @@ TSharedPtr<FJsonObject> HandleGetDataRegistryItem(
 // list_data_registry_types
 // Enumerates all registries currently registered with the subsystem.
 // ---------------------------------------------------------------------------
-// MCP:list_data_registry_types - Enumerate all registries currently registered with the subsystem.
+// MCP:list_data_registry_types - List every registry the UDataRegistrySubsystem currently has registered, sorted by type, each with registry_type, registry_path, item_struct and initialized. Read-only. An asset the subsystem has not loaded is absent: register it with initialize_data_registry, or call refresh_data_registry_map after edits.
 //   @returns { registries: [{registry_type, registry_path, item_struct, initialized}], registry_count: int }
 
 TSharedPtr<FJsonObject> HandleListDataRegistryTypes(
@@ -709,8 +709,8 @@ TSharedPtr<FJsonObject> HandleListDataRegistrySources(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_data_registry_source_count - Return the scalar count of DataSources[] on a UDataRegistry.
-//   @param registry_path - Content path to the UDataRegistry asset.
+// MCP:get_data_registry_source_count - Count the entries of DataSources[] on a UDataRegistry asset, null slots included. Read-only; returns registry_path and source_count. For the sources themselves (class, source table) use list_data_registry_sources or get_data_registry_info.
+//   @param registry_path - Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items".
 //   @returns { registry_path: string, source_count: int }
 
 TSharedPtr<FJsonObject> HandleGetDataRegistrySourceCount(const TSharedPtr<FJsonObject>& Params)

@@ -10,6 +10,10 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
   made with it.
 - `Tools/catalog_server.py` serves the tool list over stdio without the editor, the same list the
   editor serves, so that MCP directories such as Glama can list the tools.
+- The 408 tool definitions that said the least were rewritten from their code: every description now
+  says what the tool reads or changes, what it returns and its side effects, and every parameter says
+  what it takes. About 60 of them described something the code does not do, and now match it. No
+  tool, parameter, type or accepted value changed.
 
 ## 1.1.0 - 2026-10-14
 

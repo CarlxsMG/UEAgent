@@ -522,7 +522,7 @@ TSharedPtr<FJsonObject> HandleListReplicatedActors(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_world_net_mode - Read ENetMode for the editor world as a string.
+// MCP:get_world_net_mode - Read the net mode of the editor world as a string ("Standalone", "ListenServer", "Client" or "DedicatedServer") with net_mode_code, is_server and is_client. Read-only, no parameters; PIE worlds are not read, so this normally reports "Standalone".
 //   @returns { net_mode: string, net_mode_code: int, is_server: bool, is_client: bool }
 //   Read-only, headless-safe. Values: "Standalone"|"ListenServer"|"Client"|"DedicatedServer".
 TSharedPtr<FJsonObject> HandleGetWorldNetMode(const TSharedPtr<FJsonObject>& Params)

@@ -216,8 +216,8 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypes(const TSharedPtr<FJsonObject>
 //   UAssetManager::Get().GetPrimaryAssetIdForPath(FSoftObjectPath(path)).
 //   Invalid is a real, correct answer for a non-primary asset.
 // ---------------------------------------------------------------------------
-// MCP:get_primary_asset_id - Resolve the Primary Asset Id for an asset path
-//   @param asset_path - Object path, e.g. /Game/MyGame/M_Example.M_Example
+// MCP:get_primary_asset_id - Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error. get_primary_asset_id_from_path is the same lookup without the split fields.
+//   @param asset_path - Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not match.
 //   @returns { asset_path, primary_asset_id, is_valid, primary_asset_type, primary_asset_name }
 TSharedPtr<FJsonObject> HandleGetPrimaryAssetId(const TSharedPtr<FJsonObject>& Params)
 {
@@ -248,8 +248,8 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetId(const TSharedPtr<FJsonObject>& P
 //   Read the AssetBundles tag (FAssetData::TaggedAssetBundles) for an asset.
 //   An asset with no bundles -> empty bundles[] is the real, correct result.
 // ---------------------------------------------------------------------------
-// MCP:get_asset_bundle_data - Read the AssetBundles registry tag for an asset
-//   @param asset_path - Object path, e.g. /Game/MyGame/M_Example.M_Example
+// MCP:get_asset_bundle_data - Read the AssetBundles tag of one asset from the Asset Registry without loading it: each bundle with bundle_name, asset_paths and num_assets, plus bundle_count and asset_found. An asset with no bundles, or not found, returns an empty list rather than an error. Read-only.
+//   @param asset_path - Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not resolve to the asset.
 //   @returns { bundle_name, asset_paths, num_assets, asset_path, asset_found, bundles, bundle_count }
 TSharedPtr<FJsonObject> HandleGetAssetBundleData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -297,8 +297,8 @@ TSharedPtr<FJsonObject> HandleGetAssetBundleData(const TSharedPtr<FJsonObject>& 
 //   Scan the configured types' directories (or one named type) synchronously.
 //   A fresh project may legitimately find 0 assets -> 0 is real.
 // ---------------------------------------------------------------------------
-// MCP:scan_primary_assets - Scan the configured Primary Asset directories synchronously
-//   @param primary_asset_type - Optional type name to limit the scan to
+// MCP:scan_primary_assets - Synchronously rescan the directories and specific assets of every PrimaryAssetTypesToScan rule (or only primary_asset_type) so the Asset Manager registers their primary assets; rules without paths are skipped. Returns num_assets_found, types_scanned and per-type scanned_types. Run it after add_primary_asset_rule.
+//   @param primary_asset_type - Configured type name to scan alone, e.g. "Item"; omitted or empty scans every rule, and an unknown name scans nothing (types_scanned=0).
 //   @returns { type, num_assets_found, num_paths, scanned, types_scanned, scanned_types }
 TSharedPtr<FJsonObject> HandleScanPrimaryAssets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -382,7 +382,7 @@ TSharedPtr<FJsonObject> HandleScanPrimaryAssets(const TSharedPtr<FJsonObject>& P
 //   UAssetManager::Get().GetPrimaryAssetTypeInfo(FPrimaryAssetType, Info).
 //   Returns detailed info about a specific primary asset type.
 // ---------------------------------------------------------------------------
-// MCP:get_primary_asset_type_info - Get detailed info about a specific primary asset type.
+// MCP:get_primary_asset_type_info - Read what the running Asset Manager holds for one primary asset type: asset_class, has_blueprint_classes, is_editor_only, num_assets from the last scan and its directories. found=false for a type it does not know, not an error; get_primary_asset_types reads the configured rules instead.
 //   @param asset_type_name - Name of the primary asset type (e.g. "Item")
 //   @returns { asset_type_name, found, asset_class, has_blueprint_classes, is_editor_only, num_assets, directories }
 TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypeInfo(const TSharedPtr<FJsonObject>& Params)
@@ -420,9 +420,9 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetTypeInfo(const TSharedPtr<FJsonObje
 //   UAssetManager::Get().GetPrimaryAssetIdList(Type, Ids, Filter).
 //   Returns all primary asset IDs of a given type.
 // ---------------------------------------------------------------------------
-// MCP:get_primary_asset_ids_by_type - Get all primary asset IDs of a given type.
-//   @param asset_type_name - Name of the primary asset type
-//   @param filter - Optional filter ("unloaded_only" to list only unloaded)
+// MCP:get_primary_asset_ids_by_type - List the Primary Asset Ids the running Asset Manager has registered for one type: asset_ids entries with type, name and full_id, plus count; success is false when none are found, unknown type included. Only scanned assets appear (see scan_primary_assets). Read-only.
+//   @param asset_type_name - Name of the primary asset type, e.g. "Item".
+//   @param filter - "unloaded_only" keeps only assets with no current or pending bundle state (not loaded through the Asset Manager); omitted or any other value lists all.
 //   @returns { type, name, full_id, asset_type_name, success, asset_ids, count }
 TSharedPtr<FJsonObject> HandleGetPrimaryAssetIdsByType(const TSharedPtr<FJsonObject>& Params)
 {
@@ -708,8 +708,8 @@ TSharedPtr<FJsonObject> HandleGetPrimaryAssetCookRules(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(AssetManager_CookRulesReply(PrimaryAssetType, Found->Rules));
 }
 
-// MCP:remove_primary_asset_rule - Remove a primary asset type entry from UAssetManagerSettings
-//   @param primary_asset_type - Name of the primary asset type to remove.
+// MCP:remove_primary_asset_rule - Remove every PrimaryAssetTypesToScan entry of one type from the Asset Manager project settings and write DefaultGame.ini; an unknown type is an error. Returns removed_count, type_count_after and saved. The running Asset Manager is not refreshed, so its scanned data for the type remains.
+//   @param primary_asset_type - Name of the primary asset type to remove, e.g. "Item".
 //   @returns { primary_asset_type, removed_count, type_count_after, saved }
 TSharedPtr<FJsonObject> HandleRemovePrimaryAssetRule(const TSharedPtr<FJsonObject>& Params)
 {

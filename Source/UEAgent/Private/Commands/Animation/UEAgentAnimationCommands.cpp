@@ -287,9 +287,9 @@ TSharedPtr<FJsonObject> HandleGetAnimationBlueprintInfo(const TSharedPtr<FJsonOb
     return Report;
 }
 
-// MCP:configure_animation_events - Configure animation event settings for a skeletal mesh component
-//   @param component_name - Name of the skeletal mesh component to configure
-//   @param event_settings - Event configuration mode: 'enable', 'disable', or 'custom'
+// MCP:configure_animation_events - Switch the tick of a skeletal mesh component in the editor world (or the one the world param picks): despite the name, it only toggles component ticking and tick-when-paused. Returns the previous and current tick flags; nothing is marked dirty or saved.
+//   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
+//   @param event_settings - Tick mode, any case: 'enable' (tick on, not while paused), 'disable' (tick off) or 'custom' (tick on, paused setting kept)
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
 //   @returns { component_name: string, requested_settings: string, events_configured: bool, previous_tick_enabled: bool, previous_tick_when_paused: bool, current_tick_enabled: bool, current_tick_when_paused: bool, component_valid: bool, component_class: string, anim_instance_class: string?, has_anim_instance: bool, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
 
@@ -455,8 +455,8 @@ TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Par
     return Report;
 }
 
-// MCP:play_animation - Play an animation montage on a skeletal mesh component
-//   @param component_name - Name of the skeletal mesh component to play animation on
+// MCP:play_animation - Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Play at play_rate, then jump to start_section if playback started. Editor world unless the world param says otherwise; the component needs an anim instance. playing/success mean Montage_Play returned a length above 0.
+//   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param montage_path - Full asset path to the AnimMontage (e.g. '/Game/Animations/MyMontage.MyMontage')
 //   @param play_rate - Playback rate multiplier (optional, default 1.0)
 //   @param start_section - Name of the section to jump to after play starts (optional)
@@ -520,8 +520,8 @@ TSharedPtr<FJsonObject> HandlePlayAnimation(const TSharedPtr<FJsonObject>& Param
     return Report;
 }
 
-// MCP:stop_animation - Stop animation montage playback on a skeletal mesh component
-//   @param component_name - Name of the skeletal mesh component to stop animation on
+// MCP:stop_animation - Stop montage playback on a skeletal mesh component with Montage_Stop and a 0.25 s blend-out: only montage_path when given, otherwise every active montage. Editor world unless the world param says otherwise; an unknown montage_path is an error. was_playing and playing cover any montage.
+//   @param component_name - Object name of the USkeletalMeshComponent, e.g. "CharacterMesh0", case-insensitive; the first actor in the world that has one with that name wins
 //   @param montage_path - Full asset path of a specific AnimMontage to stop; if omitted, stops all montages (optional)
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie').
 //   @returns { component_name: string, was_playing: bool, playing: bool, success: bool, montage_path: string?, montage_name: string?, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }

@@ -18,24 +18,24 @@ Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. T
 
 ## `create_volume`
 
-Creates a volume actor (BlockingVolume, KillZVolume, PainCausingVolume, or PostProcessVolume).
+Spawn a BlockingVolume, KillZVolume, PainCausingVolume, PostProcessVolume or TriggerVolume in the editor world with a real cube brush, labelled volume_name, as one undo step; the level is not saved. Returns actor_name, actor_path, actor_class and brush_built. For other AVolume classes or box extents use spawn_box_volume.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `volume_name` | string | yes | Name label for the volume actor |
-| `volume_type` | string | no | Volume class to spawn (defaults to BlockingVolume) |
-| `location` | array | no | World location for the spawned volume |
-| `size` | number | no | Optional cube brush size in unreal units |
+| `volume_name` | string | yes | Editor label for the new actor; its object name is generated and returned as actor_name. |
+| `volume_type` | string | no | Volume class, case-insensitive: "BlockingVolume" (default), "KillZVolume", "PainCausingVolume", "PostProcessVolume" or "TriggerVolume"; any other value spawns a BlockingVolume. |
+| `location` | array | no | World location [x, y, z] in cm of the volume center (default [0, 0, 0]). |
+| `size` | number | no | Edge length in cm of the cube brush (the full side, not a half-extent); omitted or not positive gives 200. |
 
 **Returns:** `{ volume_name, volume_type, actor_name, actor_path, actor_class, brush_built, success }`
 
 ## `get_actors_in_trigger`
 
-Gets list of actors currently overlapping with a trigger.
+List the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}]; get_trigger_overlap_count returns only the count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `trigger_name` | string | yes | Name of the trigger actor to check |
+| `trigger_name` | string | yes | Object name of the trigger actor, such as the actor_name returned by create_trigger; its editor label is not matched. |
 
 **Returns:** `{ trigger_name, actor_name, actor_class, actors, actor_count }`
 
@@ -61,41 +61,41 @@ Retrieves information about a trigger actor, including its type and bounding box
 
 ## `get_trigger_overlap_count`
 
-Count actors currently overlapping a trigger (no payload list).
+Count the actors currently overlapping a TriggerBox, TriggerSphere or TriggerVolume in the editor world, without changing anything; the cheap form of get_actors_in_trigger. Returns actor_name and overlap_count. Fails if the first actor matching the name is not a trigger.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Trigger actor name (ATriggerBox / ATriggerSphere / ATriggerVolume) (required) |
+| `actor_name` | string | yes | Object name or editor label of the trigger actor; the first actor matching either is used. |
 
 **Returns:** `{ actor_name, overlap_count }`
 
 ## `get_volume_info`
 
-Retrieves information about a volume actor, including its type.
+Read a volume actor in the editor world without changing it: its class, whether it is a BlockingVolume, KillZVolume, PainCausingVolume or PostProcessVolume and, when it has a brush component, bounds_origin and bounds_extent as text plus has_brush. Fails if the actor is not an AVolume.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the volume actor to query |
+| `actor_name` | string | yes | Object name of the volume actor in the editor world; its editor label is not matched. |
 
 **Returns:** `{ actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin, bounds_extent, has_brush }`
 
 ## `remove_trigger_box`
 
-Destroy an ATriggerBox actor after verifying the actor class.
+Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Name of the ATriggerBox actor. |
+| `actor_name` | string | no | Object name of the TriggerBox actor (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
 ## `remove_trigger_sphere`
 
-Destroy an ATriggerSphere actor after verifying the actor class.
+Delete a TriggerSphere actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Name of the ATriggerSphere actor. |
+| `actor_name` | string | no | Object name of the TriggerSphere actor (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
@@ -111,14 +111,14 @@ Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, Pai
 
 ## `set_trigger_box_extent`
 
-Set ATriggerBox::GetCollisionComponent()->BoxExtent (FVector).
+Resize a TriggerBox in the editor world by setting the unscaled half-extent of its box collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_extent, new_extent and changed. Each extent must be greater than 0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | TriggerBox actor name (required) |
-| `extent_x` | number | yes | Box half-extent X (required, > 0) |
-| `extent_y` | number | yes | Box half-extent Y (required, > 0) |
-| `extent_z` | number | yes | Box half-extent Z (required, > 0) |
+| `actor_name` | string | yes | Object name of the TriggerBox actor in the editor world; its editor label is not matched. |
+| `extent_x` | number | yes | Half-extent along local X in cm, greater than 0; the box is twice as long. |
+| `extent_y` | number | yes | Half-extent along local Y in cm, greater than 0. |
+| `extent_z` | number | yes | Half-extent along local Z in cm, greater than 0. |
 
 **Returns:** `{ actor_name, component_name, previous_extent: {x, y, z}, new_extent: {x, y, z}, changed }`
 
@@ -135,12 +135,12 @@ Configure overlap-event generation on a trigger/volume's root primitive componen
 
 ## `set_trigger_sphere_radius`
 
-Set ATriggerSphere::GetCollisionComponent()->SphereRadius (float, > 0).
+Resize a TriggerSphere in the editor world by setting the unscaled radius of its sphere collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_radius, new_radius and changed. The radius must be greater than 0.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | TriggerSphere actor name (required) |
-| `radius` | number | yes | Sphere radius (required, > 0) |
+| `actor_name` | string | yes | Object name of the TriggerSphere actor in the editor world; its editor label is not matched. |
+| `radius` | number | yes | New unscaled sphere radius in cm, greater than 0. |
 
 **Returns:** `{ actor_name, component_name, previous_radius, new_radius, changed }`
 

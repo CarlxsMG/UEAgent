@@ -276,10 +276,10 @@ TSharedPtr<FJsonObject> HandleGetStaticMeshInfo(
 // ---------------------------------------------------------------------------
 // set_static_mesh_nanite
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_nanite - Enable or disable Nanite on a static mesh.
+// MCP:set_static_mesh_nanite - Set the Nanite settings of a UStaticMesh asset through the StaticMeshEditor subsystem, which rebuilds the mesh, then save it; a failed save is an error. Both fields are always written: omitting enabled disables Nanite and omitting keep_percent_triangles resets it to 1.0. Returns nanite_enabled read back.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @param enabled - Whether to enable Nanite.
-//   @param keep_percent_triangles - Fraction of triangles to keep (defaults to 1.0)
+//   @param enabled - true enables Nanite, false disables it; default false, so leaving it out disables Nanite.
+//   @param keep_percent_triangles - Fraction of the source triangles Nanite keeps, 1.0 keeps them all (default 1.0, written even when omitted).
 //   @returns { static_mesh_path, nanite_enabled, saved }
 TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 	const TSharedPtr<FJsonObject>& Params)
@@ -644,9 +644,9 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 // ---------------------------------------------------------------------------
 // set_static_mesh_collision_complexity
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_collision_complexity - Set the collision complexity of a static mesh.
+// MCP:set_static_mesh_collision_complexity - Set the collision complexity (BodySetup CollisionTraceFlag) of a UStaticMesh asset, creating its BodySetup when missing, then save it; a failed save is an error. An unrecognized complexity silently becomes default, so check collision_complexity, which is read back.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @param complexity - One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple".
+//   @param complexity - One of "default", "simple_and_complex", "simple_as_complex", "complex_as_simple", case-insensitive; any other value is stored as default.
 //   @returns { static_mesh_path, collision_complexity, saved }
 TSharedPtr<FJsonObject> HandleSetStaticMeshCollisionComplexity(
 	const TSharedPtr<FJsonObject>& Params)

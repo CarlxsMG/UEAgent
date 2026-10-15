@@ -146,15 +146,15 @@ Read one Enhanced Input InputAction asset in full: its value type (Bool / Axis1D
 
 ## `get_input_action_state`
 
-Read the LIVE Enhanced Input state of ONE action on the local player: whether the engine is tracking it at all, its trigger event, its current value, and the world time it last TRIGGERED. THE ORACLE FOR "did that input actually fire", which nothing else answers: inject_key_input returns injected:true and trigger_input_action returns dispatched:true whether or not a single handler ran, so a dead binding and a working one are indistinguishable from their replies -- read this BEFORE and AFTER instead, and `last_triggered_world_time` advancing is the proof. It also answers "is this action reachable right now", because `is_mapped_in_applied_context` goes false when the context that carries it is removed (mounting, a vehicle, a menu) and `is_tracked` goes false when the engine is not evaluating the action at all -- which is what a pawn that stopped being possessed looks like. Runtime state: needs a live PIE/game session, and in co-op `world` decides WHICH local player you are reading.
+Read the live Enhanced Input state of one InputAction for a local player in a running PIE or game session: is_tracked, trigger_events, value, last_triggered_world_time and the mapping contexts that carry it, applied or not. It is the oracle for whether an input fired, since inject_key_input and trigger_input_action succeed either way: read it before and after, and an advancing last_triggered_world_time is the proof. is_mapped_in_applied_context false means no applied context maps it (removed on mounting, in a vehicle or a menu); is_tracked false means the engine is not evaluating it, typically an unpossessed pawn. In co-op, world picks which local player is read.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `action` | string | yes | InputAction to read: full object path or short asset name. Aliases: action_path, action_name. |
 | `player_index` | number | no | Local player index (default 0). |
 | `world` | string | no | World selector: 'pie' (default) \| 'server' \| 'client' \| 'pie:N' \| 'game'. |
-| `action_path` | string | no |   |
-| `action_name` | string | no |   |
+| `action_path` | string | no | Alias of action, read when action is absent or empty: InputAction object path or short asset name. |
+| `action_name` | string | no | Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name. |
 
 **Returns:** `{ action_path: string, action_name: string, value_type: string, is_enhanced_input: bool, is_tracked: bool, is_mapped_in_applied_context: bool, trigger_event: number, trigger_events: array, value: array, elapsed_seconds: number, triggered_seconds: number, last_triggered_world_time: number, world_time_seconds: number, contexts_mapping_action: array, contexts_mapping_action_count: number, applied_context_count: number, player_index: number, player_controller: string, player_input_class: string, world: string, note: string }`
 
@@ -226,14 +226,14 @@ List the triggers attached to ONE key mapping inside an Enhanced Input mapping c
 
 ## `map_input_action`
 
-Bind a key to an InputAction inside an Enhanced Input mapping context -- the call that actually makes a keypress do something. Takes full ASSET PATHS for the context and action (add_mapping_to_context is the same operation addressed by short asset names). Check the key is not already claimed with find_free_input_key or list_all_input_mappings first: a duplicate binding compiles fine and only misbehaves in play.
+Bind a key to an InputAction in an Enhanced Input mapping context, both by full asset path (add_mapping_to_context takes short names), and save the context. Each call appends a mapping, even a duplicate, and reports success even if the save failed; check the key with find_free_input_key or list_all_input_mappings first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `context_path` | string | yes | Full path to the InputMappingContext asset. |
 | `action_path` | string | yes | Full path to the InputAction asset. |
 | `key_name` | string | yes | Key name to map (e.g., "SpaceBar", "LeftMouseButton"). |
-| `key` | string | no | Key name |
+| `key` | string | no | Alias of key_name, read only when key_name is absent (same FKey names). |
 | `input_action_path` | string | no | Fallback for action_path when action_path is absent. |
 
 **Returns:** `{ context_path, action_path, key_name, mapping_count, success, message }`
@@ -341,7 +341,7 @@ Change an InputAction's value type after the fact (button vs axis: Bool / Axis1D
 
 ## `trigger_input_action`
 
-Fire an Enhanced Input action to the local PIE player so the REAL bound handlers run (headless key injection never reaches Enhanced Input). Resolves the ULocalPlayer's UEnhancedInputLocalPlayerSubsystem in the live PIE/Game world and calls InjectInputForAction (EnhancedInputSubsystemInterface.h) with an FInputActionValue built to match the action's ValueType. Requires an active PIE/game session and the EnhancedInput module.
+Inject a value for an Enhanced Input action into a local player's UEnhancedInputLocalPlayerSubsystem in a running PIE or game session, so the real bound handlers run with the action's own modifiers and triggers (headless key injection never reaches Enhanced Input). dispatched true does not prove a handler fired: compare get_input_action_state before and after.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -350,8 +350,8 @@ Fire an Enhanced Input action to the local PIE player so the REAL bound handlers
 | `player_index` | number | no | Local player index used to resolve the PlayerController (default 0). |
 | `hold_seconds` | number | no | Optional float. When > 0, the value is re-injected every tick for this many seconds (so a movement AXIS actually moves the pawn), then a final neutral/zero value is injected to release. Fire-and-forget: the command returns immediately and the hold runs across the next hold_seconds of PIE. Omit (or 0) for a single one-shot sample. |
 | `world` | string | no | Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). With 2+ players the default may drive the OTHER player's pawn. |
-| `action_path` | string | no |   |
-| `action_name` | string | no |   |
+| `action_path` | string | no | Alias of action, read when action is absent or empty: InputAction object path or short asset name. |
+| `action_name` | string | no | Alias of action, read only when action is absent or empty and action_path is absent: InputAction object path or short asset name. |
 
 **Returns:** `{ dispatched: bool, note: string, action_path: string, value_type: string, injected_value: [x,y,z], player_index: number, hold_seconds: number, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 

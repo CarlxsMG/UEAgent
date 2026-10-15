@@ -53,7 +53,7 @@ Read one actor's current replication settings -- the exact read-side of configur
 
 ## `get_world_net_mode`
 
-Read ENetMode for the editor world as a string.
+Read the net mode of the editor world as a string ("Standalone", "ListenServer", "Client" or "DedicatedServer") with net_mode_code, is_server and is_client. Read-only, no parameters; PIE worlds are not read, so this normally reports "Standalone".
 
 No parameters.
 

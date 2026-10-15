@@ -115,11 +115,11 @@ namespace UEAgentMaterialExtraImpl
     }
 }
 
-// MCP:connect_to_material_output - Connect a material expression output to a material property.
-//   @param material_path - Material asset path.
+// MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
+//   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found.
 //   @param from_node_id - Id of the source expression (from create_material_expression / get_material_expressions).
-//   @param output_property - BaseColor, Metallic, Roughness, Normal, Emissive, Opacity, OpacityMask, Specular, ...
-//   @param from_pin - Optional source output pin name (default: first available)
+//   @param output_property - Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor.
+//   @param from_pin - Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output.
 //   @returns { material: string, from_node_id: string, output_property: string, connected: bool }
 
 TSharedPtr<FJsonObject> HandleConnectToMaterialOutput(const TSharedPtr<FJsonObject>& Params)
@@ -379,9 +379,9 @@ namespace
     }
 }
 
-// MCP:set_material_instance_param - Set a parameter on a Material Instance Constant, then RE-READ it and report what the asset actually holds. `set` is derived from that re-read, NOT from the engine setter's return value -- UMaterialEditingLibrary::SetMaterialInstance*ParameterValue always returns false (its bResult is never assigned), which would make this tool report a failure it had not had. Vector values are parsed explicitly in three formats and a malformed one is a hard ERROR instead of a silent (0,0,0,1).
-//   @param instance_path - Material instance asset path.
-//   @param param_name - Parameter name.
+// MCP:set_material_instance_param - Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
+//   @param instance_path - Asset path of the UMaterialInstanceConstant, e.g. "/Game/Materials/MI_Rock".
+//   @param param_name - Parameter name as defined in the parent material, e.g. "BaseTint"; only global parameters are reached, not layer parameters.
 //   @param value - Value. Scalar: a number (JSON number or numeric string). Vector: '(R=..,G=..,B=..,A=..)', '[r,g,b,a]', '[r,g,b]', 'r,g,b,a', 'r,g,b', or a real JSON array of 3-4 numbers; anything else is REJECTED (never written as black). Texture: an asset path. Static switch: a bool or 'true'/'false'.
 //   @param param_type - "scalar" | "vector" | "texture" | "static_switch" (optional, inferred from the value: a JSON array => vector, a JSON bool => static_switch, a JSON number => scalar, a string starting with '/' => texture, with '(' or '[' => vector, else scalar. A bool passed AS A STRING still reads as scalar, so pass param_type explicitly in that case)
 //   @returns { instance: string, instance_path: string, param_name: string, param_type: string, value_format?: string, set: bool, value_after: number|object|string|bool|null, overridden_after: bool, value_requested: number|object|string|bool, requested: {...} }
@@ -571,8 +571,8 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
     return mcp_common::MakeOutcomeReply(Result, bSet, Error);
 }
 
-// MCP:compile_material - Recompile/refresh a material asset.
-//   @param material_path - Material asset path
+// MCP:compile_material - Recompile a UMaterial asset through UMaterialEditingLibrary::RecompileMaterial: refreshes its child material instances and the viewports and marks the package dirty, without saving. recompiled is always true and does not report shader errors. Material functions use recompile_material_function.
+//   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance or function path fails with Material not found.
 //   @returns { material: string, recompiled: bool }
 
 TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Params)
@@ -848,10 +848,10 @@ namespace UEAgentMaterialExtraImpl
     }
 }
 
-// MCP:create_material_function - Create and save a new Material Function asset (UMaterialFunction).
+// MCP:create_material_function - Create a UMaterialFunction asset at package_path/name through the editor factory, exposed to the function library, and save it. Idempotent: an existing function is returned untouched with already_exists=true; another asset class at that path is an error. Returns function_path, num_inputs, num_outputs and saved.
 //   @param package_path - /Game package directory, e.g. '/Game/MyGame'
 //   @param name - Asset name for the new material function
-//   @param description - Optional description for the material function
+//   @param description - Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists.
 //   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists: bool? }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObject>& Params)
@@ -926,12 +926,12 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
     return Result;
 }
 
-// MCP:add_material_function_input - Add a UMaterialExpressionFunctionInput node to a material function.
+// MCP:add_material_function_input - Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and delete_material_function_input, plus num_inputs and added.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
-//   @param input_name - Name of the new input pin
+//   @param input_name - Name of the new input pin, stored as given: a name another input already uses is not made unique.
 //   @param input_type - One of the 13 EFunctionInputType values: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|Texture2DArray|VolumeTexture|StaticBool|MaterialAttributes|TextureExternal|Bool|Substrate (optional, default "Scalar")
 //   @param description - Optional tooltip/description string for the input pin
-//   @param preview_value - Optional {x,y,z,w} (FVector4f) preview value used when previewing / as default
+//   @param preview_value - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value. Used for previews, and as the default with use_preview_value_as_default.
 //   @param use_preview_value_as_default - Optional bool; if true, the preview value becomes the input's default
 //   @param sort_priority - Optional int controlling the input's display order relative to other inputs
 //   @returns { function_path: string, input_name: string, input_type: string, node_id: string, num_inputs: number, added: bool }
@@ -1025,15 +1025,15 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
     return Result;
 }
 
-// MCP:set_material_function_input_props - Set properties on an existing UMaterialExpressionFunctionInput (located by node_id).  Partial update (idempotent): only fields present in Params are written; mirrors everything get_material_function_inputs reads. ValidateName is re-run when input_name changes. Also writes InputType/SortPriority/bUsePreviewValueAsDefault, which the reader exposes.
+// MCP:set_material_function_input_props - Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_inputs.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The input node id (UMaterialExpression name) from add_material_function_input
-//   @param input_name - Optional new pin name (re-validated for uniqueness)
+//   @param input_name - New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material).
 //   @param input_type - Optional EFunctionInputType (the 13 values; same parser as add_material_function_input)
-//   @param description - Optional tooltip/description string
-//   @param preview_value - Optional {x,y,z,w} (FVector4f) preview value
-//   @param use_preview_value_as_default - Optional bool
-//   @param sort_priority - Optional int display-order
+//   @param description - New tooltip text of the input pin.
+//   @param preview_value - JSON object {"x":0,"y":0,"z":0,"w":0} (FVector4f), any subset; missing components keep their current value.
+//   @param use_preview_value_as_default - Bool: true makes the preview value the default of the input when its pin is left unconnected.
+//   @param sort_priority - Integer that orders this input pin relative to the other inputs of the function.
 //   @returns { function_path: string, node_id: string, input_name: string, input_type: string, applied: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialFunctionInputProps(const TSharedPtr<FJsonObject>& Params)
@@ -1306,10 +1306,10 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionCall(const TSharedPtr<FJsonObje
     return Result;
 }
 
-// MCP:duplicate_material_expression - Duplicate a material expression (in-place) and optionally rename.
+// MCP:duplicate_material_expression - Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count.
 //   @param material_path - Full asset path of the UMaterial.
-//   @param node_id - Name of the source expression.
-//   @param new_node_name - Optional rename for the duplicate (optional)
+//   @param node_id - Object name of the expression to copy, as listed by get_material_expressions.
+//   @param new_node_name - Object name for the copy; when taken, a unique variant is used (read duplicate_node). Default: a name the engine picks.
 //   @returns { material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number }
 
 TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJsonObject>& Params)
@@ -1394,8 +1394,8 @@ TSharedPtr<FJsonObject> HandleGetMaterialGraphInfo(const TSharedPtr<FJsonObject>
 //   delete_material_function            delete the UMaterialFunction asset.
 // ========================================================================== //
 
-// MCP:recompile_material_function - Recompile (UpdateMaterialFunction) a UMaterialFunction and save it.
-//   @param material_function_path - Asset path of the UMaterialFunction
+// MCP:recompile_material_function - Recompile a material function, layer or function instance (UpdateMaterialFunction): loaded materials using it recompile and dependent function instances are marked dirty but not saved, then the function itself is saved; success requires that save. recompiled is always true, not a shader-error report.
+//   @param material_function_path - Asset path of the UMaterialFunctionInterface (function, layer or function instance), e.g. "/Game/Materials/MF_Blend".
 //   @returns { material_function_path: string, function_class: string, recompiled: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleRecompileMaterialFunction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1589,7 +1589,7 @@ UMaterialFunctionInstanceFactory* Factory = NewObject<UMaterialFunctionInstanceF
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function_instance"));
 }
 
-// MCP:set_material_function_instance_parent - Re-parent a UMaterialFunctionInstance and save it.
+// MCP:set_material_function_instance_parent - Re-parent a UMaterialFunctionInstance asset to another material function or function instance in one undoable transaction, then save it; success requires the save. Returns old_parent and new_parent, read back from the asset ("(none)" when empty).
 //   @param instance_path - Asset path of the UMaterialFunctionInstance to re-parent
 //   @param parent_function_path - Asset path of the new parent UMaterialFunctionInterface
 //   @returns { instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool }
@@ -1627,8 +1627,8 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInstanceParent(const TSharedPtr
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_material_function_instance_parent"));
 }
 
-// MCP:get_material_function_inputs - Enumerate UMaterialFunctionInput / UMaterialFunctionOutput expressions inside a UMaterialFunction.
-//   @param material_function_path - Asset path of the UMaterialFunction
+// MCP:get_material_function_inputs - List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs. Read-only. Function instances are not accepted; for the whole node graph use get_material_function_graph.
+//   @param material_function_path - Asset path of the UMaterialFunction or material layer, e.g. "/Game/Materials/MF_Blend".
 //   @returns { material_function_path: string, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }
 TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1684,7 +1684,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:delete_material_function - Delete a UMaterialFunction asset from the project.
+// MCP:delete_material_function - Force-delete the asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check and no class check (any asset there goes), open editors close and undo history may be cleared. Permanent. Returns deleted; success stays true when deleted is false, so read it.
 //   @param material_function_path - Asset path of the UMaterialFunction to delete
 //   @returns { material_function_path: string, deleted: bool }
 TSharedPtr<FJsonObject> HandleDeleteMaterialFunction(const TSharedPtr<FJsonObject>& Params)

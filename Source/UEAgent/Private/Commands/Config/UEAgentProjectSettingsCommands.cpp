@@ -470,7 +470,7 @@ namespace
 //   returns their class name + CDO container / category. Headless-safe;
 //   does not load anything new from disk.
 // ---------------------------------------------------------------------------
-// MCP:list_project_setting_sections - List every loaded UDeveloperSettings-derived class
+// MCP:list_project_setting_sections - List every loaded, concrete UDeveloperSettings subclass (the Project/Editor Settings sections) without loading new modules, read-only. Returns count and sections [{class_name, class_path, container_name, category_name, section_name, section_text}]; pass class_name to get_project_settings_value or set_project_settings_value.
 //   @returns { count: int, sections: [object] }
 TSharedPtr<FJsonObject> HandleListProjectSettingSections(
 	const TSharedPtr<FJsonObject>& /*Params*/)
@@ -504,9 +504,9 @@ TSharedPtr<FJsonObject> HandleListProjectSettingSections(
 //   Returns the property's text form (round-trippable for primitives and
 //   common structs). For UObject* properties returns "".
 // ---------------------------------------------------------------------------
-// MCP:get_project_settings_value - Read a UDeveloperSettings property as a text string
-//   @param class_name - Class short name or /Script/Module.Class path
-//   @param property_name - Name of the property on the settings class
+// MCP:get_project_settings_value - Read one property of a settings class default object (CDO) as its ExportText string; this is the in-memory value, not re-read from the .ini on disk. Returns class_name, property_name and value; an unknown class or property is an error. set_project_settings_value is the writer.
+//   @param class_name - Short name of a loaded UDeveloperSettings subclass without the U prefix (e.g. "PhysicsSettings"), or a /Script/Module.Class path
+//   @param property_name - Name of the property on the settings class, e.g. "DefaultGravityZ"
 //   @returns { class_name: string, property_name: string, value: string }
 TSharedPtr<FJsonObject> HandleGetProjectSettingsValue(
 	const TSharedPtr<FJsonObject>& Params)
@@ -840,7 +840,7 @@ TSharedPtr<FJsonObject> HandleGetDefaultGameMap(
 // get_project_info
 //   Returns the project name/description/company from UGeneralProjectSettings.
 // ---------------------------------------------------------------------------
-// MCP:get_project_info - Read the project name and metadata from UGeneralProjectSettings
+// MCP:get_project_info - Read the project metadata from the in-memory UGeneralProjectSettings defaults (Project Settings, Description), read-only. Returns project_name, project_version, company_name, company_distinguished_name, copyright_notice, description, homepage, licensing_terms, privacy_policy and support_contact, as strings that may be empty.
 //   @returns { project_name: string, project_version: string, company_name: string, company_distinguished_name: string, copyright_notice: string, description: string, homepage: string, licensing_terms: string, privacy_policy: string, support_contact: string }
 TSharedPtr<FJsonObject> HandleGetProjectInfo(
 	const TSharedPtr<FJsonObject>& /*Params*/)
@@ -1023,8 +1023,8 @@ TSharedPtr<FJsonObject> HandleListCollisionChannels(
 //   private Profiles array instead, since AddProfileTemplate no-ops on a
 //   name collision by design.
 // ---------------------------------------------------------------------------
-// MCP:add_collision_profile - Create (or update, if profile_name already exists) a project collision profile.
-//   @param profile_name [string!] - Profile name
+// MCP:add_collision_profile - Create a project collision profile, or replace an existing one of that name in full (omitted fields reset, custom responses cleared, can_modify not checked), then write Config/DefaultEngine.ini via TryUpdateDefaultConfigFile, unverified. Returns custom_response_count and already_existed; read it back with get_collision_profile.
+//   @param profile_name [string!] - Name of the collision profile to create or replace, e.g. "MyPawnProfile"
 //   @param object_type_name [string!] - Channel this profile's object type resolves to, e.g. "WorldDynamic" or a custom channel's friendly name
 //   @param collision_enabled [string] - "NoCollision" | "QueryOnly" | "PhysicsOnly" | "QueryAndPhysics" | "ProbeOnly" | "QueryAndProbe". Defaults to "QueryAndPhysics".
 //   @param custom_responses [array] - [{channel: string, response: "Block"|"Ignore"|"Overlap"}, ...] per-channel overrides
@@ -1139,8 +1139,8 @@ TSharedPtr<FJsonObject> HandleAddCollisionProfile(
 // get_collision_profile
 //   Pure public API read: UCollisionProfile::GetProfileTemplate.
 // ---------------------------------------------------------------------------
-// MCP:get_collision_profile - Read a collision profile's full definition by name.
-//   @param profile_name [string!] - Profile name
+// MCP:get_collision_profile - Read one project collision profile by name, read-only: object_type_name, collision_enabled, can_modify, help_message and custom_responses [{channel, response}], which lists only the per-channel overrides. An unknown name is an error; add_collision_profile is the writer.
+//   @param profile_name [string!] - Name of an existing collision profile, e.g. "BlockAll" or "Pawn"
 //   @returns { profile_name: string, object_type_name: string, collision_enabled: string, can_modify: bool, help_message: string, custom_responses: [{channel: string, response: string}] }
 TSharedPtr<FJsonObject> HandleGetCollisionProfile(
 	const TSharedPtr<FJsonObject>& Params)

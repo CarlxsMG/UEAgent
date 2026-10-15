@@ -1557,8 +1557,8 @@ try
 // ---------------------------------------------------------------------------
 // list_meta_sound_nodes — enumerate nodes in a MetaSound graph
 // ---------------------------------------------------------------------------
-// MCP:list_meta_sound_nodes - List all nodes in a MetaSound Source graph with their handles, class names, and pin counts.
-//   @param metasound_path - Asset path.
+// MCP:list_meta_sound_nodes - List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_meta_sound_node_info and the other node tools.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @returns { metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }
 TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1608,9 +1608,9 @@ TSharedPtr<FJsonObject> HandleListMetaSoundNodes(
 // ---------------------------------------------------------------------------
 // get_meta_sound_node_info — full node detail (inputs/outputs/literals)
 // ---------------------------------------------------------------------------
-// MCP:get_meta_sound_node_info - Read a single node's full interface: inputs, outputs, environment, input defaults, and configuration struct class.
-//   @param metasound_path - Asset path.
-//   @param node_id - Node GUID string.
+// MCP:get_meta_sound_node_info - Read one node of the default graph of a MetaSound Source by GUID: its name, class name, input/output/environment vertices (name, type_name, vertex_id), input literal defaults and Configuration struct class. Read-only; get node ids from list_meta_sound_nodes.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
+//   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @returns { metasound_path, node_id, name, class_name, inputs: [{name, type_name}], outputs: [...], environment: [...], input_defaults: [{vertex_id, value, type}], configuration_class }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1677,9 +1677,9 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInfo(
 // ---------------------------------------------------------------------------
 // get_meta_sound_node_input_default — read one input literal by vertex name
 // ---------------------------------------------------------------------------
-// MCP:get_meta_sound_node_input_default - Read the current default value of a single node input by vertex name.
-//   @param metasound_path - Asset path.
-//   @param node_id - Node GUID string.
+// MCP:get_meta_sound_node_input_default - Read the default literal stored on one input of a MetaSound Source node: vertex type, has_value, literal_type and value; has_value false means no literal is set. An unknown input name fails and lists the valid ones. Write it with metasound_set_node_input_default.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
+//   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param input_name - Name of the input vertex (matches FMetasoundFrontendVertex::Name).
 //   @returns { metasound_path, node_id, input_name, type, value, has_value }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInputDefault(
@@ -1735,11 +1735,11 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeInputDefault(
 //   The Configuration struct is per-subclass — for example ArrayGet's config has
 //   NumOutputs, Index pin references, etc. We round-trip via FJsonObjectConverter.
 // ---------------------------------------------------------------------------
-// MCP:set_meta_sound_node_property - Set a single field of a MetaSound node's Configuration struct by reflection. Idempotent — re-applying the same value is a no-op.
-//   @param metasound_path - Asset path.
-//   @param node_id - Node GUID string.
+// MCP:set_meta_sound_node_property - Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves, and the reply succeeds even when the save fails: check saved.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
+//   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
-//   @param value - JSON value to apply (any FJsonObjectConverter-supported type).
+//   @param value - New value for the field, converted by FJsonObjectConverter; numbers and booleans can be passed as strings ("0.5", "true").
 //   @returns { metasound_path, node_id, property, set, value_changed, saved }
 TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1832,9 +1832,9 @@ TSharedPtr<FJsonObject> HandleSetMetaSoundNodeProperty(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_meta_sound_node_property - Read a single property of a MetaSound node's Configuration struct.
-//   @param metasound_path - Asset path.
-//   @param node_id - Node GUID string.
+// MCP:get_meta_sound_node_property - Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_meta_sound_node_property.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
+//   @param node_id - Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused.
 //   @param property - FProperty name on the Configuration struct.
 //   @returns { metasound_path, node_id, property, type, has_value, value? }
 TSharedPtr<FJsonObject> HandleGetMetaSoundNodeProperty(
@@ -1877,8 +1877,8 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundNodeProperty(
 // ---------------------------------------------------------------------------
 // list_meta_sound_references — AssetRegistry "what assets reference this MS?"
 // ---------------------------------------------------------------------------
-// MCP:list_meta_sound_references - List all asset packages that reference a given MetaSound Source. Runtime-safe (uses IAssetRegistry, no editor-only subsystem).
-//   @param metasound_path - Asset path.
+// MCP:list_meta_sound_references - List the packages that reference a MetaSound Source asset, hard or soft, from the Asset Registry, with their count. Read-only; the source is loaded to resolve its package. For assets of any type use get_asset_referencers.
+//   @param metasound_path - MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted.
 //   @returns { metasound_path, count, references: [{ package_name }] }
 TSharedPtr<FJsonObject> HandleListMetaSoundReferences(
 	const TSharedPtr<FJsonObject>& Params)

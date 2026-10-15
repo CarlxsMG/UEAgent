@@ -350,7 +350,7 @@ TSharedPtr<FJsonObject> HandleRemoveAssetFromCollection(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_collections - Lists every Content Browser collection in the project.
+// MCP:get_collections - List every Content Browser collection of the project container, of every share type, without changing anything: name and share_type of each (the share_type that get_collection_assets and the other collection tools need), plus collection_count. Errors when the collection manager is unavailable.
 //   @returns { collections: [{ name: string, share_type: string }], collection_count: number }
 
 TSharedPtr<FJsonObject> HandleGetCollections(const TSharedPtr<FJsonObject>& Params)

@@ -454,11 +454,11 @@ Create a new Level Sequence asset with a specified duration and frame rate
 
 ## `delete_level_sequence`
 
-Delete a Level Sequence asset from the project
+Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Reports success even when the delete did not happen: check actually_deleted, true only when the delete reported success and the asset is gone.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the sequence to delete |
+| `sequence_name` | string | yes | Asset name of the Level Sequence to delete, not its path (e.g. "LS_Intro") |
 
 **Returns:** `{ sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, actually_deleted: bool }`
 
@@ -577,11 +577,11 @@ Lists every object binding in a Level Sequence with its tracks.
 
 ## `get_sequence_duration`
 
-Retrieve the playback duration of a Level Sequence
+Reads the playback range of a Level Sequence, the first under /Game whose asset name matches (case-insensitive), without changing it. Returns duration in seconds, and start_frame and end_frame in tick-resolution frames, not display frames; get_timeline_info also gives both rates.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the sequence to query |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used |
 
 **Returns:** `{ sequence_name: string, duration: number, start_frame: int, end_frame: int }`
 
@@ -598,11 +598,11 @@ Read the Sequencer folder tree of a Level Sequence (root folders, recursively, w
 
 ## `get_sequence_frame_rate`
 
-Retrieve the frame rate of a Level Sequence
+Reads the tick resolution of a Level Sequence (found by asset name under /Game), NOT its display rate, without changing it. Returns frame_rate as a decimal plus numerator and denominator. Read the display rate with get_timeline_info; change both with set_sequence_frame_rate.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the sequence to query |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used |
 
 **Returns:** `{ sequence_name: string, frame_rate: number, numerator: int, denominator: int }`
 
@@ -619,11 +619,11 @@ List the master tracks and binding tracks of a Level Sequence.  A track is a "ma
 
 ## `get_sequence_possessables`
 
-List all possessables with GUID, name, class, parent GUID.
+List the possessable bindings of a Level Sequence found by asset name under /Game (first match): GUID, name, possessed class and parent GUID of each, plus possessable_count. Read-only; spawnables are listed by get_sequence_spawnables, and every binding with its tracks by get_sequence_bindings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the level sequence asset. |
+| `sequence_name` | string | yes | Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case. |
 
 **Returns:** `{ sequence_name: string, possessables: [{guid, name, class, parent_guid}], possessable_count: int }`
 
@@ -660,11 +660,11 @@ Read the master and binding tracks for a Level Sequence
 
 ## `get_timeline_info`
 
-Read timeline summary for a Level Sequence
+Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the target level sequence |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used |
 
 **Returns:** `{ sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int }`
 
@@ -707,7 +707,7 @@ Move a master track (by class) or an object-binding (by GUID) into a named Seque
 
 ## `pause_level_sequence_runtime`
 
-Pause playback of an active Level Sequence player
+Pauses, at its current position, the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned. Players live in the PIE or game world and stop resolving once it ends. Returns player_key, paused, playing and current_time in seconds; read it later with get_level_sequence_status_runtime.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -798,12 +798,12 @@ Remove a section from a sequencer track by index.  Resolves the section like set
 
 ## `remove_sequence_binding`
 
-Remove a possessable/spawnable binding by GUID.
+Remove a spawnable or possessable binding, found by GUID, from a Level Sequence named by asset name under /Game, then save the sequence; a failed save returns success false. Fails when the GUID is not a spawnable or possessable of the sequence. Returns removed_as; get GUIDs from get_sequence_bindings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the level sequence asset. |
-| `binding_guid` | string | yes | GUID string of the binding to remove. |
+| `sequence_name` | string | yes | Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case. |
+| `binding_guid` | string | yes | GUID of the binding to remove, as get_sequence_bindings returns it. |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, removed: bool, removed_as: string, saved: bool }`
 
@@ -1175,12 +1175,12 @@ Set the display frame rate of a Level Sequence.  The display rate is the asset-l
 
 ## `set_sequence_duration`
 
-Change the playback duration of a Level Sequence
+Sets the playback range of a Level Sequence (found by asset name under /Game) to [0, duration) and marks the package dirty without saving; not undoable. Returns previous_duration, actual_duration, duration_set (within 0.01 s), and start_frame and end_frame in tick-resolution frames.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Name of the sequence to modify |
-| `duration` | number | yes | New duration in seconds, 0 to 3600 |
+| `sequence_name` | string | yes | Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used |
+| `duration` | number | yes | New length in seconds, greater than 0 and at most 3600 (0 is refused) |
 
 **Returns:** `{ sequence_name: string, requested_duration: number, previous_duration: number, actual_duration: number, duration_set: bool, start_frame: int, end_frame: int }`
 
@@ -1353,7 +1353,7 @@ Set EMovieSceneBlendType on a transform track's section (absolute|additive|relat
 
 ## `stop_level_sequence_runtime`
 
-Stop playback and destroy a Level Sequence player
+Stops the runtime ULevelSequencePlayer whose player_key play_level_sequence_runtime returned, forgets the key and destroys the ALevelSequenceActor hosting it, so the key is invalid afterwards. Returns player_key, stopped (always true) and playing as read just after Stop. Use pause_level_sequence_runtime to keep the player.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

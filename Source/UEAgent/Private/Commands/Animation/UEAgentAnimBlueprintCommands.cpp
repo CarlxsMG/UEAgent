@@ -463,7 +463,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_anim_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_anim_blueprint - Create and save a UAnimBlueprint targeting a skeleton.
+// MCP:create_anim_blueprint - Create an Animation Blueprint (parent UAnimInstance) for a skeleton at package_path/name with the editor factory, compile it and save it; an existing Animation Blueprint at that path is returned unchanged (already_existed=true). Refused while PIE runs unless force=true. Returns asset_path, generated_class and target_skeleton_set.
 //   @param package_path - UE content folder, e.g. /Game/MyGame
 //   @param name - Asset name for the new Animation Blueprint
 //   @param skeleton_path - Optional skeleton path; defaults to /Engine/EngineMeshes/SkeletalCube_Skeleton
@@ -1104,7 +1104,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimTransition(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // compile_anim_blueprint
 // ---------------------------------------------------------------------------
-// MCP:compile_anim_blueprint - Compile an Animation Blueprint and report its status.
+// MCP:compile_anim_blueprint - Compile an Animation Blueprint synchronously and save its package, even when the compile fails; returns status (EBlueprintStatus name), is_up_to_date, has_error and the error and warning messages with their counts. Refused while PIE runs unless force=true. Use get_anim_blueprint_info to inspect without compiling.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @returns { anim_blueprint_path: string, compiled: bool, status: string, is_up_to_date: bool, has_error: bool, error_count: int, warning_count: int, errors: [string], warnings: [string], saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCompileAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
@@ -1163,7 +1163,7 @@ TSharedPtr<FJsonObject> HandleCompileAnimBlueprint(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_anim_blueprint_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_blueprint_info - Read structural info about an Animation Blueprint.
+// MCP:get_anim_blueprint_info - Read an Animation Blueprint without compiling or changing it: target skeleton, parent and generated class, is_anim_instance, is_template, graph_count, and the state machines of its top-level AnimGraph with their state counts (conduits not counted). list_anim_state_machines scans every function graph.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @returns { asset_path: string, target_skeleton: string, target_skeleton_set: bool, parent_class: string, generated_class: string, is_anim_instance: bool, is_template: bool, graph_count: int, state_machine_count: int, state_machines: [{ name: string, state_count: int }] }
 
@@ -1223,7 +1223,7 @@ TSharedPtr<FJsonObject> HandleGetAnimBlueprintInfo(const TSharedPtr<FJsonObject>
 // List, get info, validate. NO graph mutation, NO compile. Headless-safe.
 // ===========================================================================
 
-// MCP:list_anim_state_machines - List every AnimGraphNode_StateMachine in the AnimBP (read-only).
+// MCP:list_anim_state_machines - List the state machine nodes at the top level of every function graph of an Animation Blueprint (the AnimGraph included), read-only and without compiling: count and state_machines [{name, graph_name}]. Machines nested inside states are not listed.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @returns { count, state_machines: [{name, graph_name}] }
 TSharedPtr<FJsonObject> HandleListAnimStateMachines(const TSharedPtr<FJsonObject>& Params)
@@ -1300,9 +1300,9 @@ TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:validate_anim_state_machine - Validate a state machine's structure without compiling.
+// MCP:validate_anim_state_machine - Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. Caveat: state_count includes conduits and transitions and transition_count stays 0, so that warning always fires.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param state_machine_name - Name of the state machine
+//   @param state_machine_name - Name of a state machine in the top-level AnimGraph, matched without case (see list_anim_state_machines).
 //   @returns { is_valid, errors[], warnings[], info[], state_count, transition_count }
 TSharedPtr<FJsonObject> HandleValidateAnimStateMachine(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1424,12 +1424,12 @@ TSharedPtr<FJsonObject> HandleClearAnimTransitionRule(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_automatic
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_automatic - Configure the automatic-rule UPROPERTYs of a transition.
+// MCP:set_anim_transition_rule_automatic - Set the automatic rule of one transition (source_state to target_state) in a state machine of an Animation Blueprint: bAutomaticRuleBasedOnSequencePlayerInState and AutomaticRuleTriggerTime, both written every call (omitted means false and 0). Marks it structurally modified and saves without compiling; refused while PIE runs unless force=true.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param machine_name - Name of the state machine that owns the transition
 //   @param source_state - Name of the source state (transition origin)
 //   @param target_state - Name of the target state (transition destination)
-//   @param enabled [bool] - bAutomaticRuleBasedOnSequencePlayerInState (default false)
+//   @param enabled [bool] - True lets the transition fire on its own when the sequence player of the source state nears its end (bAutomaticRuleBasedOnSequencePlayerInState); omitted writes false.
 //   @param trigger_time [number] - AutomaticRuleTriggerTime in seconds (default 0.0; negative = blend lead)
 //   @returns { anim_blueprint_path, machine_name, source_state, target_state, enabled, trigger_time, rule_graph_has_result_node, saved, save_error? }
 TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleAutomatic(const TSharedPtr<FJsonObject>& Params)
@@ -2229,16 +2229,16 @@ TSharedPtr<FJsonObject> HandleScaffoldBlendSpace2D(
     return Resp;
 }
 
-// MCP:scaffold_aim_offset_blend_space - Create a UAimOffsetBlendSpace (2D AimOffset) asset for character aim-offset blending (typically Yaw x Pitch). Idempotent on re-run. Same protected-axis caveat as `scaffold_blend_space_2d`.
-//   @param package_path [string!] - /Game/... folder (required)
-//   @param asset_name [string!] - Display name (required)
-//   @param skeleton_path [string!] - USkeleton (required)
-//   @param yaw_min [number] - Optional yaw axis lower bound (default -90.0 degrees)
-//   @param yaw_max [number] - Optional yaw axis upper bound (default 90.0)
-//   @param pitch_min [number] - Optional pitch axis lower bound (default -90.0)
-//   @param pitch_max [number] - Optional pitch axis upper bound (default 90.0)
-//   @param num_grid_points_yaw [number] - Optional yaw grid density (default 4)
-//   @param num_grid_points_pitch [number] - Optional pitch grid density (default 4)
+// MCP:scaffold_aim_offset_blend_space - Create a UAimOffsetBlendSpace for a skeleton at package_path/asset_name and save it, or re-save the one already there (already_existed=true); a failed save still succeeds with saved=false. Yaw/pitch ranges and grid counts are only echoed, not written: set axes with set_blendspace_properties.
+//   @param package_path [string!] - Content folder for the new asset, e.g. /Game/Animation/AimOffsets (a trailing slash is ignored).
+//   @param asset_name [string!] - Name of the aim offset asset (e.g. "AO_Rifle"); the object path becomes package_path/asset_name.asset_name.
+//   @param skeleton_path [string!] - Asset path of the USkeleton the new aim offset targets (e.g. "/Game/Characters/Mannequin/SK_Mannequin_Skeleton"); a reused asset keeps its own skeleton.
+//   @param yaw_min [number] - Yaw lower bound echoed in the reply (default -90.0 degrees); not written to the asset.
+//   @param yaw_max [number] - Yaw upper bound echoed in the reply (default 90.0); not written to the asset.
+//   @param pitch_min [number] - Pitch lower bound echoed in the reply (default -90.0); not written to the asset.
+//   @param pitch_max [number] - Pitch upper bound echoed in the reply (default 90.0); not written to the asset.
+//   @param num_grid_points_yaw [number] - Yaw grid divisions echoed in the reply (default 4); not written to the asset.
+//   @param num_grid_points_pitch [number] - Pitch grid divisions echoed in the reply (default 4); not written to the asset.
 //   @returns { asset_path, skeleton_path, yaw_min, yaw_max, pitch_min, pitch_max, num_grid_points_yaw, num_grid_points_pitch, already_existed, saved, note? }
 TSharedPtr<FJsonObject> HandleScaffoldAimOffsetBlendSpace(
     const TSharedPtr<FJsonObject>& Params)

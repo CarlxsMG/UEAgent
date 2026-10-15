@@ -6,24 +6,24 @@
 
 ## `activate_ability`
 
-Activate a specific ability for an actor
+Try to activate one granted ability on an editor-world actor ability system component with TryActivateAbility; activated is the engine verdict, false when the activation checks of the ability refuse it. Use grant_ability first, and cancel_ability to stop it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor whose ability to activate |
-| `ability_name` | string | yes | Name of the ability to activate |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, ability_name, activated }`
 
 ## `add_ability_task`
 
-Add a UGameplayTask to a UGameplayAbility instance
+Create an ability task on the primary instance of an ability already granted to an editor-world actor; the task is initialized (AwaitingActivation), never activated. task_class is only validated: it always builds the abstract base UAbilityTask, which logs a warning and an ensure.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Actor label in the level |
-| `ability_class` | string | yes | Gameplay ability class path |
-| `task_class` | string | yes | UGameplayTask-derived class path |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_class` | string | yes | Class path of an ability already granted to the actor, e.g. "/Game/Abilities/GA_Jump.GA_Jump_C"; it must be instanced (have a primary instance) |
+| `task_class` | string | yes | Class path of a UAbilityTask subclass, e.g. "/Script/GameplayAbilities.AbilityTask_WaitDelay"; checked, but not used to build the task |
 | `instance_name` | string | no | Name for the new task instance (default "Default") |
 
 **Returns:** `{ actor_name, ability_class, task_class, instance_name, task_name, added, task_state }`
@@ -42,12 +42,12 @@ Add a single FGameplayAttributeData member variable to an AttributeSet Blueprint
 
 ## `add_gameplay_effect_component`
 
-Add a standard UGameplayEffectComponent to a GE Blueprint CDO
+Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `gameplay_effect_path` | string | yes | Full asset path of the GE Blueprint |
-| `component_type` | string | yes | AssetTags, TargetTags, AdditionalEffects, ChanceToApply, or Immunity |
+| `gameplay_effect_path` | string | yes | Asset path of the GameplayEffect Blueprint, e.g. "/Game/GAS/Effects/GE_Damage". |
+| `component_type` | string | yes | Bare type name, case-insensitive: AssetTags, TargetTags, AdditionalEffects, ChanceToApply, Immunity, TargetTagRequirements, RemoveOther, CustomCanApply, BlockAbilityTags, Abilities or CancelAbilityTags (not the full class name). |
 
 **Returns:** `{ gameplay_effect_path: string, component_type: string, component_class: string, component_count: int, component_added: bool, already_existed: bool }`
 
@@ -66,36 +66,36 @@ Append a modifier to a GameplayEffect CDO's Modifiers array
 
 ## `apply_gameplay_effect`
 
-Apply a gameplay effect to an actor
+Apply a GameplayEffect class to an editor-world actor ability system component: an outgoing spec at the given level, with a fresh context from that component, applied to self. applied tells whether the engine returned a valid handle. apply_multiple_gameplay_effects applies a list.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to apply the effect to |
-| `effect_class` | string | yes | Full class path of the gameplay effect to apply |
-| `level` | number | no | GameplayEffect/ability level (default 1.0) |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `effect_class` | string | yes | Class path of a UGameplayEffect subclass; a Blueprint GE needs its _C class path, e.g. "/Game/Effects/GE_Burn.GE_Burn_C" |
+| `level` | number | no | Effect level for scalable magnitudes, fractions allowed; default 1.0 |
 
 **Returns:** `{ actor_name, effect_class, level, applied }`
 
 ## `apply_multiple_gameplay_effects`
 
-Apply several UGameplayEffects to an actor in one call
+Apply several GameplayEffect classes at one level to an editor-world actor ability system component; each entry is loaded and applied separately, so a bad path does not stop the rest. Returns requested, applied_count, failed_count and the per-entry applied and failed lists.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Target actor label |
-| `effect_classes` | array | yes | Array of UGameplayEffect class paths |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `effect_classes` | array | yes | JSON array of UGameplayEffect class path strings, e.g. ["/Game/Effects/GE_Burn.GE_Burn_C"]; non-string entries go to failed |
 | `level` | number | no | GameplayEffect/ability level applied to all effects (default 1.0) |
 
 **Returns:** `{ error, effect_class, applied, active_handle, actor_name, requested, applied_count, failed_count, failed }`
 
 ## `cancel_ability`
 
-Cancel an active ability for an actor
+Cancel one granted ability on an editor-world actor ability system component (CancelAbilityHandle), reading its spec before and after: returns was_active, still_active and cancelled. success is false, with an error, when the ability is still active afterwards (it may not allow cancelling).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor whose ability to cancel |
-| `ability_name` | string | yes | Name of the ability to cancel |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, ability_name, was_active, still_active, cancelled } -- read back from the spec: cancelled means was_active and not still_active`
 
@@ -112,47 +112,47 @@ Set a GameplayAbility CDO's asset tags from a list of tag strings
 
 ## `create_attribute_set_asset`
 
-Create an AttributeSet Blueprint with FGameplayAttributeData member variables
+Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint, then add one FGameplayAttributeData variable per attributes entry and save without compiling, so run compile_blueprint before use. Returns attributes_added and added_attribute_names; refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. AS_Character |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
-| `attributes` | array | no | Optional list of {name, default_value} attribute descriptors |
+| `name` | string | yes | Asset name without a path, e.g. "AS_Character". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints. |
+| `attributes` | array | no | Array of {"name": "Health", "default_value": 100} objects; entries without a name are skipped, and a name the class already has is not added yet still counted. default_value is written as bare number text that FGameplayAttributeData cannot parse, so the compiled default stays 0. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], created: bool }`
 
 ## `create_attribute_set_blueprint`
 
-Create a Blueprint parented to UAttributeSet and save it
+Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An asset already there is returned untouched with already_existed=true. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. AS_Character |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
+| `name` | string | yes | Asset name without a path, e.g. "AS_Character". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, created: bool }`
 
 ## `create_gameplay_ability_blueprint`
 
-Create a Blueprint parented to UGameplayAbility and save it
+Create a Blueprint parented to UGameplayAbility at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_ability. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. GA_Fireball |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
+| `name` | string | yes | Asset name without a path, e.g. "GA_Fireball". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Abilities"; defaults to /Game/Blueprints. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_ability: bool, already_existed: bool, created: bool }`
 
 ## `create_gameplay_cue_notify_actor`
 
-Create a Blueprint parented to AGameplayCueNotify_Actor
+Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. GCN_Beam |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
-| `gameplay_cue_tag` | string | no | Optional registered GameplayCue tag to set on the CDO |
+| `name` | string | yes | Asset name without a path, e.g. "GCN_Beam". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints. |
+| `gameplay_cue_tag` | string | no | Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Beam"; an unregistered tag is skipped (cue_tag_set=false), not an error. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }`
 
@@ -182,36 +182,36 @@ Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced loop
 
 ## `create_gameplay_cue_notify_static`
 
-Create a Blueprint parented to UGameplayCueNotify_Static
+Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the asset already there (already_existed=true). A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. GCN_Hit |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
-| `gameplay_cue_tag` | string | no | Optional registered GameplayCue tag to set on the CDO |
+| `name` | string | yes | Asset name without a path, e.g. "GCN_Hit". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints. |
+| `gameplay_cue_tag` | string | no | Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Hit"; an unregistered tag is skipped (cue_tag_set=false), not an error. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }`
 
 ## `create_gameplay_effect_blueprint`
 
-Create a Blueprint parented to UGameplayEffect and save it
+Create a Blueprint parented to UGameplayEffect at package_path/name, compile and save it; returns asset_path, generated_class and is_gameplay_effect. An asset already at that path is returned untouched with already_existed=true and its class unchecked (created is always true). Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name, e.g. GE_Damage |
-| `package_path` | string | no | Target content path, defaults to /Game/Blueprints |
+| `name` | string | yes | Asset name without a path, e.g. "GE_Damage". |
+| `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Effects"; defaults to /Game/Blueprints. |
 
 **Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_effect: bool, already_existed: bool, created: bool }`
 
 ## `create_gameplay_effect_container`
 
-Create and save a UGameplayEffectContainer asset
+Create and save a native UGameplayEffect asset (despite the name, not a container and not a Blueprint) at package_path/name. An existing asset there is returned untouched (already_existed=true). apply_gameplay_effect needs a class, so use create_gameplay_effect_blueprint for an effect it can apply.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Asset name (no path) |
+| `name` | string | yes | Asset name without a path, e.g. "GE_Damage" |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/GameplayEffects) |
-| `duration_policy` | string | no | Duration type: Instant, HasDuration, or Infinite (default Instant) |
+| `duration_policy` | string | no | Duration type, case-insensitive: Instant, HasDuration or Infinite (default Instant) |
 | `duration_magnitude` | number | no | Duration in seconds, applied when policy is HasDuration (default 0.0) |
 
 **Returns:** `{ name, asset_path, already_existed, duration_policy, duration_magnitude, created }`
@@ -239,52 +239,52 @@ Read activation info and asset tags from a GA Blueprint CDO
 
 ## `get_ability_info`
 
-Get detailed information about a specific ability
+Read one ability granted to an editor-world actor ability system component: ability_class, level, is_active and input_id of the first matching spec. Read-only; an error when no granted spec matches ability_name. Use get_active_abilities to list them all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor that owns the ability |
-| `ability_name` | string | yes | Name of the ability to get information about |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, ability_name, ability_class, level, is_active, input_id }`
 
 ## `get_ability_system_component`
 
-Retrieve ability system component information for an actor
+Read the ability system component of an editor-world actor (the IAbilitySystemInterface answer, else its first UAbilitySystemComponent): component_name, active_abilities_count (all granted specs, active or not) and active_effects_count. Read-only; a missing actor or component is an error, not has_ability_system=false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to query for ability system component |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 
 **Returns:** `{ actor_name, has_ability_system, component_name, active_abilities_count, active_effects_count }`
 
 ## `get_ability_tasks`
 
-List UGameplayTask instances owned by a UGameplayAbility
+List the UGameplayTask objects outered to a GameplayTasksComponent of an editor-world actor (its ability system component counts): task_name, task_class, task_state, is_ability_task, plus counts. Tasks built by NewAbilityTask, add_ability_task included, are outered to the transient package and are not listed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Actor label in the level |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 
 **Returns:** `{ task_name, task_class, task_state, is_ability_task, actor_name, task_count, ability_task_count, generic_task_count, tasks }`
 
 ## `get_active_abilities`
 
-Get list of active abilities for an actor
+List every ability granted to an editor-world actor ability system component, running or not (all activatable specs, despite the tool name): ability_name (the class default object name), ability_class, level and is_active, plus count. Read-only; get_ability_info reads one.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to query for abilities |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 
 **Returns:** `{ ability_name, ability_class, level, is_active, actor_name, abilities, count }`
 
 ## `get_active_effects`
 
-Get list of active gameplay effects on an actor
+List the gameplay effects currently active on an editor-world actor ability system component: effect_name (the definition object name), effect_class and level for each, plus count. Read-only; effects whose definition is gone are skipped. get_gameplay_effect_info reads one.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to query for effects |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
 
 **Returns:** `{ effect_name, effect_class, level, actor_name, effects, count }`
 
@@ -301,12 +301,12 @@ Read back the FAttributeMetaData DataTable an AttributeSet class is initialized 
 
 ## `get_attribute_value`
 
-Get the value of a specific attribute
+Read one attribute from the attribute sets registered on an editor-world actor ability system component: value (current, modifiers included), base_value and attribute_set. Read-only; an unknown attribute is not an error but found=false. get_attributes lists every attribute.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor that owns the attribute |
-| `attribute_name` | string | yes | Name of the attribute to get the value for |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `attribute_name` | string | yes | Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive; the first registered attribute that matches wins |
 
 **Returns:** `{ actor_name, attribute_name, found, value, base_value, attribute_set }`
 
@@ -342,34 +342,34 @@ Read the GEComponents array from a GameplayEffect CDO, round-tripping each compo
 
 ## `get_gameplay_effect_info`
 
-Get detailed information about an active gameplay effect
+Read the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name: effect_class and level. Read-only; an error when none matches. For an effect asset that is not applied, use get_gameplay_effect_modifiers instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor that has the effect |
-| `effect_name` | string | yes | Name of the gameplay effect to get information about |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `effect_name` | string | yes | Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, effect_name, effect_class, level }`
 
 ## `get_gameplay_effect_modifiers`
 
-Read attribute modifiers from a UGameplayEffect
+Read the attribute modifiers of a GameplayEffect asset (native asset, or Blueprint GE class default object): attribute, attribute_set, modifier_op and, when static, the magnitude at level 1, plus duration_policy and modifier_count. Read-only; magnitude_type always says ScalableFloat, whatever the real type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `effect_path` | string | yes | Asset path to the UGameplayEffect |
+| `effect_path` | string | yes | GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset |
 
 **Returns:** `{ attribute, attribute_set, modifier_op, magnitude_type, magnitude_value_at_level_1, effect_path, duration_policy, modifier_count, modifiers }`
 
 ## `grant_ability`
 
-Grant a new ability to an actor
+Grant an ability class to an editor-world actor ability system component with GiveAbility at a whole-number level; granted tells whether a valid spec handle came back. Runtime state only (not saved with the level), and granting the same class again adds another spec.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to grant the ability to |
-| `ability_class` | string | yes | Full class path of the ability to grant |
-| `level` | number | no | GameplayEffect/ability level (default 1) |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_class` | string | yes | Class path of a UGameplayAbility subclass: "/Game/Abilities/GA_Jump.GA_Jump_C" for a Blueprint, "/Script/MyGame.MyAbility" for C++ |
+| `level` | number | no | Spec level, a whole number; default 1 |
 
 **Returns:** `{ actor_name, ability_class, level, granted }`
 
@@ -398,23 +398,23 @@ Registers a REAL listener on a target actor's UAbilitySystemComponent for a game
 
 ## `remove_ability`
 
-Remove an ability from an actor
+Remove one granted ability from an editor-world actor ability system component with ClearAbility. An active ability is only marked, and leaves when it ends (pending_removal=true); removed=true means the spec is gone. success is false with an error otherwise.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to remove the ability from |
-| `ability_name` | string | yes | Name of the ability to remove |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `ability_name` | string | yes | Ability to match among the granted specs: the ability_name from get_active_abilities, the class name with or without _C ("GA_Jump"), the asset path ("/Game/Abilities/GA_Jump") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, ability_name, removed, pending_removal } -- read back: removed means the spec is gone; an active ability is only marked, and leaves when it ends (pending_removal)`
 
 ## `remove_gameplay_effect`
 
-Remove an active gameplay effect from an actor
+Remove the first active gameplay effect on an editor-world actor ability system component whose definition matches effect_name, with all its stacks (RemoveActiveGameplayEffect). removed is the engine answer confirmed by the effect no longer being active; success is false with an error otherwise.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor to remove the effect from |
-| `effect_name` | string | yes | Name of the gameplay effect to remove |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `effect_name` | string | yes | Active effect to match by its definition: the effect_name from get_active_effects, the class name with or without _C ("GE_Burn"), the asset path ("/Game/Effects/GE_Burn") or the class path; case-insensitive, first match wins |
 
 **Returns:** `{ actor_name, effect_name, removed } -- removed is what the engine reports, confirmed by the effect not being active afterwards`
 
@@ -478,12 +478,12 @@ Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when 
 
 ## `set_attribute_base_value`
 
-Set the base value of an attribute
+Set the base value of one attribute on an editor-world actor ability system component (SetNumericAttributeBase); active modifiers keep applying on top. Returns the read-back base_value and current value; set=false, not an error, when no registered attribute set has that attribute.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor that owns the attribute |
-| `attribute_name` | string | yes | Name of the attribute to set |
+| `actor_name` | string | yes | Object name (not the label) of the editor-world actor, e.g. "BP_Hero_C_1", matched case-insensitively; find_actors_by_name maps labels to names |
+| `attribute_name` | string | yes | Attribute name ("Health") or "SetClass.Attribute" ("MyAttributeSet.Health"), case-insensitive; the first registered attribute that matches wins |
 | `value` | number | yes | The new base value for the attribute |
 
 **Returns:** `{ actor_name, attribute_name, value, set, base_value }`
@@ -521,11 +521,11 @@ Set CDO lifetime/instancing/override properties on an AGameplayCueNotify_Actor (
 
 ## `set_gameplay_cue_notify_burst_properties`
 
-Set GameplayCueTag/IsOverride on a UGameplayCueNotify_Burst Blueprint CDO
+Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify_Burst Blueprint |
+| `cue_notify_path` | string | yes | Asset path of the GameplayCueNotify_Burst Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit". |
 | `gameplay_cue_tag` | string | no | Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error |
 | `is_override` | boolean | no | Optional bool: this cue overrides parent-tag cues instead of running in addition |
 
@@ -553,11 +553,11 @@ Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCue
 
 ## `set_gameplay_cue_notify_static_properties`
 
-Set GameplayCueTag/IsOverride on a UGameplayCueNotify_Static Blueprint CDO
+Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify_Static Blueprint |
+| `cue_notify_path` | string | yes | Asset path of the GameplayCueNotify_Static Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit". |
 | `gameplay_cue_tag` | string | no | Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error |
 | `is_override` | boolean | no | Optional bool: this cue overrides parent-tag cues instead of running in addition |
 
@@ -649,12 +649,12 @@ Set a GameplayEffect Blueprint CDO's duration policy and duration
 
 ## `set_gameplay_effect_duration_policy`
 
-Change the duration policy of a UGameplayEffect
+Set DurationPolicy on a GameplayEffect asset (a native UGameplayEffect asset, or the class default object of a Blueprint GE) and save its package; with HasDuration it also sets a constant DurationMagnitude. Returns old_duration_policy and duration_policy. Fails while PIE runs, because the save is refused.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `effect_path` | string | yes | Asset path to the UGameplayEffect |
-| `duration_policy` | string | yes | One of "instant\|duration\|infinite" |
+| `effect_path` | string | yes | GameplayEffect asset path: a Blueprint GE ("/Game/Effects/GE_Burn") or a native UGameplayEffect asset |
+| `duration_policy` | string | yes | One of "Instant", "HasDuration" or "Infinite", any case ("duration" alone is refused) |
 | `duration_magnitude` | number | no | Duration in seconds, applied when policy is HasDuration (default 0.0) |
 
 **Returns:** `{ effect_path, old_duration_policy, duration_policy, duration_magnitude, set }`

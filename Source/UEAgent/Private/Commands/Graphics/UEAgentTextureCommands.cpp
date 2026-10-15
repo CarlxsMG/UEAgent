@@ -473,11 +473,11 @@ TSharedPtr<FJsonObject> HandleCreateStaticTextureFromRenderTarget(const TSharedP
 // Sets UTexture::SRGB / CompressionSettings / LODGroup on an existing UTexture2D,
 // then PostEditChange + UpdateResource + save. Reads the resulting values back.
 // ---------------------------------------------------------------------------
-// MCP:set_texture_settings - Sets sRGB / compression / LOD-group on an existing UTexture2D and saves it.  Applies the requested settings, then PostEditChange + UpdateResource + save, reading the resulting values back.  compression_settings accepts the enum name without the "TC_" prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR".  lod_group accepts the group name without the "TEXTUREGROUP_" prefix, e.g. "World", "UI", "Character", "Effects".
+// MCP:set_texture_settings - Sets the given sRGB, compression and LOD group of a UTexture2D asset, rebuilds its resource when one changed and saves it in every case, returning the values read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning.
 //   @param texture_path - Asset path of the texture to modify
-//   @param srgb - Optional bool
-//   @param compression_settings - Optional TextureCompressionSettings enum string
-//   @param lod_group - Optional TextureGroup enum string
+//   @param srgb - True treats the texture as sRGB color, false as linear data such as normal or mask maps; omit to keep the current value
+//   @param compression_settings - TextureCompressionSettings name with or without the TC_ prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR"; omit to keep the current value
+//   @param lod_group - TextureGroup name with or without the TEXTUREGROUP_ prefix, e.g. "World", "UI", "Character", "Effects"; omit to keep the current value
 //   @returns { texture_name: string, asset_path: string, changed: bool, saved: bool, srgb: bool, compression: string, lod_group: string, compression_warning?: string, lod_group_warning?: string, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetTextureSettings(const TSharedPtr<FJsonObject>& Params)

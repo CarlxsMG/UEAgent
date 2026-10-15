@@ -255,9 +255,9 @@ namespace UEAgentMaterialCollectionImpl
     }
 }
 
-// MCP:create_material_parameter_collection - Create and save a new UMaterialParameterCollection asset
-//   @param name - Asset name, e.g. MPC_Global
-//   @param package_path - Target content path, defaults to /Game/MaterialCollections
+// MCP:create_material_parameter_collection - Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned with created=false and already_exists=true, while another asset type at that path is an error. Returns collection_path, scalar_count, vector_count and saved.
+//   @param name - Asset name without a path, e.g. "MPC_Global"
+//   @param package_path - Content folder for the asset, e.g. "/Game/MaterialCollections" (the default)
 //   @returns { name: string, package_path: string, collection_path: string, asset_path: string, collection_class: string, scalar_count: int, vector_count: int, created: bool, already_exists: bool, success: bool, saved: bool, message: string }
 TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollection(const TSharedPtr<FJsonObject>& Params)
 {
@@ -309,10 +309,10 @@ TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollection(const TSharedPtr
         bSaved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_material_parameter_collection"), TEXT("bSaved")));
 }
 
-// MCP:add_collection_scalar_param - Append a scalar parameter to a Material Parameter Collection
+// MCP:add_collection_scalar_param - Add a scalar parameter (new GUID) to a Material Parameter Collection asset and save it; an existing scalar of that name only gets its default overwritten (already_existed=true). Returns scalar_count_before, scalar_count, default_value and id. For a color use add_collection_vector_param.
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Name of the new scalar parameter
-//   @param default_value - Optional float default, default 0
+//   @param default_value - Default float value; default 0. An existing scalar of that name gets this value too, even when it is omitted
 //   @returns { collection_path: string, param_name: string, param_type: string, param_added: bool, already_existed: bool, scalar_count_before: int, scalar_count: int, default_value: number, id: string, saved: bool }
 TSharedPtr<FJsonObject> HandleAddCollectionScalarParam(const TSharedPtr<FJsonObject>& Params)
 {
@@ -434,11 +434,11 @@ TSharedPtr<FJsonObject> HandleAddCollectionVectorParam(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_collection_vector_param"), SaveError);
 }
 
-// MCP:set_collection_param_default - Set the default value of an existing collection parameter
+// MCP:set_collection_param_default - Set the default of an existing scalar or vector parameter of a Material Parameter Collection asset and save it: a scalar takes scalar_value, a vector takes vector [r, g, b, a]. Errors when neither array has the name or the needed value is missing.
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Name of the existing parameter to update
 //   @param scalar_value - Optional new float value for a scalar parameter
-//   @param vector - Optional new [r, g, b, a] color for a vector parameter
+//   @param vector - New linear color for a vector parameter, as a JSON array [r, g, b, a]; alpha is 1 when only three values are given
 //   @returns { collection_path: string, param_name: string, param_type: string, default_set: bool, saved: bool, default_value: number, scalar_value: number, default: object, default_rgba: [number] }
 TSharedPtr<FJsonObject> HandleSetCollectionParamDefault(const TSharedPtr<FJsonObject>& Params)
 {
@@ -529,7 +529,7 @@ TSharedPtr<FJsonObject> HandleSetCollectionParamDefault(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_collection_param_default"), SaveError);
 }
 
-// MCP:get_collection_info - Read all parameters of a Material Parameter Collection
+// MCP:get_collection_info - Read every parameter of a Material Parameter Collection asset: scalar_params (name, default, id), vector_params (name, id, default object and default_rgba), scalar_count, vector_count and total_count. Read-only; get_collection_param_info reads one parameter, get_mpci_info the live per-world values.
 //   @param collection_path - Full /Game path to the MPC asset
 //   @returns { collection_path: string, collection_name: string, collection_class: string, scalar_params: [object], vector_params: [object], scalar_count: int, vector_count: int, total_count: int }
 TSharedPtr<FJsonObject> HandleGetCollectionInfo(const TSharedPtr<FJsonObject>& Params)
@@ -628,11 +628,11 @@ TSharedPtr<FJsonObject> HandleRemoveCollectionParam(const TSharedPtr<FJsonObject
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_collection_param"), SaveError);
 }
 
-// MCP:rename_collection_param - Rename a parameter in a Material Parameter Collection
+// MCP:rename_collection_param - Rename one parameter of a Material Parameter Collection asset, keeping its Id, and save it. Refuses when new_name is already used in the same array, and errors when param_name is not in the array param_type selects (default scalar).
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Current parameter name
 //   @param new_name - New parameter name, must not collide with another
-//   @param param_type - scalar or vector, default scalar
+//   @param param_type - Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar
 //   @returns { collection_path: string, param_name: string, new_name: string, param_type: string, renamed: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleRenameCollectionParam(const TSharedPtr<FJsonObject>& Params)
 {
@@ -738,10 +738,10 @@ TSharedPtr<FJsonObject> HandleClearCollectionParams(const TSharedPtr<FJsonObject
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("clear_collection_params"), SaveError);
 }
 
-// MCP:regenerate_collection_param_id - Regenerate the FGuid of a collection parameter
+// MCP:regenerate_collection_param_id - Assign a new random FGuid Id to one parameter of a Material Parameter Collection asset and save it; returns new_id. It searches only the array param_type selects (default scalar) and errors when the name is not there.
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Name of the parameter to regenerate the id for
-//   @param param_type - scalar or vector, default scalar
+//   @param param_type - Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar
 //   @returns { collection_path: string, param_name: string, param_type: string, new_id: string, regenerated: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleRegenerateCollectionParamId(const TSharedPtr<FJsonObject>& Params)
 {
@@ -774,10 +774,10 @@ TSharedPtr<FJsonObject> HandleRegenerateCollectionParamId(const TSharedPtr<FJson
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("regenerate_collection_param_id"), SaveError);
 }
 
-// MCP:get_collection_param_info - Read detailed info about one parameter in a collection
+// MCP:get_collection_param_info - Read one parameter of a Material Parameter Collection asset: id, index in its array and default (default_value for a scalar, an RGBA default object for a vector). Read-only; it searches only the array param_type selects and errors when the name is not there.
 //   @param collection_path - Full /Game path to the MPC asset
 //   @param param_name - Name of the parameter to query
-//   @param param_type - scalar or vector, default scalar
+//   @param param_type - Which array to search: "scalar" or "vector", any case; omitted or anything else means scalar
 //   @returns { collection_path: string, param_name: string, param_type: string, id: string, default_value: number, default: object, index: int, collection_class: string }
 TSharedPtr<FJsonObject> HandleGetCollectionParamInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -824,10 +824,10 @@ TSharedPtr<FJsonObject> HandleGetCollectionParamInfo(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:duplicate_mpc - Duplicate a Material Parameter Collection to a new path
-//   @param source_path - Full /Game path of the source MPC
-//   @param new_name - Name for the duplicated MPC
-//   @param package_path - Target package path, defaults to source's folder
+// MCP:duplicate_mpc - Duplicate a Material Parameter Collection asset, parameters included with their names, Ids and defaults, to package_path/new_name and save the copy. Refuses when the target already exists. Returns collection_path, scalar_count, vector_count, saved and save_error.
+//   @param source_path - Source MPC path, e.g. "/Game/MPC/MPC_A" or the object path "/Game/MPC/MPC_A.MPC_A"
+//   @param new_name - Asset name of the copy, e.g. "MPC_B"; must not be empty
+//   @param package_path - Target folder; default is the folder of source_path when it is an object path with a dot ("/Game/MPC/MPC_A.MPC_A"), else "/Game/MaterialCollections"
 //   @returns { source_path: string, collection_path: string, asset_path: string, name: string, package_path: string, scalar_count: int, vector_count: int, duplicated: bool, saved: bool, save_error: string }
 TSharedPtr<FJsonObject> HandleDuplicateMpc(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1124,9 +1124,9 @@ TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_mpci_info - Read MPCI state, parent collection, and live parameter values
+// MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Read-only, never creates the instance; scalar_override_count and vector_override_count are only the parameter counts.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Optional world context label, default editor
+//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively
 //   @returns { collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
 TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
 {

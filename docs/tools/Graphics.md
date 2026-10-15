@@ -16,12 +16,12 @@ Read the full UDecalComponent state (size, sort order, fade screen size, fade-ou
 
 ## `set_decal_color`
 
-Set the DecalColor (FLinearColor) on a UDecalComponent.
+Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). No undo, dirty flag or save; returns the resulting r, g, b, a.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `color` | string | no | Optional [r, g, b, a] (default: keep current DecalColor). |
+| `color` | string | no | Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor. |
 
 **Returns:** `{ actor_label: string, r: float, g: float, b: float, a: float }`
 

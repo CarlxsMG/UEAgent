@@ -401,24 +401,24 @@ TSharedPtr<FJsonObject> HandleGetMetasoundPresetParameters(
 // Sets sound class properties (volume, pitch, low_pass_frequency,
 // attenuation_distance_scale) on a USoundClass asset.
 // ---------------------------------------------------------------------------
-// MCP:set_sound_class_properties - Sets properties on a USoundClass asset.  Loads the USoundClass, sets the specified FSoundClassProperties fields, and saves the package.
+// MCP:set_sound_class_properties - Write the given FSoundClassProperties fields of a USoundClass asset (volume, pitch, filters, routing and loading flags) in one undoable transaction, then save it. Only fields you pass change; values are not range-checked and unknown enum names are skipped. Returns every current value plus applied_<field> flags and saved.
 //   @param sound_class_path - Content path of the USoundClass asset.
-//   @param volume - Properties.Volume.
-//   @param pitch - Properties.Pitch.
-//   @param low_pass_frequency - Properties.LowPassFilterFrequency.
-//   @param attenuation_distance_scale - Properties.AttenuationDistanceScale.
-//   @param lfe_bleed - Properties.LFEBleed.
-//   @param voice_center_channel_volume - Properties.VoiceCenterChannelVolume.
-//   @param radio_filter_volume - Properties.RadioFilterVolume.
-//   @param radio_filter_volume_threshold - Properties.RadioFilterVolumeThreshold.
-//   @param default_2d_reverb_send_amount - Properties.Default2DReverbSendAmount.
-//   @param apply_effects - Properties.bApplyEffects.
-//   @param always_play - Properties.bAlwaysPlay.
-//   @param is_ui_sound - Properties.bIsUISound.
-//   @param is_music - Properties.bIsMusic.
-//   @param center_channel_only - Properties.bCenterChannelOnly.
-//   @param apply_ambient_volumes - Properties.bApplyAmbientVolumes.
-//   @param reverb - Properties.bReverb.
+//   @param volume - Volume multiplier for sounds of this class (Properties.Volume), e.g. 0.5 for half
+//   @param pitch - Pitch multiplier for sounds of this class (Properties.Pitch), e.g. 1.2
+//   @param low_pass_frequency - Low-pass filter cutoff frequency in Hz (Properties.LowPassFilterFrequency)
+//   @param attenuation_distance_scale - Scale on the distance used for attenuation (Properties.AttenuationDistanceScale): 0.5 attenuates a sound 1000 units away as if it were 500 away
+//   @param lfe_bleed - Amount of the sound sent to the LFE (subwoofer) channel (Properties.LFEBleed)
+//   @param voice_center_channel_volume - Amount sent to the center channel (Properties.VoiceCenterChannelVolume); does not propagate to child classes
+//   @param radio_filter_volume - Volume of the legacy radio filter effect (Properties.RadioFilterVolume)
+//   @param radio_filter_volume_threshold - Volume at which the legacy radio filter kicks in (Properties.RadioFilterVolumeThreshold)
+//   @param default_2d_reverb_send_amount - Reverb send amount for unattenuated (2D) sounds of this class (Properties.Default2DReverbSendAmount)
+//   @param apply_effects - Bool for Properties.bApplyEffects (Output to Master EQ Submix): route referencing sounds to the Master EQ submix
+//   @param always_play - Bool for Properties.bAlwaysPlay: inflate the priority of referencing sounds so they always play
+//   @param is_ui_sound - Bool for Properties.bIsUISound: sounds of this class keep playing while the game is paused in the UI
+//   @param is_music - Bool for Properties.bIsMusic: mark the class as music (propagates to child classes only when the parent is true)
+//   @param center_channel_only - Bool for Properties.bCenterChannelOnly: force sounds of this class to the center channel
+//   @param apply_ambient_volumes - Bool for Properties.bApplyAmbientVolumes: apply the Interior/Exterior volume and low-pass modifiers
+//   @param reverb - Bool for Properties.bReverb (Send to Master Reverb Submix): send referencing sounds to the reverb submix
 //   @param output_target - Properties.OutputTarget enum name (Speaker|Controller|ControllerFallbackToSpeaker); case-insensitive, ignored if unrecognized.
 //   @param loading_behavior - Properties.LoadingBehavior enum name (Inherited|RetainOnLoad|PrimeOnLoad|LoadOnDemand|ForceInline); case-insensitive, ignored if unrecognized.
 //   @returns { sound_class_path: string, success: bool, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, applied_volume: bool, applied_pitch: bool, applied_low_pass_frequency: bool, applied_attenuation_distance_scale: bool, applied_lfe_bleed: bool, applied_voice_center_channel_volume: bool, applied_radio_filter_volume: bool, applied_radio_filter_volume_threshold: bool, applied_default_2d_reverb_send_amount: bool, applied_apply_effects: bool, applied_always_play: bool, applied_is_ui_sound: bool, applied_is_music: bool, applied_center_channel_only: bool, applied_apply_ambient_volumes: bool, applied_reverb: bool, applied_output_target: bool, applied_loading_behavior: bool, saved: bool }

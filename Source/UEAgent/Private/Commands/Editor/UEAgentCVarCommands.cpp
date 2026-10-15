@@ -323,9 +323,9 @@ TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>
 // search_cvars
 // ---------------------------------------------------------------------------
 
-// MCP:search_cvars - Search cvar names by substring (read-only).
+// MCP:search_cvars - Search console variables and commands whose name contains term (case-insensitive); each hit has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a prefix listing use list_cvars_with_prefix; for one cvar in full, get_cvar.
 //   @param term - Substring to search (case-insensitive)
-//   @param max - Max results (default 50)
+//   @param max - Maximum number of entries to return (default 50, minimum 1).
 //   @returns { count, cvars: [{name, value, help}] }
 TSharedPtr<FJsonObject> HandleSearchCVars(const TSharedPtr<FJsonObject>& Params)
 {
@@ -357,9 +357,9 @@ TSharedPtr<FJsonObject> HandleSearchCVars(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_cvars_with_prefix - List cvars whose name starts with prefix (read-only).
-//   @param prefix - Required prefix
-//   @param max - Max results (default 100)
+// MCP:list_cvars_with_prefix - List console variables and commands whose name starts with prefix (case-insensitive); each entry has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a substring search use search_cvars.
+//   @param prefix - Name prefix to match, case-insensitive, e.g. "r.Shadow." or "t.".
+//   @param max - Maximum number of entries to return (default 100, minimum 1).
 //   @returns { count, cvars: [...] }
 TSharedPtr<FJsonObject> HandleListCVarsWithPrefix(const TSharedPtr<FJsonObject>& Params)
 {
@@ -437,9 +437,9 @@ TSharedPtr<FJsonObject> HandleSetCVarsFromJson(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:list_engine_ini_sections - List section names in an INI file.
-//   @param config_file - One of "Engine", "Game", "Input", "Editor", "Scalability" (default "Engine")
-//   @param include_base - Whether to include Base.ini (default false)
+// MCP:list_engine_ini_sections - List the section names GConfig holds for one INI (count, sections, file_path). Read-only. Caveat: it asks GConfig for config_file plus .ini, a form GConfig does not match to its known config files (get_engine_ini_value avoids it), so count can be 0 for a file that has sections.
+//   @param config_file - INI base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; not validated.
+//   @param include_base - Ignored: the code reads it but never uses it, so Base.ini sections are neither added nor removed.
 //   @returns { count, sections: [...] }
 TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject>& Params)
 {
@@ -465,10 +465,10 @@ TSharedPtr<FJsonObject> HandleListEngineIniSections(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_engine_ini_value - Read a value from a specific INI section.
+// MCP:get_engine_ini_value - Read one key from the merged in-memory config (GConfig) of an INI such as Engine or Game. Read-only; returns value and found (false, with an empty value, when the section or key is missing). Pass config_file without .ini. Writer: set_engine_ini_value.
 //   @param section - Section name (e.g. "/Script/Engine.RendererSettings")
-//   @param key - Key name
-//   @param config_file - INI file base name (default "Engine")
+//   @param key - Key inside the section, e.g. "r.DefaultFeature.AntiAliasing".
+//   @param config_file - Config base name without extension, e.g. "Engine" (default), "Game", "Input", "Editor", "Scalability"; "Engine.ini" is not resolved.
 //   @returns { section, key, value, found }
 TSharedPtr<FJsonObject> HandleGetEngineIniValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -497,11 +497,11 @@ TSharedPtr<FJsonObject> HandleGetEngineIniValue(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_engine_ini_value - Write a value to a specific INI section, verified by read-back.
-//   @param section - Section name
-//   @param key - Key name
-//   @param value - Value to write
-//   @param config_file - INI file base name (default "Engine")
+// MCP:set_engine_ini_value - Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/<Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded.
+//   @param section - INI section, e.g. "/Script/Engine.RendererSettings"; created when missing.
+//   @param key - Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced.
+//   @param value - Value as text, written verbatim; an empty string is allowed.
+//   @param config_file - Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved.
 //   @returns { applied, section, key, value, readback_value }
 TSharedPtr<FJsonObject> HandleSetEngineIniValue(const TSharedPtr<FJsonObject>& Params)
 {

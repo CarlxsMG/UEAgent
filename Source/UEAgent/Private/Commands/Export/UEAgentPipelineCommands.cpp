@@ -110,7 +110,7 @@ TSharedPtr<FJsonObject> HandleFlushAsyncLoading(const TSharedPtr<FJsonObject>& P
 // ---------------------------------------------------------------------------
 // get_source_control_status
 // ---------------------------------------------------------------------------
-// MCP:get_source_control_status - Report the editor's revision-control state via ISourceControlModule.
+// MCP:get_source_control_status - Report the editor revision-control connection, read-only: provider name, whether revision control is enabled and the provider available, and its status_text. Says nothing about individual files or their checkout state, and never connects or changes settings.
 //   @returns { provider, enabled, available, status_text }
 TSharedPtr<FJsonObject> HandleGetSourceControlStatus(const TSharedPtr<FJsonObject>& Params)
 {

@@ -259,8 +259,8 @@ TSharedPtr<FJsonObject> HandleSetShowFlag(const TSharedPtr<FJsonObject>& Params)
 // set_camera_speed
 // ---------------------------------------------------------------------------
 
-// MCP:set_camera_speed - Set the editor viewport camera movement speed (float multiplier)
-//   @param speed - Camera speed (positive float; the editor clamps to its valid range)
+// MCP:set_camera_speed - Set the camera movement speed of the active level editor viewport (the focused one, else the first). Affects this editor session only and saves nothing. Returns requested and camera_speed, the value read back from the viewport afterwards.
+//   @param speed - Camera speed as a positive float; 0 or less is an error. Compare camera_speed in the reply to see what the viewport kept.
 //   @returns { applied: bool, requested: number, camera_speed: number }
 TSharedPtr<FJsonObject> HandleSetCameraSpeed(const TSharedPtr<FJsonObject>& Params)
 {
@@ -347,7 +347,7 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 // get_viewport_state
 // ---------------------------------------------------------------------------
 
-// MCP:get_viewport_state - Read the current state of the active editor viewport
+// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
 //   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: int, location: [number], rotation: [number], show_flags: object }
 TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Params)
 {
@@ -506,7 +506,7 @@ TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Par
 // set_viewport_exposure
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_exposure - Set fixed-exposure settings on the active editor viewport
+// MCP:set_viewport_exposure - Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_exposure reads them.
 //   @param fixed - True for fixed exposure (use FixedEV100), false for automatic eye-adaptation
 //   @param ev100 - EV100 value to use when fixed=true (any float; typical range -3..20)
 //   @returns { applied: bool, fixed: bool, ev100: number }

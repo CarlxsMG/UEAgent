@@ -65,11 +65,11 @@ Produce a CANONICAL, STABLE text dump of ANY asset (Blueprint, DataTable, Materi
 
 ## `export_asset_data`
 
-Exports asset data to JSON or TXT format.
+Load an asset and write its class, package and every editable or Blueprint-visible property, as details-panel text, to a new file Saved/Exports/Assets/Name_YYYYMMDD_HHMMSS.json or .txt in the project. Returns export_file_path, export_success and file sizes; an unsupported format writes nothing (export_success=false).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Full path to the asset (e.g., '/Game/MyAsset'). |
+| `asset_path` | string | yes | Package or object path of the asset (e.g., '/Game/MyAsset'); the file is named after its last segment. |
 | `export_format` | string | yes | Export format: 'json' or 'txt'. |
 
 **Returns:** `{ asset_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }`
@@ -133,7 +133,7 @@ No parameters.
 
 ## `get_source_control_status`
 
-Report the editor's revision-control state via ISourceControlModule.
+Report the editor revision-control connection, read-only: provider name, whether revision control is enabled and the provider available, and its status_text. Says nothing about individual files or their checkout state, and never connects or changes settings.
 
 No parameters.
 

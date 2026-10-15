@@ -501,8 +501,8 @@ TSharedPtr<FJsonObject> HandleSpawnFieldSystemActor(
 // ---------------------------------------------------------------------------
 // 5. get_field_system_info
 // ---------------------------------------------------------------------------
-// MCP:get_field_system_info - Read back the authored field commands of a UFieldSystem.
-//   @param field_system_path - Asset path of the UFieldSystem
+// MCP:get_field_system_info - Read the field commands authored in a UFieldSystem asset, in order: each with physics_type, target_attribute, command_name and max_magnitude (not its node graph), plus command_count. Read-only; the array index is what remove_field_node takes, and add_field_node authors new commands.
+//   @param field_system_path - Asset path of the UFieldSystem, e.g. "/Game/MyGame/FS_Example" or "/Game/MyGame/FS_Example.FS_Example".
 //   @returns { field_system_path: string, command_count: int, commands: [{ physics_type, target_attribute, command_name, max_magnitude }], success: bool }
 
 TSharedPtr<FJsonObject> HandleGetFieldSystemInfo(

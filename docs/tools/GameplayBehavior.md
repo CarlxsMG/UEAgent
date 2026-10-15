@@ -6,13 +6,13 @@
 
 ## `create_behavior_config`
 
-Create (or load, idempotent) a UGameplayBehaviorConfig data asset.
+Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the one already there, set its protected BehaviorClass by reflection when behavior_class resolves, then save it. An unresolved behavior_class is ignored without error, so check behavior_class in the reply; created tells new from existing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `config_name` | string | yes | Name of the new config asset. |
+| `config_name` | string | yes | Asset name of the config, e.g. "BC_Patrol" |
 | `package_path` | string | no | Destination /Game folder (default /Game/MCP). |
-| `behavior_class` | string | no | Optional UGameplayBehavior subclass name to assign as BehaviorClass (set via reflection). |
+| `behavior_class` | string | no | Full path of a loaded UGameplayBehavior subclass, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; a short name never resolves, and a miss is ignored |
 
 **Returns:** `{ config_path: string, config_name: string, behavior_class: string, created: bool, saved: bool }`
 
@@ -29,17 +29,17 @@ Stop a UGameplayBehavior running on a Pawn in the editor world.
 
 ## `get_behavior_config_info`
 
-Read the BehaviorClass from a UGameplayBehaviorConfig (via reflection).
+Read the protected BehaviorClass of a UGameplayBehaviorConfig asset by reflection: behavior_class (class name), behavior_class_path and has_behavior_class. Read-only; set it with set_behavior_class, or list every config with list_behavior_configs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `config_path` | string | yes | Content path of the UGameplayBehaviorConfig. |
+| `config_path` | string | yes | Path of the UGameplayBehaviorConfig asset, e.g. "/Game/MCP/BC_Patrol" |
 
 **Returns:** `{ config_path: string, behavior_class: string, behavior_class_path: string, has_behavior_class: bool }`
 
 ## `get_behavior_subsystem_info`
 
-Probe the UGameplayBehaviorSubsystem availability in the editor world.
+Report whether the editor world has a UGameplayBehaviorSubsystem (UGameplayBehaviorSubsystem::GetCurrent): world_name, subsystem_available and, when it exists, subsystem_class. Read-only, no parameters; trigger_behavior_on_actor and end_behavior_on_actor fail without it.
 
 No parameters.
 

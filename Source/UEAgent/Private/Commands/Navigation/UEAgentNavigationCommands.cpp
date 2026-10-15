@@ -348,7 +348,7 @@ TSharedPtr<FJsonObject> HandleRebuildNavigation(const TSharedPtr<FJsonObject>& P
 // supported agent count from the nav system (NavDataSet / GetSupportedAgents, both
 // public members on UNavigationSystemV1).
 // ----------------------------------------------------------------------------
-// MCP:get_navigation_info - Reports navigation system info for the editor world
+// MCP:get_navigation_info - Read the navigation system state of the editor world (never PIE): nav_system_present, nav_data_count, supported_agent_count with the agent names, and is_navigation_dirty. Read-only; a world without a navigation system reports zeros instead of an error.
 //   @returns { nav_system_present, nav_data_count, supported_agent_count, is_navigation_dirty, supported_agents, success }
 TSharedPtr<FJsonObject> HandleGetNavigationInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1319,9 +1319,9 @@ TSharedPtr<FJsonObject> HandleRemoveEQSGenerator(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_eqs_test - Removes the test at test_index from a query option.
+// MCP:remove_eqs_test - Remove the test at test_index from one option of a UEnvQuery asset; later tests shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range option or test index is an error, not a no-op. Returns removed and test_count.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
-//   @param option_index - Option index (default 0)
+//   @param option_index - 0-based index of the query option that holds the test (default 0).
 //   @param test_index - Index of the test to remove within the option (required)
 //   @returns { query_path, option_index, test_index, removed, test_count }
 TSharedPtr<FJsonObject> HandleRemoveEQSTest(const TSharedPtr<FJsonObject>& Params)
@@ -1380,7 +1380,7 @@ TSharedPtr<FJsonObject> HandleAddEQSOption(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_eqs_option - Removes the option at option_index from a UEnvQuery.
+// MCP:remove_eqs_option - Remove the option at option_index, with its generator and tests, from a UEnvQuery asset; later options shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range index is an error, not a no-op. Returns removed and option_count.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param option_index - Index of the option to remove (required)
 //   @returns { query_path, option_index, removed, option_count }

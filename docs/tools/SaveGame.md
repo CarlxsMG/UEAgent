@@ -16,23 +16,23 @@ Create a new SaveGame instance from a specified SaveGame class
 
 ## `delete_save_game`
 
-Delete a SaveGame file from a named slot
+Delete the save file of a slot with DeleteGameInSlot; the data is gone for good. success is false, with an error, when the engine refuses, usually because the slot does not exist (check with does_save_game_exist). Returns slot_name, user_index and message.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to delete |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`
 
 ## `does_save_game_exist`
 
-Check if a save slot exists
+Check whether a save slot has data with UGameplayStatics::DoesSaveGameExist; returns exists. Read-only. Use get_save_game_slot_info for the file path, size and modification time, or list_save_games to see every slot.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to check |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
 **Returns:** `{ slot_name: string, user_index: int, exists: bool }`
 
@@ -49,12 +49,12 @@ Retrieve metadata existence path and file size for a save slot
 
 ## `get_save_game_slot_info`
 
-Get slot metadata including file size and modification timestamp
+Read the metadata of a save slot: exists and, for an existing slot, save_path (the generic desktop Saved/SaveGames/&lt;slot>.sav) plus file_size, modified_iso and modified_ticks when that file is on disk. A missing slot is exists=false with an error field, not a failure.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to query |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 
 **Returns:** `{ slot_name: string, user_index: int, exists: bool, save_path: string, file_size: int, modified_iso: string, modified_ticks: int, error: string }`
 
@@ -70,12 +70,12 @@ List all save games for a given user index. The list is what the platform's save
 
 ## `load_game`
 
-Load a SaveGame instance from a named slot
+Load the SaveGame stored in a slot with LoadGameFromSlot and report the transient object: save_game_instance, save_game_class and save_game_path. success is false when the slot is empty or unreadable, or holds a class other than save_game_class; does_save_game_exist tells missing from corrupt.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name to load from |
-| `user_index` | number | no | Optional user index, default 0 |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
 | `save_game_class` | string | no | Optional SaveGame subclass the slot is expected to hold. A slot file records its own class and is rebuilt as that; when the loaded object is not this class (or a child of it) the load is reported as failed. An unknown class name is an error. |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, save_game_instance: string, save_game_class: string, save_game_path: string, expected_class?: string, error: string }`
@@ -93,11 +93,11 @@ Load a SaveGame instance from slot, sync fallback over AsyncLoadGameFromSlot
 
 ## `load_game_from_memory`
 
-Deserialize a SaveGame instance from a base64 memory blob
+Deserialize a SaveGame from a base64 blob (the memory_base64 of save_game_to_memory) with LoadGameFromMemory; returns the transient object save_game_instance, save_game_class and save_game_path. Invalid base64 is an error; success is false when the blob is corrupt, truncated or from another SaveGame class.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `memory_base64` | string | yes | Base64-encoded serialized SaveGame payload |
+| `memory_base64` | string | yes | Base64 text of a serialized SaveGame, as returned in memory_base64 by save_game_to_memory |
 
 **Returns:** `{ success: bool, memory_size: int, save_game_instance: string, save_game_class: string, save_game_path: string, error: string }`
 
@@ -113,13 +113,13 @@ Restore the transform + properties a previous serialize_actor_state wrote, addre
 
 ## `save_game`
 
-Save a SaveGame instance to a named slot
+Write a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) to a slot with SaveGameToSlot, overwriting what the slot held; it does not save an object made by create_save_game. On desktop the file is Saved/SaveGames/&lt;slot>.sav. Returns success and message.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `slot_name` | string | yes | Save slot name where the game will be saved |
-| `user_index` | number | no | Optional user index, default 0 |
-| `save_game_class` | string | no | Optional SaveGame subclass; defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected) |
+| `user_index` | number | no | Platform user index for the save system; default 0 (the generic desktop save system ignores it) |
+| `save_game_class` | string | no | Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame |
 
 **Returns:** `{ slot_name: string, user_index: int, success: bool, message: string }`
 
@@ -137,11 +137,11 @@ Save a SaveGame instance to slot, sync fallback over AsyncSaveGameToSlot
 
 ## `save_game_to_memory`
 
-Serialize a SaveGame instance to a base64 memory blob
+Serialize a NEW default-valued SaveGame object of save_game_class (default UMCPSaveGame) with SaveGameToMemory and return it as memory_base64 with memory_size; nothing is written to disk. Pass the blob to load_game_from_memory to round-trip it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `save_game_class` | string | no | Optional SaveGame subclass; defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected) |
+| `save_game_class` | string | no | Name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); default UMCPSaveGame |
 
 **Returns:** `{ success: bool, save_game_class: string, memory_size: int, memory_base64: string }`
 

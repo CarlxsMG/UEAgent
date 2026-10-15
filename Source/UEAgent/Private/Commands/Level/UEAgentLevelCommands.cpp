@@ -1269,8 +1269,9 @@ TSharedPtr<FJsonObject> HandleWaitForPieCompletion(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:capture_pie_screenshot - Snapshot the active game/editor viewport to a PNG. Writes a synchronous scene readback (returns output_path + dimensions), but FViewport::ReadPixels does NOT include the UMG/Slate HUD. When PIE is active AND include_ui=true it ALSO queues a with-UI engine screenshot; on a later render frame our UGameViewportClient::OnScreenshotCaptured() handler CPU-crops the composited whole-window bitmap down to the game viewport (editor chrome removed, HUD kept) and overwrites the SAME output_path (ui_overwrite_next_frame=true); re-read output_path after this call for the HUD-inclusive image. PIE-active is preferred but not required.
+// MCP:capture_pie_screenshot - Write a PNG of the game viewport (else the active editor viewport) from a synchronous ReadPixels, which omits the UMG/Slate HUD; returns output_path, width, height and bytes_written. With include_ui=true during PIE, a cropped HUD version overwrites output_path a frame later (ui_overwrite_next_frame).
 //   @param output_path - Optional string. If empty, auto-names into <Project>/Saved/MCP/PIE_<utc>.png.
+//   @param include_ui - When true and PIE is running with rendering, also request an engine screenshot with the HUD that a later frame crops to the game viewport (editor chrome removed) and writes over output_path; SDR only, given up after 8 s. Default false.
 //   @returns { saved_to_pie_active, output_path, width, height, bytes_written, includes_ui, ui_overwrite_next_frame, ui_note? }
 TSharedPtr<FJsonObject> HandleCapturePieScreenshot(const TSharedPtr<FJsonObject>& Params)
 {

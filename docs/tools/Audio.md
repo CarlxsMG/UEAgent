@@ -6,7 +6,7 @@
 
 ## `add_bus_to_mix`
 
-Add a USoundControlBus to a USoundControlBusMix
+Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose target value is default_value, and saves the mix. A bus already in the mix is left unchanged (already_in_mix true, not saved); edit a stage with set_control_bus_mix_stage_value. Returns mix_path, bus_path, bus_count, added, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -46,13 +46,13 @@ Adds a graph OUTPUT node to an existing MetaSound Source and saves it.  Obtains 
 
 ## `add_modulation_input_to_patch`
 
-Append a USoundControlBus input to a USoundModulationPatch
+Appends a USoundControlBus as an input of a USoundModulationPatch asset and saves the patch. A bus whose asset name is already among the inputs is skipped (added false, already_present true, not saved). input_name is not stored. Returns patch_path, bus_path, input_count, added, already_present, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `patch_path` | string | yes | Asset path to the USoundModulationPatch |
 | `bus_path` | string | yes | Asset path to the USoundControlBus to add as an input |
-| `input_name` | string | no | Optional friendly name for the input (default "") |
+| `input_name` | string | no | Ignored: the engine input struct has no name field, so the value is only written to the log (default empty) |
 
 **Returns:** `{ patch_path, bus_path, input_count, added, already_present, saved }`
 
@@ -70,12 +70,12 @@ Construct a USoundNode inside a Sound Cue and return its node_id
 
 ## `add_soundfield_effect_to_submix`
 
-Append a concrete USoundfieldEffectBase to a soundfield submix chain.
+Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSubmix effect chain and save it; a class already in the chain is skipped (already_present). When no concrete subclass is loaded (stock UE 5.8 ships none) nothing changes: added:false plus a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
-| `effect_class_name` | string | yes | Friendly name OR /Script/Path.Class (required). |
+| `effect_class_name` | string | yes | Full class path of a concrete USoundfieldEffectBase subclass, e.g. "/Script/MyAudioPlugin.MySoundfieldEffect"; it is looked up with no outer, so a bare class name does not resolve |
 
 **Returns:** `{ submix_path, effect_path, effect_class, chain_length, added, already_present, saved, note? }`
 
@@ -158,19 +158,19 @@ Create (or load) a UAudioBus asset and set its channel layout
 
 ## `create_control_bus`
 
-Create and save a USoundControlBus asset under /Game
+Creates a USoundControlBus asset at package_path/bus_name, or loads the one already there, and saves it. initial_value is only echoed back as value, never written to the bus; push a runtime value with set_control_bus_value. Returns bus_path, default_value, created, already_existed, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `bus_name` | string | yes | Name of the control bus (e.g. "Bus_Volume") |
 | `package_path` | string | no | Target content package path where the asset is created (default /Game/MCP) |
-| `initial_value` | number | no | Initial bus value echoed back (default 1.0) |
+| `initial_value` | number | no | Number echoed back as value in the reply; it is not stored on the bus (default 1.0) |
 
 **Returns:** `{ bus_path, bus_name, value, default_value, created, already_existed, saved }`
 
 ## `create_control_bus_mix`
 
-Create and save a USoundControlBusMix asset under /Game
+Creates a USoundControlBusMix asset at package_path/mix_name, or loads the one already there, and saves it. A new mix has no stages; add buses with add_bus_to_mix. Returns mix_path, mix_name, bus_count (its stage count), created, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -228,7 +228,7 @@ Creates (or loads, idempotently) a UMetaSoundSource asset and saves it.  Uses UM
 
 ## `create_modulation_generator`
 
-Create and save a USoundModulationGenerator asset under /Game
+Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path, with engine default settings, and saves it. An existing generator there is returned untouched with its own class (not saved). Returns generator_path, generator_name, generator_class, created, already_existed, saved. Configure it with set_modulation_generator_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -239,7 +239,7 @@ Create and save a USoundModulationGenerator asset under /Game
 
 ## `create_modulation_generator_lfo`
 
-Create and save a modulation generator (LFO) asset
+Creates a USoundModulationGeneratorLFO asset at package_path/generator_name (or loads the one there), writes waveform, frequency, amplitude and offset, enables looping and saves it, overwriting an existing LFO. An unknown waveform silently becomes Sine but is echoed as sent. Returns generator_path, the written values, created, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -248,31 +248,31 @@ Create and save a modulation generator (LFO) asset
 | `frequency` | number | no | LFO frequency in Hz (default 1.0) |
 | `amplitude` | number | no | LFO amplitude (default 1.0) |
 | `offset` | number | no | LFO output offset (default 0.0) |
-| `waveform` | string | no | LFO shape: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine) |
+| `waveform` | string | no | LFO shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine; any other value also gives Sine) |
 
 **Returns:** `{ generator_path, generator_name, waveform, frequency, amplitude, offset, created, saved }`
 
 ## `create_modulation_parameter`
 
-Create and save a USoundModulationParameter asset under /Game
+Creates a USoundModulationParameter asset of the chosen concrete class at parameter_path and saves it. An existing parameter there is returned untouched with its real class (not saved). Returns parameter_path, parameter_name, parameter_class, created, already_existed, saved. Tune it with set_modulation_parameter_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `parameter_path` | string | yes | Full asset path (e.g. /Game/MyGame/Param_Volume); the package path is the directory portion and the leaf becomes the asset name |
-| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFFrequency, HPFFrequency, Bipolar, Additive, Scaled |
+| `parameter_class` | string | yes | Concrete class name (case-insensitive). One of: Volume, Frequency, LPFrequency, HPFrequency, Bipolar, Additive, Scaled. The filter names take ONE F: "LPFFrequency" and "HPFFrequency" are refused, although the error message lists them |
 
 **Returns:** `{ parameter_path, parameter_name, parameter_class, created, already_existed, saved }`
 
 ## `create_sound_attenuation`
 
-Create a USoundAttenuation asset with attenuation enabled
+Create a USoundAttenuation asset at package_path/name, or load the one already there, then force bAttenuate on, apply the optional falloff_distance and sphere radius, and save it (re-running edits the existing asset). Returns the values read back; set_sound_attenuation_properties edits every other field.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new Sound Attenuation asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `falloff_distance` | number | no | Optional FalloffDistance on FBaseAttenuationSettings |
-| `radius` | number | no | Optional sphere radius applied to AttenuationShapeExtents X |
+| `falloff_distance` | number | no | FalloffDistance in Unreal units (cm): how far beyond the inner shape the volume fades out. Unchanged when omitted. |
+| `radius` | number | no | Inner sphere radius in Unreal units (cm); sets the shape to Sphere and AttenuationShapeExtents to (radius, 0, 0). Unchanged when omitted. |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, attenuate: bool, falloff_distance: number, radius: number, shape_extent_x: number, shape_extent_y: number, shape_extent_z: number, applied_falloff_distance: bool, applied_radius: bool, created: bool, already_exists: bool, saved: bool }`
 
@@ -291,19 +291,19 @@ Create a USoundClass asset and optionally set its volume/pitch
 
 ## `create_sound_concurrency`
 
-Create a USoundConcurrency asset and optionally set MaxCount
+Create a USoundConcurrency asset at package_path/name, or load the one already there, optionally set MaxCount, and save it. Returns max_count read back, created, already_exists and saved; set_sound_concurrency_properties edits the other concurrency settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new Sound Concurrency asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `max_count` | number | no | Optional MaxCount on FSoundConcurrencySettings, clamped to >= 1 |
+| `max_count` | number | no | Most sounds of this group that play at once (MaxCount); values below 1 become 1 and fractions are truncated. Unchanged when omitted. |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, max_count: int, applied_max_count: bool, created: bool, already_exists: bool, saved: bool }`
 
 ## `create_sound_cue`
 
-Create and save an empty USoundCue asset under /Game
+Create an empty USoundCue (no nodes, no first node) at package_path/name and save it; an existing cue there is returned unchanged (already_existed:true). Returns cue_path, asset_path, node_count and saved. Build the graph with add_sound_cue_node, connect_sound_cue_nodes and set_sound_cue_first_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -327,7 +327,7 @@ Create a USoundMix asset and optionally set its EQ toggle / duration
 
 ## `create_sound_modulation_patch`
 
-Create and save a USoundModulationPatch asset under /Game
+Creates a USoundModulationPatch asset at package_path/patch_name with no inputs or output, bypassed by default (bBypass true), and saves it; a patch already there is returned untouched, not re-saved. Returns patch_path, bBypass, input_count, output_parameter_path, created, already_existed, saved. Fill it with add_modulation_input_to_patch and set_modulation_patch_output_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -352,7 +352,7 @@ Create (or load) a USoundSourceBus asset and wire its routing fields
 
 ## `create_sound_submix`
 
-Create a USoundSubmix asset
+Create an empty USoundSubmix asset at package_path/name, or load the one already there, and save it. Returns asset_path, created, already_exists and saved; add effects with add_submix_effect_to_chain and read them with get_submix_effect_chain.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -363,7 +363,7 @@ Create a USoundSubmix asset
 
 ## `create_soundfield_submix`
 
-Create a USoundfieldSubmix asset under /Game/...
+Create a USoundfieldSubmix asset at submix_path and save it, with its default encoding format and an empty effect chain; an existing one there is returned unchanged (already_existed:true). Returns soundfield_encoding_format, effect_chain_length and saved; inspect it with get_soundfield_submix_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -431,11 +431,11 @@ Clear a wired child out of a parent node's input slot (inverse of connect_sound_
 
 ## `get_audio_bus`
 
-Read the channel layout of an existing UAudioBus asset
+Read the channel layout of a UAudioBus asset: channels (Mono, Stereo, Quad, FivePointOne or SevenPointOne), channels_int and num_channels. Read-only. is_active is always false because no audio device is queried. Change the layout with set_audio_bus_channels.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `bus_path` | string | yes | Full content path of the target UAudioBus |
+| `bus_path` | string | yes | Asset path of the UAudioBus, e.g. "/Game/Audio/AB_Music". |
 
 **Returns:** `{ bus_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, is_active: bool (always false: headless — no audio device) }`
 
@@ -459,7 +459,7 @@ No parameters.
 
 ## `get_control_bus_mix_info`
 
-Read the mix-stage table of a USoundControlBusMix
+Reads the stages of a USoundControlBusMix asset without changing it. Returns mix_path, stage_count and stages, one per stage with bus_path (empty when the bus reference is cleared), target_value, attack_time and release_time. Edit a stage with set_control_bus_mix_stage_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -469,35 +469,35 @@ Read the mix-stage table of a USoundControlBusMix
 
 ## `get_meta_sound_node_info`
 
-Read a single node's full interface: inputs, outputs, environment, input defaults, and configuration struct class.
+Read one node of the default graph of a MetaSound Source by GUID: its name, class name, input/output/environment vertices (name, type_name, vertex_id), input literal defaults and Configuration struct class. Read-only; get node ids from list_meta_sound_nodes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
-| `node_id` | string | yes | Node GUID string. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 
 **Returns:** `{ metasound_path, node_id, name, class_name, inputs: [{name, type_name}], outputs: [...], environment: [...], input_defaults: [{vertex_id, value, type}], configuration_class }`
 
 ## `get_meta_sound_node_input_default`
 
-Read the current default value of a single node input by vertex name.
+Read the default literal stored on one input of a MetaSound Source node: vertex type, has_value, literal_type and value; has_value false means no literal is set. An unknown input name fails and lists the valid ones. Write it with metasound_set_node_input_default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
-| `node_id` | string | yes | Node GUID string. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 | `input_name` | string | yes | Name of the input vertex (matches FMetasoundFrontendVertex::Name). |
 
 **Returns:** `{ metasound_path, node_id, input_name, type, value, has_value }`
 
 ## `get_meta_sound_node_property`
 
-Read a single property of a MetaSound node's Configuration struct.
+Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_meta_sound_node_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
-| `node_id` | string | yes | Node GUID string. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 | `property` | string | yes | FProperty name on the Configuration struct. |
 
 **Returns:** `{ metasound_path, node_id, property, type, has_value, value? }`
@@ -534,7 +534,7 @@ Gets all parameter defaults from a MetaSound preset.  Loads the preset, obtains 
 
 ## `get_modulation_generator_info`
 
-Read state of a USoundModulationGenerator (class + typed settings)
+Reads a USoundModulationGenerator asset without changing it. Returns generator_path, generator_class and settings by class: LFO shape, frequency, amplitude, offset, phase; ADEnvelope attack_time, decay_time; EnvelopeFollower attack_time, release_time, gain, audio_bus_path; empty for any other class.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -544,7 +544,7 @@ Read state of a USoundModulationGenerator (class + typed settings)
 
 ## `get_modulation_info`
 
-Read state and metadata of a USoundControlBus
+Reads a USoundControlBus asset and its live value in the editor world, without changing anything. Returns bus_path, default_value, current_value (the live modulator value; the engine returns 1.0 for a bus that is not active) and subsystem_active (whether the editor world has a modulation manager).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -554,7 +554,7 @@ Read state and metadata of a USoundControlBus
 
 ## `get_modulation_parameter_info`
 
-Read state of a USoundModulationParameter (Settings + class)
+Reads a USoundModulationParameter asset without changing it. Returns parameter_path, parameter_class (the concrete class, e.g. SoundModulationParameterVolume) and its settings value_normalized, clamp_to_normalized_range and value_unit. Change them with set_modulation_parameter_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -564,7 +564,7 @@ Read state of a USoundModulationParameter (Settings + class)
 
 ## `get_sound_attenuation_properties`
 
-Read all FSoundAttenuationSettings fields from a USoundAttenuation.
+Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF, occlusion, reverb send) of a USoundAttenuation asset as one settings object, with the keys set_sound_attenuation_properties takes, plus asset_class. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -574,11 +574,11 @@ Read all FSoundAttenuationSettings fields from a USoundAttenuation.
 
 ## `get_sound_class_hierarchy`
 
-Read the hierarchy of a USoundClass
+Read one level of the hierarchy of a USoundClass asset: its parent and parent_path (parent "None" for a root), the names of its direct children and child_count. Call it again on a parent or child to walk further. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sound_class_path` | string | yes | Full content path of the USoundClass |
+| `sound_class_path` | string | yes | Asset path of the USoundClass, e.g. "/Game/Audio/SC_SFX.SC_SFX". |
 
 **Returns:** `{ name: string, sound_class_path: string, parent: string, parent_path: string, children: [string], child_count: int }`
 
@@ -594,7 +594,7 @@ Gets sound class properties and hierarchy info from a USoundClass.
 
 ## `get_sound_concurrency_properties`
 
-Read all FSoundConcurrencySettings fields from a USoundConcurrency.
+Read every FSoundConcurrencySettings field (maxCount, bLimitToOwner, resolutionRule, retriggerTime, volume scaling, voice stealing) of a USoundConcurrency asset as one settings object, with the keys set_sound_concurrency_properties takes, plus asset_class. Read-only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -604,7 +604,7 @@ Read all FSoundConcurrencySettings fields from a USoundConcurrency.
 
 ## `get_sound_cue_graph`
 
-Read back a Sound Cue's node graph
+Read the node graph of a USoundCue without changing it: every node in AllNodes with its id (the node_id other sound cue tools take), class, child_ids (-1 for an empty slot), max_child_nodes and editable properties, plus first_node_id (-1 when unset) and node_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -614,7 +614,7 @@ Read back a Sound Cue's node graph
 
 ## `get_sound_modulation_patch_info`
 
-Read state of a USoundModulationPatch (bBypass, output, inputs)
+Reads a USoundModulationPatch asset without changing it. Returns patch_path, bBypass, output_parameter ({ path, class }, or null when unset), inputs (one { bus: { path }, name } per input; name is always empty) and input_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -624,11 +624,11 @@ Read state of a USoundModulationPatch (bBypass, output, inputs)
 
 ## `get_sound_source_bus`
 
-Read the routing fields of an existing USoundSourceBus asset
+Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or Stereo), duration in seconds (0 plays indefinitely) and the UAudioBus it outputs to (audio_bus_path and audio_bus_class, empty when none). Read-only. Writer: set_sound_source_bus_audio_bus.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ssb_path` | string | yes | Full content path of the target USoundSourceBus |
+| `ssb_path` | string | yes | Asset path of the USoundSourceBus, e.g. "/Game/Audio/SSB_Radio". |
 
 **Returns:** `{ ssb_path: string, asset_class: string, source_bus_channels: string, duration: float, audio_bus_path: string, audio_bus_class: string }`
 
@@ -644,7 +644,7 @@ Read USoundWave tunables (the object's own UPROPERTY fields) from an imported so
 
 ## `get_soundfield_submix_info`
 
-Reader: format + encoding_settings + effect_chain[].
+Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_format and resolved_format, encoding_settings {class, path}, and effect_chain entries {index, class, path, settings_class, settings_path} with chain_length. Adds a note when no concrete soundfield effect class is loaded.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -654,11 +654,11 @@ Reader: format + encoding_settings + effect_chain[].
 
 ## `get_submix_effect_chain`
 
-Read the effect chain of a USoundSubmix
+Read the effect chain of a USoundSubmix asset in order: one entry per slot with the name, class and path of its USoundEffectSubmixPreset ("None" for an empty slot), plus chain_length. Read-only; add_submix_effect_to_chain appends to it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `submix_path` | string | yes | Full content path of the target USoundSubmix |
+| `submix_path` | string | yes | Asset path of the USoundSubmix, e.g. "/Game/Audio/SM_Master.SM_Master". |
 
 **Returns:** `{ submix_path: string, effects: [object], chain_length: int }`
 
@@ -674,21 +674,21 @@ Enumerate all MetaSound node classes registered with the engine (via Metasound::
 
 ## `list_meta_sound_nodes`
 
-List all nodes in a MetaSound Source graph with their handles, class names, and pin counts.
+List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_meta_sound_node_info and the other node tools.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
 
 **Returns:** `{ metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }`
 
 ## `list_meta_sound_references`
 
-List all asset packages that reference a given MetaSound Source. Runtime-safe (uses IAssetRegistry, no editor-only subsystem).
+List the packages that reference a MetaSound Source asset, hard or soft, from the Asset Registry, with their count. Read-only; the source is loaded to resolve its package. For assets of any type use get_asset_referencers.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
 
 **Returns:** `{ metasound_path, count, references: [{ package_name }] }`
 
@@ -808,7 +808,7 @@ Plays a sound asset at a specific world location without requiring an audio comp
 
 ## `remove_bus_from_mix`
 
-Remove a bus's stage from a USoundControlBusMix
+Removes every stage that uses a USoundControlBus from a USoundControlBusMix asset and saves the mix. When the bus is not in the mix nothing is saved and the call reports failure, with already_absent true in its data. Returns mix_path, bus_path, removed, already_absent, stage_count, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -852,7 +852,7 @@ Removes a node from a MetaSound Source graph by its node_id GUID (inverse of met
 
 ## `remove_modulation_input_from_patch`
 
-Remove a bus's input from a USoundModulationPatch
+Removes every input of a USoundModulationPatch asset whose bus has the same asset name as bus_path, then saves the patch. When no input matches nothing is saved and the call reports failure, with already_removed true in its data. Returns patch_path, bus_path, removed, already_removed, input_count, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -863,7 +863,7 @@ Remove a bus's input from a USoundModulationPatch
 
 ## `remove_soundfield_effect`
 
-RemoveAt on SoundfieldEffectChain[effect_index] (soft remove).
+Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoable) and save; the effect object stays in the package and an out-of-range index is an error. Returns removed_effect_class, removed_effect_path and chain_length. With no concrete effect class loaded nothing changes: removed:false plus a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -895,12 +895,12 @@ Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed
 
 ## `set_audio_bus_channels`
 
-Change the channel layout of an existing UAudioBus asset
+Change the channel layout (AudioBusChannels) of an existing UAudioBus asset and save it; success requires the save. Returns channels, channels_int and num_channels read back from the asset. To make a new bus use create_audio_bus.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `bus_path` | string | yes | Full content path of the target UAudioBus |
-| `channels` | string | yes | EAudioBusChannels: 'Mono' \| 'Stereo' \| 'Quad' \| 'FiveDotOne' \| 'SevenDotOne' |
+| `bus_path` | string | yes | Asset path of the UAudioBus, e.g. "/Game/Audio/AB_Music". |
+| `channels` | string | yes | EAudioBusChannels: 'Mono' \| 'Stereo' \| 'Quad' \| 'FiveDotOne' \| 'SevenDotOne', case-insensitive; FivePointOne, 5.1, SevenPointOne and 7.1 are accepted too. |
 
 **Returns:** `{ bus_path: string, asset_class: string, channels: string, channels_int: int, num_channels: int, saved: bool }`
 
@@ -917,11 +917,11 @@ Assigns a sound asset to an audio component for playback.
 
 ## `set_audio_volume`
 
-Sets the volume multiplier for an audio component.
+Set VolumeMultiplier (0 to 10, else an error; also resets VolumeModulationMin/Max to 1) on an audio component of the editor world, matched by object name against the first audio component of each actor. No undo, no dirty mark. Returns old_volume, new_volume and volume_set.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to modify |
+| `audio_component_name` | string | yes | Object name of the audio component to modify (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched. |
 | `volume` | number | yes | Volume multiplier between 0.0 and 10.0 |
 
 **Returns:** `{ audio_component_name: string, old_volume: number, new_volume: number, requested_volume: number, volume_set: bool, volume_message: string, audio_enabled: bool, audio_pitch: number, audio_mobility: string, audio_sound_name: string, audio_3d_attenuation_radius: number, audio_position: { x, y, z }, audio_owner_name: string }`
@@ -942,26 +942,26 @@ Set the target value (and optional fades) of a bus's stage in a mix
 
 ## `set_control_bus_value`
 
-Set the runtime value of a USoundControlBus
+Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_modulation_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `bus_path` | string | yes | Asset path to the USoundControlBus |
 | `value` | number | yes | New runtime bus value to push (required float) |
-| `fade_time` | number | no | Fade time in seconds; negative uses the mix default (default -1.0) |
+| `fade_time` | number | no | Fade time in seconds; a negative value reuses the last fade time of the global stage, or 0.1 s if none was set (default -1.0) |
 
 **Returns:** `{ bus_path, value, fade_time, applied }`
 
 ## `set_meta_sound_node_property`
 
-Set a single field of a MetaSound node's Configuration struct by reflection. Idempotent — re-applying the same value is a no-op.
+Write one field of a MetaSound Source node's Configuration struct by reflection, directly in the document (not through the MetaSound builder), then save the asset. Re-applying a value returns value_changed false but still saves, and the reply succeeds even when the save fails: check saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path. |
-| `node_id` | string | yes | Node GUID string. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
 | `property` | string | yes | FProperty name on the Configuration struct. |
-| `value` | string | no | JSON value to apply (any FJsonObjectConverter-supported type). |
+| `value` | string | no | New value for the field, converted by FJsonObjectConverter; numbers and booleans can be passed as strings ("0.5", "true"). |
 
 **Returns:** `{ metasound_path, node_id, property, set, value_changed, saved }`
 
@@ -980,7 +980,7 @@ Sets a parameter default value on a MetaSound preset.  Loads the preset, obtains
 
 ## `set_modulation_generator_settings`
 
-Set USoundModulationGenerator settings (typed by class)
+Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored, other generator classes are refused, and the LFO shape cannot be set here. Returns generator_path, generator_class, settings as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -999,7 +999,7 @@ Set USoundModulationGenerator settings (typed by class)
 
 ## `set_modulation_parameter_settings`
 
-Set USoundModulationParameterSettings fields on a parameter asset
+Writes the given Settings fields (value_normalized, clamp_to_normalized_range, value_unit) of a USoundModulationParameter asset and saves it; omitted fields keep their value, and the asset is saved even when none is given. Returns parameter_path, the three settings as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1012,7 +1012,7 @@ Set USoundModulationParameterSettings fields on a parameter asset
 
 ## `set_modulation_patch_bypass`
 
-Set the bBypass flag on a USoundModulationPatch
+Sets the bBypass flag of a USoundModulationPatch asset and saves it. A bypassed patch stays active but outputs the default value of its output parameter; new patches start bypassed. Returns patch_path, bBypass as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1023,7 +1023,7 @@ Set the bBypass flag on a USoundModulationPatch
 
 ## `set_modulation_patch_output_parameter`
 
-Assign the USoundModulationParameter of a USoundModulationPatch
+Sets the output USoundModulationParameter of a USoundModulationPatch asset, or clears it when parameter_path is an empty string, and saves the patch. Returns patch_path, parameter_path and parameter_class as stored (empty after a clear), updated, cleared, saved. Create a parameter with create_modulation_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1045,38 +1045,38 @@ Author FSoundAttenuationSettings on a USoundAttenuation via reflection (partial 
 
 ## `set_sound_class_parent`
 
-Wire a child USoundClass under a parent USoundClass
+Make one USoundClass the child of another, wiring ParentClass and ChildClasses, and save both packages. A previous parent loses the child in memory but is not saved; only self-parenting is refused, not cycles. Returns child_count, saved_parent and saved_child, succeeding even when a save fails.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `child_sound_class_path` | string | yes | Full content path of the child USoundClass |
-| `parent_sound_class_path` | string | yes | Full content path of the parent USoundClass |
+| `child_sound_class_path` | string | yes | Asset path of the USoundClass to re-parent, e.g. "/Game/Audio/SC_Footsteps.SC_Footsteps". |
+| `parent_sound_class_path` | string | yes | Asset path of the USoundClass that becomes its parent, e.g. "/Game/Audio/SC_SFX.SC_SFX". |
 
 **Returns:** `{ child: string, parent: string, child_path: string, parent_path: string, child_count: int, saved_parent: bool, saved_child: bool }`
 
 ## `set_sound_class_properties`
 
-Sets properties on a USoundClass asset.  Loads the USoundClass, sets the specified FSoundClassProperties fields, and saves the package.
+Write the given FSoundClassProperties fields of a USoundClass asset (volume, pitch, filters, routing and loading flags) in one undoable transaction, then save it. Only fields you pass change; values are not range-checked and unknown enum names are skipped. Returns every current value plus applied_&lt;field> flags and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sound_class_path` | string | yes | Content path of the USoundClass asset. |
-| `volume` | number | no | Properties.Volume. |
-| `pitch` | number | no | Properties.Pitch. |
-| `low_pass_frequency` | number | no | Properties.LowPassFilterFrequency. |
-| `attenuation_distance_scale` | number | no | Properties.AttenuationDistanceScale. |
-| `lfe_bleed` | number | no | Properties.LFEBleed. |
-| `voice_center_channel_volume` | number | no | Properties.VoiceCenterChannelVolume. |
-| `radio_filter_volume` | number | no | Properties.RadioFilterVolume. |
-| `radio_filter_volume_threshold` | number | no | Properties.RadioFilterVolumeThreshold. |
-| `default_2d_reverb_send_amount` | number | no | Properties.Default2DReverbSendAmount. |
-| `apply_effects` | boolean | no | Properties.bApplyEffects. |
-| `always_play` | boolean | no | Properties.bAlwaysPlay. |
-| `is_ui_sound` | boolean | no | Properties.bIsUISound. |
-| `is_music` | boolean | no | Properties.bIsMusic. |
-| `center_channel_only` | boolean | no | Properties.bCenterChannelOnly. |
-| `apply_ambient_volumes` | boolean | no | Properties.bApplyAmbientVolumes. |
-| `reverb` | boolean | no | Properties.bReverb. |
+| `volume` | number | no | Volume multiplier for sounds of this class (Properties.Volume), e.g. 0.5 for half |
+| `pitch` | number | no | Pitch multiplier for sounds of this class (Properties.Pitch), e.g. 1.2 |
+| `low_pass_frequency` | number | no | Low-pass filter cutoff frequency in Hz (Properties.LowPassFilterFrequency) |
+| `attenuation_distance_scale` | number | no | Scale on the distance used for attenuation (Properties.AttenuationDistanceScale): 0.5 attenuates a sound 1000 units away as if it were 500 away |
+| `lfe_bleed` | number | no | Amount of the sound sent to the LFE (subwoofer) channel (Properties.LFEBleed) |
+| `voice_center_channel_volume` | number | no | Amount sent to the center channel (Properties.VoiceCenterChannelVolume); does not propagate to child classes |
+| `radio_filter_volume` | number | no | Volume of the legacy radio filter effect (Properties.RadioFilterVolume) |
+| `radio_filter_volume_threshold` | number | no | Volume at which the legacy radio filter kicks in (Properties.RadioFilterVolumeThreshold) |
+| `default_2d_reverb_send_amount` | number | no | Reverb send amount for unattenuated (2D) sounds of this class (Properties.Default2DReverbSendAmount) |
+| `apply_effects` | boolean | no | Bool for Properties.bApplyEffects (Output to Master EQ Submix): route referencing sounds to the Master EQ submix |
+| `always_play` | boolean | no | Bool for Properties.bAlwaysPlay: inflate the priority of referencing sounds so they always play |
+| `is_ui_sound` | boolean | no | Bool for Properties.bIsUISound: sounds of this class keep playing while the game is paused in the UI |
+| `is_music` | boolean | no | Bool for Properties.bIsMusic: mark the class as music (propagates to child classes only when the parent is true) |
+| `center_channel_only` | boolean | no | Bool for Properties.bCenterChannelOnly: force sounds of this class to the center channel |
+| `apply_ambient_volumes` | boolean | no | Bool for Properties.bApplyAmbientVolumes: apply the Interior/Exterior volume and low-pass modifiers |
+| `reverb` | boolean | no | Bool for Properties.bReverb (Send to Master Reverb Submix): send referencing sounds to the reverb submix |
 | `output_target` | string | no | Properties.OutputTarget enum name (Speaker\|Controller\|ControllerFallbackToSpeaker); case-insensitive, ignored if unrecognized. |
 | `loading_behavior` | string | no | Properties.LoadingBehavior enum name (Inherited\|RetainOnLoad\|PrimeOnLoad\|LoadOnDemand\|ForceInline); case-insensitive, ignored if unrecognized. |
 
@@ -1095,12 +1095,12 @@ Author FSoundConcurrencySettings on a USoundConcurrency via reflection (partial 
 
 ## `set_sound_cue_first_node`
 
-Set the cue's output or root node
+Make the node at node_id the root (FirstNode, the output) of a USoundCue graph, undoably, and save the asset. Returns first_node_class, first_node_set and saved; an out-of-range node_id is an error. Get node ids from add_sound_cue_node or get_sound_cue_graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `cue_path` | string | yes | Full asset path of the cue |
-| `node_id` | number | yes | node_id to use as the root of the cue graph |
+| `node_id` | number | yes | node_id (index in the cue AllNodes array) to use as the root of the cue graph |
 
 **Returns:** `{ cue_path: string, node_id: int, first_node_class: string, first_node_set: bool, saved: bool }`
 
@@ -1132,12 +1132,12 @@ Sets a sound class adjuster override in a USoundMix.  Loads the USoundMix and US
 
 ## `set_sound_source_bus_audio_bus`
 
-Assign or clear the UAudioBus return on a USoundSourceBus
+Point the AudioBus output of a USoundSourceBus asset at a UAudioBus, or clear it when audio_bus_path is empty or omitted, then save; success requires the save. Returns audio_bus_path and audio_bus_class read back, plus cleared. A bus path that does not load is an error, not a clear.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ssb_path` | string | yes | Full content path of the target USoundSourceBus |
-| `audio_bus_path` | string | no | Full content path of the UAudioBus to assign, or "" to clear the assignment. |
+| `ssb_path` | string | yes | Asset path of the USoundSourceBus, e.g. "/Game/Audio/SSB_Radio". |
+| `audio_bus_path` | string | no | Asset path of the UAudioBus to assign, e.g. "/Game/Audio/AB_Music"; "" or omitted clears the assignment. |
 
 **Returns:** `{ ssb_path: string, audio_bus_path: string, audio_bus_class: string, cleared: bool, saved: bool }`
 
@@ -1155,13 +1155,13 @@ Author a single FSoundSourceBusSendInfo entry on USoundBase::BusSends via reflec
 
 ## `set_sound_source_bus_send_level_curve`
 
-Author the CustomSendLevelCurve on USoundBase::BusSends[send_index] via reflection.
+Merge a FRuntimeFloatCurve JSON into BusSends[send_index].CustomSendLevelCurve of a USoundSourceBus asset (BusSends grows with default entries past its end) and save it; success requires the save. Returns the curve read back. The curve only takes effect when that send uses the CustomCurve control method: see set_sound_source_bus_send_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ssb_path` | string | yes | Full content path of the target USoundSourceBus (USoundBase.BusSends is the target array). |
 | `send_index` | number | yes | 0-based index into BusSends; the entry is mutated in place. Resized/extended with default-constructed entries if out of range. |
-| `distance_curve` | object | yes | Object representing FRuntimeFloatCurve authoring data. Usable shape: { 'editor_curve_data': { 'float_curve': { 'keys': [ { 'time': float, 'value': float }, ... ] } } }. Absent keys are left at the struct default. |
+| `distance_curve` | object | yes | FRuntimeFloatCurve fields by their UPROPERTY names, e.g. {"EditorCurveData": {"Keys": [{"Time": 0.0, "Value": 1.0}, {"Time": 1.0, "Value": 0.0}]}}; Time 0-1 maps to MinSendDistance-MaxSendDistance and Keys replaces the key list. Fields left out keep their current values; unknown keys are ignored without error. |
 
 **Returns:** `{ ssb_path: string, send_index: int, bus_sends_count: int, distance_curve: object, applied_keys: [string], saved: bool }`
 
@@ -1179,13 +1179,13 @@ Author USoundWave tunables on an imported sound wave via reflection (partial mer
 
 ## `set_soundfield_effect_settings`
 
-Reflection-write properties on Effect->Settings.
+Validate a soundfield effect slot but never write its settings (always a no-op): USoundfieldEffectBase::GetSettingsClass is protected, so the settings class cannot be found. An out-of-range effect_index is an error; otherwise returns applied_count:0, saved:false and a note.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
 | `effect_index` | number | yes | Zero-based index into SoundfieldEffectChain (required). |
-| `settings` | object | yes | JSON object {property_name: value, ...} (required). |
+| `settings` | object | yes | JSON object {property_name: value, ...}; currently ignored, since no setting is ever written |
 
 **Returns:** `{ submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note? }`
 
@@ -1229,10 +1229,10 @@ Updates the timing fields on an existing subtitle cue.  Loads the USubtitleAsset
 
 ## `stop_sound`
 
-Stops playback of sound on an audio component.
+Stop playback on an audio component of the editor world (UAudioComponent::Stop), matched by object name against the first audio component of each actor; components in a running PIE world are not reached. Returns was_playing and playing; success is always true. Start playback with play_sound.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `audio_component_name` | string | yes | Name of the audio component to stop |
+| `audio_component_name` | string | yes | Object name of the audio component to stop (e.g. "AudioComponent0"), compared without case; only the first audio component of each actor is searched. |
 
 **Returns:** `{ audio_component_name: string, playing: bool, was_playing: bool, success: bool }`

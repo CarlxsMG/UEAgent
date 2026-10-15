@@ -306,15 +306,15 @@ Sets a post-process setting on a PostProcessVolume (sets bOverride flag + field,
 
 ## `set_post_process_volume_settings`
 
-Set the FPostProcessSettings struct of an APostProcessVolume. Each field is optional; only the fields present in the Params JSON are applied. Marks the actor dirty + adds a FScopedTransaction so it can be undone. bloom_intensity/ambient_occlusion_intensity/vignette_intensity are set through set_post_process_setting, not here (one code path per field).
+Set enabled, priority, film_grain_intensity and motion_blur_amount of a PostProcessVolume in the editor world as one undo step; only the fields you pass change, and film grain and motion blur also get their bOverride flag so they take effect. The level is not saved. Returns applied_count and applied_fields; other settings use set_post_process_setting.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `volume_name` | string | yes | Label of the APostProcessVolume. |
-| `enabled` | boolean | no | Optional bool (PPV bEnabled). |
-| `priority` | string | no | Optional float (PPV Priority). |
-| `film_grain_intensity` | string | no | Optional float. |
-| `motion_blur_amount` | string | no | Optional float. |
+| `volume_name` | string | yes | Editor label of the PostProcessVolume in the editor world; object names are not matched. |
+| `enabled` | boolean | no | Whether the volume is enabled (APostProcessVolume bEnabled). |
+| `priority` | string | no | Blend priority among overlapping volumes, a number such as 1; a numeric string is also accepted. |
+| `film_grain_intensity` | string | no | Film grain intensity from 0 to 1, a number; a numeric string is also accepted. |
+| `motion_blur_amount` | string | no | Motion blur strength from 0 to 1 (0 is off), a number; a numeric string is also accepted. |
 
 **Returns:** `{ volume_name, applied_count, applied_fields: [string] }`
 
@@ -335,13 +335,13 @@ Set properties on an existing reflection-capture actor (Sphere or Box). Dispatch
 
 ## `set_scene_capture_2d_properties`
 
-Set data-only properties on an existing SceneCapture2D actor's USceneCaptureComponent2D: CaptureSource (base), ProjectionType, FOVAngle, TextureTarget (UTextureRenderTarget2D by path) and bCaptureEveryFrame (base). Headless-safe: configures fields only, never triggers a GPU capture. Reads every set property back.
+Sets the given CaptureSource, ProjectionType, FOVAngle, TextureTarget and bCaptureEveryFrame of the USceneCaptureComponent2D on a SceneCapture2D actor in the editor world, without capturing or saving; undoable. An invalid value fails the call, but fields applied before it stay set. Returns each field read back with a *_set flag.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or internal name of the SceneCapture2D actor |
 | `capture_source` | string | no | ESceneCaptureSource (e.g. SceneColorHDR \| FinalColorLDR \| FinalColorHDR \| SceneDepth); the SCS_ prefix is optional |
-| `projection_type` | string | no | Perspective \| Orthographic |
+| `projection_type` | string | no | Projection mode, "Perspective" or "Orthographic" (case-insensitive); any other value fails the call; omit to keep the current one |
 | `fov_angle` | number | no | Field-of-view angle in degrees (FOVAngle field) |
 | `texture_target` | string | no | Path to a UTextureRenderTarget2D to assign |
 | `capture_every_frame` | boolean | no | Whether the component captures every frame (bCaptureEveryFrame) |
@@ -434,12 +434,12 @@ Spawns an ExponentialHeightFog actor and optionally sets its fog density.
 
 ## `spawn_post_process_volume`
 
-Spawns a PostProcessVolume actor (unbound/infinite-extent by default).
+Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `unbound` | boolean | no | If true, volume covers the entire world (optional, default true) |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
+| `unbound` | boolean | no | true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }`
 
@@ -456,11 +456,11 @@ Spawns a SceneCapture2D actor into the editor world.  Reports whether the captur
 
 ## `spawn_sky_atmosphere`
 
-Spawns a SkyAtmosphere actor into the editor world.
+Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }`
 
@@ -490,11 +490,11 @@ Spawns a SphereReflectionCapture actor into the editor world.  Sets the sphere c
 
 ## `spawn_volumetric_cloud`
 
-Spawns a VolumetricCloud actor into the editor world.
+Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }`
 

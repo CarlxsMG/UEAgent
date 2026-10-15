@@ -388,10 +388,10 @@ namespace
     }
 }
 
-// MCP:create_physics_asset - Create and save a UPhysicsAsset for a skeletal mesh
+// MCP:create_physics_asset - Creates a UPhysicsAsset at package_path/name, generating bodies and constraints from a skeletal mesh, sets that mesh as its preview mesh and saves it; the mesh is not pointed at the new asset. An existing one there is returned unchanged. Returns bodies, constraints, skeleton_bones, bodies_generated, saved.
 //   @param name - Asset name (e.g. 'PA_Cube').
-//   @param package_path - Target content package path where the asset is created (check the body for the default)
-//   @param skeletal_mesh_path - Source skeletal mesh path (defaults to engine SkeletalCube)
+//   @param package_path - Content folder for the new asset (default /Game/Physics; an empty string also uses it)
+//   @param skeletal_mesh_path - Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load
 //   @returns { package_path, already_existed, created, saved, bodies_generated, generation_message, save_error }
 TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& Params)
 {
@@ -577,12 +577,12 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_physics_body_properties"), SaveError);
 }
 
-// MCP:set_physics_body_advanced_properties - Set FBodyInstance advanced fields (damping, mass/inertia scale, COM nudge, gravity) on one body of a UPhysicsAsset (read-modify-write; only supplied fields change; idempotent). Asset-only edit on the body's DefaultInstance; reports AUTHORED struct values (not live GetBodyMass, which is 0 with no running sim).
+// MCP:set_physics_body_advanced_properties - Writes only the given advanced FBodyInstance fields (damping, mass scale, inertia scale, COM nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or bone_name, and saves it. Fails when no field is given. Returns the authored values read back, applied_count, saved.
 //   @param physics_asset_path - /Game path to the UPhysicsAsset.
-//   @param body_index [int] - Explicit body index (or use bone_name).
+//   @param body_index [int] - Index of the body in the asset; wins over bone_name when both are given
 //   @param bone_name - Bone name to resolve the body (alternative to body_index).
-//   @param linear_damping [number] - Linear drag.
-//   @param angular_damping [number] - Angular drag.
+//   @param linear_damping [number] - Drag that slows linear movement (FBodyInstance LinearDamping, unitless, engine default 0.01); omit to keep the current value
+//   @param angular_damping [number] - Drag that slows rotation (FBodyInstance AngularDamping, unitless, engine default 0); omit to keep the current value
 //   @param mass_scale [number] - Per-instance mass multiplier (>= 0.001).
 //   @param inertia_tensor_scale [array] - [x,y,z] inertia scale.
 //   @param com_nudge [array] - [x,y,z] center-of-mass offset.
@@ -671,10 +671,10 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyAdvancedProperties(const TSharedPtr<
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_physics_body_advanced_properties"), SaveError);
 }
 
-// MCP:add_simple_collision_to_static_mesh - Add a simple (analytic) collision primitive to a UStaticMesh
+// MCP:add_simple_collision_to_static_mesh - Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bounds of a UStaticMesh to its BodySetup and saves the mesh; a mesh outside /Game is first duplicated to dest_path. Not idempotent: each call adds one more (clear them with remove_static_mesh_collision).
 //   @param static_mesh_path - Path to the source UStaticMesh.
-//   @param dest_path - /Game path to duplicate a read-only source mesh into first
-//   @param shape - Collision primitive shape to add (defaults to Box)
+//   @param dest_path - Path under /Game to copy a mesh that is not under /Game into before editing (required then; an existing mesh there is reused and edited)
+//   @param shape - Box, Sphere or Capsule, case-insensitive, sized from the mesh bounds (default Box; any other value also adds a Box)
 //   @returns { static_mesh_path, shape, box_count, sphere_count, capsule_count, element_count, collision_added, duplicated_to_game, saved, save_error }
 TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJsonObject>& Params)
 {

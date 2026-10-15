@@ -89,7 +89,7 @@ Reports the composition of a UEnvQuery asset: each option's generator class and 
 
 ## `get_navigation_info`
 
-Reports navigation system info for the editor world
+Read the navigation system state of the editor world (never PIE): nav_system_present, nav_data_count, supported_agent_count with the agent names, and is_navigation_dirty. Read-only; a world without a navigation system reports zeros instead of an error.
 
 No parameters.
 
@@ -148,7 +148,7 @@ Clears the generator on a query option. Idempotent (removed=false if the option 
 
 ## `remove_eqs_option`
 
-Removes the option at option_index from a UEnvQuery.
+Remove the option at option_index, with its generator and tests, from a UEnvQuery asset; later options shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range index is an error, not a no-op. Returns removed and option_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -159,13 +159,13 @@ Removes the option at option_index from a UEnvQuery.
 
 ## `remove_eqs_test`
 
-Removes the test at test_index from a query option.
+Remove the test at test_index from one option of a UEnvQuery asset; later tests shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range option or test index is an error, not a no-op. Returns removed and test_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
 | `test_index` | number | yes | Index of the test to remove within the option (required) |
-| `option_index` | number | no | Option index (default 0) |
+| `option_index` | number | no | 0-based index of the query option that holds the test (default 0). |
 
 **Returns:** `{ query_path, option_index, test_index, removed, test_count }`
 

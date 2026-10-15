@@ -155,10 +155,10 @@ TSharedPtr<FJsonObject> HandleCreateAIControllerBlueprint(const TSharedPtr<FJson
 
 // Runtime AI perception introspection and configuration.
 
-// MCP:configure_ai_sight_radius - Configure UAIPerceptionComponent::ConfigureSense UAISenseConfig_Sight on a runtime AIPerceptionComponent.
-//   @param actor_name - Required.
-//   @param sight_radius - Required float (>0).
-//   @param lose_sight_radius - Optional float (default = sight_radius * 1.5).
+// MCP:configure_ai_sight_radius - Set SightRadius, and LoseSightRadius to sight_radius times 1.5, on the sight config of the AIPerceptionComponent of an AI-possessed pawn or an AIController. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns sight_radius, lose_sight_radius and sight_sense_count; 0 means no sight config, nothing changed.
+//   @param actor_name - Object name or editor label of the pawn or AIController in the editor world; the first match is used.
+//   @param sight_radius - New SightRadius in cm, greater than 0.
+//   @param lose_sight_radius - Ignored: the code never reads it and always sets LoseSightRadius to sight_radius times 1.5.
 TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;
@@ -202,8 +202,8 @@ TSharedPtr<FJsonObject> HandleConfigureAISightRadius(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(R);
 }
 
-// MCP:get_ai_perceived_actors - Currently perceived actors (any sense) on an AI-possessed pawn.
-//   @param actor_name - Required.
+// MCP:get_ai_perceived_actors - List the actors that the AIPerceptionComponent of an AI-possessed pawn, or of an AIController, currently perceives by any sense, without changing anything. The actor is looked up in the editor world, not PIE, so an unpossessed pawn is an error. Returns count and perceived [{actor_name}]; no last-sensed time is included.
+//   @param actor_name - Object name or editor label of the pawn or AIController in the editor world; the first match is used.
 //   @returns { actor_name, perceived: [{actor_name, last_sensed_seconds}], count }
 TSharedPtr<FJsonObject> HandleGetAIPerceivedActors(const TSharedPtr<FJsonObject>& Params)
 {

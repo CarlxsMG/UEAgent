@@ -755,12 +755,12 @@ TSharedPtr<FJsonObject> HandleDisconnectIKGoalFromSolver(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // add_ik_retarget_chain
 // ---------------------------------------------------------------------------
-// MCP:add_ik_retarget_chain - Add a retarget bone chain to an IK Rig.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
+// MCP:add_ik_retarget_chain - Add a retarget bone chain from start_bone to end_bone, optionally tied to an IK goal, to an IK Rig asset and save it. Both bones must exist in the skeleton of the rig; the chain name is made unique, so read chain_name back. A failed save returns success false.
+//   @param ik_rig_path - IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero".
 //   @param chain_name - Name for the new retarget chain (uniquified by the engine)
-//   @param start_bone - First bone in the chain
-//   @param end_bone - Last bone in the chain
-//   @param goal_name - Optional IK goal to attach the chain to
+//   @param start_bone - First bone of the chain; must exist in the skeleton of the rig.
+//   @param end_bone - Last bone of the chain; must exist in the skeleton of the rig.
+//   @param goal_name - IK goal to attach the chain to (default none); not checked against the goals of the rig.
 //   @returns { asset_path: string, chain_name: string, start_bone: string, end_bone: string, goal_name: string, chain_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddIKRetargetChain(const TSharedPtr<FJsonObject>& Params)
@@ -1187,10 +1187,10 @@ TSharedPtr<FJsonObject> HandleRemoveIKRetargetChain(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // rename_ik_retarget_chain
 // ---------------------------------------------------------------------------
-// MCP:rename_ik_retarget_chain - Rename a retarget chain in an IK Rig.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
-//   @param chain_name - Current name of the retarget chain
-//   @param new_name - New name to assign
+// MCP:rename_ik_retarget_chain - Rename a retarget chain of an IK Rig asset and save it. The engine makes the new name unique, so read new_name back; an unknown chain_name is not an error but returns renamed false. The save result is not reported.
+//   @param ik_rig_path - IK Rig (UIKRigDefinition) asset path, e.g. "/Game/Retarget/IK_Hero".
+//   @param chain_name - Current name of the retarget chain, as get_ik_rig_info lists it.
+//   @param new_name - Requested new name; the engine may add a suffix to keep it unique.
 //   @returns { asset_path: string, old_name: string, new_name: string, renamed: bool }
 
 TSharedPtr<FJsonObject> HandleRenameIKRetargetChain(const TSharedPtr<FJsonObject>& Params)

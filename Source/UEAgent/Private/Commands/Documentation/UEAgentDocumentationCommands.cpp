@@ -227,8 +227,8 @@ TSharedPtr<FJsonObject> HandleGenerateBlueprintDocs(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:create_asset_documentation - Create detailed documentation for a specific asset.
-//   @param asset_name - The object path or name of the asset to document
+// MCP:create_asset_documentation - Build a JSON record of one asset from the Asset Registry, without loading it or writing a file: identity, .uasset size and date, a coarse category and usage blurb, and depth-1 dependencies and referencers (100 each at most). Errors without an editor world.
+//   @param asset_name - Package path ("/Game/Props/SM_Chair") or object path ("/Game/Props/SM_Chair.SM_Chair") of the asset; a bare asset name is not resolved
 //   @returns { asset_documentation: { asset_name, asset_path, asset_class, asset_type, package_name, object_path, file_name, file_size: int (bytes, 0 if file_exists=false), last_modified: string, file_exists: bool, asset_category, usage, dependencies: [string] (package names, depth-1, capped at 100), dependencies_truncated: bool, dependents: [string] (referencers, depth-1, capped at 100), dependents_truncated: bool }, generation_date: string, project_name: string }
 
 TSharedPtr<FJsonObject> HandleCreateAssetDocumentation(const TSharedPtr<FJsonObject>& Params)

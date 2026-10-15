@@ -1543,10 +1543,10 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraEmitterHandle(const TSharedPtr<FJsonO
 // duplicate_niagara_emitter_handle
 // Duplicates an existing emitter handle in a Niagara system.
 // ---------------------------------------------------------------------------
-// MCP:duplicate_niagara_emitter_handle - Duplicate an existing emitter handle in a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
-//   @param source_emitter_name - Display name of the emitter handle to duplicate.
-//   @param new_emitter_name - Optional name for the duplicate; defaults to "<source>_Copy"
+// MCP:duplicate_niagara_emitter_handle - Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, then save the system. Returns the actual name and id of the copy plus total_emitters; a failed save is not reported in the reply. Find handle names with get_niagara_emitter_handles.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
+//   @param source_emitter_name - Display name of the emitter handle to copy (case-insensitive), as get_niagara_emitter_handles lists it.
+//   @param new_emitter_name - Name for the copy (default "<source_emitter_name>_Copy").
 //   @returns { system_path: string, source_emitter_name: string, new_emitter_name: string, new_emitter_id: string, is_valid: bool, total_emitters: int }
 
 TSharedPtr<FJsonObject> HandleDuplicateNiagaraEmitterHandle(const TSharedPtr<FJsonObject>& Params)
@@ -1594,8 +1594,8 @@ TSharedPtr<FJsonObject> HandleDuplicateNiagaraEmitterHandle(const TSharedPtr<FJs
 // get_niagara_emitter_handles
 // Lists all emitter handles on a Niagara system: name, ID, enabled state.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_handles - List all emitter handles on a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
+// MCP:get_niagara_emitter_handles - List every emitter handle of a Niagara System asset with its display name, id GUID, enabled and valid flags, plus emitter_count. Read-only; the names feed the other emitter tools, and get_niagara_emitter_handle_info gives one handle in detail.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
 //   @returns { system_path: string, emitter_count: int, emitter_handles: [{ name, id, is_enabled, is_valid }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandles(const TSharedPtr<FJsonObject>& Params)
@@ -1678,10 +1678,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterEnabled(const TSharedPtr<FJsonObj
 // get_niagara_emitter_handle_info
 // Get detailed info for a specific emitter handle by name or index.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_handle_info - Get detailed info for a specific emitter handle.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Optional display name of the emitter handle
-//   @param emitter_index - Optional zero-based index; used if emitter_name not provided
+// MCP:get_niagara_emitter_handle_info - Read one emitter handle of a Niagara System asset, chosen by display name or 0-based index: its id, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags. Read-only; list every handle with get_niagara_emitter_handles.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
+//   @param emitter_name - Display name of the handle (case-insensitive); when non-empty it wins over emitter_index.
+//   @param emitter_index - 0-based position in the emitter list of the system, used only when emitter_name is absent or empty.
 //   @returns { system_path: string, emitter_name: string, emitter_id: string, emitter_id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandleInfo(const TSharedPtr<FJsonObject>& Params)
@@ -1726,10 +1726,10 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandleInfo(const TSharedPtr<FJson
 // Renames an emitter handle. Uses FNiagaraEmitterHandle::SetName which requires
 // the owning system reference (to ensure name uniqueness).
 // ---------------------------------------------------------------------------
-// MCP:rename_niagara_emitter_handle - Rename an emitter handle on a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
-//   @param current_name - Current display name of the emitter handle.
-//   @param new_name - New display name.
+// MCP:rename_niagara_emitter_handle - Rename an emitter handle of a Niagara System asset and save the system. The engine sanitizes the name and makes it unique among the emitters of the system, so read new_name and verified (false when the stored name differs from the request); a failed save is not reported.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
+//   @param current_name - Current display name of the emitter handle (case-insensitive), as get_niagara_emitter_handles lists it.
+//   @param new_name - Requested display name; it may come back sanitized or with a numeric suffix.
 //   @returns { system_path: string, old_name: string, new_name: string, verified: bool }
 
 TSharedPtr<FJsonObject> HandleRenameNiagaraEmitterHandle(const TSharedPtr<FJsonObject>& Params)
@@ -5300,9 +5300,9 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceArray(const TSharedPtr<FJso
 //                                         UNiagaraEmitter::TemplateAssetDescription (FText)
 // ========================================================================== //
 
-// MCP:set_niagara_system_warmup_time - Set the warmup time (seconds) on a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
-//   @param warmup_time - Warmup time in seconds (>= 0; pass 0 to disable warmup).
+// MCP:set_niagara_system_warmup_time - Set the warmup time in seconds of a Niagara System asset and save it; a failed save returns success false. With a non-zero warmup_tick_delta the engine rounds the time down to a whole number of ticks, so read new_warmup_time and warmup_tick_count back.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
+//   @param warmup_time - Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it.
 //   @returns { system_path: string, old_warmup_time: number, new_warmup_time: number, warmup_tick_count: int, applied: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTime(const TSharedPtr<FJsonObject>& Params)
@@ -5476,8 +5476,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemDeterministic(const TSharedPtr<FJs
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_deterministic"));
 }
 
-// MCP:get_niagara_system_warmup_time - Get the warmup / determinism configuration of a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
+// MCP:get_niagara_system_warmup_time - Read the warmup and determinism settings of a Niagara System asset: warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup and deterministic. Read-only; change them with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count, set_niagara_system_warmup_tick_delta and set_niagara_system_deterministic.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
 //   @returns { system_path: string, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraSystemWarmupTime(const TSharedPtr<FJsonObject>& Params)
@@ -5497,9 +5497,9 @@ TSharedPtr<FJsonObject> HandleGetNiagaraSystemWarmupTime(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_niagara_emitter_template_description - Set the FText TemplateAssetDescription metadata on a UNiagaraEmitter asset.
-//   @param emitter_asset_path - Asset path of the UNiagaraEmitter (the .uasset, not a system path).
-//   @param description - New description text
+// MCP:set_niagara_emitter_template_description - Set the TemplateAssetDescription text of a standalone Niagara Emitter asset (not an emitter inside a system) and save the asset; a failed save returns success false. Returns old_description and new_description; an empty string clears the text.
+//   @param emitter_asset_path - Asset path of the UNiagaraEmitter, e.g. "/Game/FX/NE_Sparks" (an emitter asset, not a system path).
+//   @param description - New description text, stored as FText; an empty string clears it.
 //   @returns { emitter_asset_path: string, old_description: string, new_description: string, applied: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraEmitterTemplateDescription(const TSharedPtr<FJsonObject>& Params)
@@ -5799,10 +5799,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterMaxGPUParticles(const TSharedPtr<
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_niagara_emitter_local_space - Toggle bLocalSpace on a Niagara emitter's FVersionedNiagaraEmitterData.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param local_space - Boolean to assign to bLocalSpace
+// MCP:set_niagara_emitter_local_space - Set whether one emitter of a Niagara System asset simulates in local space (bLocalSpace on its emitter data), then save the system. Returns local_space as read back, applied and saved (with save_error); the reply stays success even when the save fails, so check saved.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
+//   @param emitter_name - Display name of the emitter handle (case-insensitive).
+//   @param local_space - true to simulate the particles of the emitter in its local space, false for world space; the call fails without it.
 //   @returns { system_path: string, emitter_name: string, local_space: bool, applied: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraEmitterLocalSpace(const TSharedPtr<FJsonObject>& Params)
@@ -7599,11 +7599,11 @@ namespace
     }
 }
 
-// MCP:set_niagara_decal_renderer_material - Set UNiagaraDecalRendererProperties::Material by asset path (UMaterialInterface).
-//   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
-//   @param emitter_name - Name of the emitter handle.
-//   @param renderer_index - Index of the Decal renderer within the emitter's renderer list.
-//   @param material_path - Asset path of the UMaterialInterface to assign as the decal Material.
+// MCP:set_niagara_decal_renderer_material - Assign a material to the Decal renderer at renderer_index of one emitter in a Niagara System asset and save the system; a failed save returns success false. Returns the previous and new material paths and changed. For sprite, ribbon or mesh renderers use set_niagara_renderer_material.
+//   @param system_path - Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it.
+//   @param emitter_name - Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it.
+//   @param renderer_index - 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it.
+//   @param material_path - Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood".
 TSharedPtr<FJsonObject> HandleSetNiagaraDecalRendererMaterial(const TSharedPtr<FJsonObject>& Params)
 {
     FString Error;

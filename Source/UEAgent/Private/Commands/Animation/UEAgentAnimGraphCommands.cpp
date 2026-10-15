@@ -780,12 +780,14 @@ namespace
     }
 }
 
-// MCP:set_anim_graph_node_pin_binding - Bind an AnimGraph node's input pin (property) to a variable/property path via UAnimGraphNode_Base property bindings (the detail-panel "bind" chip). set_anim_graph_node_property writes the internal FAnimNode struct; this writes the pin BINDING map instead -- e.g. bind a Pose History node's "TransformTrajectory" pin to a "Trajectory" variable. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+// MCP:set_anim_graph_node_pin_binding - Bind an AnimGraph node input pin to a variable or property path in the node property-binding map (the Details-panel bind chip), e.g. "TransformTrajectory" to "Trajectory"; set_anim_graph_node_property edits the FAnimNode struct instead. Returns applied and the stored binding; saves the AnimBP without recompiling (run compile_anim_blueprint).
 //   @param anim_blueprint_path - Path or name of the UAnimBlueprint (aliases: anim_blueprint, blueprint_name).
 //   @param node_id - NodeGuid of the target UAnimGraphNode_* (from get_graph_nodes).
 //   @param pin_name - The bound property/pin name (e.g. "TransformTrajectory").
-//   @param binding_path - The variable/property path to bind the pin to (e.g. "Trajectory", or nested "MyStruct.Member").
+//   @param binding_path - The variable/property path to bind the pin to (e.g. "Trajectory", or nested "MyStruct.Member"). This tool does not check that the path resolves.
 //   @param graph_name - Target graph (optional; deep-resolved; default the top-level AnimGraph).
+//   @param anim_blueprint - Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty.
+//   @param blueprint_name - Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty.
 //   @returns { node_id, pin_name, binding_path, applied, binding:{property_name, property_path[], path_as_text, is_bound, is_promotion, binding_type, pin_category}, saved }
 TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonObject>& Params)
 {
@@ -870,11 +872,13 @@ TSharedPtr<FJsonObject> HandleSetAnimGraphNodePinBinding(const TSharedPtr<FJsonO
     return Result; // raw payload (matches the other AnimGraph mutators)
 }
 
-// MCP:clear_anim_graph_node_pin_binding - Remove a UAnimGraphNode_Base property binding from an input pin (the inverse of set_anim_graph_node_pin_binding). Use to drop a stale/invalid binding without deleting+recreating the node. Saves the ABP but does NOT recompile it -- run compile_anim_blueprint after your edits for runtime effect.
+// MCP:clear_anim_graph_node_pin_binding - Remove the property binding from one input pin of an AnimGraph node (inverse of set_anim_graph_node_pin_binding), dropping a stale binding without recreating the node. Returns was_bound, is_bound and cleared; an unbound pin gives cleared=false, not an error. Undoable; saves the AnimBP without recompiling (run compile_anim_blueprint).
 //   @param anim_blueprint_path - Path or name of the UAnimBlueprint (aliases: anim_blueprint, blueprint_name).
 //   @param node_id - NodeGuid of the target UAnimGraphNode_* (from get_graph_nodes).
 //   @param pin_name - The bound property/pin name whose binding to clear (e.g. "TransformTrajectory").
 //   @param graph_name - Target graph (optional; deep-resolved; default the top-level AnimGraph).
+//   @param anim_blueprint - Alias of anim_blueprint_path, used only when anim_blueprint_path is absent or empty.
+//   @param blueprint_name - Alias of anim_blueprint_path, used only when anim_blueprint_path and anim_blueprint are both absent or empty.
 //   @returns { node_id, pin_name, was_bound, is_bound, cleared, saved }
 TSharedPtr<FJsonObject> HandleClearAnimGraphNodePinBinding(const TSharedPtr<FJsonObject>& Params)
 {

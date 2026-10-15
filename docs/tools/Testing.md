@@ -26,7 +26,7 @@ Retrieve comprehensive debug information about a blueprint including structure, 
 
 ## `list_validators`
 
-List all enabled editor data validator classes.
+List the editor data validators the DataValidation subsystem has enabled (ForEachEnabledValidator): class_name, class_path and enabled for each, plus validator_count. Read-only; errors when the DataValidation plugin subsystem is unavailable. validate_asset runs them on one asset.
 
 No parameters.
 
@@ -101,7 +101,7 @@ STATIC listing of a blueprint's graphs and their nodes. It does NOT trace anythi
 
 ## `validate_asset`
 
-Run all registered data validators on a single asset.
+Run the enabled editor data validators (UEditorValidatorSubsystem::IsAssetValid, Script use case) on one asset: validation_result (Valid, Invalid or NotValidated), is_valid (NotValidated counts as valid), errors and warnings. Read-only; validators_run counts the enabled validators, not those that applied.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

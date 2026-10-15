@@ -251,8 +251,8 @@ TSharedPtr<FJsonObject> HandleGetTriggerInfo(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_actors_in_trigger - Gets list of actors currently overlapping with a trigger.
-//   @param trigger_name - Name of the trigger actor to check
+// MCP:get_actors_in_trigger - List the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}]; get_trigger_overlap_count returns only the count.
+//   @param trigger_name - Object name of the trigger actor, such as the actor_name returned by create_trigger; its editor label is not matched.
 //   @returns { trigger_name, actor_name, actor_class, actors, actor_count }
 TSharedPtr<FJsonObject> HandleGetActorsInTrigger(const TSharedPtr<FJsonObject>& Params)
 {
@@ -350,11 +350,11 @@ TSharedPtr<FJsonObject> HandleSetTriggerEvents(const TSharedPtr<FJsonObject>& Pa
 
 // Brush volumes.
 
-// MCP:create_volume - Creates a volume actor (BlockingVolume, KillZVolume, PainCausingVolume, or PostProcessVolume).
-//   @param volume_name - Name label for the volume actor
-//   @param volume_type - Volume class to spawn (defaults to BlockingVolume)
-//   @param location - World location for the spawned volume
-//   @param size - Optional cube brush size in unreal units
+// MCP:create_volume - Spawn a BlockingVolume, KillZVolume, PainCausingVolume, PostProcessVolume or TriggerVolume in the editor world with a real cube brush, labelled volume_name, as one undo step; the level is not saved. Returns actor_name, actor_path, actor_class and brush_built. For other AVolume classes or box extents use spawn_box_volume.
+//   @param volume_name - Editor label for the new actor; its object name is generated and returned as actor_name.
+//   @param volume_type - Volume class, case-insensitive: "BlockingVolume" (default), "KillZVolume", "PainCausingVolume", "PostProcessVolume" or "TriggerVolume"; any other value spawns a BlockingVolume.
+//   @param location - World location [x, y, z] in cm of the volume center (default [0, 0, 0]).
+//   @param size - Edge length in cm of the cube brush (the full side, not a half-extent); omitted or not positive gives 200.
 //   @returns { volume_name, volume_type, actor_name, actor_path, actor_class, brush_built, success }
 TSharedPtr<FJsonObject> HandleCreateVolume(const TSharedPtr<FJsonObject>& Params)
 {
@@ -421,8 +421,8 @@ TSharedPtr<FJsonObject> HandleCreateVolume(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_volume_info - Retrieves information about a volume actor, including its type.
-//   @param actor_name - Name of the volume actor to query
+// MCP:get_volume_info - Read a volume actor in the editor world without changing it: its class, whether it is a BlockingVolume, KillZVolume, PainCausingVolume or PostProcessVolume and, when it has a brush component, bounds_origin and bounds_extent as text plus has_brush. Fails if the actor is not an AVolume.
+//   @param actor_name - Object name of the volume actor in the editor world; its editor label is not matched.
 //   @returns { actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin, bounds_extent, has_brush }
 TSharedPtr<FJsonObject> HandleGetVolumeInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -729,16 +729,16 @@ static TSharedPtr<FJsonObject> HandleRemoveTypedTrigger(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:remove_trigger_box - Destroy an ATriggerBox actor after verifying the actor class.
-//   @param actor_name - Name of the ATriggerBox actor.
+// MCP:remove_trigger_box - Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
+//   @param actor_name - Object name of the TriggerBox actor (its editor label is not matched); the command fails without it.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveTriggerBox(const TSharedPtr<FJsonObject>& Params)
 {
     return HandleRemoveTypedTrigger<ATriggerBox>(Params, TEXT("remove_trigger_box"));
 }
 
-// MCP:remove_trigger_sphere - Destroy an ATriggerSphere actor after verifying the actor class.
-//   @param actor_name - Name of the ATriggerSphere actor.
+// MCP:remove_trigger_sphere - Delete a TriggerSphere actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
+//   @param actor_name - Object name of the TriggerSphere actor (its editor label is not matched); the command fails without it.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveTriggerSphere(const TSharedPtr<FJsonObject>& Params)
 {
@@ -814,11 +814,11 @@ TSharedPtr<FJsonObject> HandleGetTriggerEvents(const TSharedPtr<FJsonObject>& Pa
 // re-renders.
 // ---------------------------------------------------------------------------
 
-// MCP:set_trigger_box_extent - Set ATriggerBox::GetCollisionComponent()->BoxExtent (FVector).
-//   @param actor_name [string!] - TriggerBox actor name (required)
-//   @param extent_x [number!] - Box half-extent X (required, > 0)
-//   @param extent_y [number!] - Box half-extent Y (required, > 0)
-//   @param extent_z [number!] - Box half-extent Z (required, > 0)
+// MCP:set_trigger_box_extent - Resize a TriggerBox in the editor world by setting the unscaled half-extent of its box collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_extent, new_extent and changed. Each extent must be greater than 0.
+//   @param actor_name [string!] - Object name of the TriggerBox actor in the editor world; its editor label is not matched.
+//   @param extent_x [number!] - Half-extent along local X in cm, greater than 0; the box is twice as long.
+//   @param extent_y [number!] - Half-extent along local Y in cm, greater than 0.
+//   @param extent_z [number!] - Half-extent along local Z in cm, greater than 0.
 //   @returns { actor_name, component_name, previous_extent: {x, y, z}, new_extent: {x, y, z}, changed }
 TSharedPtr<FJsonObject> HandleSetTriggerBoxExtent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -862,9 +862,9 @@ TSharedPtr<FJsonObject> HandleSetTriggerBoxExtent(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:set_trigger_sphere_radius - Set ATriggerSphere::GetCollisionComponent()->SphereRadius (float, > 0).
-//   @param actor_name [string!] - TriggerSphere actor name (required)
-//   @param radius [number!] - Sphere radius (required, > 0)
+// MCP:set_trigger_sphere_radius - Resize a TriggerSphere in the editor world by setting the unscaled radius of its sphere collision component and updating its overlaps; the level is marked dirty, not saved. Returns previous_radius, new_radius and changed. The radius must be greater than 0.
+//   @param actor_name [string!] - Object name of the TriggerSphere actor in the editor world; its editor label is not matched.
+//   @param radius [number!] - New unscaled sphere radius in cm, greater than 0.
 //   @returns { actor_name, component_name, previous_radius, new_radius, changed }
 TSharedPtr<FJsonObject> HandleSetTriggerSphereRadius(const TSharedPtr<FJsonObject>& Params)
 {
@@ -909,8 +909,8 @@ TSharedPtr<FJsonObject> HandleSetTriggerSphereRadius(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_trigger_overlap_count - Count actors currently overlapping a trigger (no payload list).
-//   @param actor_name [string!] - Trigger actor name (ATriggerBox / ATriggerSphere / ATriggerVolume) (required)
+// MCP:get_trigger_overlap_count - Count the actors currently overlapping a TriggerBox, TriggerSphere or TriggerVolume in the editor world, without changing anything; the cheap form of get_actors_in_trigger. Returns actor_name and overlap_count. Fails if the first actor matching the name is not a trigger.
+//   @param actor_name [string!] - Object name or editor label of the trigger actor; the first actor matching either is used.
 //   @returns { actor_name, overlap_count }
 //   Read-only, headless-safe. Cheap variant of get_actors_in_trigger that skips the array payload.
 TSharedPtr<FJsonObject> HandleGetTriggerOverlapCount(const TSharedPtr<FJsonObject>& Params)

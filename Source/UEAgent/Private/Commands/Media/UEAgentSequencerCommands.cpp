@@ -3353,8 +3353,8 @@ TSharedPtr<FJsonObject> HandleGetSequenceSpawnables(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:get_sequence_possessables - List all possessables with GUID, name, class, parent GUID.
-//   @param sequence_name - Name of the level sequence asset.
+// MCP:get_sequence_possessables - List the possessable bindings of a Level Sequence found by asset name under /Game (first match): GUID, name, possessed class and parent GUID of each, plus possessable_count. Read-only; spawnables are listed by get_sequence_spawnables, and every binding with its tracks by get_sequence_bindings.
+//   @param sequence_name - Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case.
 //   @returns { sequence_name: string, possessables: [{guid, name, class, parent_guid}], possessable_count: int }
 
 TSharedPtr<FJsonObject> HandleGetSequencePossessables(const TSharedPtr<FJsonObject>& Params)
@@ -3385,9 +3385,9 @@ TSharedPtr<FJsonObject> HandleGetSequencePossessables(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:remove_sequence_binding - Remove a possessable/spawnable binding by GUID.
-//   @param sequence_name - Name of the level sequence asset.
-//   @param binding_guid - GUID string of the binding to remove.
+// MCP:remove_sequence_binding - Remove a spawnable or possessable binding, found by GUID, from a Level Sequence named by asset name under /Game, then save the sequence; a failed save returns success false. Fails when the GUID is not a spawnable or possessable of the sequence. Returns removed_as; get GUIDs from get_sequence_bindings.
+//   @param sequence_name - Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case.
+//   @param binding_guid - GUID of the binding to remove, as get_sequence_bindings returns it.
 //   @returns { sequence_name: string, binding_guid: string, removed: bool, removed_as: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleRemoveSequenceBinding(const TSharedPtr<FJsonObject>& Params)

@@ -207,23 +207,23 @@ Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a Dynamic
 
 ## `delete_selected_triangles_from_mesh`
 
-Delete triangles by a triangle-selection.
+Delete the listed triangle IDs from a DynamicMeshActor's live dynamic mesh in the editor world; IDs that do not exist are skipped, so compare num_deleted with requested_count. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `triangle_ids` | array | yes | Triangle IDs to delete (required, non-empty) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `triangle_ids` | array | yes | Non-empty array of non-negative integer triangle IDs, e.g. [0, 5, 12]; any negative or non-numeric entry fails the call. |
 
 **Returns:** `{ actor_name, num_deleted, requested_count, triangle_count, previous_triangle_count }`
 
 ## `delete_triangle_from_mesh`
 
-Delete a single triangle by ID from the mesh.
+Delete one triangle by ID from a DynamicMeshActor's live dynamic mesh in the editor world; a missing ID is not an error, deleted just comes back false. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `triangle_id` | number | yes | Triangle ID to delete (required) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `triangle_id` | number | yes | Non-negative integer ID of the triangle to delete. |
 
 **Returns:** `{ actor_name, triangle_id, deleted, triangle_count, previous_triangle_count }`
 
@@ -462,21 +462,21 @@ Get the number of separate connected components in the mesh (alias of GetNumConn
 
 ## `get_num_extended_polygroup_layers`
 
-Count extended polygroup layers on the mesh.
+Count the extended polygroup layers (those beyond the default polygroup layer) on a DynamicMeshActor's live dynamic mesh in the editor world, as num_polygroup_layers. Read-only; reply actor_name is the component name, not the actor label. Change the count with set_num_extended_polygroup_layers.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
 
 **Returns:** `{ actor_name, num_polygroup_layers }`
 
 ## `get_num_open_border_edges`
 
-Count open boundary edges (complement of get_mesh_open_border_loops).
+Count the open boundary edges (edges with a single adjacent triangle) of a DynamicMeshActor's live dynamic mesh in the editor world; 0 means the mesh is closed. Read-only; get the loops with get_mesh_open_border_loops. Reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
 
 **Returns:** `{ actor_name, num_open_border_edges }`
 
@@ -568,21 +568,21 @@ Renumber MaterialIDs on a DynamicMeshActor's live dynamic mesh. Two modes: pass 
 
 ## `remove_dynamic_mesh_actor`
 
-Destroy a spawned DynamicMeshActor from the editor world.
+Destroy a DynamicMeshActor in the editor world, found by label or object name, inside an undoable transaction. Returns the label, internal name and triangle_count_before of the destroyed actor; fails if the name matches no DynamicMeshActor. Create one with spawn_dynamic_mesh_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the ADynamicMeshActor to destroy (required). |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the DynamicMeshActor to destroy. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, destroyed: bool, triangle_count_before: int, note?: string }`
 
 ## `remove_unused_vertices`
 
-Remove unreferenced vertices from a DynamicMeshActor's dynamic mesh
+Remove the vertices no triangle references from a DynamicMeshActor's live dynamic mesh in the editor world and refresh its render data. Remaining vertex IDs are not renumbered and a clean mesh is a no-op; returns vertex_count_before, vertex_count, vertices_removed and removed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
 
 **Returns:** `{ actor_name: string, triangle_count: int, vertex_count: int, vertex_count_before: int, vertices_removed: int, removed: bool }`
 
@@ -626,15 +626,15 @@ Rotate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_Me
 
 ## `rotate_mesh_uvs`
 
-Rotate UVs in-place on a UV channel.
+Rotate all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by an angle in degrees around a UV-space pivot; 0 degrees changes nothing (rotated false). No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `uv_channel` | number | yes | UV channel index (required) |
-| `rotation_angle_deg` | number | yes | Rotation in degrees (required) |
-| `rotation_origin_u` | number | no | Optional U rotation origin (default 0) |
-| `rotation_origin_v` | number | no | Optional V rotation origin (default 0) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `uv_channel` | number | yes | 0-based UV channel index; a channel the mesh does not have fails the call. |
+| `rotation_angle_deg` | number | yes | Rotation angle in degrees; 0 leaves the UVs untouched. |
+| `rotation_origin_u` | number | no | U coordinate of the rotation pivot (default 0). |
+| `rotation_origin_v` | number | no | V coordinate of the rotation pivot (default 0). |
 
 **Returns:** `{ actor_name, uv_channel, rotation_angle_deg, rotation_origin: {u, v}, rotated: bool }`
 
@@ -651,16 +651,16 @@ Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_Mes
 
 ## `scale_mesh_uvs`
 
-Scale UVs in-place on a UV channel.
+Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors; zero factors are refused and 1, 1 changes nothing (scaled false). No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `uv_channel` | number | yes | UV channel index (required) |
-| `scale_u` | number | yes | U scale (required, non-zero) |
-| `scale_v` | number | yes | V scale (required, non-zero) |
-| `scale_origin_u` | number | no | Optional U scale origin (default 0) |
-| `scale_origin_v` | number | no | Optional V scale origin (default 0) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `uv_channel` | number | yes | 0-based UV channel index; a channel the mesh does not have fails the call. |
+| `scale_u` | number | yes | Scale factor along U; must be non-zero (1 keeps U unchanged). |
+| `scale_v` | number | yes | Scale factor along V; must be non-zero (1 keeps V unchanged). |
+| `scale_origin_u` | number | no | U coordinate of the point the scaling is centred on (default 0). |
+| `scale_origin_v` | number | no | V coordinate of the point the scaling is centred on (default 0). |
 
 **Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number,`
 
@@ -738,21 +738,21 @@ Stamp a MaterialID onto every triangle inside a region, via the engine's SelectM
 
 ## `set_mesh_uv_element_position`
 
-Set a single UV element's position by index.
+Set the (u, v) of one element of a UV channel overlay on a DynamicMeshActor's live dynamic mesh in the editor world; an invalid element ID writes nothing and returns is_valid_element false, not an error. No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `uv_channel` | number | yes | UV channel index (required) |
-| `element_id` | number | yes | UV element ID (vertex, edge, or triangle) (required) |
-| `u` | number | yes | New U position (required) |
-| `v` | number | yes | New V position (required) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `uv_channel` | number | yes | 0-based UV channel index; a channel the mesh does not have fails the call. |
+| `element_id` | number | yes | ID of the element in the UV overlay of that channel, not a vertex, edge or triangle ID. |
+| `u` | number | yes | New U coordinate of the element. |
+| `v` | number | yes | New V coordinate of the element. |
 
 **Returns:** `{ actor_name, uv_channel, element_id, new_position: {u, v}, is_valid_element, set: bool }`
 
 ## `set_mesh_uvs_from_projection`
 
-Project UVs onto a DynamicMeshActor's live dynamic mesh from a plane, a box or a cylinder, via UGeometryScriptLibrary_MeshUVFunctions::SetMeshUVsFrom{Planar,Box,Cylinder}Projection. BOX is the one to reach for on plank-and-post geometry (each face takes the projection axis it faces, so nothing stretches); PLANAR only makes sense for a flat piece; CYLINDER for anything wrapped. Can be limited to a region, so different parts of one mesh can take different projections. NOTE: this REPLACES the UVs of the selected triangles on that channel.
+Replace the UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world with a box, plane or cylinder projection, optionally only inside a region. Box suits plank-and-post geometry (each face takes the axis it faces), plane only flat pieces, cylinder wrapped shapes. Returns triangles_affected and applied.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -774,7 +774,7 @@ Project UVs onto a DynamicMeshActor's live dynamic mesh from a plane, a box or a
 | `source_material_id` | integer | no | Region parameter for region='material_id'. |
 | `polygroup_id` | integer | no | Region parameter for region='polygroup'. |
 | `min_triangle_points` | integer | no | Region parameter, 1-3. |
-| `invert` | boolean | no | Region parameter. |
+| `invert` | boolean | no | Select the complement of a box, sphere, plane or normal_angle region (default false); the other regions ignore it. |
 
 **Returns:** `{ actor_name, projection, uv_channel, region, triangles_affected: int, uv_channel_count: int, applied: bool }`
 
@@ -826,12 +826,12 @@ QEM-simplify a DynamicMeshActor's dynamic mesh to a target triangle count
 
 ## `spawn_dynamic_mesh_actor`
 
-Spawn an ADynamicMeshActor into the editor world
+Spawn an empty ADynamicMeshActor into the editor world (not PIE) at an optional location and rotation, ignoring collisions, in an undoable transaction. Returns the label of the new actor as actor_name, its internal name and triangle_count (0). Remove it with remove_dynamic_mesh_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [x, y, z] world location |
-| `rotation` | array | no | Optional [pitch, yaw, roll] world rotation |
+| `location` | array | no | World location [x, y, z] in cm (default the world origin). |
+| `rotation` | array | no | World rotation in degrees as [pitch, yaw, roll] (default no rotation). |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_dynamic_mesh_component: bool, has_dynamic_mesh: bool, triangle_count: int, spawned: bool }`
 
@@ -861,14 +861,14 @@ Translate the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary
 
 ## `translate_mesh_uvs`
 
-Translate UVs in-place on a UV channel.
+Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by (translate_u, translate_v); a zero offset changes nothing (translated false). No undo entry; reply actor_name is the component name, not the actor label.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | DynamicMeshActor name (required) |
-| `uv_channel` | number | yes | UV channel index (required) |
-| `translate_u` | number | yes | U translation (required) |
-| `translate_v` | number | yes | V translation (required) |
+| `actor_name` | string | yes | Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world. |
+| `uv_channel` | number | yes | 0-based UV channel index; a channel the mesh does not have fails the call. |
+| `translate_u` | number | yes | Offset added to every U coordinate (1.0 shifts by one full tile). |
+| `translate_v` | number | yes | Offset added to every V coordinate (1.0 shifts by one full tile). |
 
 **Returns:** `{ actor_name: string, uv_channel: int, translate_u: number, translate_v: number,`
 

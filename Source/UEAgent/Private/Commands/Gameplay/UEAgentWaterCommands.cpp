@@ -232,9 +232,9 @@ namespace
 // ---------------------------------------------------------------------------
 // create_water_zone
 // ---------------------------------------------------------------------------
-// MCP:create_water_zone - Spawn an AWaterZone actor in the editor world.
+// MCP:create_water_zone - Spawn a new AWaterZone actor in the editor world at location, unrotated, and label it. Not idempotent: every call adds another zone, even with a label already in use. Nothing is saved. Returns actor_label, actor_name and has_water_mesh; link bodies via water_zone_label of create_lake_water_body and its siblings.
 //   @param actor_label - Label to assign to the new AWaterZone actor
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+//   @param location - World location [X, Y, Z] in cm; anything but a 3-number array means the origin.
 //   @returns { actor_label: string, actor_name: string, has_water_mesh: bool }
 TSharedPtr<FJsonObject> HandleCreateWaterZone(
 	const TSharedPtr<FJsonObject>& Params)
