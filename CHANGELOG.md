@@ -4,6 +4,41 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.1 - 2026-10-15
+
+- Calls that killed the editor are refused before they touch anything: a negative `section_index` on
+  the procedural mesh tools, `remap_material_ids` with `compact: true` on a mesh whose material IDs
+  reach past its material list, a negative `option_index` on `add_eqs_test` and `add_eqs_generator`,
+  `add_spring_arm` with the name of an existing component (it now takes a free name), and
+  `add_skeletal_mesh_socket` copying to the skeleton of a mesh without one.
+- Tools that answered success for nothing now say what happened. `set_anim_curve_keys` on a transform
+  curve wrote nothing; `add_anim_bone_track` with an unknown bone replaced the root track;
+  `generate_mesh_uvs` deleted every UV channel above the one it wrote; `apply_uniform_remesh` could
+  not use `uv_preserving` smoothing and ignored `preserve_sharp_edges` and `auto_compact` set to
+  false; the dynamic mesh boolean, normals, UV, material ID and transform tools and the render target
+  draws measure what they did (an identity transform succeeds with `applied: false`);
+  `add_metasound_graph_output` with an existing name reset its default; `add_mass_trait`,
+  `add_widget_to_blueprint` and `remove_string_table_entry` said added, saved or removed for nothing;
+  `set_mid_scalar_param` and `copy_mid_params_from_source` accepted unknown parameters;
+  `set_actor_material` accepted any slot; and the IK rig, retargeter, geometry collection, camera rig,
+  animation sequence and Interchange pipeline tools report a failed save.
+- Edits that were lost or half written: the Niagara data interface tools never dirtied or saved the
+  system; the `set_game_mode_*` setters never dirtied a Blueprint GameMode; the gameplay effect and
+  cue setters edited the class defaults and then had the save refused during Play-in-Editor (they
+  refuse first); `create_level_sequence` shifted the keys of an existing sequence and accepted a rate
+  below 1; `create_audio_bus` and `create_sound_source_bus` reset an existing asset's settings.
+- Undoable now: the smart object slot tools, `add_eqs_test`, `add_spring_arm` and
+  `set_control_bus_mix_stage_value`.
+- Also fixed: `setup_foot_ik` binds the legs, `add_subsequence_track` refuses a sequence that would
+  contain itself, `remove_widget` reaches the widgets `create_widget` makes in Play-in-Editor (new
+  optional `target_world`), `add_chooser_column_to_table` adds a second column of the same type,
+  `create_editable_skeletal_mesh` takes `/Game` and plugin paths, `define_usd_prim` refuses an unknown
+  specifier, and a new audio bus is Stereo as documented.
+- Schemas: `interp_mode` of `set_anim_curve_interp_mode` and `rotation` of `rotate_dynamic_mesh` are
+  required, as the tools already demanded; `duration_seconds` of `set_gameplay_effect_duration` is
+  optional (only `HasDuration` needs it); the six tag lists of
+  `set_gameplay_effect_component_target_tag_requirements` are arrays.
+
 ## 1.2.0 - 2026-10-15
 
 - A Claude Code plugin, `ueagent`, installed from this repository
