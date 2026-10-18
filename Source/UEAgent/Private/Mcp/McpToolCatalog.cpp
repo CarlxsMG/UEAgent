@@ -351,6 +351,13 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 					(*ParamObj)->TryGetBoolField(TEXT("required"), Param.bRequired);
 					(*ParamObj)->TryGetStringField(TEXT("description"), Param.Description);
 					(*ParamObj)->TryGetStringField(TEXT("aliasOf"), Param.AliasOf);
+					const TArray<TSharedPtr<FJsonValue>>* IntRange = nullptr;
+					if ((*ParamObj)->TryGetArrayField(TEXT("intRange"), IntRange) && IntRange && IntRange->Num() == 2
+						&& (*IntRange)[0].IsValid() && (*IntRange)[1].IsValid()
+						&& (*IntRange)[0]->TryGetNumber(Param.IntRangeMin) && (*IntRange)[1]->TryGetNumber(Param.IntRangeMax))
+					{
+						Param.bHasIntRange = true;
+					}
 					if (Param.Name.IsEmpty() || Tool.FindParam(Param.Name))
 					{
 						continue;
@@ -518,6 +525,40 @@ FString FMcpToolCatalog::CheckRequired(const FTool& Tool, const TSharedPtr<FJson
 				*Tool.Name, *Param.Name, *Param.Name, *FString::Join(*Aliases, TEXT(", ")));
 		}
 		return FString::Printf(TEXT("%s: missing required parameter '%s'"), *Tool.Name, *Param.Name);
+	}
+	return FString();
+}
+
+FString FMcpToolCatalog::CheckIntegerRanges(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return FString();
+	}
+	const TSharedPtr<const FMcpToolCatalog> Catalog = GetCurrent();
+	const FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(CommandType) : nullptr;
+	if (!Tool)
+	{
+		return FString();
+	}
+	for (const FParam& Param : Tool->Params)
+	{
+		const TSharedPtr<FJsonValue> Value = Param.bHasIntRange ? Params->TryGetField(Param.Name) : nullptr;
+		// Only a JSON number: that is what the schema asks for, and what TryGetNumberField(int32) range-checks.
+		if (!Value.IsValid() || Value->Type != EJson::Number)
+		{
+			continue;
+		}
+		const double Number = Value->AsNumber();
+		// The engine accepts [Min, Max] and rounds half away from zero, so 2147483647.4 already fails its read.
+		if (Number < Param.IntRangeMin || Number > Param.IntRangeMax)
+		{
+			return FString::Printf(
+				TEXT("%s: %s is %s, outside the integer range the tool reads it into (%.0f to %.0f). Out of that range the value ")
+				TEXT("cannot be read, and the tool would go on with its default instead. WHAT WORKS: a whole number from %.0f to %.0f."),
+				*CommandType, *Param.Name, *FString::SanitizeFloat(Number, 0), Param.IntRangeMin, Param.IntRangeMax,
+				Param.IntRangeMin, Param.IntRangeMax);
+		}
 	}
 	return FString();
 }

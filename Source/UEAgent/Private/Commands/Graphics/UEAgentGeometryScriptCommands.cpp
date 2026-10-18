@@ -36,6 +36,7 @@
 #include "GeometryScript/MeshSelectionFunctions.h" // UGeometryScriptLibrary_MeshSelectionFunctions::SelectMeshElements{InBox,InSphere,WithPlane,ByNormalAngle,ByMaterialID,ByPolygroup}
 #include "GeometryScript/GeometryScriptSelectionTypes.h" // FGeometryScriptMeshSelection::{GetNumSelected,ConvertToMeshIndexArray}
 #include "DynamicMesh/DynamicMesh3.h"             // FDynamicMesh3 (GeometryCore) — needed by ConvertToMeshIndexArray via UDynamicMesh::ProcessMesh
+#include "VectorTypes.h"                          // UE::Geometry::Normalized / IsNormalized (GeometryCore): the ray direction check of find_nearest_ray_intersection_with_mesh
 // Mesh map ("what is this piece?") + UV unwrapping.
 #include "Selections/MeshConnectedComponents.h"   // UE::Geometry::FMeshConnectedComponents::FindConnectedTriangles (per-island triangle lists; READ-ONLY, unlike SplitMeshByComponents)
 #include "GeometryScript/MeshSelectionQueryFunctions.h" // UGeometryScriptLibrary_MeshSelectionQueryFunctions::GetMeshSelectionBoundingBox
@@ -2281,20 +2282,16 @@ TSharedPtr<FJsonObject> HandleFindNearestPointOnMesh(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:find_nearest_ray_intersection_with_mesh - Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.
+// MCP:find_nearest_ray_intersection_with_mesh - Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. A ray_direction that cannot be normalized (all zeros, a non-finite value, or not an array of three numbers) is refused before anything else runs. hit is false when nothing is hit within max_distance. The mesh is not changed.
 //   @param actor_name - Label or name of the target DynamicMeshActor.
 //   @param ray_origin - [x, y, z] origin point of the ray in mesh-local space.
-//   @param ray_direction - [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter.
+//   @param ray_direction - [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter, but a zero or non-finite direction is an error.
 //   @param max_distance - Optional float; max search distance (0 = unlimited).
 //   @param allow_unsafe_modified [bool] - Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh.
 //   @returns { actor_name, hit: bool, ray_parameter, hit_triangle_id, hit_position_x/y/z, hit_bary_coords_x/y/z } -- actor_name is the dynamic mesh component's name, not the actor label; ray_parameter is a distance along the normalized direction.
 TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
-    FString Error;
-    UDynamicMesh* DynMesh = ResolveDynamicMeshForSpatial(Params, Error);
-    if (!DynMesh)
-        return mcp_common::MakeErrorReply(Error);
     if (!Params->HasField(TEXT("ray_origin")))
         return mcp_common::MakeErrorReply(TEXT("ray_origin is required"));
     if (!Params->HasField(TEXT("ray_direction")))
@@ -2302,6 +2299,23 @@ TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
 
     const FVector RayOrigin = mcp_common::ReadJsonVector(Params, TEXT("ray_origin"));
     const FVector RayDirection = mcp_common::ReadJsonVector(Params, TEXT("ray_direction"));
+
+    // The engine builds its ray with UE::Geometry::Normalized(RayDirection), which yields the zero vector for a zero
+    // length and NaN for an infinite one; that ray hits nothing, so the query would answer hit:false for a request
+    // that is no ray at all. The same normalization is measured here and refused before anything else runs. A
+    // malformed array reads as the zero vector (ReadJsonVector), so it is refused too.
+    if (!UE::Geometry::IsNormalized(UE::Geometry::Normalized(FVector3d(RayDirection))))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("ray_direction (%s) cannot be normalized: pass an [x, y, z] array of finite numbers that are not all zero"),
+            *RayDirection.ToString()));
+    }
+
+    FString Error;
+    UDynamicMesh* DynMesh = ResolveDynamicMeshForSpatial(Params, Error);
+    if (!DynMesh)
+        return mcp_common::MakeErrorReply(Error);
+
     const FGeometryScriptSpatialQueryOptions Options = ReadSpatialOptions(Params);
 
     FGeometryScriptDynamicMeshBVH BVH;

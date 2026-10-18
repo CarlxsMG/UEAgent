@@ -12,6 +12,11 @@
 #include "UObject/SavePackage.h"
 #include "UObject/Package.h"
 #include "Misc/PackageName.h"
+#include "HAL/FileManager.h"            // IFileManager::IsReadOnly -- a .uasset read-only on disk cannot be saved
+#include "Serialization/ObjectWriter.h" // FObjectWriter / FObjectReader -- the in-memory snapshot a failed edit is put back from
+#include "Serialization/ObjectReader.h"
+#include "UObject/UObjectHash.h"        // GetObjectsWithOuter -- the components an edit added
+#include "UObject/ObjectKey.h"          // TObjectKey
 #include "Engine/CurveTable.h"          // UCurveTable + FCurveTableRowHandle (set_..._custom_curve FinalLookupCurve)
 #include "Engine/World.h"               // GEditor->GetEditorWorldContext
 #include "EngineUtils.h"                // TActorIterator
@@ -203,8 +208,10 @@ namespace
 
     // The refusal of a CDO edit that GASAuthoring_SaveBlueprint could not persist, or null when the edit may
     // go ahead. SaveAssetPackage refuses every save while a Play-in-Editor session runs, and a save under an
-    // enforced read-only root; editing the CDO first would leave the change in memory, and its package dirty,
-    // behind an error reply. Call it after loading the Blueprint and before the first write to its CDO.
+    // enforced read-only root, and the engine cannot replace a .uasset that is read-only on disk (a Git LFS
+    // `lockable` file nobody has locked); editing the CDO first would leave the change in memory, and its
+    // package dirty, behind an error reply. Call it after loading the Blueprint and before the first write to its
+    // CDO; a save that fails for any other reason is undone by FGASAuthoringCDOEdit.
     TSharedPtr<FJsonObject> GASAuthoring_RefuseUnsavableEdit(const UBlueprint* Blueprint)
     {
         if (mcp_common::IsPieActive())
@@ -221,8 +228,142 @@ namespace
                 TEXT("'mcp.ReadOnlyRootEnforcement 0' if this really is intended."),
                 *PackageName));
         }
+        // The same file SaveAssetPackage writes. A package with no file yet has nothing read-only to replace.
+        FString FileName;
+        if (FPackageName::TryConvertLongPackageNameToFilename(PackageName, FileName, FPackageName::GetAssetPackageExtension())
+            && IFileManager::Get().FileExists(*FileName) && IFileManager::Get().IsReadOnly(*FileName))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("REFUSED: %s is read-only on disk, so it cannot be saved and nothing was changed. In a Git LFS ")
+                TEXT("repo that is a `lockable` file you have not locked: take the lock (git lfs lock <file>) and retry."),
+                *FileName));
+        }
         return nullptr;
     }
+
+    // The in-memory state a CDO edit starts from, so that an edit which fails, or whose save fails, leaves nothing
+    // behind its error reply: otherwise the change stays in memory, its package dirty, and the next save of that
+    // package writes it. Take it after GASAuthoring_RefuseUnsavableEdit and before the first write to the CDO.
+    // It holds the properties of the CDO and of the GameplayEffectComponents it already has (a component setter
+    // edits those), a GameplayEffect's cached tags, and the package's dirty flag. Undo() puts them back and takes
+    // out any component the edit added; Keep() is called once the edit is saved. Destroyed without either, it
+    // undoes, so every error return after it rolls the edit back.
+    class FGASAuthoringCDOEdit
+    {
+    public:
+        explicit FGASAuthoringCDOEdit(UObject* InCDO)
+            : CDO(InCDO)
+            , Package(InCDO->GetOutermost())
+            , bPackageWasDirty(InCDO->GetOutermost()->IsDirty())
+        {
+            TArray<UObject*> Subobjects;
+            GetObjectsWithOuter(InCDO, Subobjects, EGetObjectsFlags::None);
+            Snapshot(InCDO);
+            for (UObject* Subobject : Subobjects)
+            {
+                if (Subobject->IsA<UGameplayEffectComponent>())
+                {
+                    ExistingSubobjects.Add(Subobject);
+                    Snapshot(Subobject);
+                }
+            }
+            if (const UGameplayEffect* GE = Cast<UGameplayEffect>(InCDO))
+            {
+                // Plain members, not UPROPERTYs, so the archive does not carry them; the component setters'
+                // SetAndApply* add to them.
+                bHasCachedTags = true;
+                CachedAssetTags = GE->CachedAssetTags;
+                CachedGrantedTags = GE->CachedGrantedTags;
+                CachedBlockedAbilityTags = GE->CachedBlockedAbilityTags;
+            }
+        }
+
+        FGASAuthoringCDOEdit(const FGASAuthoringCDOEdit&) = delete;
+        FGASAuthoringCDOEdit& operator=(const FGASAuthoringCDOEdit&) = delete;
+
+        ~FGASAuthoringCDOEdit()
+        {
+            Undo();
+        }
+
+        // The edit was saved: nothing is put back.
+        void Keep()
+        {
+            bSettled = true;
+        }
+
+        void Undo()
+        {
+            if (bSettled)
+            {
+                return;
+            }
+            bSettled = true;
+            for (const FObjectState& State : States)
+            {
+                if (UObject* Object = State.Object.Get())
+                {
+                    FObjectReader(Object, State.Bytes);
+                }
+            }
+            UObject* Owner = CDO.Get();
+            if (UGameplayEffect* GE = Cast<UGameplayEffect>(Owner); GE && bHasCachedTags)
+            {
+                GE->CachedAssetTags = CachedAssetTags;
+                GE->CachedGrantedTags = CachedGrantedTags;
+                GE->CachedBlockedAbilityTags = CachedBlockedAbilityTags;
+            }
+            if (Owner)
+            {
+                // A component the edit created (UGameplayEffect::AddComponent, the only subobject these edits make)
+                // is no longer referenced once the properties are back, but a save takes every RF_Public object of
+                // the package as an export: it leaves the package, so no later save writes it.
+                TArray<UObject*> Subobjects;
+                GetObjectsWithOuter(Owner, Subobjects, EGetObjectsFlags::None);
+                for (UObject* Subobject : Subobjects)
+                {
+                    if (Subobject->IsA<UGameplayEffectComponent>() && !ExistingSubobjects.Contains(Subobject))
+                    {
+                        Subobject->ClearFlags(RF_Public | RF_Standalone);
+                        Subobject->Rename(nullptr, GetTransientPackage(),
+                            REN_DontCreateRedirectors | REN_DoNotDirty | REN_NonTransactional);
+                        Subobject->MarkAsGarbage();
+                    }
+                }
+            }
+            if (UPackage* OwnerPackage = Package.Get())
+            {
+                OwnerPackage->SetDirtyFlag(bPackageWasDirty);
+            }
+        }
+
+    private:
+        struct FObjectState
+        {
+            TWeakObjectPtr<UObject> Object;
+            TArray<uint8> Bytes;
+        };
+
+        void Snapshot(UObject* Object)
+        {
+            FObjectState& State = States.AddDefaulted_GetRef();
+            State.Object = Object;
+            // Without delta: a property still equal to its archetype's value would be left out of a delta and so
+            // never put back after the edit changed it.
+            FObjectWriter(Object, State.Bytes, /*bIgnoreClassRef*/ false, /*bIgnoreArchetypeRef*/ false, /*bDoDelta*/ false);
+        }
+
+        TWeakObjectPtr<UObject> CDO;
+        TWeakObjectPtr<UPackage> Package;
+        bool bPackageWasDirty = false;
+        TArray<FObjectState> States;
+        TSet<TObjectKey<UObject>> ExistingSubobjects;
+        bool bHasCachedTags = false;
+        FGameplayTagContainer CachedAssetTags;
+        FGameplayTagContainer CachedGrantedTags;
+        FGameplayTagContainer CachedBlockedAbilityTags;
+        bool bSettled = false;
+    };
 
     // LoadGameplayEffectCDO into Out for a modifier edit, refused when the CDO's Modifiers array has no entry at
     // Out.Index or when the edit could not be saved (GASAuthoring_RefuseUnsavableEdit); the error reply on failure.
@@ -542,7 +683,29 @@ namespace
 
     // Persist a CDO edit: mark the Blueprint modified and dirty and save its package, without recompiling
     // (values on the CDO serialize with the package). Modify() on the CDO is the caller's responsibility
-    // (done before mutating). Null when saved, else the error reply.
+    // (done before mutating). A save that fails undoes Edit, the snapshot taken before the edit, so the error
+    // reply leaves the asset as it was; a saved edit is kept. Null when saved, else the error reply.
+    TSharedPtr<FJsonObject> GASAuthoring_SaveBlueprint(UBlueprint* Blueprint, FGASAuthoringCDOEdit& Edit)
+    {
+        if (!Blueprint)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Null Blueprint"));
+        }
+        Blueprint->Modify();
+        Blueprint->MarkPackageDirty();
+        FString SaveError;
+        if (!mcp_common::SaveAssetPackage(Blueprint->GetOutermost(), Blueprint, SaveError))
+        {
+            Edit.Undo();
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s The edit was undone, so the asset is as it was before the call."), *SaveError));
+        }
+        Edit.Keep();
+        return nullptr;
+    }
+
+    // The save of a Blueprint edit that has no CDO snapshot to undo (a member variable added and compiled): null
+    // when saved, else the error reply.
     TSharedPtr<FJsonObject> GASAuthoring_SaveBlueprint(UBlueprint* Blueprint)
     {
         if (!Blueprint)
@@ -551,13 +714,10 @@ namespace
         }
         Blueprint->Modify();
         Blueprint->MarkPackageDirty();
-        if (UPackage* Package = Blueprint->GetOutermost())
+        FString SaveError;
+        if (!mcp_common::SaveAssetPackage(Blueprint->GetOutermost(), Blueprint, SaveError))
         {
-            FString SaveError;
-            if (!mcp_common::SaveAssetPackage(Package, Blueprint, SaveError))
-            {
-                return mcp_common::MakeErrorReply(SaveError);
-            }
+            return mcp_common::MakeErrorReply(SaveError);
         }
         return nullptr;
     }
@@ -689,20 +849,15 @@ namespace
             return Refused;
         }
 
+        FGASAuthoringCDOEdit Edit(AbilityCDO);
         AbilityCDO->Modify();
         ClassProp->SetObjectPropertyValue(ClassProp->ContainerPtrToValuePtr<void>(AbilityCDO), GEClass);
 
         // Native UPROPERTY on the parent class -> values live on the CDO and serialize with the package;
         // mark dirty + save, no recompile (same rationale as the GE CDO setters).
-        AbilityBP->Modify();
-        AbilityBP->MarkPackageDirty();
-        if (UPackage* Package = AbilityBP->GetOutermost())
+        if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(AbilityBP, Edit))
         {
-            FString SaveError;
-            if (!mcp_common::SaveAssetPackage(Package, AbilityBP, SaveError))
-            {
-                return mcp_common::MakeErrorReply(SaveError);
-            }
+            return SaveFailed;
         }
 
         UObject* RB = ClassProp->GetObjectPropertyValue(ClassProp->ContainerPtrToValuePtr<void>(AbilityCDO));
@@ -942,7 +1097,7 @@ TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& P
 
 // GameplayEffect CDO authoring
 
-// MCP:set_gameplay_effect_duration - Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session or a read-only root fails before any edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
+// MCP:set_gameplay_effect_duration - Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param duration_policy - Instant, Infinite, or HasDuration
 //   @param duration_seconds - Duration in seconds; required when duration_policy is HasDuration, ignored for Instant and Infinite
@@ -997,6 +1152,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
 
     GECDO->DurationPolicy = Policy;
@@ -1012,7 +1168,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
     // (not Blueprint NewVariables), so their values live on the CDO and serialize with
     // the package directly. Recompiling risks re-initializing the CDO; marking dirty +
     // saving is sufficient and deterministic.
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1053,7 +1209,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
 //   UGameplayEffect::StackDurationRefreshPolicy / StackPeriodResetPolicy                     GameplayEffect.h
 //   FScalableFloat::GetValue() (UE_API)  ScalableFloat.h ; EGameplayEffectStackingType (None/AggregateBySource/AggregateByTarget)
 
-// MCP:set_gameplay_effect_period - Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session or a read-only root fails before any edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
+// MCP:set_gameplay_effect_period - Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint.
 //   @param period_seconds - Period in seconds between executions (0 = non-periodic).
 //   @param execute_on_application - Optional: if true the effect also executes immediately on application (default false).
@@ -1077,6 +1233,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectPeriod(const TSharedPtr<FJsonObje
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
     GECDO->Period = FScalableFloat((float)PeriodSeconds);
     bool bExecOnApp = false;
@@ -1086,7 +1243,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectPeriod(const TSharedPtr<FJsonObje
     // Period / bExecutePeriodicEffectOnApplication are NATIVE UProperties on UGameplayEffect (not BP
     // NewVariables), so values live on the CDO and serialize with the package — mark dirty + save, no
     // recompile (identical rationale to set_gameplay_effect_duration).
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1102,7 +1259,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectPeriod(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_stacking - Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies).
+// MCP:set_gameplay_effect_stacking - Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint.
 //   @param stacking_type - None | AggregateBySource | AggregateByTarget.
 //   @param stack_limit - Optional max stack count (int; 0 = no limit).
@@ -1156,6 +1313,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
     // UGameplayEffect::StackingType is UE_DEPRECATED(5.7) ("will be made private; use GetStackingType").
     // The only setter, SetStackingType(), is WITH_EDITOR + non-exported (no GAMEPLAYABILITIES_API) -> not
@@ -1176,7 +1334,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
         GECDO->StackPeriodResetPolicy = ResetPolicy.GetValue();
     }
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1198,7 +1356,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectStacking(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session or a read-only root fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
+// MCP:add_gameplay_effect_modifier - Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param attribute_name - Attribute to modify, Health or MySet.Health: the bare name or AttributeSetClass.Attribute, case-insensitive, first match among the loaded AttributeSet classes
 //   @param modifier_op - Add, Multiply, Divide, or Override (case-insensitive)
@@ -1263,6 +1421,7 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectModifier(const TSharedPtr<FJsonOb
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
 
     // Build and append the modifier (FGameplayModifierInfo, GameplayEffect.h).
@@ -1275,7 +1434,7 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectModifier(const TSharedPtr<FJsonOb
 
     // Persist the CDO edit without recompiling (Modifiers is a native UProperty on the
     // UGameplayEffect parent; see set_gameplay_effect_duration for rationale).
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1305,7 +1464,7 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectModifier(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_gameplay_effect_modifier - Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD)
+// MCP:remove_gameplay_effect_modifier - Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array to remove (0 = first; add_gameplay_effect_modifier appends)
 //   @returns { ge_blueprint_path: string, removed_index: int, modifier_count: int, removed: bool }
@@ -1322,6 +1481,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectModifier(const TSharedPtr<FJso
         return Error;
     }
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
 
     // Remove the entry. UGameplayEffect::Modifiers is a public native UProperty
@@ -1332,7 +1492,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectModifier(const TSharedPtr<FJso
 
     // Persist the CDO edit without recompiling (Modifiers lives on the UGameplayEffect
     // parent CDO and serializes with the package; identical rationale to the add path).
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1358,7 +1518,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectModifier(const TSharedPtr<FJso
 //   FGameplayEffectAttributeCaptureDefinition(FGameplayAttribute, EGameplayEffectAttributeCaptureSource, bSnapshot) (inline)
 //   Read-back: GetMagnitudeCalculationType()/GetSetByCallerFloat() (inline), GetAttributeCaptureDefinitions() (UE_API)
 
-// MCP:set_gameplay_effect_modifier_set_by_caller - Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name)
+// MCP:set_gameplay_effect_modifier_set_by_caller - Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (add_gameplay_effect_modifier appends; 0 = first)
 //   @param data_tag - Optional gameplay tag the caller uses to set the magnitude (modern path; must be a registered tag)
@@ -1412,6 +1572,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
             FString::Printf(TEXT("data_tag '%s' is not a registered gameplay tag and no data_name was given"), *DataTagStr));
     }
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
     // The public inline ctor FGameplayEffectModifierMagnitude(const FSetByCallerFloat&) sets
     // MagnitudeCalculationType = SetByCaller (GameplayEffect.h). The struct's members
@@ -1420,7 +1581,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
     // no recompile (identical rationale to set_gameplay_effect_duration).
     Modifier.Magnitude() = FGameplayEffectModifierMagnitude(SetByCaller);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1438,7 +1599,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_attribute_based - Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute)
+// MCP:set_gameplay_effect_modifier_attribute_based - Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param backing_attribute - Attribute to capture, e.g. Health or MySet.Health (must exist on some AttributeSet)
@@ -1511,10 +1672,11 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
     AttrFloat.BackingAttribute = FGameplayEffectAttributeCaptureDefinition(BackingAttr, CaptureSource, bSnapshot);
     AttrFloat.AttributeCalculationType = CalcType;
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
     Modifier.Magnitude() = FGameplayEffectModifierMagnitude(AttrFloat);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1571,7 +1733,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayModMagnitudeCalculationBlueprint(con
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_custom - Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it)
+// MCP:set_gameplay_effect_modifier_custom - Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param calculation_class - BP asset path (/Game/...) or class name of a CONCRETE UGameplayModMagnitudeCalculation subclass
@@ -1624,10 +1786,11 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
     CustomFloat.PreMultiplyAdditiveValue = FScalableFloat((float)PreAdd);
     CustomFloat.PostMultiplyAdditiveValue = FScalableFloat((float)PostAdd);
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
     Modifier.Magnitude() = FGameplayEffectModifierMagnitude(CustomFloat);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1657,7 +1820,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
 //   reflection (GetMagnitudeSubStructPtr, by-name UScriptStruct lookup) — read-back of channel/calc-type
 //   and the FinalLookupCurve write/read (FinalLookupCurve is a public member once the struct is reached).
 
-// MCP:set_gameplay_effect_modifier_attribute_based_up_to_channel - Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel)
+// MCP:set_gameplay_effect_modifier_attribute_based_up_to_channel - Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param backing_attribute - Attribute to capture, e.g. Health or MySet.Health (must exist on some AttributeSet)
@@ -1729,10 +1892,11 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBasedUpToChannel
     AttrFloat.AttributeCalculationType = EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel;
     AttrFloat.FinalChannel = FinalChannel;
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
     Modifier.Magnitude() = FGameplayEffectModifierMagnitude(AttrFloat);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1773,7 +1937,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBasedUpToChannel
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve
+// MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be CustomCalculationClass (call set_gameplay_effect_modifier_custom first)
 //   @param curve_table_path - Full asset path of the UCurveTable holding the lookup row
@@ -1818,11 +1982,12 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustomCurve(const TShared
 
     const bool bRowExists = CurveTable->FindCurveUnchecked(RowFName) != nullptr;
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
+    Modifier.GECDO->Modify();
     CustomPtr->FinalLookupCurve.CurveTable = CurveTable;
     CustomPtr->FinalLookupCurve.RowName = RowFName;
 
-    Modifier.GECDO->Modify();
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1845,7 +2010,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustomCurve(const TShared
 //   Both reach the protected AttributeBasedMagnitude sub-struct by reflection (GetMagnitudeSubStructPtr)
 //   and write its public members.
 
-// MCP:set_gameplay_effect_modifier_attribute_curve - Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly
+// MCP:set_gameplay_effect_modifier_attribute_curve - Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
 //   @param curve_table_path - Full asset path of the UCurveTable holding the lookup row
@@ -1891,11 +2056,12 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeCurve(const TSha
 
     const bool bRowExists = CurveTable->FindCurveUnchecked(RowFName) != nullptr;
 
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
+    Modifier.GECDO->Modify();
     AttrPtr->AttributeCurve.CurveTable = CurveTable;
     AttrPtr->AttributeCurve.RowName = RowFName;
 
-    Modifier.GECDO->Modify();
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1910,7 +2076,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeCurve(const TSha
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_attribute_tag_filters - Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation
+// MCP:set_gameplay_effect_modifier_attribute_tag_filters - Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array; the modifier's magnitude must already be AttributeBased (call set_gameplay_effect_modifier_attribute_based first)
 //   @param source_tags - Optional list of gameplay tag strings; replaces SourceTagFilter. Omit to leave the source filter unchanged
@@ -1958,6 +2124,8 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
     FGameplayTagContainer SourceContainer;
     FGameplayTagContainer TargetContainer;
     TArray<TSharedPtr<FJsonValue>> SourceResolved, SourceUnknown, TargetResolved, TargetUnknown;
+    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
+    Modifier.GECDO->Modify();
     if (bHasSource)
     {
         GASAuthoring_ParseTags(*SourceTagsArray, SourceContainer, SourceResolved, SourceUnknown);
@@ -1969,8 +2137,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
         AttrPtr->TargetTagFilter = TargetContainer;
     }
 
-    Modifier.GECDO->Modify();
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -2009,7 +2176,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeTagFilters(const
 
 // GameplayAbility CDO authoring
 
-// MCP:set_ability_cost - Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed)
+// MCP:set_ability_cost - Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ability_blueprint_path - Full asset path of the GameplayAbility Blueprint
 //   @param cost_effect_path - Full asset path of the GameplayEffect Blueprint to use as the cost
 //   @returns { ability_blueprint_path: string, cost_effect_path: string, cost_effect_class: string, cost_effect_class_matches: bool, set: bool }
@@ -2018,7 +2185,7 @@ TSharedPtr<FJsonObject> HandleSetAbilityCost(const TSharedPtr<FJsonObject>& Para
     return SetAbilityGameplayEffectClass(Params, TEXT("CostGameplayEffectClass"), TEXT("cost_effect_path"), TEXT("cost_effect_class"));
 }
 
-// MCP:set_ability_cooldown - Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires)
+// MCP:set_ability_cooldown - Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ability_blueprint_path - Full asset path of the GameplayAbility Blueprint
 //   @param cooldown_effect_path - Full asset path of the GameplayEffect Blueprint to use as the cooldown (typically HasDuration)
 //   @returns { ability_blueprint_path: string, cooldown_effect_path: string, cooldown_effect_class: string, cooldown_effect_class_matches: bool, set: bool }
@@ -2027,7 +2194,7 @@ TSharedPtr<FJsonObject> HandleSetAbilityCooldown(const TSharedPtr<FJsonObject>& 
     return SetAbilityGameplayEffectClass(Params, TEXT("CooldownGameplayEffectClass"), TEXT("cooldown_effect_path"), TEXT("cooldown_effect_class"));
 }
 
-// MCP:configure_ability_tags - Set a GameplayAbility CDO's asset tags from a list of tag strings
+// MCP:configure_ability_tags - Set a GameplayAbility CDO's asset tags from a list of tag strings. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ability_blueprint_path - Full asset path of the GA Blueprint
 //   @param asset_tags - List of gameplay tag strings, e.g. [Ability.Fire]
 //   @returns { ability_blueprint_path: string, resolved_tags: [string], unknown_tags: [string], ability_tags: [string], tag_count: int, configured: bool }
@@ -2060,6 +2227,7 @@ TSharedPtr<FJsonObject> HandleConfigureAbilityTags(const TSharedPtr<FJsonObject>
     TArray<TSharedPtr<FJsonValue>> UnknownTags;
     GASAuthoring_ParseTags(*AssetTagsArray, NewContainer, ResolvedTags, UnknownTags);
 
+    FGASAuthoringCDOEdit Edit(AbilityCDO);
     AbilityCDO->Modify();
 
     // EditorGetAssetTags() returns a mutable ref to the ability's tag container
@@ -2069,7 +2237,7 @@ TSharedPtr<FJsonObject> HandleConfigureAbilityTags(const TSharedPtr<FJsonObject>
 
     // Persist the CDO edit without recompiling (AbilityTags is a native UProperty on
     // the UGameplayAbility parent; see set_gameplay_effect_duration for rationale).
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -2134,20 +2302,15 @@ namespace
                     {
                         return Refused;
                     }
+                    FGASAuthoringCDOEdit Edit(CueCDO);
                     CueCDO->Modify();
                     GASAuthoring_SetCueNotifyTag(CueCDO, Tag);
                     bCueTagSet = true;
                     CueTagApplied = Tag.ToString();
 
-                    Blueprint->Modify();
-                    Blueprint->MarkPackageDirty();
-                    if (UPackage* Package = Blueprint->GetOutermost())
+                    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
                     {
-                        FString SaveError;
-                        if (!mcp_common::SaveAssetPackage(Package, Blueprint, SaveError))
-                        {
-                            return mcp_common::MakeErrorReply(SaveError);
-                        }
+                        return SaveFailed;
                     }
                 }
             }
@@ -2238,19 +2401,21 @@ namespace
         Result->SetNumberField(TEXT("num_preallocated_instances"), CueCDO->NumPreallocatedInstances);
     }
 
-    // The cue notify a set_gameplay_cue_notify_static/burst_properties command edits, and how many properties it set.
+    // The cue notify a set_gameplay_cue_notify_static/burst_properties command edits, how many properties it set, and
+    // the snapshot of its CDO taken before the first write (undone on an error, kept once the edit is saved).
     struct FGASAuthoringCueEdit
     {
         FString BlueprintPath;
         UBlueprint* Blueprint = nullptr;
         UGameplayCueNotify_Static* CueCDO = nullptr;
         int32 PropertiesSet = 0;
+        TOptional<FGASAuthoringCDOEdit> CDOEdit;
     };
 
     // set_gameplay_cue_notify_static/burst_properties: loads the cue_notify_path Blueprint, whose CDO must be a CueClass
     // (CueKind names it in the error), and applies the gameplay_cue_tag and is_override given (public UPROPERTYs on
     // UGameplayCueNotify_Static, written directly after Modify(), so a re-run is idempotent). The error reply when a
-    // step fails or neither property is given.
+    // step fails or neither property is given; Out.CDOEdit then puts the CDO back as it was.
     TSharedPtr<FJsonObject> GASAuthoring_ApplyCueStaticProperties(const TSharedPtr<FJsonObject>& Params, const UClass* CueClass,
                                                                   const TCHAR* CueKind, FGASAuthoringCueEdit& Out)
     {
@@ -2271,6 +2436,7 @@ namespace
             return Refused;
         }
 
+        Out.CDOEdit.Emplace(Out.CueCDO);
         Out.CueCDO->Modify();
 
         if (TSharedPtr<FJsonObject> TagError = GASAuthoring_ApplyCueTagParam(Params, Out.CueCDO, Out.PropertiesSet))
@@ -2307,7 +2473,7 @@ namespace
 
 // GameplayCueNotify authoring
 
-// MCP:create_gameplay_cue_notify_static - Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+// MCP:create_gameplay_cue_notify_static - Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GCN_Hit".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
 //   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Hit"; an unregistered tag is skipped (cue_tag_set=false), not an error.
@@ -2330,7 +2496,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyStatic(const TSharedPtr<FJs
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_cue_notify_actor - Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+// MCP:create_gameplay_cue_notify_actor - Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
 //   @param name - Asset name without a path, e.g. "GCN_Beam".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
 //   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Beam"; an unregistered tag is skipped (cue_tag_set=false), not an error.
@@ -2353,7 +2519,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyActor(const TSharedPtr<FJso
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_gameplay_cue_notify_burst - Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
+// MCP:create_gameplay_cue_notify_burst - Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
 //   @param name - Asset name, e.g. GCN_Hit
 //   @param package_path - Target content path, defaults to /Game/Blueprints
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
@@ -2383,7 +2549,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyBurst(const TSharedPtr<FJso
 //     IsOverride, bUniqueInstancePerInstigator/SourceObject, bAllowMultipleOnActive/WhileActiveEvents,
 //     NumPreallocatedInstances  (GameplayCueNotify_Actor.h, all public data members -> no reflection)
 
-// MCP:create_gameplay_cue_notify_looping - Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
+// MCP:create_gameplay_cue_notify_looping - Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
 //   @param name - Asset name, e.g. GCN_Aura
 //   @param package_path - Target content path, defaults to /Game/Blueprints
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
@@ -2406,7 +2572,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyLooping(const TSharedPtr<FJ
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_actor_properties - Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session or a read-only root fails before any edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
+// MCP:set_gameplay_cue_notify_actor_properties - Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify_Actor/_Looping Blueprint
 //   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
 //   @param auto_destroy_delay - Optional float: seconds to stay alive before auto-destroy (needs auto_destroy_on_remove)
@@ -2438,6 +2604,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(CueCDO);
     CueCDO->Modify();
 
     // Apply only the properties that were provided (set-to-fixed-value -> idempotent across runs).
@@ -2449,7 +2616,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
             TEXT("No properties provided (set at least one of auto_destroy_on_remove|auto_destroy_delay|auto_attach_to_owner|is_override|unique_instance_per_instigator|unique_instance_per_source_object|allow_multiple_on_active_events|allow_multiple_while_active_events|num_preallocated_instances)"));
     }
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -2532,7 +2699,7 @@ TSharedPtr<FJsonObject> HandleGetGameplayCueNotifyInfo(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_static_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back.
+// MCP:set_gameplay_cue_notify_static_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param cue_notify_path - Asset path of the GameplayCueNotify_Static Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
@@ -2545,7 +2712,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyStaticProperties(const TShared
     {
         return Error;
     }
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Edit.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Edit.Blueprint, *Edit.CDOEdit))
     {
         return SaveFailed;
     }
@@ -2555,7 +2722,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyStaticProperties(const TShared
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_burst_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back.
+// MCP:set_gameplay_cue_notify_burst_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param cue_notify_path - Asset path of the GameplayCueNotify_Burst Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
@@ -2571,7 +2738,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyBurstProperties(const TSharedP
     {
         return Error;
     }
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Edit.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Edit.Blueprint, *Edit.CDOEdit))
     {
         return SaveFailed;
     }
@@ -2582,7 +2749,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyBurstProperties(const TSharedP
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_looping_properties - Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO
+// MCP:set_gameplay_cue_notify_looping_properties - Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify_Looping Blueprint
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
@@ -2615,6 +2782,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyLoopingProperties(const TShare
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(CueCDO);
     CueCDO->Modify();
 
     // GameplayCueTag + the public Actor-inherited lifetime props (same set as
@@ -2633,7 +2801,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyLoopingProperties(const TShare
             TEXT("No properties provided (set at least one of gameplay_cue_tag|auto_destroy_on_remove|auto_destroy_delay|auto_attach_to_owner|is_override|unique_instance_per_instigator|unique_instance_per_source_object|allow_multiple_on_active_events|allow_multiple_while_active_events|num_preallocated_instances)"));
     }
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -2651,7 +2819,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyLoopingProperties(const TShare
 
 // GameplayEffect component authoring
 
-// MCP:add_gameplay_effect_component - Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them.
+// MCP:add_gameplay_effect_component - Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param gameplay_effect_path - Asset path of the GameplayEffect Blueprint, e.g. "/Game/GAS/Effects/GE_Damage".
 //   @param component_type - Bare type name, case-insensitive: AssetTags, TargetTags, AdditionalEffects, ChanceToApply, Immunity, TargetTagRequirements, RemoveOther, CustomCanApply, BlockAbilityTags, Abilities or CancelAbilityTags (not the full class name).
 //   @returns { gameplay_effect_path: string, component_type: string, component_class: string, component_count: int, component_added: bool, already_existed: bool }
@@ -2698,6 +2866,7 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectComponent(const TSharedPtr<FJsonO
     {
         return Refused;
     }
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
 
     // Add the component to the GE CDO's GEComponents array via the public AddComponent<T>()
@@ -2713,7 +2882,7 @@ TSharedPtr<FJsonObject> HandleAddGameplayEffectComponent(const TSharedPtr<FJsonO
     // Persist the CDO edit. GEComponents is a native UPROPERTY (Instanced) on the
     // UGameplayEffect parent, so the value serializes with the package; mark dirty + save
     // without recompiling (mirrors set_gameplay_effect_duration's rationale).
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -2828,7 +2997,7 @@ TSharedPtr<FJsonObject> HandleGetGameplayEffectComponents(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_gameplay_effect_component - Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component)
+// MCP:remove_gameplay_effect_component - Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component), and save; the removed component is left out of the saved asset. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param gameplay_effect_path - Full asset path of the GE Blueprint
 //   @param component_index - Optional index into the GEComponents array (call get_gameplay_effect_components to enumerate; 0 = first). Supply this OR component_type
 //   @param component_type - Optional friendly type (AssetTags, TargetTags, AdditionalEffects, ChanceToApply, Immunity, TargetTagRequirements, RemoveOther, CustomCanApply, BlockAbilityTags, Abilities, CancelAbilityTags). Accepts the bare type or the full class name. Supply this OR component_index
@@ -2943,20 +3112,27 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectComponent(const TSharedPtr<FJs
     // Mutate the CDO array, then persist without recompiling (GEComponents is a native Instanced
     // UPROPERTY on the UGameplayEffect parent CDO; it serializes with the package — same rationale
     // as the add path). RemoveValues shifts trailing entries down, re-indexing them contiguously.
+    FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
+    UObject* RemovedComponent = InnerObjProp->GetObjectPropertyValue(Helper.GetRawPtr(RemovedIndex));
     Helper.RemoveValues(RemovedIndex, 1);
 
-    Blueprint->Modify();
-    Blueprint->MarkPackageDirty();
-    bool bSaved = false;
-    if (UPackage* Package = Blueprint->GetOutermost())
+    // SaveAssetPackage takes every RF_Public object of the package as a root of the save, referenced or not, so
+    // the removed component (public like every subobject of the CDO) would still be written, as an orphan
+    // export. Without the flag it is saved only while something references it again, as after an undo.
+    const EObjectFlags RemovedRootFlags = RemovedComponent ? RemovedComponent->GetMaskedFlags(RF_Public | RF_Standalone) : RF_NoFlags;
+    if (RemovedComponent)
     {
-        FString SaveError;
-        if (!mcp_common::SaveAssetPackage(Package, Blueprint, SaveError))
+        RemovedComponent->ClearFlags(RemovedRootFlags);
+    }
+
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
+    {
+        if (RemovedComponent)
         {
-            return mcp_common::MakeErrorReply(SaveError);
+            RemovedComponent->SetFlags(RemovedRootFlags);
         }
-        bSaved = true;
+        return SaveFailed;
     }
 
     // Read back the count from the same CDO (no recompile occurred).
@@ -2969,7 +3145,7 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayEffectComponent(const TSharedPtr<FJs
     Result->SetStringField(TEXT("removed_class"), RemovedClass);
     Result->SetNumberField(TEXT("component_count"), After.Num());
     Result->SetBoolField(TEXT("removed"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_gameplay_effect_component"));
+    return mcp_common::MakeSavedReply(Result, /*bSaved*/ true, TEXT("remove_gameplay_effect_component"));
 }
 
 // ============================================================================
@@ -3074,7 +3250,7 @@ namespace
 //       Application/Ongoing/RemovalTagRequirements (FGameplayTagRequirements RequireTags/IgnoreTags)
 //   set_..._granted_abilities  -> UAbilitiesGameplayEffectComponent::AddGrantedAbilityConfig (AddUnique dedup)
 
-// MCP:set_gameplay_effect_component_target_tags - Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent)
+// MCP:set_gameplay_effect_component_target_tags - Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings to grant to the target (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], granted_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3089,6 +3265,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
     }
 
     // Idempotent: FindOrAddComponent reuses an existing component (so a re-run mutates it).
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UTargetTagsGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UTargetTagsGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3099,7 +3276,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
     Inherited.Added = Request.Tags;
     Comp.SetAndApplyTargetTagChanges(Inherited);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -3108,7 +3285,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_asset_tags - Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent)
+// MCP:set_gameplay_effect_component_asset_tags - Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings the GE asset owns (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], asset_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3122,6 +3299,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
         return ErrResp;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UAssetTagsGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UAssetTagsGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3129,7 +3307,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
     Inherited.Added = Request.Tags;
     Comp.SetAndApplyAssetTagChanges(Inherited);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -3138,7 +3316,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_block_ability_tags - Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent)
+// MCP:set_gameplay_effect_component_block_ability_tags - Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings of abilities to block (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], block_ability_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3152,6 +3330,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentBlockAbilityTags(const T
         return ErrResp;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UBlockAbilityTagsGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UBlockAbilityTagsGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3159,7 +3338,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentBlockAbilityTags(const T
     Inherited.Added = Request.Tags;
     Comp.SetAndApplyBlockedAbilityTagChanges(Inherited);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Request.Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -3168,7 +3347,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentBlockAbilityTags(const T
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_chance_to_apply - Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)
+// MCP:set_gameplay_effect_component_chance_to_apply - Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param chance - Probability the GE applies (0.0 = never, 1.0 = always)
 //   @returns { ge_blueprint_path: string, component_class: string, chance: float, chance_readback: float, chance_matches: bool, already_existed: bool, set: bool }
@@ -3194,6 +3373,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UChanceToApplyGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UChanceToApplyGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3201,7 +3381,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
     // FScalableFloat. Build a constant FScalableFloat from the float param (no curve).
     Comp.SetChanceToApplyToTarget(FScalableFloat((float)Chance));
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -3220,7 +3400,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentChanceToApply(const TSha
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_target_tag_requirements - Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)
+// MCP:set_gameplay_effect_component_target_tag_requirements - Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param application_require_tags [array] - Optional array of gameplay tag strings: the target must have for the GE to apply
 //   @param application_ignore_tags [array] - Optional array of gameplay tag strings: that, if present, block application
@@ -3266,6 +3446,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(co
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UTargetTagRequirementsGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UTargetTagRequirementsGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3295,7 +3476,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(co
         }
     }
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -3315,7 +3496,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTagRequirements(co
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_granted_abilities - Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique)
+// MCP:set_gameplay_effect_component_granted_abilities - Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param ability_path - GameplayAbility Blueprint asset path or bare class name to grant
 //   @param input_id - Optional input ID to bind the granted ability to (default -1 = none)
@@ -3353,6 +3534,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentGrantedAbilities(const T
         return Refused;
     }
 
+    FGASAuthoringCDOEdit Edit(GECDO);
     bool bAlreadyExisted = false;
     UAbilitiesGameplayEffectComponent& Comp = GASAuthoring_FindOrAddGEComponent<UAbilitiesGameplayEffectComponent>(GECDO, bAlreadyExisted);
 
@@ -3363,7 +3545,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentGrantedAbilities(const T
     Config.InputID = InputID;
     Comp.AddGrantedAbilityConfig(Config);
 
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }

@@ -3,6 +3,7 @@
 #include "Mcp/McpPythonScan.h"
 #include "Mcp/McpPy.h"
 #include "Mcp/McpReadback.h"
+#include "Mcp/McpToolCatalog.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -399,6 +400,18 @@ namespace McpPreconditionsPrivate
 		return Refuse(Fill(MsgDoubleSlashPath, { Where, Value }), TEXT("double_slash_path"));
 	}
 
+	/** A number outside the integer range its parameter is read into: the engine's read fails and
+	 *  the handler would go on with its default (0, -1, the first slot) as if the call had asked for it. */
+	static TOptional<FRefusal> RefuseIntegerOutOfRange(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+	{
+		const FString Message = FMcpToolCatalog::CheckIntegerRanges(CommandType, Params);
+		if (Message.IsEmpty())
+		{
+			return {};
+		}
+		return Refuse(Message, TEXT("integer_range"));
+	}
+
 	/** Creating a SetMaterialAttributes node crashes the editor. */
 	static TOptional<FRefusal> RefuseSetMaterialAttributes(const TSharedPtr<FJsonObject>& Params)
 	{
@@ -719,6 +732,7 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 
 	// (a) by arguments
 	if (TOptional<FRefusal> Refusal = RefuseDoubleSlashPath(Params)) { return Refusal; }
+	if (TOptional<FRefusal> Refusal = RefuseIntegerOutOfRange(CommandType, Params)) { return Refusal; }
 	if (CommandType == TEXT("create_material_expression")) { return RefuseSetMaterialAttributes(Params); }
 	if (CommandType == TEXT("scatter_foliage_in_box") || CommandType == TEXT("add_foliage_instances")) { return RefuseFoliage(Params); }
 	if (CommandType == TEXT("load_level")) { return RefuseLoadLevel(Params); }

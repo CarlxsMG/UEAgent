@@ -34,6 +34,7 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UnrealType.h"
+#include "UObject/PerPlatformProperties.h"  // FPerPlatformFrameRate -- the per-platform sampling rates of a sequence
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -1241,10 +1242,70 @@ TSharedPtr<FJsonObject> HandleCreatePoseAsset(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("create_pose_asset"), SaveError);
 }
 
+namespace
+{
+    // Whether two transforms hold the same values, component for component, with no tolerance: the pose asset
+    // stores what it is given, so only an exact match is a pose the add would leave unchanged.
+    bool AnimAuthoring_SameTransform(const FTransform& A, const FTransform& B)
+    {
+        return A.GetTranslation() == B.GetTranslation() && A.GetRotation() == B.GetRotation()
+            && A.GetScale3D() == B.GetScale3D();
+    }
+
+    // Whether UPoseAsset::AddReferencePose(PoseName, RefSkeleton) would leave the asset as it is (PoseAsset.cpp:
+    // AddReferencePose, AddOrUpdatePose, CombineTracks and PostProcessData): the pose exists; its tracks are
+    // exactly the bones of the skeleton, so no track would be inserted and none dropped as invalid; each track
+    // already holds its bone's reference pose; every curve value is zero; and there is no source-animation GUID
+    // for the add to invalidate.
+    bool AnimAuthoring_PoseIsReferencePose(const UPoseAsset* PoseAsset, FName PoseName, const FReferenceSkeleton& RefSkeleton)
+    {
+        const int32 PoseIndex = PoseAsset->GetPoseIndexByName(PoseName);
+        if (PoseIndex == INDEX_NONE || PoseAsset->SourceAnimationRawDataGUID.IsValid())
+        {
+            return false;
+        }
+        const TArray<FName>& Tracks = PoseAsset->GetTrackNames();
+        const TArray<FTransform>& SourcePose = PoseAsset->GetFullPose(PoseIndex);
+        const TArray<FTransform>& RefPose = RefSkeleton.GetRefBonePose();
+        if (Tracks.Num() != RefSkeleton.GetNum() || SourcePose.Num() != Tracks.Num())
+        {
+            return false;
+        }
+        for (int32 BoneIndex = 0; BoneIndex < RefSkeleton.GetNum(); ++BoneIndex)
+        {
+            if (!Tracks.Contains(RefSkeleton.GetBoneName(BoneIndex)))
+            {
+                return false;
+            }
+        }
+        for (int32 TrackIndex = 0; TrackIndex < Tracks.Num(); ++TrackIndex)
+        {
+            const int32 BoneIndex = RefSkeleton.FindBoneIndex(Tracks[TrackIndex]);
+            if (!RefPose.IsValidIndex(BoneIndex) || !AnimAuthoring_SameTransform(SourcePose[TrackIndex], RefPose[BoneIndex]))
+            {
+                return false;
+            }
+        }
+        const TArray<float>& CurveValues = PoseAsset->GetFullCurveValues(PoseIndex);
+        if (CurveValues.Num() != PoseAsset->GetNumCurves())
+        {
+            return false;
+        }
+        for (const float CurveValue : CurveValues)
+        {
+            if (CurveValue != 0.0f)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // add_pose_to_pose_asset
 // ---------------------------------------------------------------------------
-// MCP:add_pose_to_pose_asset - Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
+// MCP:add_pose_to_pose_asset - Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) in an undo transaction and save it; refused when the asset has no skeleton. A pose of that name that already holds exactly that reference pose (every bone a track, zero curve values, no source animation GUID) is a success with added=false, already_existed=true and saved=false, and the asset is neither modified nor saved. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
 //   @param pose_asset_path - Path to the UPoseAsset (e.g. '/Game/MyGame/Pose_Example').
 //   @param pose_name - Name of the pose to add (e.g. 'RefPose_A').
 //   @returns { pose_asset_path, pose_name, num_poses, num_tracks, present, added, already_existed, saved, save_error, message }
@@ -1266,6 +1327,23 @@ TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& 
     }
 
     const FName PoseFName(*PoseName);
+    const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
+
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
+    Obj->SetStringField(TEXT("pose_name"), PoseName);
+
+    // A pose that already holds the reference pose it would copy changes nothing: answered before Modify()
+    // would dirty the asset.
+    if (AnimAuthoring_PoseIsReferencePose(PoseAsset, PoseFName, RefSkeleton))
+    {
+        Obj->SetNumberField(TEXT("num_poses"), PoseAsset->GetNumPoses());
+        Obj->SetNumberField(TEXT("num_tracks"), PoseAsset->GetNumTracks());
+        Obj->SetBoolField(TEXT("present"), true);
+        Obj->SetBoolField(TEXT("added"), false);
+        Obj->SetBoolField(TEXT("already_existed"), true);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The pose already holds the skeleton reference pose; nothing changed, nothing saved"));
+    }
 
     const FScopedTransaction Transaction(LOCTEXT("AddPoseToPoseAsset", "Add Pose To Pose Asset"));
     PoseAsset->Modify();
@@ -1275,7 +1353,7 @@ TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& 
     // AddReferencePose builds tracks + a pose purely from the skeleton's reference pose
     // (FReferenceSkeleton::GetRefBonePose) — no source UAnimSequence is required, so this
     // is a fully headless-safe REAL effect. If the named pose already exists it is updated.
-    PoseAsset->AddReferencePose(PoseFName, Skeleton->GetReferenceSkeleton());
+    PoseAsset->AddReferencePose(PoseFName, RefSkeleton);
 
     const bool bPresent = PoseAsset->ContainsPose(PoseFName);
     const int32 NumPoses = PoseAsset->GetNumPoses();
@@ -1283,9 +1361,6 @@ TSharedPtr<FJsonObject> HandleAddPoseToPoseAsset(const TSharedPtr<FJsonObject>& 
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(PoseAsset, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("pose_asset_path"), PoseAsset->GetPathName());
-    Obj->SetStringField(TEXT("pose_name"), PoseName);
     Obj->SetNumberField(TEXT("num_poses"), NumPoses);
     Obj->SetNumberField(TEXT("num_tracks"), PoseAsset->GetNumTracks());
     Obj->SetBoolField(TEXT("present"), bPresent);
@@ -2195,6 +2270,109 @@ namespace
         }
         return true;
     }
+
+    // Whether two key arrays are the same, field for field: time, value, modes, tangents and their weights.
+    bool AnimAuthoring_SameRichCurveKeys(const TArray<FRichCurveKey>& A, const TArray<FRichCurveKey>& B)
+    {
+        if (A.Num() != B.Num())
+        {
+            return false;
+        }
+        for (int32 KeyIndex = 0; KeyIndex < A.Num(); ++KeyIndex)
+        {
+            const FRichCurveKey& KeyA = A[KeyIndex];
+            const FRichCurveKey& KeyB = B[KeyIndex];
+            if (KeyA.Time != KeyB.Time || KeyA.Value != KeyB.Value || KeyA.InterpMode != KeyB.InterpMode
+                || KeyA.TangentMode != KeyB.TangentMode || KeyA.TangentWeightMode != KeyB.TangentWeightMode
+                || KeyA.ArriveTangent != KeyB.ArriveTangent || KeyA.ArriveTangentWeight != KeyB.ArriveTangentWeight
+                || KeyA.LeaveTangent != KeyB.LeaveTangent || KeyA.LeaveTangentWeight != KeyB.LeaveTangentWeight)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Whether the transform curve already holds what IAnimationDataController::SetTransformCurveKeys would write
+    // for Transforms at Times (AnimSequencerController.cpp): per key, the location, the rotation as Euler angles
+    // and the scale, one linear key per axis, set on each of the nine channels with FRichCurve::SetKeys. SetKeys
+    // runs on a copy of each channel, so the tangents it derives are compared too.
+    bool AnimAuthoring_TransformCurveHasKeys(const FTransformCurve* Curve, const TArray<FTransform>& Transforms,
+        const TArray<float>& Times)
+    {
+        if (!Curve || Transforms.Num() != Times.Num())
+        {
+            return false;
+        }
+        const FVectorCurve* const Channels[3] = { &Curve->TranslationCurve, &Curve->RotationCurve, &Curve->ScaleCurve };
+        for (int32 Channel = 0; Channel < 3; ++Channel)
+        {
+            for (int32 Axis = 0; Axis < 3; ++Axis)
+            {
+                TArray<FRichCurveKey> Keys;
+                Keys.Reserve(Transforms.Num());
+                for (int32 KeyIndex = 0; KeyIndex < Transforms.Num(); ++KeyIndex)
+                {
+                    const FTransform& Value = Transforms[KeyIndex];
+                    const FVector Vector = Channel == 0 ? Value.GetLocation()
+                        : (Channel == 1 ? Value.GetRotation().Euler() : Value.GetScale3D());
+                    Keys.Add(FRichCurveKey(Times[KeyIndex], static_cast<float>(Vector[Axis])));
+                }
+                const FRichCurve& Held = Channels[Channel]->FloatCurves[Axis];
+                FRichCurve Written = Held;
+                Written.SetKeys(Keys);
+                if (!AnimAuthoring_SameRichCurveKeys(Held.GetConstRefOfKeys(), Written.GetConstRefOfKeys()))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Tells whether a data-controller write changed what a sequence stores, from the content GUID of its data
+    // model (IAnimationDataModel::GenerateGuid, the raw-data key of its compressed data) taken before the write.
+    // UAnimationSequencerDataModel hashes the frame count and the times, values and defaults of every bone and
+    // curve channel (key counts included), the attributes and the transform curves, so an equal GUID after the
+    // write means it left them as they were. When the GUID does not come from that hash (a legacy GUID cached
+    // until the first edit of an upgraded asset, or a.AnimDataModel.UseSignatureStateHash=1) the write
+    // invalidates it, so it always differs and the write is taken as a change.
+    class FAnimAuthoring_SequenceWriteProbe
+    {
+    public:
+        explicit FAnimAuthoring_SequenceWriteProbe(UAnimSequence* InSequence)
+            : Sequence(InSequence)
+            , Package(InSequence->GetPackage())
+            , bWasDirty(Package && Package->IsDirty())
+        {
+            if (const IAnimationDataModel* Model = Sequence->GetDataModel())
+            {
+                GuidBefore = Model->GenerateGuid();
+            }
+        }
+
+        // True when the write left the stored data as it was; the package then goes back to the dirty state it
+        // had before, which the sequence changes after any bracketed write of its data model.
+        bool RestoreIfUnchanged() const
+        {
+            const IAnimationDataModel* Model = Sequence->GetDataModel();
+            if (!Model || !GuidBefore.IsValid() || Model->GenerateGuid() != GuidBefore)
+            {
+                return false;
+            }
+            if (Package)
+            {
+                Package->SetDirtyFlag(bWasDirty);
+            }
+            return true;
+        }
+
+    private:
+        UAnimSequence* Sequence;
+        UPackage* Package;
+        bool bWasDirty;
+        FGuid GuidBefore;
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -2290,11 +2468,11 @@ TSharedPtr<FJsonObject> HandleCreateAnimSequence(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_anim_bone_track
 // ---------------------------------------------------------------------------
-// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+// MCP:add_anim_bone_track - Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent); when that leaves the stored track data as it was (measured with the data model GUID; the engine stores a constant track as one value, whatever num_keys is) the reply is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
 //   @param num_keys - Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence.
-//   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, save_error, message }
+//   @returns { anim_sequence_path, bone_name, num_bone_tracks, num_keys, changed, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2341,6 +2519,10 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
     bool bSaved = false;
     FString SaveError;
 
+    // The public data model has no raw key count (GetBoneTrackTransforms samples every frame), so whether the
+    // write changes anything is measured on the stored data, before and after it.
+    const FAnimAuthoring_SequenceWriteProbe Probe(Seq);
+
     IAnimationDataController& Controller = Seq->GetController();
     Controller.OpenBracket(NSLOCTEXT("MCP", "AddBoneTrack", "Add Bone Track"));
 
@@ -2363,13 +2545,23 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
         NumBoneTracks = Model->GetNumBoneTracks();
     }
 
-    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
     Obj->SetStringField(TEXT("bone_name"), BoneFName.ToString());
     Obj->SetNumberField(TEXT("num_bone_tracks"), NumBoneTracks);
     Obj->SetNumberField(TEXT("num_keys"), NumKeys);
+
+    // A track that already held these keys is left as it was: nothing to save.
+    if (Probe.RestoreIfUnchanged())
+    {
+        Obj->SetBoolField(TEXT("changed"), false);
+        Obj->SetBoolField(TEXT("success"), true);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The bone track already holds these identity keys; nothing changed, nothing saved"));
+    }
+
+    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
+
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetBoolField(TEXT("success"), bSaved);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Bone track added"), bSaved, SaveError, TEXT("")));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_bone_track"), SaveError);
@@ -2381,11 +2573,11 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
 // only writes identity. Same IAnimationDataController::SetBoneTrackKeys path,
 // fed from caller-provided per-key transforms; read back from the data model.
 // ---------------------------------------------------------------------------
-// MCP:set_anim_bone_track_keys - Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
+// MCP:set_anim_bone_track_keys - Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A track that already holds exactly these keys (the stored track data comes out unchanged, measured with the data model GUID) is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
 //   @param anim_sequence_path - Asset path of the UAnimSequence.
 //   @param bone_name - Name of a bone of the skeleton of the sequence; omitted or empty means the root bone.
 //   @param keys - Array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1].
-//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, save_error, message }
+//   @returns { anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, changed, success, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath;
@@ -2467,6 +2659,9 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     bool bSaved = false;
     FString SaveError;
 
+    // Measured on the stored data before and after the write, as add_anim_bone_track does.
+    const FAnimAuthoring_SequenceWriteProbe Probe(Seq);
+
     IAnimationDataController& Controller = Seq->GetController();
     Controller.OpenBracket(NSLOCTEXT("MCP", "SetBoneTrackKeys", "Set Bone Track Keys"));
     Controller.AddBoneCurve(BoneFName);  // idempotent (no-op if track exists)
@@ -2487,8 +2682,6 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
         }
     }
 
-    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
     Obj->SetStringField(TEXT("bone_name"), BoneFName.ToString());
@@ -2503,6 +2696,18 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
         First->SetArrayField(TEXT("rotation_euler"), E);
         Obj->SetObjectField(TEXT("first_key"), First);
     }
+
+    // A track that already held these keys is left as it was: nothing to save.
+    if (Probe.RestoreIfUnchanged())
+    {
+        Obj->SetBoolField(TEXT("changed"), false);
+        Obj->SetBoolField(TEXT("success"), true);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The bone track already holds exactly these keys; nothing changed, nothing saved"));
+    }
+
+    bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
+
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetBoolField(TEXT("success"), bSaved);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Bone track keys set"), bSaved, SaveError, TEXT("")));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_bone_track_keys"), SaveError);
@@ -3416,11 +3621,11 @@ TSharedPtr<FJsonObject> HandleAddMontageSegment(const TSharedPtr<FJsonObject>& P
 // add_anim_transform_curve — add a transform curve (RCT_Transform) to a
 // UAnimSequence via the data controller.
 // ---------------------------------------------------------------------------
-// MCP:add_anim_transform_curve - Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.
+// MCP:add_anim_transform_curve - Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller and set its keys as linear keys per axis, in one undo step, then save the package; the sampling rate of the sequence is left as it is. An existing transform curve of that name is kept and its keys are replaced; one that already holds exactly those keys is a success with changed=false, keys_set=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 //   @param anim_sequence_path - Object path of the UAnimSequence.
 //   @param curve_name - Name of the transform curve to add.
 //   @param keys - JSON array of {time, location:[x,y,z], rotation:[pitch,yaw,roll], scale:[x,y,z]} objects
-//   @returns { anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, success, saved, save_error }
+//   @returns { anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, changed, success, saved, save_error, message? }
 TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimPath, CurveName;
@@ -3465,11 +3670,32 @@ TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject
     const FName CurveFName(*CurveName);
     const FAnimationCurveIdentifier CurveId(CurveFName, ERawCurveTrackTypes::RCT_Transform);
 
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
+    Obj->SetStringField(TEXT("curve_name"), CurveName);
+    Obj->SetNumberField(TEXT("num_keys"), Times.Num());
+
+    // A transform curve that already holds these keys changes nothing: answered before the data controller
+    // transacts (AddCurve leaves an existing curve and its flags alone).
+    if (const IAnimationDataModel* Model = Seq->GetDataModel())
+    {
+        if (AnimAuthoring_TransformCurveHasKeys(Model->FindTransformCurve(CurveId), Transforms, Times))
+        {
+            Obj->SetNumberField(TEXT("num_transform_curves"), Model->GetNumberOfTransformCurves());
+            Obj->SetBoolField(TEXT("keys_set"), false);
+            Obj->SetBoolField(TEXT("changed"), false);
+            Obj->SetBoolField(TEXT("success"), true);
+            return AnimAuthoring_NoChangeReply(Obj, TEXT("The transform curve already exists with those keys; nothing changed, nothing saved"));
+        }
+    }
+
+    // No NotifyPopulated here: a Populated notify makes the sequence reset its sampling rate to the data model
+    // rate and drop its per-platform overrides (UAnimSequence::OnModelModified). The curve notifies of the
+    // bracket already regenerate what depends on the curve.
     IAnimationDataController& Controller = Seq->GetController();
     Controller.OpenBracket(LOCTEXT("AddTransformCurve", "MCP: Add Transform Curve"));
     Controller.AddCurve(CurveId, /*AACF_DefaultCurve*/0x00000004);
     const bool bSet = Controller.SetTransformCurveKeys(CurveId, Transforms, Times);
-    Controller.NotifyPopulated();
     Controller.CloseBracket();
 
     int32 NumTransformCurves = 0;
@@ -3481,12 +3707,9 @@ TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject
     FString SaveError;
     const bool bSaved = AnimAuthoring_SavePackageOf(Seq, SaveError);
 
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("anim_sequence_path"), Seq->GetPathName());
-    Obj->SetStringField(TEXT("curve_name"), CurveName);
     Obj->SetNumberField(TEXT("num_transform_curves"), NumTransformCurves);
-    Obj->SetNumberField(TEXT("num_keys"), Times.Num());
     Obj->SetBoolField(TEXT("keys_set"), bSet);
+    Obj->SetBoolField(TEXT("changed"), true);
     Obj->SetBoolField(TEXT("success"), true);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_anim_transform_curve"), SaveError);
 }
@@ -3838,7 +4061,27 @@ TSharedPtr<FJsonObject> HandleSetAnimFrameRate(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_anim_frame_rate"), SaveError);
 }
 
-// MCP:set_anim_number_of_frames - Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
+namespace
+{
+    // The smallest frame count at From that is a whole number of frames at To: frame_count * (To / From) is
+    // whole exactly when frame_count is a multiple of the reduced denominator of that ratio. Both rates have a
+    // positive numerator and denominator.
+    long long AnimAuthoring_WholeFrameStep(const FFrameRate& From, const FFrameRate& To)
+    {
+        const int64 RatioNum = static_cast<int64>(To.Numerator) * From.Denominator;
+        const int64 RatioDen = static_cast<int64>(To.Denominator) * From.Numerator;
+        int64 Gcd = RatioNum;
+        for (int64 Rest = RatioDen; Rest != 0;)
+        {
+            const int64 Next = Gcd % Rest;
+            Gcd = Rest;
+            Rest = Next;
+        }
+        return Gcd > 0 ? static_cast<long long>(RatioDen / Gcd) : 1LL;
+    }
+}
+
+// MCP:set_anim_number_of_frames - Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed. Each per-platform override of the sampling rate that the engine compresses at (a valid rate other than the default that is a multiple or a factor of it) is checked the same way, and the error names the platform; an override with a non-positive numerator is an error too. The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 //   @param sequence_path - Asset path of the UAnimSequence.
 //   @param frame_count - New number of frames (integer > 0).
 //   @returns { sequence_path, frame_count, saved, save_error, note? }
@@ -3895,21 +4138,53 @@ TSharedPtr<FJsonObject> HandleSetAnimNumberOfFrames(const TSharedPtr<FJsonObject
         const FFrameTime Resampled = FFrameRate::TransformTime(FFrameTime(FFrameNumber(FrameCount)), ModelRate, SamplingRate);
         if (!FMath::IsNearlyZero(Resampled.GetSubFrame()))
         {
-            // frame_count * (sampling / model) is whole exactly when frame_count is a multiple of the reduced
-            // denominator of that ratio.
-            const int64 RatioNum = static_cast<int64>(SamplingRate.Numerator) * ModelRate.Denominator;
-            const int64 RatioDen = static_cast<int64>(SamplingRate.Denominator) * ModelRate.Numerator;
-            int64 Gcd = RatioNum;
-            for (int64 Rest = RatioDen; Rest != 0;)
-            {
-                const int64 Next = Gcd % Rest;
-                Gcd = Rest;
-                Rest = Next;
-            }
-            const long long Step = Gcd > 0 ? static_cast<long long>(RatioDen / Gcd) : 1LL;
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("%d frames at the data model rate %s are not a whole number of frames at the sampling rate %s of this sequence; nothing was changed. Use a frame count that is a multiple of %lld."),
-                FrameCount, *ModelRate.ToPrettyText().ToString(), *SamplingRate.ToPrettyText().ToString(), Step));
+                FrameCount, *ModelRate.ToPrettyText().ToString(), *SamplingRate.ToPrettyText().ToString(),
+                AnimAuthoring_WholeFrameStep(ModelRate, SamplingRate)));
+        }
+    }
+
+    // A per-platform override of the sampling rate is the rate the engine compresses at for that platform, in
+    // the editor too when it names the running platform: UE::Anim::Compression::GetCompressionFrameRate takes a
+    // valid override that differs from the default rate and is a multiple or a factor of it, and
+    // FCompressibleAnimData::FetchData then check()s that the length is a whole number of frames at that rate.
+    // Such an override is checked the way the default rate is. One with a non-positive numerator (or a default
+    // rate with one) would make that choice divide by zero, so it is refused.
+    if (const FStructProperty* TargetRateProperty = FindFProperty<FStructProperty>(UAnimSequence::StaticClass(), TEXT("PlatformTargetFrameRate")))
+    {
+        if (TargetRateProperty->Struct == FPerPlatformFrameRate::StaticStruct())
+        {
+            const FPerPlatformFrameRate* TargetRates = TargetRateProperty->ContainerPtrToValuePtr<FPerPlatformFrameRate>(Sequence);
+            for (const TPair<FName, FFrameRate>& Override : TargetRates->PerPlatform)
+            {
+                const FFrameRate PlatformRate = Override.Value;
+                if (!PlatformRate.IsValid() || PlatformRate == SamplingRate)
+                {
+                    continue;  // GetCompressionFrameRate samples at the default rate for this platform.
+                }
+                if (PlatformRate.Numerator <= 0 || SamplingRate.Numerator <= 0)
+                {
+                    return mcp_common::MakeErrorReply(FString::Printf(
+                        TEXT("The sampling frame rate %d/%d this sequence has for platform %s cannot be resolved against its default sampling rate %d/%d (a non-positive numerator); nothing was changed"),
+                        PlatformRate.Numerator, PlatformRate.Denominator, *Override.Key.ToString(),
+                        SamplingRate.Numerator, SamplingRate.Denominator));
+                }
+                if (!PlatformRate.IsMultipleOf(SamplingRate) && !PlatformRate.IsFactorOf(SamplingRate))
+                {
+                    continue;  // Neither a multiple nor a factor: the engine samples at the default rate.
+                }
+                // The same arithmetic as FetchData: the play length in seconds at the data model rate, as frames
+                // at the platform rate.
+                const FFrameTime AtPlatformRate = PlatformRate.AsFrameTime(ModelRate.AsSeconds(FFrameTime(FFrameNumber(FrameCount))));
+                if (!FMath::IsNearlyZero(AtPlatformRate.GetSubFrame()))
+                {
+                    return mcp_common::MakeErrorReply(FString::Printf(
+                        TEXT("%d frames at the data model rate %s are not a whole number of frames at the sampling rate %s this sequence has for platform %s; nothing was changed. Use a frame count that is a multiple of %lld."),
+                        FrameCount, *ModelRate.ToPrettyText().ToString(), *PlatformRate.ToPrettyText().ToString(),
+                        *Override.Key.ToString(), AnimAuthoring_WholeFrameStep(ModelRate, PlatformRate)));
+                }
+            }
         }
     }
 
@@ -5950,12 +6225,61 @@ TSharedPtr<FJsonObject> HandleSetAnimMontagePreviewMesh(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_anim_montage_preview_mesh"), SaveError);
 }
 
+namespace
+{
+    // The values of the serialized montage fields UAnimMontage::RefreshCacheData can rewrite, copied so a refresh
+    // can be compared with them. In the engine source, UAnimSequenceBase::RefreshCacheData sorts Notifies, moves a
+    // notify to another track index and adds AnimNotifyTracks, and UAnimMontage::RefreshBranchingPointMarkers
+    // rebuilds BranchingPointMarkers and BranchingPointStateNotifyIndices. They are read through reflection (one
+    // is private); a field that cannot be found makes every comparison come out as a change.
+    class FAnimAuthoring_MontageCacheSnapshot
+    {
+    public:
+        explicit FAnimAuthoring_MontageCacheSnapshot(const UAnimMontage* Montage)
+        {
+            static const TCHAR* const FieldNames[] = { TEXT("Notifies"), TEXT("AnimNotifyTracks"),
+                TEXT("BranchingPointMarkers"), TEXT("BranchingPointStateNotifyIndices") };
+            for (const TCHAR* FieldName : FieldNames)
+            {
+                const FProperty* Property = FindFProperty<FProperty>(UAnimMontage::StaticClass(), FieldName);
+                if (!Property)
+                {
+                    bComplete = false;
+                    continue;
+                }
+                FDefaultConstructedPropertyElement Copy(Property);
+                Property->CopyCompleteValue(Copy.GetObjAddress(), Property->ContainerPtrToValuePtr<void>(Montage));
+                Fields.Emplace(Property, MoveTemp(Copy));
+            }
+        }
+
+        // Whether the montage still holds the copied values: FProperty::Identical, every element and field in order.
+        bool Matches(const UAnimMontage* Montage) const
+        {
+            if (!bComplete)
+            {
+                return false;
+            }
+            for (const TPair<const FProperty*, FDefaultConstructedPropertyElement>& Field : Fields)
+            {
+                if (!Field.Key->Identical(Field.Value.GetObjAddress(), Field.Key->ContainerPtrToValuePtr<void>(Montage), PPF_None))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+    private:
+        TArray<TPair<const FProperty*, FDefaultConstructedPropertyElement>> Fields;
+        bool bComplete = true;
+    };
+}
+
 // ---------------------------------------------------------------------------
-// refresh_anim_montage_cache — re-run UAnimSequenceBase::RefreshCacheData().
-// ENGINE_API virtual AnimSequenceBase.h; safe + idempotent (recomputes
-// NotifyTracks, SequenceLength and bone-cache without mutating authored data).
+// refresh_anim_montage_cache — re-run UAnimMontage::RefreshCacheData().
 // ---------------------------------------------------------------------------
-// MCP:refresh_anim_montage_cache - Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.
+// MCP:refresh_anim_montage_cache - Re-run UAnimMontage::RefreshCacheData on a UAnimMontage in an undo transaction (it sorts the notifies, moves a notify off a missing or overlapping notify track, adding tracks as needed, and rebuilds the branching point markers) and save it. Idempotent: when the refresh rewrites none of those fields the reply is a success with refreshed=false and saved=false, the montage keeps the dirty state it had and nothing is saved. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @returns { montage_path, refreshed, sequence_length, slot_count, section_count, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleRefreshAnimMontageCache(const TSharedPtr<FJsonObject>& Params)
@@ -5966,18 +6290,39 @@ TSharedPtr<FJsonObject> HandleRefreshAnimMontageCache(const TSharedPtr<FJsonObje
     UAnimMontage* Montage = nullptr;
     if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MontagePath, TEXT("AnimMontage"), Montage)) { return Error; }
 
-    Montage->RefreshCacheData();
-
-    // Persist so the recomputed SequenceLength / NotifyTracks land on disk too.
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+    // What the refresh rewrites is compared with a copy taken before it; when it rewrote nothing the montage goes
+    // back to the dirty state it had (Modify() marked it), and a transaction whose records hold no change leaves
+    // no undo step (FTransaction::IsTransient).
+    const FAnimAuthoring_MontageCacheSnapshot Before(Montage);
+    UPackage* const Package = Montage->GetPackage();
+    const bool bWasDirty = Package && Package->IsDirty();
+    {
+        const FScopedTransaction Transaction(LOCTEXT("RefreshAnimMontageCache", "Refresh Anim Montage Cache"));
+        Montage->Modify();
+        Montage->RefreshCacheData();
+    }
 
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
-    Obj->SetBoolField(TEXT("refreshed"), true);
     Obj->SetNumberField(TEXT("sequence_length"), Montage->GetPlayLength());
     Obj->SetNumberField(TEXT("slot_count"), Montage->SlotAnimTracks.Num());
     Obj->SetNumberField(TEXT("section_count"), Montage->CompositeSections.Num());
+
+    if (Before.Matches(Montage))
+    {
+        if (Package)
+        {
+            Package->SetDirtyFlag(bWasDirty);
+        }
+        Obj->SetBoolField(TEXT("refreshed"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The montage cache was already current; nothing changed, nothing saved"));
+    }
+
+    // Persist so the sorted notifies, their tracks and the branching point markers land on disk too.
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
+    Obj->SetBoolField(TEXT("refreshed"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage cache refreshed"), bSaved, SaveError));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("refresh_anim_montage_cache"), SaveError);
 }
@@ -6321,7 +6666,7 @@ TSharedPtr<FJsonObject> HandleSetMontageSegmentStartTime(const TSharedPtr<FJsonO
 // AnimCompositeBase.h — moves AnimSegments so there are no gaps between one
 // finishing and the next starting (preserves order). WITH_EDITOR-only.
 // ---------------------------------------------------------------------------
-// MCP:collapse_montage_segments - Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.
+// MCP:collapse_montage_segments - Collapse a montage slot track's segments end-to-end (FAnimTrack::CollapseAnimSegments: no gaps, order preserved) in an undo transaction and save the montage. Segments already end-to-end are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to collapse.
 //   @returns { montage_path, slot_name, segment_count, applied, saved, save_error, message }
@@ -6341,18 +6686,31 @@ TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObje
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("slot '%s' not found on montage"), *SlotName));
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("CollapseMontageSegments", "Collapse Montage Segments"));
-    Montage->Modify();
-    SlotTrack->AnimTrack.CollapseAnimSegments();
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("slot_name"), SlotName);
     Obj->SetNumberField(TEXT("segment_count"), SlotTrack->AnimTrack.AnimSegments.Num());
+
+    // Segments already end-to-end change nothing: the engine's own collapse runs on a copy of the track, and a
+    // result equal to it (every serialized field of every segment) is answered before Modify() would dirty it.
+    FAnimTrack Collapsed = SlotTrack->AnimTrack;
+    Collapsed.CollapseAnimSegments();
+    if (FAnimTrack::StaticStruct()->CompareScriptStruct(&Collapsed, &SlotTrack->AnimTrack, PPF_None))
+    {
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The segments are already end-to-end; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("CollapseMontageSegments", "Collapse Montage Segments"));
+        Montage->Modify();
+        SlotTrack->AnimTrack.CollapseAnimSegments();
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segments collapsed"), bSaved, SaveError));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("collapse_montage_segments"), SaveError);
@@ -6363,7 +6721,7 @@ TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObje
 // AnimCompositeBase.h — sorts AnimSegments by StartTime ascending.
 // WITH_EDITOR-only.
 // ---------------------------------------------------------------------------
-// MCP:sort_montage_segments - Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.
+// MCP:sort_montage_segments - Sort a montage slot track's segments by start time ascending (FAnimTrack::SortAnimSegments, which then lays them end-to-end and clamps each end time to its animation length) in an undo transaction and save the montage. Segments the sort leaves as they are (already in order, end-to-end and within their animations) are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
 //   @param slot_name - Name of the slot track to sort.
 //   @returns { montage_path, slot_name, segment_count, applied, saved, save_error, message }
@@ -6383,18 +6741,32 @@ TSharedPtr<FJsonObject> HandleSortMontageSegments(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("slot '%s' not found on montage"), *SlotName));
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SortMontageSegments", "Sort Montage Segments"));
-    Montage->Modify();
-    SlotTrack->AnimTrack.SortAnimSegments();
-    Montage->RefreshCacheData();
-
-    FString SaveError;
-    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
-
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("montage_path"), Montage->GetPathName());
     Obj->SetStringField(TEXT("slot_name"), SlotName);
     Obj->SetNumberField(TEXT("segment_count"), SlotTrack->AnimTrack.AnimSegments.Num());
+
+    // Segments the sort would leave as they are change nothing: the engine's own sort (with the segment-time
+    // validation it runs) works on a copy of the track, and a result equal to it is answered before Modify()
+    // would dirty the montage.
+    FAnimTrack Sorted = SlotTrack->AnimTrack;
+    Sorted.SortAnimSegments();
+    if (FAnimTrack::StaticStruct()->CompareScriptStruct(&Sorted, &SlotTrack->AnimTrack, PPF_None))
+    {
+        Obj->SetBoolField(TEXT("applied"), false);
+        return AnimAuthoring_NoChangeReply(Obj, TEXT("The segments are already sorted and end-to-end; nothing changed, nothing saved"));
+    }
+
+    {
+        const FScopedTransaction Transaction(LOCTEXT("SortMontageSegments", "Sort Montage Segments"));
+        Montage->Modify();
+        SlotTrack->AnimTrack.SortAnimSegments();
+        Montage->RefreshCacheData();
+    }
+
+    FString SaveError;
+    const bool bSaved = AnimAuthoring_SavePackageOf(Montage, SaveError);
+
     Obj->SetBoolField(TEXT("applied"), true);
     Obj->SetStringField(TEXT("message"), AnimAuthoring_SaveMessage(TEXT("Montage segments sorted"), bSaved, SaveError));
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("sort_montage_segments"), SaveError);

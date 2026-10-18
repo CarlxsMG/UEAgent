@@ -8,20 +8,25 @@
 
 *Read-only.*
 
-Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
+Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `subsystem_class` | string | yes | Class name of the subsystem to inspect (short reflected name or /Script path). |
 | `lifetime` | string | yes | Which host resolves the instance: one of engine \| gameinstance \| world \| editor \| localplayer. |
 | `player_index` | number | no | Local player index, used only when lifetime is "localplayer" (default 0). |
+| `world` | string | no | Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist |
 
-**Returns:** `{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }`
+**Returns:** `{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- the world fields only for the world, gameinstance and localplayer lifetimes`
 
 ## `list_local_player_subsystems`
 
 *Read-only.*
 
-Enumerate every live ULocalPlayerSubsystem-derived instance across all local players in the editor world's GameInstance.
+Enumerate every live ULocalPlayerSubsystem-derived instance across all local players of the game instance of a Play-in-Editor world, the running PIE world by default (world picks another; world_package and world_type say which one was read). Local players exist only while PIE runs: without PIE, or for a world with no game instance such as the editor world, it is an error that says so. Read-only.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `world` | string | no | Optional world selector: absent or pie (the default, ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client, pie:N, or editor (which has no game instance, so it fails). An unrecognised value fails naming the worlds that exist |
+
+**Returns:** `{ world: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, local_player_count: int, subsystem_count: int, subsystems: [{ player_index, player_name, subsystem_class, subsystem_name, subsystem_path }] }`

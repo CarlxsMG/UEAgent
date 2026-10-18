@@ -105,47 +105,50 @@ namespace
         return true;
     }
 
-    // Resolve the UWorld to operate on for MPCI commands. Default is the
-    // editor world (mcp_common::GetEditorWorld()); PIE / Game
-    // worlds are resolved by iterating GEngine->GetWorldContexts() and
-    // matching the WorldType + an optional label/name heuristic.
-    // Returns nullptr and sets OutError on failure.
+    // The UWorld an MPCI command acts on, read from world_label with the plugin's canonical selector
+    // (mcp_common::ResolveWorldFromParams): empty or "editor" is the editor world; "pie" (alias "game"),
+    // "server", "client" and "pie:N" a Play-in-Editor world. Any other value names a live world, as earlier
+    // releases accepted: by its object name or by its package name. The object name alone cannot reach a PIE
+    // world: it is duplicated under the editor world's name (UWorld::GetDuplicatedWorldForPIE keeps
+    // InWorld->GetFName()) and the editor world's context comes first, so only its package, with the
+    // UEDPIE_N_ prefix, tells it apart. Returns nullptr and sets OutError, naming the worlds present, on failure.
     UWorld* ResolveMpciWorld(const TSharedPtr<FJsonObject>& Params, FString& OutError)
     {
-        FString WorldLabel;
-        Params->TryGetStringField(TEXT("world_label"), WorldLabel);
-        // Empty world_label OR "editor" -> editor world.
-        if (WorldLabel.IsEmpty() || WorldLabel.Equals(TEXT("editor"), ESearchCase::IgnoreCase))
+        FString Selector;
+        Params->TryGetStringField(TEXT("world_label"), Selector);
+        Selector.TrimStartAndEndInline();
+        if (Selector.Equals(TEXT("game"), ESearchCase::IgnoreCase))
         {
-            if (!GEditor)
-            {
-                OutError = TEXT("GEditor is null (headless test harness?): cannot resolve editor world");
-                return nullptr;
-            }
-            UWorld* World = mcp_common::GetEditorWorld();
-            if (!World)
-            {
-                OutError = TEXT("Editor world is null");
-            }
-            return World;
+            Selector = TEXT("pie");
         }
-        // PIE / Game worlds: scan world contexts.
-        if (!GEngine)
+        const bool bSelectorWord = Selector.IsEmpty()
+            || Selector.Equals(TEXT("editor"), ESearchCase::IgnoreCase)
+            || Selector.Equals(TEXT("pie"), ESearchCase::IgnoreCase)
+            || Selector.Equals(TEXT("server"), ESearchCase::IgnoreCase)
+            || Selector.Equals(TEXT("client"), ESearchCase::IgnoreCase)
+            || Selector.StartsWith(TEXT("pie:"), ESearchCase::IgnoreCase);
+        if (!bSelectorWord && GEngine)
         {
-            OutError = TEXT("GEngine is null");
-            return nullptr;
-        }
-        for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
-        {
-            if (!Ctx.World()) { continue; }
-            const FString CtxName = Ctx.World()->GetName();
-            if (CtxName.Equals(WorldLabel, ESearchCase::IgnoreCase))
+            for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
             {
-                return Ctx.World();
+                UWorld* World = Ctx.World();
+                if (!World)
+                {
+                    continue;
+                }
+                const FString PackageName = World->GetOutermost() ? World->GetOutermost()->GetName() : FString();
+                if (World->GetName().Equals(Selector, ESearchCase::IgnoreCase)
+                    || PackageName.Equals(Selector, ESearchCase::IgnoreCase)
+                    || FPackageName::GetShortName(PackageName).Equals(Selector, ESearchCase::IgnoreCase))
+                {
+                    return World;
+                }
             }
         }
-        OutError = FString::Printf(TEXT("World '%s' not found among the live world contexts"), *WorldLabel);
-        return nullptr;
+        // A selector word, or a name no live world has: the resolver answers, or fails listing the worlds present.
+        const TSharedPtr<FJsonObject> WorldParams = MakeShared<FJsonObject>();
+        WorldParams->SetStringField(TEXT("world_label"), Selector);
+        return mcp_common::ResolveWorldFromParams(WorldParams, OutError, TEXT("world_label"));
     }
 }
 
@@ -922,7 +925,8 @@ TSharedPtr<FJsonObject> HandleDuplicateMpc(const TSharedPtr<FJsonObject>& Params
 // are always transient."). The canonical public path to obtain / create one
 // is UWorld::AddParameterCollectionInstance(MPC, bUpdateScene) +
 // UWorld::GetParameterCollectionInstance(MPC). Every MPCI command routes through a
-// world (editor by default; PIE/Game when world_label is specified).
+// world (editor by default; a Play-in-Editor world when world_label selects one, see
+// ResolveMpciWorld) and stamps the reply with that world's identity (AddWorldEvidence).
 //
 //   create_material_parameter_collection_instance
 //                                          get-or-create a transient MPCI
@@ -948,10 +952,10 @@ TSharedPtr<FJsonObject> HandleDuplicateMpc(const TSharedPtr<FJsonObject>& Params
 // object — no asset file I/O (MPCI instances are runtime/transient).
 // ========================================================================== //
 
-// MCP:create_material_parameter_collection_instance - Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
+// MCP:create_material_parameter_collection_instance - Give a world a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
-//   @returns { collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_existed: bool, created: bool }
 TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollectionInstance(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -981,19 +985,19 @@ TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollectionInstance(const TS
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), Collection->GetPathName());
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     Result->SetBoolField(TEXT("is_valid"), Instance != nullptr);
     Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
     Result->SetBoolField(TEXT("created"), !bAlreadyExisted && Instance != nullptr);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_scalar_parameter_value - Override a scalar parameter value on the world's MPCI
+// MCP:set_mpci_scalar_parameter_value - Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a scalar parameter of the collection; vectors: set_mpci_vector_parameter_value.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the scalar parameter to override
 //   @param value - New float value for the parameter
-//   @param world_label - Optional world context label, default editor
-//   @returns { collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }
 TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -1044,11 +1048,11 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     Result->SetNumberField(TEXT("value"), Value);
     Result->SetNumberField(TEXT("readback_value"), OutValue);
     Result->SetBoolField(TEXT("readback_ok"), bReadback);
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_vector_parameter_value - Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
+// MCP:set_mpci_vector_parameter_value - Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the vector parameter to override
 //   @param rgba - Optional [r, g, b, a] color value
@@ -1056,8 +1060,8 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
 //   @param g - Optional green channel
 //   @param b - Optional blue channel
 //   @param a - Optional alpha channel
-//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
-//   @returns { collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }
 TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -1120,14 +1124,14 @@ TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJson
     Result->SetArrayField(TEXT("value_rgba"), mcp_common::ColorToJsonArray(Value));
     Result->SetArrayField(TEXT("readback_rgba"), mcp_common::ColorToJsonArray(OutColor));
     Result->SetBoolField(TEXT("readback_ok"), bReadback);
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
+// MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively
-//   @returns { collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }
 TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -1145,7 +1149,7 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), Collection->GetPathName());
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     Result->SetBoolField(TEXT("instance_exists"), Instance != nullptr);
     Result->SetBoolField(TEXT("is_valid"), Instance ? Instance->IsCollectionValid() : false);
 
@@ -1186,10 +1190,10 @@ TSharedPtr<FJsonObject> HandleGetMpciInfo(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:clear_mpci_parameter_overrides - Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
+// MCP:clear_mpci_parameter_overrides - Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world to the collection's default values by dropping all its scalar and vector overrides. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
 //   @param collection_path - Full /Game path of the parent MPC
-//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
-//   @returns { collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }
 TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJsonObject>& Params)
 {
     FString CollectionPath;
@@ -1242,7 +1246,7 @@ TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJson
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), Collection->GetPathName());
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     Result->SetNumberField(TEXT("scalar_count"), Collection->ScalarParameters.Num());
     Result->SetNumberField(TEXT("vector_count"), Collection->VectorParameters.Num());
     Result->SetNumberField(TEXT("scalars_reset_to_default"), ScalarsReadback);
@@ -1251,10 +1255,10 @@ TSharedPtr<FJsonObject> HandleClearMpciParameterOverrides(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_parent_collection - Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
+// MCP:set_mpci_parent_collection - Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world: the editor world by default, or the Play-in-Editor world world_label selects (world_package and world_type say which one was reached). Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
 //   @param collection_path - Full /Game path of the new parent MPC
-//   @param world_label - Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)
-//   @returns { collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }
+//   @param world_label - Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present
+//   @returns { collection_path: string, previous_parent_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_attached: bool, attached: bool }
 TSharedPtr<FJsonObject> HandleSetMpciParentCollection(const TSharedPtr<FJsonObject>& Params)
 {
     // "Set parent" on an MPCI is just "add the (possibly different) collection
@@ -1283,7 +1287,7 @@ TSharedPtr<FJsonObject> HandleSetMpciParentCollection(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), NewCollection->GetPathName());
     Result->SetStringField(TEXT("previous_parent_path"), PreviousParentPath);
-    Result->SetStringField(TEXT("world_name"), World->GetName());
+    mcp_common::AddWorldEvidence(Result, World);
     Result->SetBoolField(TEXT("is_valid"), Instance != nullptr);
     Result->SetBoolField(TEXT("already_attached"), bAlreadyAttached);
     Result->SetBoolField(TEXT("attached"), Instance != nullptr);

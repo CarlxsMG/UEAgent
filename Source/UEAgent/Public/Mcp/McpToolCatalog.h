@@ -43,6 +43,12 @@ public:
 		/** The parameter this one is another spelling of (`aliasOf` in the catalog): the handler
 		 *  reads either, as in `!TryGet(a) && !TryGet(b)`. Empty for every other parameter. */
 		FString AliasOf;
+		/** A number the handler reads only into integer variables (`intRange` in the catalog): out
+		 *  of [IntRangeMin, IntRangeMax] the engine's read fails and the handler would go on with
+		 *  its default, so McpPreconditions refuses such a value before the handler runs. */
+		bool bHasIntRange = false;
+		double IntRangeMin = 0.0;
+		double IntRangeMax = 0.0;
 	};
 
 	struct FTool
@@ -95,6 +101,13 @@ public:
 	 * if everything is present. For a relaxed canonical name, any of its spellings counts.
 	 */
 	FString CheckRequired(const FTool& Tool, const TSharedPtr<FJsonObject>& Args) const;
+
+	/**
+	 * The first number argument outside its parameter's integer range (FParam::bHasIntRange), as
+	 * an error message naming the parameter, the value and the range; empty when every one fits
+	 * or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
+	 */
+	static FString CheckIntegerRanges(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
 	/** Does the parameter NAME read as a rotation: rot, *rotation or *rotator? */
 	static bool LooksLikeRotationName(const FString& ParamName);

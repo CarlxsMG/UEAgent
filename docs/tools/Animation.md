@@ -8,7 +8,7 @@
 
 *Destructive, idempotent.*
 
-Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
+Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent); when that leaves the stored track data as it was (measured with the data model GUID; the engine stores a constant track as one value, whatever num_keys is) the reply is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Add the animation track of one skeleton bone to a UAnimSequence through its data
 | `bone_name` | string | no | Name of a bone of the skeleton of the sequence; omitted or empty means the root bone. |
 | `num_keys` | number | no | Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence. |
 
-**Returns:** `{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, save_error, message }`
+**Returns:** `{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, changed, success, saved, save_error, message }`
 
 ## `add_anim_composite_segment`
 
@@ -191,9 +191,9 @@ Append an authored sync marker (name and time, on marker track 0) to a UAnimSequ
 
 ## `add_anim_transform_curve`
 
-*Additive.*
+*Destructive.*
 
-Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.
+Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller and set its keys as linear keys per axis, in one undo step, then save the package; the sampling rate of the sequence is left as it is. An existing transform curve of that name is kept and its keys are replaced; one that already holds exactly those keys is a success with changed=false, keys_set=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -201,7 +201,7 @@ Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
 | `curve_name` | string | yes | Name of the transform curve to add. |
 | `keys` | array | no | JSON array of {time, location:[x,y,z], rotation:[pitch,yaw,roll], scale:[x,y,z]} objects |
 
-**Returns:** `{ anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, success, saved, save_error }`
+**Returns:** `{ anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, changed, success, saved, save_error, message? }`
 
 ## `add_anim_transition`
 
@@ -423,7 +423,7 @@ Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable und
 
 *Destructive.*
 
-Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
+Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) in an undo transaction and save it; refused when the asset has no skeleton. A pose of that name that already holds exactly that reference pose (every bone a track, zero curve values, no source animation GUID) is a success with added=false, already_existed=true and saved=false, and the asset is neither modified nor saved. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -498,7 +498,7 @@ Add a null (space) to a Control Rig's hierarchy.
 
 *Destructive.*
 
-Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored) and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -702,7 +702,7 @@ Remove EVERY FMotionWarpingTarget from a UMotionWarpingComponent in one call (th
 
 *Destructive.*
 
-Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.
+Collapse a montage slot track's segments end-to-end (FAnimTrack::CollapseAnimSegments: no gaps, order preserved) in an undo transaction and save the montage. Segments already end-to-end are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1720,7 +1720,7 @@ Play an AnimMontage on a skeletal mesh component with UAnimInstance::Montage_Pla
 
 *Destructive, idempotent.*
 
-Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.
+Re-run UAnimMontage::RefreshCacheData on a UAnimMontage in an undo transaction (it sorts the notifies, moves a notify off a missing or overlapping notify track, adding tracks as needed, and rebuilds the branching point markers) and save it. Idempotent: when the refresh rewrites none of those fields the reply is a success with refreshed=false and saved=false, the montage keeps the dirty state it had and nothing is saved. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2524,7 +2524,7 @@ Set the additive-animation type and base pose on a UAnimSequence in an undo tran
 
 *Destructive, idempotent.*
 
-Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
+Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A track that already holds exactly these keys (the stored track data comes out unchanged, measured with the data model GUID) is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2532,7 +2532,7 @@ Replace the keys of one bone track of a UAnimSequence with the given per-key tra
 | `keys` | array | yes | Array of per-key transforms: { translation:[x,y,z], rotation:[pitch,yaw,roll] (deg), scale:[x,y,z] }. translation default [0,0,0], rotation default [0,0,0], scale default [1,1,1]. |
 | `bone_name` | string | no | Name of a bone of the skeleton of the sequence; omitted or empty means the root bone. |
 
-**Returns:** `{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, save_error, message }`
+**Returns:** `{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, changed, success, saved, save_error, message }`
 
 ## `set_anim_curve_color`
 
@@ -2685,7 +2685,7 @@ Rebind a UAnimMontage to a different USkeleton (clears existing source link + re
 
 *Destructive, idempotent.*
 
-Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
+Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed. Each per-platform override of the sampling rate that the engine compresses at (a valid rate other than the default that is a multiple or a factor of it) is checked the same way, and the error names the platform; an override with a non-positive numerator is an error too. The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3600,7 +3600,7 @@ Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animat
 
 *Destructive.*
 
-Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.
+Sort a montage slot track's segments by start time ascending (FAnimTrack::SortAnimSegments, which then lays them end-to-end and clamps each end time to its animation length) in an undo transaction and save the montage. Segments the sort leaves as they are (already in order, end-to-end and within their animations) are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

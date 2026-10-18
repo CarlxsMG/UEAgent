@@ -14,7 +14,7 @@
 // It is NOT a validator: the dispatcher REPORTS the finding (data.unknown_params)
 // and runs the command anyway. Rejecting would break existing callers.
 //
-// Coverage: 2097 commands / 6431 param names.
+// Coverage: 2097 commands / 6433 param names.
 #pragma once
 
 #include "CoreMinimal.h"

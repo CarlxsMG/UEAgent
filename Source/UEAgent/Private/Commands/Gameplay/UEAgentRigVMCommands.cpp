@@ -324,7 +324,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_rigvm_link
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored) and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName
@@ -343,8 +343,12 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
         return Error;
     }
 
+    // With undo set up, AddLink records what it changes (the links it breaks on the target pin, the types it
+    // resolves) into its own action, and cancelling that action on every failure past its first change undoes
+    // them; without it a link that fails after those steps leaves them in the graph. A new link is one action
+    // on the rig's action stack, and so one undo step.
     const bool bLinked = Controller->AddLink(
-        SourcePin, TargetPin, /*bSetupUndoRedo*/ false);
+        SourcePin, TargetPin, /*bSetupUndoRedo*/ true);
 
     TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
     Resp->SetStringField(TEXT("source_pin"), SourcePin);
@@ -352,13 +356,13 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
     Resp->SetBoolField(TEXT("linked"), bLinked);
     if (!bLinked)
     {
-        // An incompatible, missing or already-linked pairing is the engine returning false here. Nothing
-        // was linked, so the rig is neither compiled nor saved; the payload still says so (saved=false).
+        // An incompatible, missing or already-linked pairing is the engine returning false here. The graph is
+        // as it was, so the rig is neither compiled nor saved; the payload still says so (saved=false).
         URigVMGraph* Model = CRBP->GetDefaultModel();
         Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
         Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
-            TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked); the rig was not compiled or saved"),
+            TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked); the graph was left as it was and the rig was not compiled or saved"),
             *SourcePin, *TargetPin));
     }
 

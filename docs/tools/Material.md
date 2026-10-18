@@ -119,14 +119,14 @@ Clear all parameter overrides on a Material Instance Constant.  Resets all scala
 
 *Destructive, idempotent.*
 
-Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
+Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world to the collection's default values by dropping all its scalar and vector overrides. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }`
+**Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }`
 
 ## `compile_material`
 
@@ -394,14 +394,14 @@ Create a UMaterialParameterCollection asset at package_path/name and save it to 
 
 *Destructive.*
 
-Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
+Give a world a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }`
+**Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_existed: bool, created: bool }`
 
 ## `create_material_variant`
 
@@ -897,14 +897,14 @@ Get all parameters and their current values from a Material Instance Dynamic
 
 *Read-only.*
 
-Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
+Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
-| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }`
+**Returns:** `{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }`
 
 ## `inspect_material_instance_constant`
 
@@ -1264,35 +1264,35 @@ Set a vector (color) parameter override on a transient Material Instance Dynamic
 
 *Destructive, idempotent.*
 
-Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
+Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world: the editor world by default, or the Play-in-Editor world world_label selects (world_package and world_type say which one was reached). Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the new parent MPC |
-| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }`
+**Returns:** `{ collection_path: string, previous_parent_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_attached: bool, attached: bool }`
 
 ## `set_mpci_scalar_parameter_value`
 
 *Destructive, idempotent.*
 
-Override a scalar parameter value on the world's MPCI
+Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a scalar parameter of the collection; vectors: set_mpci_vector_parameter_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
 | `parameter_name` | string | yes | Name of the scalar parameter to override |
 | `value` | number | no | New float value for the parameter |
-| `world_label` | string | no | Optional world context label, default editor |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string }`
+**Returns:** `{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }`
 
 ## `set_mpci_vector_parameter_value`
 
 *Destructive, idempotent.*
 
-Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
+Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1303,9 +1303,9 @@ Override one vector parameter on the Material Parameter Collection Instance (MPC
 | `g` | number | no | Optional green channel |
 | `b` | number | no | Optional blue channel |
 | `a` | number | no | Optional alpha channel |
-| `world_label` | string | no | Empty or "editor" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match) |
+| `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
-**Returns:** `{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }`
+**Returns:** `{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }`
 
 ## `set_substrate_slab_scalar`
 

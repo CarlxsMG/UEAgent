@@ -50,7 +50,7 @@ Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, wit
 
 *Additive, idempotent.*
 
-Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them.
+Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -63,7 +63,7 @@ Add one empty UGameplayEffectComponent of a standard type to the GEComponents of
 
 *Additive.*
 
-Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session or a read-only root fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
+Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -119,7 +119,7 @@ Cancel one granted ability on an editor-world actor ability system component (Ca
 
 *Destructive, idempotent.*
 
-Set a GameplayAbility CDO's asset tags from a list of tag strings
+Set a GameplayAbility CDO's asset tags from a list of tag strings. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -172,7 +172,7 @@ Create a Blueprint parented to UGameplayAbility at package_path/name, compile an
 
 *Additive.*
 
-Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -186,7 +186,7 @@ Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cu
 
 *Additive.*
 
-Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
+Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -200,7 +200,7 @@ Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced on
 
 *Additive.*
 
-Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.
+Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -214,7 +214,7 @@ Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced loop
 
 *Additive.*
 
-Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.
+Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -496,7 +496,7 @@ Remove the first active gameplay effect on an editor-world actor ability system 
 
 *Destructive.*
 
-Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component)
+Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component), and save; the removed component is left out of the saved asset. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -511,7 +511,7 @@ Remove a component from a GameplayEffect CDO's GEComponents array by index or by
 
 *Destructive.*
 
-Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD)
+Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -538,7 +538,7 @@ Sends a FGameplayEvent to the target actor's UAbilitySystemComponent via UAbilit
 
 *Destructive, idempotent.*
 
-Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires)
+Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -551,7 +551,7 @@ Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use unt
 
 *Destructive, idempotent.*
 
-Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed)
+Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -592,7 +592,7 @@ Author the DataTable&lt;FAttributeMetaData> that gives a UAttributeSet class its
 
 *Destructive, idempotent.*
 
-Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session or a read-only root fails before any edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
+Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -613,7 +613,7 @@ Write the lifetime, instancing and override properties you pass on the class def
 
 *Destructive, idempotent.*
 
-Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back.
+Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -627,7 +627,7 @@ Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO 
 
 *Destructive, idempotent.*
 
-Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO
+Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -649,7 +649,7 @@ Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCue
 
 *Destructive, idempotent.*
 
-Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back.
+Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -663,7 +663,7 @@ Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO 
 
 *Destructive, idempotent.*
 
-Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent)
+Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -676,7 +676,7 @@ Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tag
 
 *Destructive, idempotent.*
 
-Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent)
+Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -689,7 +689,7 @@ Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities w
 
 *Destructive, idempotent.*
 
-Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)
+Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -702,7 +702,7 @@ Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0)
 
 *Destructive, idempotent.*
 
-Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique)
+Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -716,7 +716,7 @@ Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP 
 
 *Destructive, idempotent.*
 
-Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)
+Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -734,7 +734,7 @@ Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/R
 
 *Destructive, idempotent.*
 
-Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent)
+Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -747,7 +747,7 @@ Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to
 
 *Destructive, idempotent.*
 
-Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session or a read-only root fails before any edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
+Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -775,7 +775,7 @@ Set DurationPolicy on a GameplayEffect asset (a native UGameplayEffect asset, or
 
 *Destructive, idempotent.*
 
-Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute)
+Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -795,7 +795,7 @@ Switch an existing GE modifier's magnitude to AttributeBased (scales off a captu
 
 *Destructive, idempotent.*
 
-Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel)
+Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -815,7 +815,7 @@ Switch a GE modifier's magnitude to AttributeBased with the channel-terminated c
 
 *Destructive, idempotent.*
 
-Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly
+Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -830,7 +830,7 @@ Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is al
 
 *Destructive, idempotent.*
 
-Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation
+Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -845,7 +845,7 @@ Set the Source/Target tag filters on a GE modifier whose magnitude is already At
 
 *Destructive, idempotent.*
 
-Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it)
+Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -862,7 +862,7 @@ Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGamepla
 
 *Destructive, idempotent.*
 
-Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve
+Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -877,7 +877,7 @@ Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is 
 
 *Destructive, idempotent.*
 
-Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name)
+Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -892,7 +892,7 @@ Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime b
 
 *Destructive, idempotent.*
 
-Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session or a read-only root fails before any edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
+Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -906,7 +906,7 @@ Set Period (seconds between periodic executions, 0 = not periodic) and bExecuteP
 
 *Destructive, idempotent.*
 
-Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies).
+Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
