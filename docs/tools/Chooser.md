@@ -8,12 +8,12 @@
 
 *Additive.*
 
-Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. A Randomize column stays last, as the Chooser editor keeps it: a column added to a table that ends with one goes just before it, so the Randomize index grows by one; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The column goes where the Chooser editor puts it: a filter column before the first output or Randomize column, so filters stay ahead of them; an output column at the end but before a trailing Randomize column; a Randomize column last. The columns after it move up one index; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Long package path of an existing UChooserTable. |
-| `column_type` | string | yes | Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
+| `column_type` | string | yes | Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject". |
 | `column_name` | string | yes | Label echoed back in the reply only; it is not stored on the column. |
 
 **Returns:** `{ table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }`

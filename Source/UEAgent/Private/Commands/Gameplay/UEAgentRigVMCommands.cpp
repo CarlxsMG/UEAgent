@@ -93,6 +93,46 @@ namespace
         return mcp_common::SaveAssetPackage(CRBP->GetOutermost(), CRBP, OutSaveError);
     }
 
+    /**
+     * What a failed AddLink has to leave as it was in Graph, as one comparable string: its structure hash
+     * (URigVMGraph::GetStructureHash: the names of its nodes and the names, types and directions of their pins),
+     * plus what that hash leaves out, its links by pin path and every pin's default value and expansion. Sorted,
+     * so a link the cancel put back at another index of the graph's link array still compares equal.
+     */
+    FString RigVM_GraphFingerprint(const URigVMGraph* Graph)
+    {
+        if (!Graph)
+        {
+            return FString();
+        }
+        TArray<FString> Entries;
+        for (const URigVMLink* Link : Graph->GetLinks())
+        {
+            if (Link)
+            {
+                Entries.Add(FString::Printf(TEXT("link %s -> %s"), *Link->GetSourcePinPath(), *Link->GetTargetPinPath()));
+            }
+        }
+        for (const URigVMNode* Node : Graph->GetNodes())
+        {
+            if (!Node)
+            {
+                continue;
+            }
+            for (const URigVMPin* Pin : Node->GetAllPinsRecursively())
+            {
+                if (Pin)
+                {
+                    Entries.Add(FString::Printf(TEXT("pin %s = %s%s"), *Pin->GetPinPath(), *Pin->GetDefaultValue(),
+                        Pin->IsExpanded() ? TEXT(" (expanded)") : TEXT("")));
+                }
+            }
+        }
+        // Case-sensitive, so that no two entries compare equal and the order is the same on every call.
+        Entries.Sort([](const FString& A, const FString& B) { return A.Compare(B, ESearchCase::CaseSensitive) < 0; });
+        return FString::Printf(TEXT("structure %u\n"), Graph->GetStructureHash()) + FString::Join(Entries, TEXT("\n"));
+    }
+
     /** A reply that opens with the rig blueprint's asset_path. */
     TSharedPtr<FJsonObject> RigVM_StartReply(const UControlRigBlueprint* CRBP)
     {
@@ -324,7 +364,7 @@ TSharedPtr<FJsonObject> HandleSetRigVMPinDefault(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // add_rigvm_link
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored) and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
+// MCP:add_rigvm_link - Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored), nothing is compiled or saved, and the package keeps the dirty flag it had; should the graph still differ from before, the error says so and the package stays dirty. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.
 //   @param control_rig_path - Path to the UControlRigBlueprint asset
 //   @param source_pin - Output pin path NodeA.PinName
 //   @param target_pin - Input pin path NodeB.PinName
@@ -343,6 +383,11 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
         return Error;
     }
 
+    // The graph and the package's dirty flag before the call, so that a failed link can leave the package clean.
+    UPackage* Package = CRBP->GetOutermost();
+    const bool bPackageWasDirty = Package->IsDirty();
+    const FString GraphBefore = RigVM_GraphFingerprint(CRBP->GetDefaultModel());
+
     // With undo set up, AddLink records what it changes (the links it breaks on the target pin, the types it
     // resolves) into its own action, and cancelling that action on every failure past its first change undoes
     // them; without it a link that fails after those steps leaves them in the graph. A new link is one action
@@ -356,14 +401,24 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
     Resp->SetBoolField(TEXT("linked"), bLinked);
     if (!bLinked)
     {
-        // An incompatible, missing or already-linked pairing is the engine returning false here. The graph is
-        // as it was, so the rig is neither compiled nor saved; the payload still says so (saved=false).
+        // An incompatible, missing or already-linked pairing is the engine returning false here, and the rig is
+        // neither compiled nor saved; the payload still says so (saved=false). The cancel of a failure past
+        // AddLink's first change puts the graph back but not the dirty flag its changes set, so the flag is put
+        // back too, once the graph is measured to be what it was.
         URigVMGraph* Model = CRBP->GetDefaultModel();
+        const bool bGraphUnchanged = RigVM_GraphFingerprint(Model).Equals(GraphBefore, ESearchCase::CaseSensitive);
+        if (bGraphUnchanged)
+        {
+            Package->SetDirtyFlag(bPackageWasDirty);
+        }
         Resp->SetNumberField(TEXT("link_count"), Model ? Model->GetLinks().Num() : 0);
         Resp->SetBoolField(TEXT("saved"), false);
-        return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(
-            TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked); the graph was left as it was and the rig was not compiled or saved"),
-            *SourcePin, *TargetPin));
+        const FString Failure = FString::Printf(
+            TEXT("AddLink returned false for '%s' -> '%s' (pins incompatible, missing, or already linked)"), *SourcePin, *TargetPin);
+        return mcp_common::MakeOutcomeReply(Resp, false, bGraphUnchanged
+            ? Failure + TEXT("; the graph was left as it was and the rig was not compiled or saved")
+            : Failure + TEXT(", and the graph CHANGED although the link failed: the rig was not compiled or saved and its ")
+                TEXT("package stays dirty, so read it with get_rigvm_graph before saving it"));
     }
 
     FString SaveErr;

@@ -44,6 +44,18 @@ namespace mcp_common
     UEAGENT_API bool IsPieActive();
 
     /**
+     * Tells the dispatcher that this call changed nothing although the engine recorded a change in the undo
+     * buffer (an animation data controller bracket records one whatever it writes), so the call's undo step
+     * would undo nothing. The dispatcher then drops that step, which also keeps the redo history, but only when
+     * it is the outermost transaction: inside a batch or a begin_transaction the step belongs to the caller.
+     * Call it only once the call's own probe has proved that no stored data changed. Game thread.
+     */
+    UEAGENT_API void DiscardUndoStepOfThisCall();
+
+    /** Whether DiscardUndoStepOfThisCall ran since the last call of this, clearing the request (the dispatcher's). */
+    UEAGENT_API bool ConsumeDiscardUndoStepRequest();
+
+    /**
      * Marks the package dirty and saves it to disk (.uasset) with
      * the canonical authoring flags (RF_Public|RF_Standalone,
      * SAVE_NoError, Error=GError). Returns false + fills OutError on

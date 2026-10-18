@@ -645,9 +645,9 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeSavedReply(MakeReplyData(), bSaved, TEXT("create_chooser_table"), SaveError);
 }
 
-// MCP:add_chooser_column_to_table - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. A Randomize column stays last, as the Chooser editor keeps it: a column added to a table that ends with one goes just before it, so the Randomize index grows by one; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+// MCP:add_chooser_column_to_table - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The column goes where the Chooser editor puts it: a filter column before the first output or Randomize column, so filters stay ahead of them; an output column at the end but before a trailing Randomize column; a Randomize column last. The columns after it move up one index; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
-//   @param column_type - Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
+//   @param column_type - Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
 //   @param column_name - Label echoed back in the reply only; it is not stored on the column.
 //   @returns { table_path: string, column_index: int, column_name: string, column_type: string, already_existed: bool, row_count?: int, saved?: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObject>& Params)
@@ -729,14 +729,35 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		}
 	});
 
-	// A Randomize column filters the rows left by the columns before it down to one pick, so it must stay last:
-	// like the Chooser editor's AddColumn, a new column goes before a trailing Randomize column. Each column owns
-	// its row cells, so the insert leaves every row in step.
+	// The column goes where the Chooser editor's FChooserTableViewModel::AddColumn puts it, by the same tests: a
+	// Randomize column at the end (it picks one of the rows the columns before it left); an output column at the
+	// end too, but before a trailing Randomize column; any other column, a filter, before the first output or
+	// Randomize column, so the filters stay ahead of them. Each column owns its row cells, so the insert leaves
+	// every row in step.
 	int32 NewIndex = Table->ColumnsStructs.Num();
-	const FChooserColumnBase* LastColumn = NewIndex > 0 ? Table->ColumnsStructs.Last().GetPtr<FChooserColumnBase>() : nullptr;
-	if (LastColumn && LastColumn->IsRandomizeColumn())
+	if (const FChooserColumnBase* NewColumn = NewCol.GetPtr<FChooserColumnBase>(); NewColumn && !NewColumn->IsRandomizeColumn())
 	{
-		--NewIndex;
+		if (NewColumn->HasOutputs())
+		{
+			const FChooserColumnBase* LastColumn = NewIndex > 0 ? Table->ColumnsStructs.Last().GetPtr<FChooserColumnBase>() : nullptr;
+			if (LastColumn && LastColumn->IsRandomizeColumn())
+			{
+				--NewIndex;
+			}
+		}
+		else
+		{
+			NewIndex = 0;
+			while (NewIndex < Table->ColumnsStructs.Num())
+			{
+				const FChooserColumnBase* Column = Table->ColumnsStructs[NewIndex].GetPtr<FChooserColumnBase>();
+				if (Column && (Column->HasOutputs() || Column->IsRandomizeColumn()))
+				{
+					break;
+				}
+				++NewIndex;
+			}
+		}
 	}
 
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddChooserColumn", "Add Chooser Column (MCP)"));

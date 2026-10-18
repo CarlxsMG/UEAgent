@@ -2554,6 +2554,8 @@ TSharedPtr<FJsonObject> HandleAddAnimBoneTrack(const TSharedPtr<FJsonObject>& Pa
     // A track that already held these keys is left as it was: nothing to save.
     if (Probe.RestoreIfUnchanged())
     {
+        // The controller's bracket still recorded a change, which would undo nothing.
+        mcp_common::DiscardUndoStepOfThisCall();
         Obj->SetBoolField(TEXT("changed"), false);
         Obj->SetBoolField(TEXT("success"), true);
         return AnimAuthoring_NoChangeReply(Obj, TEXT("The bone track already holds these identity keys; nothing changed, nothing saved"));
@@ -2700,6 +2702,8 @@ TSharedPtr<FJsonObject> HandleSetAnimBoneTrackKeys(const TSharedPtr<FJsonObject>
     // A track that already held these keys is left as it was: nothing to save.
     if (Probe.RestoreIfUnchanged())
     {
+        // The controller's bracket still recorded a change, which would undo nothing.
+        mcp_common::DiscardUndoStepOfThisCall();
         Obj->SetBoolField(TEXT("changed"), false);
         Obj->SetBoolField(TEXT("success"), true);
         return AnimAuthoring_NoChangeReply(Obj, TEXT("The bone track already holds exactly these keys; nothing changed, nothing saved"));
@@ -3692,11 +3696,30 @@ TSharedPtr<FJsonObject> HandleAddAnimTransformCurve(const TSharedPtr<FJsonObject
     // No NotifyPopulated here: a Populated notify makes the sequence reset its sampling rate to the data model
     // rate and drop its per-platform overrides (UAnimSequence::OnModelModified). The curve notifies of the
     // bracket already regenerate what depends on the curve.
+    const bool bCurveExisted = Seq->GetDataModel() && Seq->GetDataModel()->FindTransformCurve(CurveId) != nullptr;
+    const FAnimAuthoring_SequenceWriteProbe Probe(Seq);
     IAnimationDataController& Controller = Seq->GetController();
     Controller.OpenBracket(LOCTEXT("AddTransformCurve", "MCP: Add Transform Curve"));
     Controller.AddCurve(CurveId, /*AACF_DefaultCurve*/0x00000004);
     const bool bSet = Controller.SetTransformCurveKeys(CurveId, Transforms, Times);
+    if (!bSet && !bCurveExisted)
+    {
+        Controller.RemoveCurve(CurveId); // the curve this call added goes with the keys it could not set
+    }
     Controller.CloseBracket();
+
+    // The controller refuses keys only when their count differs from the times' or the curve is missing, which
+    // the code above rules out; should it refuse anyway, nothing is saved and the sequence is put back.
+    if (!bSet)
+    {
+        if (Probe.RestoreIfUnchanged())
+        {
+            mcp_common::DiscardUndoStepOfThisCall();
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("add_anim_transform_curve: the animation data controller refused the %d keys of '%s'; nothing was saved%s"),
+            Times.Num(), *CurveName, bCurveExisted ? TEXT("") : TEXT(" and the curve it had added was removed")));
+    }
 
     int32 NumTransformCurves = 0;
     if (const IAnimationDataModel* Model = Seq->GetDataModel())

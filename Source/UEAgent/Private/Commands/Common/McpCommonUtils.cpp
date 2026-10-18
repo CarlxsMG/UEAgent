@@ -73,6 +73,21 @@ namespace mcp_common
     //     nothing and reports success anyway.
     // The first-line refusal happens in the dispatcher
     // (UUEAgentBridge::CheckPIESafetyGuard); this covers internal paths.
+    // Game thread only, like every dispatch: no lock needed.
+    static bool GDiscardUndoStepRequested = false;
+
+    void DiscardUndoStepOfThisCall()
+    {
+        GDiscardUndoStepRequested = true;
+    }
+
+    bool ConsumeDiscardUndoStepRequest()
+    {
+        const bool bRequested = GDiscardUndoStepRequested;
+        GDiscardUndoStepRequested = false;
+        return bRequested;
+    }
+
     bool IsPieActive()
     {
         if (ULevelEditorSubsystem* LevelEditorSubsystem =

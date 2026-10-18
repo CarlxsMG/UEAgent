@@ -36,7 +36,7 @@ Create an ability task on the primary instance of an ability already granted to 
 
 *Additive.*
 
-Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class; refused during PIE.
+Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true, nothing saved); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class. An add is refused before any edit when a running PIE session, a read-only root or a .uasset read-only on disk would keep it from being saved, and a failed save undoes it, taking the variable out again and recompiling the Blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -132,7 +132,7 @@ Set a GameplayAbility CDO's asset tags from a list of tag strings. A running PIE
 
 *Additive.*
 
-Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
+Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. A running PIE session, a read-only root or a .uasset read-only on disk fails before anything is created or added; a call that adds nothing to an existing set is not refused and saves nothing (saved false). A failed save makes success false, with saved false and save_error, and the added attributes stay in memory only.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -140,7 +140,7 @@ Create (or reuse) an AttributeSet Blueprint at package_path/name like create_att
 | `package_path` | string | no | Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints. |
 | `attributes` | array | no | Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored. |
 
-**Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool }`
+**Returns:** `{ name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool, saved: bool, save_error?: string }`
 
 ## `create_attribute_set_blueprint`
 
