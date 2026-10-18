@@ -1142,10 +1142,21 @@ TSharedPtr<FJsonObject> UUEAgentBridge::DispatchSingleCommand(const FString& Com
     {
         TSharedPtr<FJsonObject> ResultJson;
         {
-            const FScopedTransaction UndoStep(TEXT("UEAgent"),
+            const bool bWrap = McpUndoStep::ShouldWrap(CommandType, Params);
+            // The step is the whole undo entry only when no transaction is open around it (not inside a batch,
+            // a begin_transaction or another dispatch): only then may a call that changed nothing drop it.
+            const bool bOutermostStep = bWrap && GEditor && GEditor->Trans && !GEditor->IsTransactionActive();
+            mcp_common::ConsumeDiscardUndoStepRequest(); // a request left by a probe dispatch is not this call's
+            FScopedTransaction UndoStep(TEXT("UEAgent"),
                 FText::Format(NSLOCTEXT("UEAgent", "UndoStep", "UEAgent: {0}"), FText::FromString(CommandType)),
-                nullptr, McpUndoStep::ShouldWrap(CommandType, Params));
+                nullptr, bWrap);
             ResultJson = McpCommandFamilies::Run(CommandType, Params);
+            // UTransBuffer::Cancel removes the step without applying it, and gives back the redo history its
+            // Begin had set aside: right for a step the handler proved holds no change.
+            if (mcp_common::ConsumeDiscardUndoStepRequest() && bOutermostStep)
+            {
+                UndoStep.Cancel();
+            }
         }
 
             // collateral-dirty attribution -- harvest (opt-in only; see the

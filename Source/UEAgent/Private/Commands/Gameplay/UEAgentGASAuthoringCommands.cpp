@@ -96,12 +96,8 @@ namespace
         bool bAlreadyExisted = false;
     };
 
-    // Reads name and package_path, then creates a UBlueprint of ParentClass at PackagePath/Name, compiles
-    // and saves it. Idempotent: a Blueprint of ParentClass already at that path is loaded instead
-    // (bAlreadyExisted). One of another class is an error, before anything touches it: the caller asked
-    // for a ParentClass Blueprint and none exists there. The error reply on failure.
-    TSharedPtr<FJsonObject> GASAuthoring_CreateBlueprint(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass,
-                                                         FGASAuthoringCreatedBlueprint& Out)
+    // Reads name and package_path (default /Game/Blueprints) into Out; the error reply when name is missing.
+    TSharedPtr<FJsonObject> GASAuthoring_ReadCreateTarget(const TSharedPtr<FJsonObject>& Params, FGASAuthoringCreatedBlueprint& Out)
     {
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Out.Name, mcp_common::EAllowEmpty::Yes))
         {
@@ -110,6 +106,21 @@ namespace
         Out.PackagePath = TEXT("/Game/Blueprints");
         Params->TryGetStringField(TEXT("package_path"), Out.PackagePath);
         Out.PackagePath = mcp_common::NormalizeFolder(Out.PackagePath, TEXT("/Game/Blueprints"));
+        return nullptr;
+    }
+
+    // The asset path Out names, PackagePath/Name, as CreateOrLoadBlueprint joins it.
+    FString GASAuthoring_CreateTargetPath(const FGASAuthoringCreatedBlueprint& Out)
+    {
+        return FString::Printf(TEXT("%s/%s"), *Out.PackagePath, *Out.Name);
+    }
+
+    // Creates a UBlueprint of ParentClass at the Out.PackagePath/Out.Name that GASAuthoring_ReadCreateTarget read,
+    // compiles and saves it. Idempotent: a Blueprint of ParentClass already at that path is loaded instead
+    // (bAlreadyExisted). One of another class is an error, before anything touches it: the caller asked
+    // for a ParentClass Blueprint and none exists there. The error reply on failure.
+    TSharedPtr<FJsonObject> GASAuthoring_CreateOrLoadTarget(UClass* ParentClass, FGASAuthoringCreatedBlueprint& Out)
+    {
         Out.ParentClass = ParentClass;
         FString Error;
         Out.Blueprint = mcp_common::CreateOrLoadBlueprint(ParentClass, Out.PackagePath, Out.Name, Out.bAlreadyExisted, Error);
@@ -128,6 +139,17 @@ namespace
                 Out.Blueprint->ParentClass ? *Out.Blueprint->ParentClass->GetName() : TEXT("none")));
         }
         return nullptr;
+    }
+
+    // GASAuthoring_ReadCreateTarget, then GASAuthoring_CreateOrLoadTarget: the whole create of a create_* command.
+    TSharedPtr<FJsonObject> GASAuthoring_CreateBlueprint(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass,
+                                                         FGASAuthoringCreatedBlueprint& Out)
+    {
+        if (TSharedPtr<FJsonObject> Missing = GASAuthoring_ReadCreateTarget(Params, Out))
+        {
+            return Missing;
+        }
+        return GASAuthoring_CreateOrLoadTarget(ParentClass, Out);
     }
 
     // The fields every create_* reply starts with; IsKindField says whether the generated class derives
@@ -206,20 +228,18 @@ namespace
         return nullptr;
     }
 
-    // The refusal of a CDO edit that GASAuthoring_SaveBlueprint could not persist, or null when the edit may
-    // go ahead. SaveAssetPackage refuses every save while a Play-in-Editor session runs, and a save under an
+    // The refusal of an edit of the package PackageName that its save could not persist, or null when the edit
+    // may go ahead. SaveAssetPackage refuses every save while a Play-in-Editor session runs, and a save under an
     // enforced read-only root, and the engine cannot replace a .uasset that is read-only on disk (a Git LFS
-    // `lockable` file nobody has locked); editing the CDO first would leave the change in memory, and its
-    // package dirty, behind an error reply. Call it after loading the Blueprint and before the first write to its
-    // CDO; a save that fails for any other reason is undone by FGASAuthoringCDOEdit.
-    TSharedPtr<FJsonObject> GASAuthoring_RefuseUnsavableEdit(const UBlueprint* Blueprint)
+    // `lockable` file nobody has locked); editing first would leave the change in memory, and its package dirty,
+    // behind an error reply. The package need not exist yet: a new one has no file, so only the first two apply.
+    TSharedPtr<FJsonObject> GASAuthoring_RefuseUnsavablePackage(const FString& PackageName)
     {
         if (mcp_common::IsPieActive())
         {
             return mcp_common::MakeErrorReply(TEXT("REFUSED: a Play-in-Editor session is running and assets cannot ")
                 TEXT("be saved during it, so nothing was changed. Stop PIE (stop_play_in_editor) and retry."));
         }
-        const FString PackageName = Blueprint->GetOutermost()->GetName();
         if (mcp_common::IsUnderReadOnlyRoot(PackageName) && mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
         {
             return mcp_common::MakeErrorReply(FString::Printf(
@@ -239,6 +259,13 @@ namespace
                 *FileName));
         }
         return nullptr;
+    }
+
+    // GASAuthoring_RefuseUnsavablePackage for an edit of Blueprint. Call it after loading the Blueprint and before
+    // the first write to it; a CDO edit whose save fails for any other reason is undone by FGASAuthoringCDOEdit.
+    TSharedPtr<FJsonObject> GASAuthoring_RefuseUnsavableEdit(const UBlueprint* Blueprint)
+    {
+        return GASAuthoring_RefuseUnsavablePackage(Blueprint->GetOutermost()->GetName());
     }
 
     // The in-memory state a CDO edit starts from, so that an edit which fails, or whose save fails, leaves nothing
@@ -704,22 +731,13 @@ namespace
         return nullptr;
     }
 
-    // The save of a Blueprint edit that has no CDO snapshot to undo (a member variable added and compiled): null
-    // when saved, else the error reply.
-    TSharedPtr<FJsonObject> GASAuthoring_SaveBlueprint(UBlueprint* Blueprint)
+    // The save of an AttributeSet Blueprint whose member variables an edit added and compiled: true when its
+    // package reached disk, else false with OutSaveError.
+    bool GASAuthoring_SaveAttributeSet(UBlueprint* Blueprint, FString& OutSaveError)
     {
-        if (!Blueprint)
-        {
-            return mcp_common::MakeErrorReply(TEXT("Null Blueprint"));
-        }
         Blueprint->Modify();
         Blueprint->MarkPackageDirty();
-        FString SaveError;
-        if (!mcp_common::SaveAssetPackage(Blueprint->GetOutermost(), Blueprint, SaveError))
-        {
-            return mcp_common::MakeErrorReply(SaveError);
-        }
-        return nullptr;
+        return mcp_common::SaveAssetPackage(Blueprint->GetOutermost(), Blueprint, OutSaveError);
     }
 
     // Adds AttributeName to Blueprint as an FGameplayAttributeData member variable whose BaseValue and
@@ -736,6 +754,44 @@ namespace
         FGameplayAttributeData::StaticStruct()->ExportText(DefaultText, &Default, /*Defaults*/ nullptr,
             /*OwnerObject*/ nullptr, PPF_SerializedAsImportText, /*ExportRootScope*/ nullptr);
         return FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*AttributeName), PinType, DefaultText);
+    }
+
+    // Whether GASAuthoring_AddAttributeVariable would add AttributeName to Blueprint, decided without touching it:
+    // AddMemberVariable's own test, which refuses NAME_None and a name the class or its parents already have as a
+    // variable. A call that adds nothing writes nothing, so it is neither refused up front nor undone.
+    bool GASAuthoring_CanAddAttributeVariable(const UBlueprint* Blueprint, const FString& AttributeName)
+    {
+        const FName VarName(*AttributeName);
+        if (VarName == NAME_None)
+        {
+            return false;
+        }
+        TSet<FName> CurrentVars;
+        FBlueprintEditorUtils::GetClassVariableList(Blueprint, CurrentVars);
+        return !CurrentVars.Contains(VarName);
+    }
+
+    // The undo of a GASAuthoring_AddAttributeVariable whose save failed: takes AttributeName out of Blueprint as the
+    // editor deletes a variable (Modify, then FBlueprintEditorUtils::RemoveMemberVariable) and recompiles it, so its
+    // generated class and CDO lose the member too while the compile carries the other members' CDO values over.
+    // Compiling is safe because the add refused a running PIE session up front. True when the member is gone from
+    // the Blueprint and its class; only then is the package's dirty flag put back to bPackageWasDirty.
+    bool GASAuthoring_RemoveAddedAttribute(UBlueprint* Blueprint, const FString& AttributeName, bool bPackageWasDirty)
+    {
+        const FName VarName(*AttributeName);
+        Blueprint->Modify();
+        FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, VarName);
+        FKismetEditorUtilities::CompileBlueprint(Blueprint);
+        UClass* GeneratedClass = Blueprint->GeneratedClass;
+        const bool bRemoved = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarName) == INDEX_NONE
+            && !(GeneratedClass && FindFProperty<FProperty>(GeneratedClass, VarName));
+        if (bRemoved)
+        {
+            Blueprint->GetOutermost()->SetDirtyFlag(bPackageWasDirty);
+            // The add and its removal cancel out: the call's undo step would undo nothing.
+            mcp_common::DiscardUndoStepOfThisCall();
+        }
+        return bRemoved;
     }
 
     // The BaseValue of the FGameplayAttributeData member AttributeName on the CDO of Blueprint's generated
@@ -941,15 +997,36 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJson
 // append one such member to an existing AttributeSet Blueprint. FBlueprintEditorUtils::AddMemberVariable is
 // the canonical Blueprint variable creator (BlueprintEditorUtils.h).
 
-// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. Refused during PIE.
+// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. A running PIE session, a read-only root or a .uasset read-only on disk fails before anything is created or added; a call that adds nothing to an existing set is not refused and saves nothing (saved false). A failed save makes success false, with saved false and save_error, and the added attributes stay in memory only.
 //   @param name - Asset name without a path, e.g. "AS_Character".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
 //   @param attributes - Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored.
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool }
+//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, UAttributeSet::StaticClass(), Created))
+    if (TSharedPtr<FJsonObject> Missing = GASAuthoring_ReadCreateTarget(Params, Created))
+    {
+        return Missing;
+    }
+
+    // A new asset is saved as it is created, so what keeps a save from happening refuses the call before anything
+    // is created (the path is validated first, as CreateOrLoadBlueprint does, by the same existence test it uses).
+    // An existing one is refused further down, and only when the call adds to it.
+    const FString AssetPath = GASAuthoring_CreateTargetPath(Created);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetPath))
+    {
+        return Invalid;
+    }
+    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
+    {
+        if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavablePackage(AssetPath))
+        {
+            return Refused;
+        }
+    }
+
+    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateOrLoadTarget(UAttributeSet::StaticClass(), Created))
     {
         return Error;
     }
@@ -959,13 +1036,10 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
     const TArray<TSharedPtr<FJsonValue>>* AttrArray = nullptr;
     Params->TryGetArrayField(TEXT("attributes"), AttrArray);
 
-    // The names AddMemberVariable accepted, with the default each one asked for; and the names it refused
-    // because the class already has a variable of that name.
-    TArray<TPair<FString, double>> Accepted;
-    TArray<TSharedPtr<FJsonValue>> SkippedNames;
+    // The named entries, with the default each one asks for, read before anything is added.
+    TArray<TPair<FString, double>> Requested;
     if (AttrArray && Blueprint->GeneratedClass)
     {
-        Blueprint->Modify();
         for (const TSharedPtr<FJsonValue>& AttrVal : *AttrArray)
         {
             const TSharedPtr<FJsonObject>* AttrObj = nullptr;
@@ -981,25 +1055,47 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
             }
             double DefaultValue = 0.0;
             Attr->TryGetNumberField(TEXT("default_value"), DefaultValue);
-            if (GASAuthoring_AddAttributeVariable(Blueprint, AttrName, DefaultValue))
-            {
-                Accepted.Emplace(AttrName, DefaultValue);
-            }
-            else
-            {
-                SkippedNames.Add(MakeShared<FJsonValueString>(AttrName));
-            }
+            Requested.Emplace(AttrName, DefaultValue);
         }
     }
 
-    // The new members reach the generated class, and their defaults the CDO, only on a compile.
+    // An existing AttributeSet the call adds to is refused before the first add when that add could not be saved.
+    const bool bAddsAny = Requested.ContainsByPredicate([Blueprint](const TPair<FString, double>& Attribute)
+    {
+        return GASAuthoring_CanAddAttributeVariable(Blueprint, Attribute.Key);
+    });
+    if (bAddsAny && Created.bAlreadyExisted)
+    {
+        if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+        {
+            return Refused;
+        }
+    }
+
+    // The names AddMemberVariable accepted, with the default each one asked for; and the names it refused
+    // because the class already has a variable of that name (it refuses them without touching the Blueprint).
+    TArray<TPair<FString, double>> Accepted;
+    TArray<TSharedPtr<FJsonValue>> SkippedNames;
+    for (const TPair<FString, double>& Attribute : Requested)
+    {
+        if (GASAuthoring_AddAttributeVariable(Blueprint, Attribute.Key, Attribute.Value))
+        {
+            Accepted.Add(Attribute);
+        }
+        else
+        {
+            SkippedNames.Add(MakeShared<FJsonValueString>(Attribute.Key));
+        }
+    }
+
+    // The new members reach the generated class, and their defaults the CDO, only on a compile. A new asset was
+    // already saved by its creation; one this call adds nothing to is not saved again.
+    bool bSaved = !Created.bAlreadyExisted;
+    FString SaveError;
     if (Accepted.Num() > 0)
     {
         FKismetEditorUtilities::CompileBlueprint(Blueprint);
-        if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
-        {
-            return SaveFailed;
-        }
+        bSaved = GASAuthoring_SaveAttributeSet(Blueprint, SaveError);
     }
 
     // Read each added attribute back from the compiled class and its CDO.
@@ -1022,11 +1118,17 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
     const bool bApplied = FailedNames.Num() == 0;
     Result->SetBoolField(TEXT("attributes_applied"), bApplied);
     Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
+    Result->SetBoolField(TEXT("saved"), bSaved);
+    if (Accepted.Num() > 0 && !bSaved)
+    {
+        // As with the other create tools: the attributes stay on the Blueprint in memory only, its package dirty.
+        return mcp_common::MakeSavedReply(Result, /*bSaved*/ false, TEXT("create_attribute_set_asset"), SaveError);
+    }
     return mcp_common::MakeOutcomeReply(Result, bApplied,
         bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_attribute_set_asset"), TEXT("attributes_applied")));
 }
 
-// MCP:add_attribute_to_set - Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class; refused during PIE.
+// MCP:add_attribute_to_set - Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true, nothing saved); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class. An add is refused before any edit when a running PIE session, a read-only root or a .uasset read-only on disk would keep it from being saved, and a failed save undoes it, taking the variable out again and recompiling the Blueprint.
 //   @param attribute_set_path - Full asset path of the AttributeSet Blueprint
 //   @param attribute_name - Name of the new attribute member variable
 //   @param default_value - Initial BaseValue and CurrentValue of the attribute, default 0; not applied to an attribute that already exists.
@@ -1052,14 +1154,37 @@ TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& P
             FString::Printf(TEXT("Blueprint is not a UAttributeSet: %s"), *BlueprintPath));
     }
 
-    const bool bAdded = GASAuthoring_AddAttributeVariable(Blueprint, AttributeName, DefaultValue);
+    // Only an add changes the Blueprint, so only an add is refused when it could not be saved; a name the class
+    // already has is answered without touching it.
+    const bool bAddable = GASAuthoring_CanAddAttributeVariable(Blueprint, AttributeName);
+    if (bAddable)
+    {
+        if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+        {
+            return Refused;
+        }
+    }
+
+    const bool bPackageWasDirty = Blueprint->GetOutermost()->IsDirty();
+    const bool bAdded = bAddable && GASAuthoring_AddAttributeVariable(Blueprint, AttributeName, DefaultValue);
     if (bAdded)
     {
         // The new member reaches the generated class, and its default the CDO, only on a compile.
         FKismetEditorUtilities::CompileBlueprint(Blueprint);
-        if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint))
+        FString SaveError;
+        if (!GASAuthoring_SaveAttributeSet(Blueprint, SaveError))
         {
-            return SaveFailed;
+            // A save that fails for a reason the refusal could not see (the file held open, a full disk) takes the
+            // attribute out again, so the error leaves the asset as it was.
+            if (GASAuthoring_RemoveAddedAttribute(Blueprint, AttributeName, bPackageWasDirty))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("%s The edit was undone: the attribute was removed again and the Blueprint recompiled, so the ")
+                    TEXT("asset is as it was before the call."), *SaveError));
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s The attribute could not be removed again, so it stays on the Blueprint in memory only, its ")
+                TEXT("package dirty."), *SaveError));
         }
     }
 

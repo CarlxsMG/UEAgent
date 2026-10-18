@@ -4,6 +4,26 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.4 - 2026-10-18
+
+- Dynamic mesh edits can be undone: the 38 tools that edit a DynamicMeshActor's mesh (booleans, remeshes,
+  normals, UVs, material IDs, transforms, appends, triangle deletes...) are one undo step each, and redo
+  applies the edit again. The engine does not record a dynamic mesh's geometry in a transaction, so before
+  only the actor was recorded and Ctrl+Z reverted an earlier step instead. An edit that changes nothing adds
+  no undo step, and a failed one leaves the mesh as it was.
+- A call that changes nothing leaves no undo step and keeps the redo history, also in
+  `add_anim_bone_track` and `set_anim_bone_track_keys`, whose engine controller records a change whatever it
+  writes.
+- `add_attribute_to_set` and `create_attribute_set_asset` refuse a Play-in-Editor session, a read-only root
+  and a `.uasset` read-only on disk before they touch anything, and a failed save of `add_attribute_to_set`
+  takes the attribute out again.
+- A failed `add_rigvm_link` leaves the package's dirty flag as it was when the graph is unchanged.
+- `add_chooser_column_to_table` places a column as the Chooser editor does: filters before outputs, outputs
+  before a trailing Randomize column.
+- Answers that were wrong: `delete_triangle_from_mesh` and `delete_selected_triangles_from_mesh` reported the
+  triangle ID space instead of the triangle count, `compact_mesh` always said `compacted: false`, and
+  `add_anim_transform_curve` answered success if the engine refused its keys.
+
 ## 1.2.3 - 2026-10-18
 
 - A number outside the integer range a tool reads it into is refused before the tool runs, in every tool
