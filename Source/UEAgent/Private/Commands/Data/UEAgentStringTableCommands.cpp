@@ -285,11 +285,11 @@ TSharedPtr<FJsonObject> HandleCreateStringTable(const TSharedPtr<FJsonObject>& P
 // --------------------------------------------------------------------------- //
 // set_string_table_entry  (upsert)
 // --------------------------------------------------------------------------- //
-// MCP:set_string_table_entry - Set a Key to SourceString entry in a UStringTable (upsert)
-//   @param string_table_path - Full asset path to the UStringTable
-//   @param key - Entry key to upsert
-//   @param source_string - Source string for the key
-//   @returns { string_table_path: string, key: string, source_string: string, entry_set: bool, verified: bool, created: bool, updated: bool, namespace: string, entry_count: int, saved: bool }
+// MCP:set_string_table_entry - Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one is not refused here and trips an engine assertion that stops the editor. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
+//   @param string_table_path - Asset path of the UStringTable, e.g. "/Game/StringTables/ST_UI".
+//   @param key - Entry key, unique within the table and never empty, e.g. "Menu_Play"; an existing key gets the new source string.
+//   @param source_string - Source text for the key, e.g. "Play"; an empty string is accepted.
+//   @returns { string_table_path: string, key: string, source_string: string, entry_set: bool, verified: bool, created: bool, updated: bool, namespace: string, entry_count: int, saved: bool, message?: string }
 TSharedPtr<FJsonObject> HandleSetStringTableEntry(const TSharedPtr<FJsonObject>& Params)
 {
     return UpsertStringTableEntry(Params, TEXT("Set String Table Entry"));

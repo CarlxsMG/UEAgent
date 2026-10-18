@@ -228,10 +228,10 @@ namespace
 // ---------------------------------------------------------------------------
 // add_rigvm_node
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_node - Add a rig-unit node to a Control Rig's RigVM solver graph
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
+// MCP:add_rigvm_node - Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
+//   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
 //   @param node_type - BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, or TwoBoneIKSimple
-//   @param node_name - Optional explicit node name
+//   @param node_name - Optional node name to ask for; defaults to the rig-unit struct name, and a name already in the graph gets a unique suffix.
 //   @param position - Optional [x, y] editor graph position
 //   @returns { asset_path: string, node_name: string, node_title: string, node_type: string, pin_count: int, node_count: int, saved: bool, already_exists: bool, save_error: string }
 TSharedPtr<FJsonObject> HandleAddRigVMNode(const TSharedPtr<FJsonObject>& Params)
@@ -432,9 +432,9 @@ TSharedPtr<FJsonObject> HandleAddRigVMLink(const TSharedPtr<FJsonObject>& Params
 // ---------------------------------------------------------------------------
 // get_rigvm_graph
 // ---------------------------------------------------------------------------
-// MCP:get_rigvm_graph - Read a Control Rig's RigVM solver graph nodes pins and links
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
-//   @returns { asset_path: string, nodes: [object], node_count: int, link_count: int }
+// MCP:get_rigvm_graph - Read the main RigVM graph of a Control Rig Blueprint, loaded by asset path: every node with its name, title, type (the rig-unit struct, or the node class otherwise) and top-level pins, each pin with its name, NodeName.PinName path, direction and is_execute, plus node_count and link_count. Links are only counted, not listed, and the sub-pins of struct pins are not expanded. Read-only: nothing is compiled or saved, and no PIE is needed. A path that is not a Control Rig Blueprint, or one with no default RigVM model, is an error. Use the pin paths with add_rigvm_link and set_rigvm_pin_default; add nodes with add_rigvm_node, take one out with remove_rigvm_node; the bones and controls of the rig: get_rig_hierarchy.
+//   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
+//   @returns { asset_path: string, nodes: [{ name: string, title: string, type: string, pin_count: int, pins: [{ name: string, path: string, direction: string, is_execute: bool }] }], node_count: int, link_count: int }
 TSharedPtr<FJsonObject> HandleGetRigVMGraph(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;

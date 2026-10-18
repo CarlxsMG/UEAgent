@@ -1502,9 +1502,9 @@ TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 // get_ik_retarget_chain_details
 // ---------------------------------------------------------------------------
-// MCP:get_ik_retarget_chain_details - Get detailed info about a retarget chain: start/end bones, goal name.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
-//   @param chain_name - Name of the retarget chain
+// MCP:get_ik_retarget_chain_details - Read one retarget chain of an IK Rig asset (UIKRigDefinition) without changing it: its start_bone, end_bone and the IK goal it drives (goal_name, None when the chain has no goal). The chain is matched by name without case; a name the rig does not have is not an error: found=false, and the bone and goal fields read None. An IK Rig that does not load is an error. Every goal and chain of the rig at once: get_ik_rig_info; edit the chain: set_ik_retarget_chain_bones or rename_ik_retarget_chain; add or drop one: add_ik_retarget_chain or remove_ik_retarget_chain; how a retargeter maps it: get_ik_retargeter_info.
+//   @param ik_rig_path - Path to the UIKRigDefinition asset (an IK Rig, not an IK Retargeter)
+//   @param chain_name - Name of the retarget chain as get_ik_rig_info lists it, matched without case
 //   @returns { asset_path: string, chain_name: string, found: bool, start_bone: string, end_bone: string, goal_name: string }
 
 TSharedPtr<FJsonObject> HandleGetIKRetargetChainDetails(const TSharedPtr<FJsonObject>& Params)

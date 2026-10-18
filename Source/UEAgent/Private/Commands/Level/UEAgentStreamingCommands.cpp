@@ -272,9 +272,9 @@ TSharedPtr<FJsonObject> HandleGetStreamingLevels(const TSharedPtr<FJsonObject>& 
 // set_streaming_level_loaded
 // ---------------------------------------------------------------------------
 
-// MCP:set_streaming_level_loaded - Sets whether a streaming sub-level should be loaded (ULevelStreaming::SetShouldBeLoaded).
-//   @param level_package_path - Package path of an existing streaming sub-level.
-//   @param loaded - Desired should-be-loaded state.
+// MCP:set_streaming_level_loaded - Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
+//   @param level_package_path - Package path of an existing streaming sub-level, e.g. "/Game/Maps/SubLevel"; an object path or the bare level name also matches.
+//   @param loaded - Desired should-be-loaded state; required.
 //   @returns { package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_loaded: bool, applied: bool }
 
 TSharedPtr<FJsonObject> HandleSetStreamingLevelLoaded(const TSharedPtr<FJsonObject>& Params)

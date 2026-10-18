@@ -310,10 +310,10 @@ TSharedPtr<FJsonObject> HandleCreateMediaTexture(const TSharedPtr<FJsonObject>& 
 // UMediaTexture::SetMediaPlayer(player), verified by reading GetMediaPlayer back.
 // Re-saves the texture package so the link persists.
 // ---------------------------------------------------------------------------
-// MCP:link_media_texture_to_player - Links a media texture to a media player via SetMediaPlayer
-//   @param media_texture_path - Asset path of the UMediaTexture (e.g.
-//   @param media_player_path - Asset path of the UMediaPlayer to bind.
-//   @returns { media_texture_path, media_player_path, linked, saved, bound_player_path, save_error }
+// MCP:link_media_texture_to_player - Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). linked confirms the texture now reports that player, and bound_player_path names the player it reports. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
+//   @param media_texture_path - Asset path of the UMediaTexture, e.g. "/Game/Media/T_Intro" (the object path form also works).
+//   @param media_player_path - Asset path of the UMediaPlayer to bind, e.g. "/Game/Media/MP_Intro" (the object path form also works).
+//   @returns { media_texture_path, media_player_path, linked, saved, bound_player_path?, save_error? }
 TSharedPtr<FJsonObject> HandleLinkMediaTextureToPlayer(const TSharedPtr<FJsonObject>& Params)
 {
     FString TexPath;

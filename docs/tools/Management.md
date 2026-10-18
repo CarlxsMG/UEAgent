@@ -111,11 +111,11 @@ Recursively copy a content folder to a new path, REMAPPING references among the 
 
 *Read-only.*
 
-Get all registered primary asset types from the Asset Manager.
+List every primary asset type the running Asset Manager has registered, read-only: each entry of types holds the type name, its asset_class (base class path) and num_assets from the last scan, and count says how many types there are. This is the live registry, not the project settings, so it includes types registered by game code and its counts cover scanned assets only (rescan with scan_primary_assets); the configured PrimaryAssetTypesToScan rules with their directories are get_primary_asset_types. There is no filter or paging; an uninitialized Asset Manager is an error. One type in detail: get_primary_asset_type_info; its asset ids: get_primary_asset_ids_by_type; its cook rules: get_primary_asset_cook_rules.
 
 No parameters.
 
-**Returns:** `{ name, asset_class, num_assets, types, count }`
+**Returns:** `{ types: [{ name, asset_class, num_assets }], count }`
 
 ## `get_asset_bundle_data`
 
@@ -158,11 +158,11 @@ Read one plugin by name, read-only: Enabled or Disabled, version, author, catego
 
 *Read-only.*
 
-Read the Priority / ChunkId / bApplyRecursively / CookRule for a single primary asset type.
+Read the rules of one primary asset type as configured in the Asset Manager project settings, read-only: cook_rule, priority, chunk_id and apply_recursively of the first PrimaryAssetTypesToScan entry of that type, matched by name without case. The running Asset Manager is not consulted, so a type only registered by game code is not found, and a type with no configured rule is an error. cook_rule comes back as Unknown, Never, ProductionNeverCook, DevelopmentAlways, DevelopmentAlwaysProductionUnknownCook or Always, each accepted back by set_primary_asset_cook_rule. Change them with set_primary_asset_cook_rule (priority: add_primary_asset_rule); every configured rule: get_primary_asset_types; what the running manager holds: get_primary_asset_type_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `primary_asset_type` | string | yes | Name of the primary asset type (e.g. "Item"). |
+| `primary_asset_type` | string | yes | Name of the primary asset type as configured in PrimaryAssetTypesToScan (e.g. "Item"). |
 
 **Returns:** `{ primary_asset_type, cook_rule, priority, chunk_id, apply_recursively }`
 
@@ -182,11 +182,11 @@ Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_
 
 *Read-only.*
 
-Get the primary asset ID for a given object path.
+Look up the Primary Asset Id (Type:Name) that the running Asset Manager has registered for an object path, read-only: primary_asset_id and is_valid. A path that is not a scanned primary asset, or a package-only path, gives is_valid=false and an empty primary_asset_id, not an error; an uninitialized Asset Manager is an error. Same lookup as get_primary_asset_id, which also returns the type and name split apart; all ids of one type: get_primary_asset_ids_by_type; to make a type scannable, add_primary_asset_rule then scan_primary_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `object_path` | string | yes | Full object path (e.g. /Game/MyAsset.MyAsset) |
+| `object_path` | string | yes | Full object path including the object name (e.g. /Game/MyAsset.MyAsset); a package-only path does not match |
 
 **Returns:** `{ object_path, primary_asset_id, is_valid }`
 

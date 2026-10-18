@@ -239,16 +239,16 @@ List the time codes at which a USD attribute on a prim of an open stage has auth
 
 *Read-only.*
 
-Read a USD attribute's value at a time code
+Read the composed value of one attribute on a prim of a USD stage opened with open_usd_stage or create_usd_stage, at the time code given in time or, when it is omitted, at the default time, which gives the static default value rather than a time sample. The value may come from any layer or be a schema fallback (has_value true, has_authored_value false). value is an object {type, value}, converted only for bool, integer, floating-point, string, token and asset values; other types such as float3 or arrays, and an attribute with no value, give a null value with a note. A missing attribute is a success with present=false; an unregistered stage, an invalid prim path or a missing prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
-| `attr_name` | string | yes | Attribute name to read |
-| `time` | number | no | Optional time code (default: unset = static default) |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
+| `attr_name` | string | yes | Attribute name to read, e.g. "size" |
+| `time` | number | no | Optional USD time code to read at, e.g. 24; when omitted the default time is read (the static default value, not a sample) |
 
-**Returns:** `{ present: bool, has_value: bool, has_authored_value: bool, type: string, type_name: string, value: object }`
+**Returns:** `{ prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, note?: string } | null, note?: string }`
 
 ## `get_usd_generated_assets`
 

@@ -1162,8 +1162,8 @@ TSharedPtr<FJsonObject> HandleMetaSoundDisconnectNodeFromGraphOutput(const TShar
 // default page graph's Nodes/Edges arrays) plus the graph's declared interface
 // input/output counts and names (from the root graph's default interface).
 // ---------------------------------------------------------------------------
-// MCP:get_metasound_graph_info - Reads the MetaSound Source document graph: node/connection counts + I/O.  Reads the document's RootGraph default page (node + connection/edge counts) and the graph's declared interface inputs/outputs (names + types).          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").
-//   @param metasound_path - Asset path of the MetaSound Source (e.g.
+// MCP:get_metasound_graph_info - Read the graph summary of a MetaSound Source asset, loading it if needed: the node, connection (edge) and variable counts of the document's root graph default page, and the root graph's declared interface inputs and outputs with name and type, plus the root graph class name. Read-only. metasound_path is a package path or a full object path; one that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. For the document's interfaces and metadata use get_metasound_info; to list the nodes themselves with their ids use list_meta_sound_nodes, then get_meta_sound_node_info; find sources with list_meta_sounds.
+//   @param metasound_path - Asset path of the MetaSound Source, as a package path ("/Game/MetaSounds/MS_Example") or an object path ("/Game/MetaSounds/MS_Example.MS_Example").
 //   @returns { asset_path: string, graph_class_name: string, node_count: number, connection_count: number, variable_count: number, input_count: number, output_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }
 
 TSharedPtr<FJsonObject> HandleGetMetaSoundGraphInfo(const TSharedPtr<FJsonObject>& Params)

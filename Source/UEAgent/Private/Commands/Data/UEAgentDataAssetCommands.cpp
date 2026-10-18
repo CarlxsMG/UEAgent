@@ -1248,8 +1248,8 @@ TSharedPtr<FJsonObject> HandleGetDataTableRows(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:get_data_table_info - Retrieves detailed information about a DataTable, including all row names. When the asset is a UCompositeDataTable (see table_class) the reported row_count is the ALREADY-MERGED map, so the response additionally explains where those rows come from: parent_tables[] in precedence order, merged_row_count vs sum_parent_row_counts, shadowed_rows[] with the winning parent, and parent_row_struct_mismatch[] for parents the engine silently skips.
-//   @param table_path - The full asset path to the DataTable.
+// MCP:get_data_table_info - Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, get_data_table_row or read_data_table_row_complex; one column: get_data_table_column; build a composite: create_composite_data_table.
+//   @param table_path - The full asset path to the DataTable or UCompositeDataTable, e.g. "/Game/Data/DT_Items".
 //   @param include_row_sources - Composite tables only. Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables.
 //   @returns { table_path, table_name, table_class, row_struct, row_count, row_names, columns:[{ name, type, is_map, is_soft, is_tag }] } plus, for a UCompositeDataTable: { parent_tables:[{ index, path, name, table_class, row_struct, row_count, row_struct_matches, contributes, null_entry }], parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch:[], shadowed_rows:[{ row_name, winner, winner_parent_slot, shadowed_by_winner:[] }], shadowed_row_count, row_sources_included, row_sources? }
 TSharedPtr<FJsonObject> HandleGetDataTableInfo(const TSharedPtr<FJsonObject>& Params)
@@ -3421,10 +3421,10 @@ TSharedPtr<FJsonObject> HandleGetDataTableColumn(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:export_data_table_as_json - Export a whole DataTable to JSON with the native exporter (read-only), so TMap<Enum,SoftClass>, soft references and GameplayTags survive, unlike get_data_table_rows. Returns row_struct, row_count and the json string (an array of row objects), optionally also written to a UTF-8 file.
+// MCP:export_data_table_as_json - Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap<Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row_as_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
 //   @param table_path - Full asset path of the DataTable.
-//   @param data_table - Alias of table_path: pass one of the two.
-//   @param file_path - Optional OS path to also write the JSON string to (echoed back as written_to)
+//   @param data_table - Alias of table_path; it is read first, so it wins when both are given.
+//   @param file_path - Optional OS file path; the JSON is also written there as UTF-8, overwriting an existing file, and echoed back as written_to
 //   @returns { table_path, row_struct, row_count, json, written_to? }
 TSharedPtr<FJsonObject> HandleExportDataTableAsJson(const TSharedPtr<FJsonObject>& Params)
 {

@@ -208,9 +208,9 @@ Create and save a UPhysicalMaterial asset, optionally setting surface/object pro
 
 ## `create_physics_asset`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates a UPhysicsAsset at package_path/name, generating bodies and constraints from a skeletal mesh, sets that mesh as its preview mesh and saves it; the mesh is not pointed at the new asset. An existing one there is returned unchanged. Returns bodies, constraints, skeleton_bones, bodies_generated, saved.
+Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true, nothing generated or written (saved still reads true), while another asset class there is an error. skeletal_mesh_path must load even when the asset exists. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -218,7 +218,7 @@ Creates a UPhysicsAsset at package_path/name, generating bodies and constraints 
 | `package_path` | string | no | Content folder for the new asset (default /Game/Physics; an empty string also uses it) |
 | `skeletal_mesh_path` | string | no | Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load |
 
-**Returns:** `{ package_path, already_existed, created, saved, bodies_generated, generation_message, save_error }`
+**Returns:** `{ asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string }`
 
 ## `fracture_geometry_collection`
 
@@ -318,13 +318,13 @@ Count the instances in an InstancedStaticMeshComponent, or read one instance's t
 
 *Read-only.*
 
-Read a UPhysicsAsset's body count, constraint count, and bound skeletal mesh.
+Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties or set_physics_body_advanced_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `physics_asset_path` | string | yes | /Game path to the UPhysicsAsset. |
+| `physics_asset_path` | string | yes | Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero". |
 
-**Returns:** `success or error payload`
+**Returns:** `{ asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }`
 
 ## `get_physics_constraint_info`
 
@@ -791,13 +791,13 @@ Slices all transforms of a UGeometryCollection asset with a regular grid of slic
 
 *Additive.*
 
-Spawn an AFieldSystemActor in the editor world and assign a UFieldSystem.  Spawns the actor at the given location, assigns the asset via UFieldSystemComponent::SetFieldSystem, and sets the actor label.
+Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. Every call spawns another actor; nothing is saved. A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info; for any other actor class use spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Editor label for the spawned actor |
-| `field_system_path` | string | yes | Asset path of the UFieldSystem to assign |
-| `location` | array | no | Optional [x, y, z] world location; defaults to (0,0,0) |
+| `actor_label` | string | yes | Outliner label for the spawned actor |
+| `field_system_path` | string | yes | Asset path of an existing UFieldSystem to assign, e.g. "/Game/MyGame/FS_Example" |
+| `location` | array | no | Optional [x, y, z] world location in cm; defaults to (0,0,0) |
 
 **Returns:** `{ actor_label: string, field_system_path: string, actor_name: string, has_field_system: bool, success: bool }`
 

@@ -642,10 +642,11 @@ TSharedPtr<FJsonObject> HandleGetSequenceFrameRate(const TSharedPtr<FJsonObject>
 // runtime commands can reach them.
 // ---------------------------------------------------------------------------
 
-// MCP:play_level_sequence_runtime - Create a runtime player and start playback of a Level Sequence
-//   @param sequence_name - Name of the sequence to play
+// MCP:play_level_sequence_runtime - Spawn an ALevelSequenceActor with a ULevelSequencePlayer for a Level Sequence in a running PIE or game world, start it with default playback settings, and return the player_key the other runtime tools take. Every call makes a new player and actor with its own key, even for a sequence already playing; nothing in the editor level or on disk changes. No PIE or game world, a world selector naming the editor world, or no sequence of that name under /Game is an error and nothing is spawned. The key stops resolving when PIE ends. Then: pause_level_sequence_runtime, set_level_sequence_time_runtime, get_level_sequence_status_runtime, and stop_level_sequence_runtime to release the player and destroy its actor; to scrub in the editor without PIE, play_timeline or set_timeline_time.
+//   @param sequence_name - Asset name of the Level Sequence, not its path, e.g. "LS_Intro"; matched case-insensitively, and the first match under /Game is used.
 //   @param world - Optional world selector: absent/'pie' (default: PlayWorld, else the first PIE context) | 'server' | 'client' | 'pie:N' | 'game' (alias of 'pie'). Runtime playback needs a PIE/Game world (an editor world has no movie-scene tick manager and would assert), so an editor world is refused here.
 //   @returns { sequence_name: string, player_key: string, playing: bool, current_time: number, world: string, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
+//   @hints additive
 TSharedPtr<FJsonObject> HandlePlayLevelSequenceRuntime(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;
@@ -778,9 +779,9 @@ TSharedPtr<FJsonObject> HandleStopLevelSequenceRuntime(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:set_level_sequence_time_runtime - Set the playback time of an active Level Sequence player
+// MCP:set_level_sequence_time_runtime - Move a runtime Level Sequence player, found by the player_key play_level_sequence_runtime returned, to time seconds with SetPlaybackPosition and the Play update method: the sequence is evaluated from its current position to the new one as playback would, so events in between can fire, rather than jumping. It does not start, pause or stop the player. A negative time, or a key that is unknown, released by stop_level_sequence_runtime or gone with its PIE session, is an error. A time past the end is not refused: actual_time, read back right after, says where the player is, next to requested_time and the player frame_rate. Runtime state only: nothing is saved. Read the state with get_level_sequence_status_runtime; in the editor without PIE, set_timeline_time scrubs a sequence.
 //   @param player_key - Player key returned from play_level_sequence_runtime
-//   @param time - Playback time in seconds, must be >= 0
+//   @param time - Playback time in seconds from the start of the sequence, must be >= 0
 //   @returns { player_key: string, requested_time: number, actual_time: number, frame_rate: number }
 TSharedPtr<FJsonObject> HandleSetLevelSequenceTimeRuntime(const TSharedPtr<FJsonObject>& Params)
 {

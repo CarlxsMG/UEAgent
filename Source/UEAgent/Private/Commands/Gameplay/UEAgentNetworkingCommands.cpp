@@ -379,7 +379,7 @@ TSharedPtr<FJsonObject> HandleSetNetworkAuthority(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_network_info - Retrieves comprehensive network information including NetDriver, replicated actors, GameState, and PlayerController details.
+// MCP:get_network_info - Read a network snapshot of the editor world, never a PIE world: its net mode; the net driver class, tick rates and client connection count; every replicating actor with its class and local role; and, when they exist, the GameState (class, player count) and the first PlayerController. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. Online subsystem config and the player list: get_network_settings; one actor in detail: get_replication_info; replicated actors filtered by role, with remote role and dormancy: list_replicated_actors; the net mode alone: get_world_net_mode.
 //   @returns { world_name: string, world_valid: bool, net_mode: string, net_driver_info: { class?: string, max_net_tick_rate?: number, net_server_max_tick_rate?: number, connection_count?: number }, replicated_actors: [{ name: string, class: string, local_role: string, is_replicated: bool }], replicated_actor_count: number, game_state_info?: { class: string, player_count: number, is_valid: bool }, player_controller_info?: { class: string, is_valid: bool, is_local_player: bool } }
 
 TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Params)

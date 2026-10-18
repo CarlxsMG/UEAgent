@@ -109,15 +109,15 @@ Add a NiagaraLightRendererProperties (UNiagaraLightRendererProperties) to a Niag
 
 *Additive.*
 
-Insert a UNiagaraScript module at a specific index in a Niagara emitter's particle stack graph.
+Insert a module script (a UNiagaraScript, by asset path) into the particle spawn or update stack of one emitter of a Niagara System asset (emitter by handle name) at a chosen position, in one undo step; then request a recompile of the system and save it. target_index is the 0-based position in that stack: -1, the default, appends, and an index past the end is clamped to it. The module starts with its script's default inputs. Not idempotent: every call adds another module node, named in module_node_name. An emitter without an editable graph, or an unknown system, emitter or script, is an error; a failed save makes success false with saved=false and save_error. Append only: add_niagara_module_to_stack; move: reorder_niagara_modules; inputs: set_niagara_module_input; list: list_niagara_modules; take out: remove_niagara_module_from_stack.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
-| `module_script_path` | string | yes | Asset path of the module UNiagaraScript |
-| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update" |
-| `target_index` | number | no | Optional stack index for insertion; INDEX_NONE (-1) appends to the end |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
+| `emitter_name` | string | yes | Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive). |
+| `module_script_path` | string | yes | Module UNiagaraScript asset path, e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce"; the call fails without it. |
+| `script_group` | string | no | Optional "spawn" or "update"; defaults to "update"; case-insensitive, any other value is an error. |
+| `target_index` | number | no | Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append, and an index below -1 inserts first. |
 
 **Returns:** `{ system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added: bool, saved: bool, save_error?: string }`
 
@@ -291,11 +291,11 @@ List all UNiagaraDataInterface user-parameter bindings on a Niagara system. para
 
 *Read-only.*
 
-Get the EffectType configuration of a Niagara system.  Reads the UNiagaraEffectType associated with the system and returns its key properties: UpdateFrequency, CullReaction, bAllowCullingForLocalPlayers.
+Read which Niagara Effect Type asset a Niagara System asset uses, plus three of that effect type's settings: update_frequency and cull_reaction (as enum value names) and allows_culling (bAllowCullingForLocalPlayers). A system with no effect type is a success with an empty effect_type_path, None for both enums and allows_culling false. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the effect type's distance and instance-count limits: get_niagara_scalability_settings; the system's own flags and fixed bounds: get_niagara_system_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
 
 **Returns:** `{ system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool }`
 
@@ -971,15 +971,15 @@ Set the EParticleAllocationMode (and optional PreAllocationCount) on a Niagara e
 
 *Destructive, idempotent.*
 
-Set the CalculateBoundsMode and FixedBounds on a Niagara emitter's FVersionedNiagaraEmitterData.
+Set how one emitter of a Niagara System asset (emitter by handle name) computes its bounds -- bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed -- and optionally its fixed bounds box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one given alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 on each axis) and the other modes keep it. Corners are not checked for min &lt;= max. An unknown mode, system or emitter is an error. A failed save still answers success, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_system_fixed_bounds.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `emitter_name` | string | yes | Name of the emitter handle. |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
+| `emitter_name` | string | yes | Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive). |
 | `bounds_mode` | string | no | One of "Dynamic", "Fixed", or "Programmable"; defaults to "Fixed" |
-| `bounds_min` | string | no | Optional [x, y, z] string (FVector) for the FixedBounds minimum |
-| `bounds_max` | string | no | Optional [x, y, z] string (FVector) for the FixedBounds maximum |
+| `bounds_min` | string | no | Optional FixedBounds minimum corner as an FVector string, e.g. "X=-50 Y=-50 Z=0" (the format the reply echoes); an axis without its X=, Y= or Z= key reads as 0, so "[x, y, z]" gives 0,0,0. |
+| `bounds_max` | string | no | Optional FixedBounds maximum corner as an FVector string, e.g. "X=50 Y=50 Z=100"; same format and rules as bounds_min. |
 
 **Returns:** `{ system_path: string, emitter_name: string, bounds_mode: string, bounds_min: string, bounds_max: string, applied: bool, saved: bool, save_error?: string }`
 
@@ -1271,12 +1271,12 @@ Re-resolve the protected UNiagaraSystem::WarmupTickCount from the current Warmup
 
 *Destructive, idempotent.*
 
-Set the warmup tick delta (seconds per tick) on a Niagara system.
+Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_warmup_time. A repeat call with the same value writes and saves again. A missing or non-positive delta, or an unknown system, is an error; a failed save makes success false with saved=false. Set the delta before calling set_niagara_system_warmup_time.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `system_path` | string | yes | Asset path of the Niagara System. |
-| `warmup_tick_delta` | number | no | Tick delta in seconds (must be > 0) |
+| `system_path` | string | yes | Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works). |
+| `warmup_tick_delta` | number | no | Seconds per warmup tick, > 0, e.g. 0.0333 for 30 ticks per second; the call fails without it. |
 
 **Returns:** `{ system_path: string, old_warmup_tick_delta: number, new_warmup_tick_delta: number, applied: bool, saved: bool }`
 

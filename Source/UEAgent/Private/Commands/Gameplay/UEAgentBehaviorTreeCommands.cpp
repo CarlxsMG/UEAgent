@@ -518,8 +518,8 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
 // Asset-based reads
 //----------------------------------------------------------------------//
 
-// MCP:get_behavior_tree_info - Get information about a behavior tree's structure and properties
-//   @param behavior_tree_path - Path or name of the behavior tree to query
+// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with that blackboard's own keys (name, type, instance_synced and the base class or enum subsettings; keys inherited from a parent blackboard are not listed), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
+//   @param behavior_tree_path - Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved
 //   @returns { behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool }], root_node: object|null }
 
 TSharedPtr<FJsonObject> HandleGetBehaviorTreeInfo(const TSharedPtr<FJsonObject>& Params)
@@ -943,9 +943,9 @@ TSharedPtr<FJsonObject> HandleGetBlackboardKeys(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_data - Retrieve all key-value pairs and complete data from an actor's blackboard
-//   @param actor_name - Name of the actor whose blackboard to dump (use blackboard_path for asset-based read)
-//   @param blackboard_path - Path to a UBlackboardData asset (alternative to actor_name)
+// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way only the asset's own keys are listed, not those inherited from a parent blackboard. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
+//   @param actor_name - Object name or label of the editor-world pawn or AIController whose running blackboard to dump; ignored when blackboard_path is given
+//   @param blackboard_path - Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name
 //   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced }]?, entries: [{ name, type, value }]?, key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& Params)

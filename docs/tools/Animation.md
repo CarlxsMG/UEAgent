@@ -205,20 +205,20 @@ Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller
 
 ## `add_anim_transition`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create a source->target transition in an anim state machine.
+Add a transition from source_state to target_state in an existing state machine of an Animation Blueprint, set its crossfade, blend mode, bidirectional flag and priority, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). The machine (top-level AnimGraph) and both endpoints (a state or a conduit) are matched by name without case; a missing one, the same state twice or an unknown blend_mode is an error. Idempotent per pair: an existing source->target transition is returned unchanged with already_existed=true and nothing is saved (to change its settings, remove_anim_transition and add it again). It starts with no rule: wire one with set_anim_transition_rule_from_bool, set_anim_transition_rule_from_comparison or set_anim_transition_rule_automatic. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Path to the UAnimBlueprint asset |
 | `machine_name` | string | yes | Name of the state machine that owns both states |
-| `source_state` | string | yes | Name of the source state (transition origin) |
-| `target_state` | string | yes | Name of the target state (transition destination) |
+| `source_state` | string | yes | Name of the source state or conduit (transition origin), matched without case |
+| `target_state` | string | yes | Name of the target state or conduit (transition destination), matched without case |
 | `crossfade_duration` | number | no | Optional blend duration in seconds (default 0.2) |
-| `blend_mode` | string | no | Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic |
-| `bidirectional` | boolean | no | Optional; also allow the reverse target->source transition |
-| `priority_order` | number | no | Optional evaluation priority (higher wins) |
+| `blend_mode` | string | no | Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic (default HermiteCubic); an unknown name is an error |
+| `bidirectional` | boolean | no | Optional, default false; sets the Bidirectional flag so the same transition can also fire target->source (no second transition is added) |
+| `priority_order` | number | no | Optional priority order (default 1); when several transitions out of a state pass at once, the smallest value wins |
 
 **Returns:** `{ anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, transition_created: bool, already_existed: bool, crossfade_duration: number, blend_mode: string, bidirectional: bool, priority_order: int, transition_count: int, saved: bool, save_error?: string }`
 
@@ -466,15 +466,15 @@ Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at 
 
 *Additive.*
 
-Add a control to a Control Rig's hierarchy.  Control types: Bool, Float, ScaleFloat, Integer, Vector2D, Position, Scale, Rotator, Transform, EulerTransform (defaults to Float).
+Add an animation control to the hierarchy of a Control Rig Blueprint, with a zero or identity value and no limits, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the control really got. An unrecognised control_type makes a Float control with control_type_recognized false instead of failing. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Set it up with set_rig_control_value, set_rig_control_limits and set_rig_control_settings; bones and nulls: add_rig_bone, add_rig_null; inspect: get_rig_hierarchy; take it out: remove_rig_element.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
-| `control_name` | string | yes | Name of the new control |
+| `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
+| `control_name` | string | yes | Name of the new control, also used as its display name; a name already in use gets a numbered suffix |
 | `control_type` | string | no | One of: "bool", "float", "scalefloat", "integer", "int", "vector2d", "position", "scale", "rotator", "transform", "eulertransform" (default "float"). |
-| `parent_name` | string | no | Optional existing element name to parent the new control under. |
-| `parent_type` | string | no | Element type of the parent (default "Null"). |
+| `parent_name` | string | no | Optional existing element name to parent the new control under; omitted or empty puts it at the root. |
+| `parent_type` | string | no | Element type of the parent (default "Null"); case is ignored, "Space" means Null, and an unknown type falls back to Null. |
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, control_type: string, control_type_recognized: bool, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
@@ -482,15 +482,15 @@ Add a control to a Control Rig's hierarchy.  Control types: Bool, Float, ScaleFl
 
 *Additive.*
 
-Add a null (space) to a Control Rig's hierarchy.
+Add a null (a space: a transform-only element) to the hierarchy of a Control Rig Blueprint at location in rig global space, with no rotation and unit scale, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the null really got. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request, so check with get_rig_hierarchy. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Each call adds another null. Controls and bones: add_rig_control, add_rig_bone; rename or take out: rename_rig_element, remove_rig_element.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
-| `null_name` | string | yes | Name of the new null |
-| `parent_name` | string | no | Optional existing element name to parent the new null under. |
-| `parent_type` | string | no | Element type of the parent ("Bone" default, "Null"/"Control"/etc). |
-| `location` | array | no | Optional [x, y, z] world location for the new null. |
+| `control_rig_path` | string | yes | Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero" |
+| `null_name` | string | yes | Name of the new null; a name already in use gets a numbered suffix |
+| `parent_name` | string | no | Optional existing element name to parent the new null under; omitted or empty puts it at the root. |
+| `parent_type` | string | no | Element type of the parent ("Bone" default, "Null"/"Control"/etc); case is ignored, "Space" means Null, and an unknown type falls back to Bone. |
+| `location` | array | no | Optional [x, y, z] location in rig global space for the new null; defaults to the origin. |
 
 **Returns:** `{ asset_path: string, element_key: string, element_type: string, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }`
 
@@ -512,13 +512,13 @@ Link an output pin to an input pin in the main RigVM graph of a Control Rig Blue
 
 *Additive.*
 
-Add a rig-unit node to a Control Rig's RigVM solver graph
+Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
 | `node_type` | string | yes | BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, or TwoBoneIKSimple |
-| `node_name` | string | no | Optional explicit node name |
+| `node_name` | string | no | Optional node name to ask for; defaults to the rig-unit struct name, and a name already in the graph gets a unique suffix. |
 | `position` | array | no | Optional [x, y] editor graph position |
 
 **Returns:** `{ asset_path: string, node_name: string, node_title: string, node_type: string, pin_count: int, node_count: int, saved: bool, already_exists: bool, save_error: string }`
@@ -527,12 +527,12 @@ Add a rig-unit node to a Control Rig's RigVM solver graph
 
 *Additive.*
 
-Append a new LOD entry to a skeletal mesh (clone of LOD 0 build settings).
+Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated, so build the LOD with bake_skeletal_mesh_lod (regenerate_even_if_imported=true) and keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_screen_size; take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `screen_size` | number | no | Optional override for ScreenSize.Default of the new LOD (default 0.5) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `screen_size` | number | no | Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped |
 
 **Returns:** `{ skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }`
 
@@ -615,16 +615,16 @@ Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
 
 *Destructive.*
 
-Run the editor's skeletal-mesh reduction pipeline via USkeletalMeshEditorSubsystem::RegenerateLOD.
+Regenerate the LODs of a skeletal mesh asset (found by content path) with the engine's mesh reduction, driven by each LOD's reduction settings, then rebuild its render data; nothing is saved, so follow with save_asset. A new_lod_count below the current count drops the LODs above it; above it, appends reduced LODs up to that count; 0, omitted or equal re-reduces the LODs that were generated, plus imported LODs above 0 with regenerate_even_if_imported and LOD 0 with generate_base_lod. A mesh that does not load is an error; a run the engine refuses, as it does during PIE, is a success with baked=false and bake_warning. Author the settings first with set_skeletal_mesh_lod_reduction_settings; one empty LOD entry: add_skeletal_mesh_lod; one LOD out by index: remove_skeletal_mesh_lod; triangle counts: get_asset_lod_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `new_lod_count` | number | no | Target LOD count; &lt;= 0 keeps current and re-runs reduction |
-| `regenerate_even_if_imported` | boolean | no | bool, regenerate even when LODs are imported (default false) |
-| `generate_base_lod` | boolean | no | bool, re-derive LOD 0 from source (default false) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `new_lod_count` | number | no | Target LOD count; fewer than now drops the extra LODs, more appends reduced ones, and &lt;= 0 (the default when omitted) keeps the current count and re-runs reduction |
+| `regenerate_even_if_imported` | boolean | no | bool, also re-reduce imported LODs above 0 when the count is kept (default false) |
+| `generate_base_lod` | boolean | no | bool, re-derive LOD 0 from its reduction settings when the count is kept (default false) |
 
-**Returns:** `{ skeletal_mesh_path: string, old_lod_count: int, new_lod_count: int, lod_count: int, baked: bool, regenerate_even_if_imported: bool, generate_base_lod: bool, bake_warning: string }`
+**Returns:** `{ skeletal_mesh_path: string, old_lod_count: int, new_lod_count: int, lod_count: int, baked: bool, regenerate_even_if_imported: bool, generate_base_lod: bool, bake_warning?: string }`
 
 ## `build_animation_state_machine`
 
@@ -905,17 +905,17 @@ Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package
 
 ## `create_editable_skeleton`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create an editable /Game skeleton by duplicating an engine skeleton
+Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false, and nothing is saved. A package_path that does not start with a slash, a source that does not exist, or another kind of asset at the target is an error; so is a source that is not a skeleton, though the copy it made is left behind unsaved. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: create_editable_skeletal_mesh; inspect the result: get_skeleton_asset_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | UE content folder, e.g. /Game/MyGame |
-| `name` | string | yes | Asset name for the new skeleton |
-| `source_skeleton` | string | no | Engine skeleton to duplicate, defaults to SkeletalCube_Skeleton |
+| `package_path` | string | yes | UE content folder starting with a slash, e.g. /Game/MyGame |
+| `name` | string | yes | Asset name for the new skeleton, e.g. "SK_Creature_Skeleton"; with package_path it gives the asset path. |
+| `source_skeleton` | string | no | Asset path of the skeleton to duplicate, e.g. "/Engine/EngineMeshes/SkeletalCube_Skeleton", which is also the default. |
 
-**Returns:** `{ asset_path: string, name: string, source: string, bone_count: int, created: bool, saved: bool, save_error: string }`
+**Returns:** `{ asset_path: string, name: string, source: string, bone_count: int, created: bool, saved?: bool, save_error?: string }`
 
 ## `create_ik_retargeter`
 
@@ -990,16 +990,16 @@ Create and save a UPoseSearchDatabase data asset bound to a UPoseSearchSchema
 
 ## `create_pose_search_schema`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a UPoseSearchSchema data asset bound to a USkeleton
+Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and nothing saved, although its saved field reads true; skeleton_path and sample_rate are not applied to it. The skeleton is loaded first, so a skeleton that does not load is an error even then; an invalid path, or an asset of another class there, is an error too; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_pose_search_schema_properties, and inspect it with inspect_pose_search_schema.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name (e.g. 'PoseSearchSchema_Example'). |
-| `package_path` | string | no | Target content package path (default /Game/MCP). |
-| `skeleton_path` | string | no | Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton). |
-| `sample_rate` | number | no | Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30). |
+| `package_path` | string | no | Target content package path (default /Game/MCP); trailing slashes are stripped. |
+| `skeleton_path` | string | no | Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); it must load even when the schema already exists. |
+| `sample_rate` | number | no | Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates. |
 
 **Returns:** `{ name, package_path, asset_path, schema_path, skeleton_path, sample_rate, schema_cardinality, channel_count, created, already_existed, saved, message }`
 
@@ -1324,12 +1324,12 @@ Get goal-specific settings for a goal connected to a solver.  FullBodyIK returns
 
 *Read-only.*
 
-Get detailed info about a retarget chain: start/end bones, goal name.
+Read one retarget chain of an IK Rig asset (UIKRigDefinition) without changing it: its start_bone, end_bone and the IK goal it drives (goal_name, None when the chain has no goal). The chain is matched by name without case; a name the rig does not have is not an error: found=false, and the bone and goal fields read None. An IK Rig that does not load is an error. Every goal and chain of the rig at once: get_ik_rig_info; edit the chain: set_ik_retarget_chain_bones or rename_ik_retarget_chain; add or drop one: add_ik_retarget_chain or remove_ik_retarget_chain; how a retargeter maps it: get_ik_retargeter_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset |
-| `chain_name` | string | yes | Name of the retarget chain |
+| `ik_rig_path` | string | yes | Path to the UIKRigDefinition asset (an IK Rig, not an IK Retargeter) |
+| `chain_name` | string | yes | Name of the retarget chain as get_ik_rig_info lists it, matched without case |
 
 **Returns:** `{ asset_path: string, chain_name: string, found: bool, start_bone: string, end_bone: string, goal_name: string }`
 
@@ -1505,13 +1505,13 @@ Read every element of a Control Rig Blueprint hierarchy in traversal order as el
 
 *Read-only.*
 
-Read a Control Rig's RigVM solver graph nodes pins and links
+Read the main RigVM graph of a Control Rig Blueprint, loaded by asset path: every node with its name, title, type (the rig-unit struct, or the node class otherwise) and top-level pins, each pin with its name, NodeName.PinName path, direction and is_execute, plus node_count and link_count. Links are only counted, not listed, and the sub-pins of struct pins are not expanded. Read-only: nothing is compiled or saved, and no PIE is needed. A path that is not a Control Rig Blueprint, or one with no default RigVM model, is an error. Use the pin paths with add_rigvm_link and set_rigvm_pin_default; add nodes with add_rigvm_node, take one out with remove_rigvm_node; the bones and controls of the rig: get_rig_hierarchy.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset |
+| `control_rig_path` | string | yes | Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin". |
 
-**Returns:** `{ asset_path: string, nodes: [object], node_count: int, link_count: int }`
+**Returns:** `{ asset_path: string, nodes: [{ name: string, title: string, type: string, pin_count: int, pins: [{ name: string, path: string, direction: string, is_execute: bool }] }], node_count: int, link_count: int }`
 
 ## `get_skeletal_mesh_info`
 
@@ -1529,24 +1529,24 @@ Get detailed info about a skeletal mesh: LODs, materials, morph targets, sockets
 
 *Read-only.*
 
-Get per-LOD build settings and screen size for a skeletal mesh.
+Read the settings of one LOD of a skeletal mesh asset found by content path: screen size, material map entry count, CPU access, the build settings, the reduction settings and the flat LOD scalars (hysteresis, prioritization weight, morph error tolerance, skin cache usage, mesh deformer). Enums come back by name, e.g. "SMTC_NumOfTriangles" or "Auto", a form the setters accept. Nothing is written. A mesh that does not load, or a lod_index outside its LOD count, is an error. Each block has its setter: set_skeletal_mesh_lod_build_settings, set_skeletal_mesh_lod_reduction_settings, set_skeletal_mesh_lod_settings and set_skeletal_mesh_lod_screen_size. Per-LOD vertex counts: get_skeletal_mesh_info; triangle counts: get_asset_lod_settings; sections: get_skeletal_mesh_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | no | LOD index to query (default 0) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `lod_index` | number | no | 0-based LOD index to read (default 0); it must be below the LOD count of the mesh |
 
-**Returns:** `{ lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...} }`
+**Returns:** `{ lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...}, reduction_settings: {...}, lod_hysteresis: float, weight_of_prioritization: float, morph_target_position_error_tolerance: float, skin_cache_usage: string, allow_mesh_deformer: bool }`
 
 ## `get_skeletal_mesh_material_slots`
 
 *Read-only.*
 
-Get all material slot info for a skeletal mesh: slot names, material paths.
+List the material slots of a skeletal mesh asset found by content path, in slot-index order: slot name, assigned material and overlay material as object paths, "(none)" where a slot has none. Nothing is written; a mesh that does not load is an error. Pass a slot_index or slot_name from here to set_skeletal_mesh_material_slot to assign a material; get_skeletal_mesh_section_info gives the material_index each section of a LOD draws with; get_skeletal_mesh_info gives the slot count next to LODs, morph targets, sockets and bones.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
 
 **Returns:** `{ skeletal_mesh_path: string, num_material_slots: int, material_slots: [{slot_index, slot_name, material_path, overlay_material_path}] }`
 
@@ -1591,14 +1591,14 @@ Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, e
 
 *Read-only.*
 
-Retrieve metadata and optional full bone/socket/slot data for a Skeleton asset
+Find a Skeleton asset in the Asset Registry and report its object path, class path, package, whether it is loaded, and the size and timestamp of its .uasset (left out when no file is on disk); nothing is changed. skeleton_name takes an object path, a package path or a short name searched under /Game; no match is an error, and so is a short name several skeletons share, with the candidates listed. Only with load_full_data true is the asset loaded, adding bone_count, the first 100 bones (name, index, parent_index) with bones_truncated, socket_count and slot_group_count. For the first 10 bone names plus virtual bones use get_skeleton_asset_info; the meshes using it: is_skeleton_shared; one bone's reference pose: get_bone_transform; a skeletal mesh: get_skeletal_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeleton_name` | string | yes | Object path, package path, or bare short name of the Skeleton asset (resolved via mcp_common::ResolveAssetFlexible; an ambiguous short name errors out listing every candidate instead of picking one silently) |
 | `load_full_data` | boolean | no | When true, loads the asset and reports bone list (capped at 100), sockets, and slot groups (optional, default false) |
 
-**Returns:** `{ skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number, file_size_kb: number, file_size_mb: number, last_modified: string, loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [object]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, load_error: string? }`
+**Returns:** `{ skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number?, file_size_kb: number?, file_size_mb: number?, last_modified: string?, loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [{ name, index, parent_index }]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, load_error: string? }`
 
 ## `inspect_motion_warping_component`
 
@@ -2253,12 +2253,12 @@ Remove one LOD from a skeletal mesh asset, with its source model and cached redu
 
 *Destructive.*
 
-Remove a morph target from a skeletal mesh by name.
+Delete one morph target, by name, from a skeletal mesh asset found by content path, including its data in every LOD's source mesh, in one undo step, then save the mesh. Not idempotent: a name the mesh does not have is an error, so a repeat call fails instead of reporting it already gone. A mesh that does not load is an error, and so is a failed save (refused during PIE or under a read-only root, or a locked file), although the deletion stays in memory. remaining_morph_targets counts the morphs left. List names with get_skeletal_mesh_morph_targets; rename with rename_skeletal_mesh_morph_target; add one with create_skeletal_mesh_morph_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `morph_target_name` | string | yes | Name of the morph target to remove |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `morph_target_name` | string | yes | Name of the morph target to delete, as get_skeletal_mesh_morph_targets lists it |
 
 **Returns:** `{ morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int }`
 
@@ -2744,15 +2744,15 @@ Set the automatic rule of one transition (source_state to target_state) in a sta
 
 *Destructive, idempotent.*
 
-Wire a bool variable's getter as the rule of a transition.
+Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or a non-bool one, is an error before anything changes; a variable known only from the blueprint's variable list (variable_kind new_blueprint) is not type-checked. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Asset path of the UAnimBlueprint |
-| `machine_name` | string | yes | Name of the state machine that owns the transition |
-| `source_state` | string | yes | Name of the source state (transition origin) |
-| `target_state` | string | yes | Name of the target state (transition destination) |
-| `variable_name` | string | yes | Name of an existing bool variable on the AnimBP (or its parent C++ class) |
+| `machine_name` | string | yes | Name of the state machine that owns the transition, matched without case |
+| `source_state` | string | yes | Name of the source state or conduit (transition origin) |
+| `target_state` | string | yes | Name of the target state or conduit (transition destination) |
+| `variable_name` | string | yes | Name of an existing bool variable on the AnimBP (or its parent C++ class); the rule reads it as is, true lets the transition pass |
 
 **Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }`
 
@@ -2760,17 +2760,17 @@ Wire a bool variable's getter as the rule of a transition.
 
 *Destructive, idempotent.*
 
-Wire a float comparison as the rule of a transition.
+Make (variable_name operator comparison_value) the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter, a literal and a comparison node are wired into the sink's bCanEnterTransition. Only a double variable (a Blueprint float) works: a C++ float property, or one known only from the variable list (variable_kind new_blueprint), maps to *_FloatFloat math functions the engine no longer has and is an error, like an unknown operator; both are found after the old rule is removed, which stays removed in memory. A missing blueprint, machine, transition or variable, or a non-float one, is an error before anything changes. Repeat calls rebuild the same rule (idempotent); saves without compiling (compile_anim_blueprint). Bool rule: set_anim_transition_rule_from_bool; empty rule: clear_anim_transition_rule. Refused while PIE runs unless force=true; a failed save is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `anim_blueprint_path` | string | yes | Asset path of the UAnimBlueprint |
-| `machine_name` | string | yes | Name of the state machine that owns the transition |
-| `source_state` | string | yes | Name of the source state (transition origin) |
-| `target_state` | string | yes | Name of the target state (transition destination) |
-| `variable_name` | string | yes | Name of an existing float variable on the AnimBP (or its parent C++ class) |
+| `machine_name` | string | yes | Name of the state machine that owns the transition, matched without case |
+| `source_state` | string | yes | Name of the source state or conduit (transition origin) |
+| `target_state` | string | yes | Name of the target state or conduit (transition destination) |
+| `variable_name` | string | yes | Name of an existing double variable (a Blueprint float) on the AnimBP or its parent class; the left-hand side of the comparison |
 | `operator` | string | yes | One of "==", "!=", ">", "&lt;", ">=", "&lt;=" (compared against comparison_value) |
-| `comparison_value` | number | no | Float literal on the right-hand side of the comparison |
+| `comparison_value` | number | no | Right-hand side of the comparison (default 0), written into the literal node at float precision |
 
 **Returns:** `{ anim_blueprint_path, machine_name, source_state, target_state, variable_name, operator, comparison_value, variable_kind, rule_set, sink_present, contributor_count, contributor_node_classes, saved, save_error? }`
 
@@ -2862,15 +2862,15 @@ Re-parent a bone (pass empty parent_name to make it a new root).
 
 *Destructive, idempotent.*
 
-Update the local reference-pose transform of an existing bone
+Overwrite the local, parent-relative reference-pose transform of an existing bone in a USkeleton asset loaded by path, through FReferenceSkeletonModifier, then save the skeleton. local_transform is written whole: an omitted location or rotation becomes zero and an omitted or zero scale becomes 1, so to change one component read the others with get_bone_transform first. The modifier notifies the skeleton listeners itself, so commit_bone_changes is not needed. Every call writes and saves, even with the same transform. An unknown bone is an error, so not_found is never true in a reply; a failed save makes success false with save_error and keeps the change in memory. Only the skeleton changes: skeletal meshes using it keep their own reference pose. Other bone edits: set_bone_parent, rename_bone, add_bone.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeleton_path` | string | yes | Path to the USkeleton asset |
-| `bone_name` | string | yes | Bone to update |
-| `local_transform` | object | yes | {location:[x,y,z], rotation:[p,y,r], scale:[x,y,z]} — all three required |
+| `skeleton_path` | string | yes | Asset path of the USkeleton, e.g. "/Game/Characters/SK_Hero_Skeleton". |
+| `bone_name` | string | yes | Name of an existing bone of that skeleton, e.g. "spine_01". |
+| `local_transform` | object | yes | Object {location:[x,y,z], rotation:[pitch,yaw,roll] or {pitch,yaw,roll}, scale:[x,y,z]} relative to the parent bone; the whole transform is written, so an omitted location or rotation becomes zero and an omitted or zero scale becomes 1. |
 
-**Returns:** `{ asset_path, bone_name, bone_index, updated, not_found, bone_count, saved, op: "set_bone_transform" }`
+**Returns:** `{ asset_path, bone_name, bone_index, updated, not_found, bone_count, saved, save_error?, op: "set_bone_transform" }`
 
 ## `set_ik_bone_settings`
 
@@ -3498,12 +3498,12 @@ Assign a material to an existing material slot of a skeletal mesh ASSET (writes 
 
 *Destructive, idempotent.*
 
-Set the platform-wide forced-min-LOD bias on a skeletal mesh.
+Set the minimum LOD a skeletal mesh asset (found by content path) renders, so the more detailed LODs below it are skipped while they stay in the asset. It replaces the whole Minimum LOD property with this one value, per-platform overrides included, or the per-quality-level one when the project setting UseSkeletalMeshMinLODPerQualityLevels is on. A missing min_lod, one outside 0 to the LOD count minus 1, or a mesh that does not load is an error. One undo step; the mesh is marked dirty but not saved, so follow with save_asset. old_min_lod is the value in effect before the call. To take a LOD out of the asset use remove_skeletal_mesh_lod; to change switch distances, set_skeletal_mesh_lod_screen_size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `min_lod` | number | no | New MinLodIdx (must be in [0, NumLODs-1]) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `min_lod` | number | no | New minimum LOD index, 0-based (must be in [0, NumLODs-1]) |
 
 **Returns:** `{ skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }`
 
@@ -3511,13 +3511,13 @@ Set the platform-wide forced-min-LOD bias on a skeletal mesh.
 
 *Destructive, idempotent.*
 
-Set the cast shadow flag on a specific section of a skeletal mesh LOD.
+Turn shadow casting on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_recompute_tangent and set_skeletal_mesh_section_visible_in_ray_tracing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | no | LOD index containing the section (default 0) |
-| `section_index` | number | no | Index of the section to modify (default 0) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `lod_index` | number | no | 0-based LOD index containing the section (default 0) |
+| `section_index` | number | no | 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0) |
 | `cast_shadow` | boolean | no | New value for the flag (default true) |
 
 **Returns:** `{ lod_index: int, section_index: int, cast_shadow: bool, saved: bool }`
@@ -3526,13 +3526,13 @@ Set the cast shadow flag on a specific section of a skeletal mesh LOD.
 
 *Destructive, idempotent.*
 
-Set the recompute tangent flag on a specific section of a skeletal mesh LOD.
+Turn runtime tangent recomputation (a GPU skin cache feature) on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_cast_shadow and set_skeletal_mesh_section_visible_in_ray_tracing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset |
-| `lod_index` | number | no | LOD index containing the section (default 0) |
-| `section_index` | number | no | Index of the section to modify (default 0) |
+| `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
+| `lod_index` | number | no | 0-based LOD index containing the section (default 0) |
+| `section_index` | number | no | 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0) |
 | `recompute_tangent` | boolean | no | New value for the flag (default true) |
 
 **Returns:** `{ lod_index: int, section_index: int, recompute_tangent: bool, saved: bool }`
@@ -3598,14 +3598,14 @@ Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animat
 
 ## `sort_montage_segments`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Sort a montage slot track's segments by start time ascending (FAnimTrack::SortAnimSegments, which then lays them end-to-end and clamps each end time to its animation length) in an undo transaction and save the montage. Segments the sort leaves as they are (already in order, end-to-end and within their animations) are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
+Sort the segments of one slot track of a UAnimMontage asset by their position on the track, ascending (FAnimTrack::SortAnimSegments), which then lays them end-to-end from 0 and clamps each segment's end time to its animation's length, in one undo step, and save the montage. Segment indices follow the new order, and the sort key is the track position, not the AnimStartTime that set_montage_segment_start_time edits. Idempotent: a track the sort leaves unchanged (already in order, end-to-end and within its animations) is a success with applied=false and saved=false, and nothing is modified or saved. An unknown montage or slot is an error; a failed save makes success false with saved=false and save_error. To close gaps but keep the array order: collapse_montage_segments; slot names: get_montage_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `montage_path` | string | yes | Full asset path of the montage (e.g. '/Game/MyGame/AM_Example'). |
-| `slot_name` | string | yes | Name of the slot track to sort. |
+| `slot_name` | string | yes | Name of the slot track to sort, e.g. "DefaultSlot" (case-insensitive); an unknown slot is an error. |
 
 **Returns:** `{ montage_path, slot_name, segment_count, applied, saved, save_error, message }`
 
@@ -3638,18 +3638,18 @@ Check a state machine of an Animation Blueprint by node counts, without compilin
 
 ## `wire_aim_offset`
 
-*Destructive, idempotent.*
+*Additive, idempotent.*
 
-Create a UBlendSpace1D asset for aim-offset blending (yaw or pitch axis). Idempotent on re-run.
+Create a plain UBlendSpace1D asset (not an aim offset class) for a skeleton at package_path/asset_name and save it, or re-save the UBlendSpace1D already there (already_existed=true, its skeleton and samples kept); nothing is overwritten, so it is idempotent. axis_name, min_value, max_value and num_grid_points are only echoed in the reply (min and max sorted, the grid clamped to 1-10), never written to the asset: set the axis with set_blendspace_properties and add samples with add_blendspace_sample. A skeleton that does not load or a failed create is an error; a failed save, as during PIE, makes success false with save_error. A real 2D aim offset (UAimOffsetBlendSpace): scaffold_aim_offset_blend_space; other blend spaces: create_blend_space or scaffold_blend_space_2d; delete: remove_blendspace_1d.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | yes | UE content folder. |
-| `asset_name` | string | yes | BlendSpace1D asset name. |
-| `skeleton_path` | string | yes | Path to the target USkeleton. |
-| `axis_name` | string | no | Optional axis name (default "Yaw"). |
-| `min_value` | number | no | Optional float (default -90.0). Axis minimum. |
-| `max_value` | number | no | Optional float (default 90.0). Axis maximum. |
-| `num_grid_points` | number | no | Optional int (default 4). |
+| `package_path` | string | yes | Content folder for the asset, e.g. /Game/Animation (a trailing slash is ignored). |
+| `asset_name` | string | yes | Asset name; the object path becomes package_path/asset_name.asset_name. |
+| `skeleton_path` | string | yes | Asset path of the USkeleton a new blend space targets; it must load even when the asset already exists, which keeps its own skeleton. |
+| `axis_name` | string | no | Optional axis label echoed in the reply (default "Yaw"); not written to the asset. |
+| `min_value` | number | no | Optional float (default -90.0) echoed as the axis minimum; not written to the asset. |
+| `max_value` | number | no | Optional float (default 90.0) echoed as the axis maximum; not written to the asset. |
+| `num_grid_points` | number | no | Optional int (default 4) echoed clamped to 1-10; not written to the asset. |
 
-**Returns:** `{ asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved }`
+**Returns:** `{ asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved, save_error? }`

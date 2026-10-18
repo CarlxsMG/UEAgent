@@ -111,11 +111,11 @@ Create an empty UBlackboardData asset at package_path/name and save it; success 
 
 *Read-only.*
 
-Get information about a behavior tree's structure and properties
+Read a UBehaviorTree asset found by content path: its name, its blackboard asset with that blackboard's own keys (name, type, instance_synced and the base class or enum subsettings; keys inherited from a parent blackboard are not listed), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `behavior_tree_path` | string | yes | Path or name of the behavior tree to query |
+| `behavior_tree_path` | string | yes | Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved |
 
 **Returns:** `{ behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool }], root_node: object|null }`
 
@@ -147,12 +147,12 @@ Read the UBlackboardComponent of an editor-world actor (its AIController blackbo
 
 *Read-only.*
 
-Retrieve all key-value pairs and complete data from an actor's blackboard
+Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way only the asset's own keys are listed, not those inherited from a parent blackboard. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name of the actor whose blackboard to dump (use blackboard_path for asset-based read) |
-| `blackboard_path` | string | no | Path to a UBlackboardData asset (alternative to actor_name) |
+| `actor_name` | string | yes | Object name or label of the editor-world pawn or AIController whose running blackboard to dump; ignored when blackboard_path is given |
+| `blackboard_path` | string | no | Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name |
 
 **Returns:** `{ actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced }]?, entries: [{ name, type, value }]?, key_count: number }`
 

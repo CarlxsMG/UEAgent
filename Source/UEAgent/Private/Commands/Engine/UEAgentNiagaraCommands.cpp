@@ -1934,8 +1934,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
 // Reads the UNiagaraEffectType associated with a UNiagaraSystem and returns
 // its key properties: UpdateFrequency, CullReaction, bAllowCullingForLocalPlayers.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_effect_type - Get the EffectType configuration of a Niagara system.  Reads the UNiagaraEffectType associated with the system and returns its key properties: UpdateFrequency, CullReaction, bAllowCullingForLocalPlayers.
-//   @param system_path - Asset path of the Niagara System.
+// MCP:get_niagara_effect_type - Read which Niagara Effect Type asset a Niagara System asset uses, plus three of that effect type's settings: update_frequency and cull_reaction (as enum value names) and allows_culling (bAllowCullingForLocalPlayers). A system with no effect type is a success with an empty effect_type_path, None for both enums and allows_culling false. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the effect type's distance and instance-count limits: get_niagara_scalability_settings; the system's own flags and fixed bounds: get_niagara_system_properties.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @returns { system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEffectType(const TSharedPtr<FJsonObject>& Params)
@@ -5479,9 +5479,9 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickCount(const TSharedPtr<F
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_warmup_tick_count"));
 }
 
-// MCP:set_niagara_system_warmup_tick_delta - Set the warmup tick delta (seconds per tick) on a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
-//   @param warmup_tick_delta - Tick delta in seconds (must be > 0)
+// MCP:set_niagara_system_warmup_tick_delta - Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_warmup_time. A repeat call with the same value writes and saves again. A missing or non-positive delta, or an unknown system, is an error; a failed save makes success false with saved=false. Set the delta before calling set_niagara_system_warmup_time.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
+//   @param warmup_tick_delta - Seconds per warmup tick, > 0, e.g. 0.0333 for 30 ticks per second; the call fails without it.
 //   @returns { system_path: string, old_warmup_tick_delta: number, new_warmup_tick_delta: number, applied: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickDelta(const TSharedPtr<FJsonObject>& Params)
@@ -5671,12 +5671,12 @@ TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 //   4. SaveModifiedNiagaraSystem(System, SaveError)
 // ========================================================================== //
 
-// MCP:set_niagara_emitter_bounds - Set the CalculateBoundsMode and FixedBounds on a Niagara emitter's FVersionedNiagaraEmitterData.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
+// MCP:set_niagara_emitter_bounds - Set how one emitter of a Niagara System asset (emitter by handle name) computes its bounds -- bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed -- and optionally its fixed bounds box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one given alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 on each axis) and the other modes keep it. Corners are not checked for min <= max. An unknown mode, system or emitter is an error. A failed save still answers success, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_system_fixed_bounds.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
+//   @param emitter_name - Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive).
 //   @param bounds_mode - One of "Dynamic", "Fixed", or "Programmable"; defaults to "Fixed"
-//   @param bounds_min - Optional [x, y, z] string (FVector) for the FixedBounds minimum
-//   @param bounds_max - Optional [x, y, z] string (FVector) for the FixedBounds maximum
+//   @param bounds_min - Optional FixedBounds minimum corner as an FVector string, e.g. "X=-50 Y=-50 Z=0" (the format the reply echoes); an axis without its X=, Y= or Z= key reads as 0, so "[x, y, z]" gives 0,0,0.
+//   @param bounds_max - Optional FixedBounds maximum corner as an FVector string, e.g. "X=50 Y=50 Z=100"; same format and rules as bounds_min.
 //   @returns { system_path: string, emitter_name: string, bounds_mode: string, bounds_min: string, bounds_max: string, applied: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraEmitterBounds(const TSharedPtr<FJsonObject>& Params)
@@ -6198,12 +6198,12 @@ namespace
 // AddScriptModuleToStack) but accepts an explicit target_index so callers can
 // place the module anywhere in the stack. INDEX_NONE appends to the end.
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_module_to_graph - Insert a UNiagaraScript module at a specific index in a Niagara emitter's particle stack graph.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_script_path - Asset path of the module UNiagaraScript
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @param target_index - Optional stack index for insertion; INDEX_NONE (-1) appends to the end
+// MCP:add_niagara_module_to_graph - Insert a module script (a UNiagaraScript, by asset path) into the particle spawn or update stack of one emitter of a Niagara System asset (emitter by handle name) at a chosen position, in one undo step; then request a recompile of the system and save it. target_index is the 0-based position in that stack: -1, the default, appends, and an index past the end is clamped to it. The module starts with its script's default inputs. Not idempotent: every call adds another module node, named in module_node_name. An emitter without an editable graph, or an unknown system, emitter or script, is an error; a failed save makes success false with saved=false and save_error. Append only: add_niagara_module_to_stack; move: reorder_niagara_modules; inputs: set_niagara_module_input; list: list_niagara_modules; take out: remove_niagara_module_from_stack.
+//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
+//   @param emitter_name - Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive).
+//   @param module_script_path - Module UNiagaraScript asset path, e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce"; the call fails without it.
+//   @param script_group - Optional "spawn" or "update"; defaults to "update"; case-insensitive, any other value is an error.
+//   @param target_index - Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append, and an index below -1 inserts first.
 //   @returns { system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddNiagaraModuleToGraph(const TSharedPtr<FJsonObject>& Params)

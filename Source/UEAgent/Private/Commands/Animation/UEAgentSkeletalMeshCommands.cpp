@@ -535,10 +535,10 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshMorphTargets(
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_lod_info
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_lod_info - Get per-LOD build settings and screen size for a skeletal mesh.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index to query (default 0)
-//   @returns { lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...} }
+// MCP:get_skeletal_mesh_lod_info - Read the settings of one LOD of a skeletal mesh asset found by content path: screen size, material map entry count, CPU access, the build settings, the reduction settings and the flat LOD scalars (hysteresis, prioritization weight, morph error tolerance, skin cache usage, mesh deformer). Enums come back by name, e.g. "SMTC_NumOfTriangles" or "Auto", a form the setters accept. Nothing is written. A mesh that does not load, or a lod_index outside its LOD count, is an error. Each block has its setter: set_skeletal_mesh_lod_build_settings, set_skeletal_mesh_lod_reduction_settings, set_skeletal_mesh_lod_settings and set_skeletal_mesh_lod_screen_size. Per-LOD vertex counts: get_skeletal_mesh_info; triangle counts: get_asset_lod_settings; sections: get_skeletal_mesh_section_info.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param lod_index - 0-based LOD index to read (default 0); it must be below the LOD count of the mesh
+//   @returns { lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...}, reduction_settings: {...}, lod_hysteresis: float, weight_of_prioritization: float, morph_target_position_error_tolerance: float, skin_cache_usage: string, allow_mesh_deformer: bool }
 
 TSharedPtr<FJsonObject> HandleGetSkeletalMeshLodInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1045,9 +1045,9 @@ TSharedPtr<FJsonObject> HandleCreateSkeletalMeshMorphTarget(
 // ---------------------------------------------------------------------------
 // remove_skeletal_mesh_morph_target
 // ---------------------------------------------------------------------------
-// MCP:remove_skeletal_mesh_morph_target - Remove a morph target from a skeletal mesh by name.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param morph_target_name - Name of the morph target to remove
+// MCP:remove_skeletal_mesh_morph_target - Delete one morph target, by name, from a skeletal mesh asset found by content path, including its data in every LOD's source mesh, in one undo step, then save the mesh. Not idempotent: a name the mesh does not have is an error, so a repeat call fails instead of reporting it already gone. A mesh that does not load is an error, and so is a failed save (refused during PIE or under a read-only root, or a locked file), although the deletion stays in memory. remaining_morph_targets counts the morphs left. List names with get_skeletal_mesh_morph_targets; rename with rename_skeletal_mesh_morph_target; add one with create_skeletal_mesh_morph_target.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param morph_target_name - Name of the morph target to delete, as get_skeletal_mesh_morph_targets lists it
 //   @returns { morph_target_name: string, skeletal_mesh_path: string, removed: bool, remaining_morph_targets: int }
 
 TSharedPtr<FJsonObject> HandleRemoveSkeletalMeshMorphTarget(
@@ -1351,10 +1351,10 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshSectionInfo(
 // ---------------------------------------------------------------------------
 // set_skeletal_mesh_section_recompute_tangent
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_section_recompute_tangent - Set the recompute tangent flag on a specific section of a skeletal mesh LOD.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index containing the section (default 0)
-//   @param section_index - Index of the section to modify (default 0)
+// MCP:set_skeletal_mesh_section_recompute_tangent - Turn runtime tangent recomputation (a GPU skin cache feature) on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_cast_shadow and set_skeletal_mesh_section_visible_in_ray_tracing.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param lod_index - 0-based LOD index containing the section (default 0)
+//   @param section_index - 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0)
 //   @param recompute_tangent - New value for the flag (default true)
 //   @returns { lod_index: int, section_index: int, recompute_tangent: bool, saved: bool }
 
@@ -1401,10 +1401,10 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionRecomputeTangent(
 // ---------------------------------------------------------------------------
 // set_skeletal_mesh_section_cast_shadow
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_section_cast_shadow - Set the cast shadow flag on a specific section of a skeletal mesh LOD.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index containing the section (default 0)
-//   @param section_index - Index of the section to modify (default 0)
+// MCP:set_skeletal_mesh_section_cast_shadow - Turn shadow casting on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_recompute_tangent and set_skeletal_mesh_section_visible_in_ray_tracing.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param lod_index - 0-based LOD index containing the section (default 0)
+//   @param section_index - 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0)
 //   @param cast_shadow - New value for the flag (default true)
 //   @returns { lod_index: int, section_index: int, cast_shadow: bool, saved: bool }
 
@@ -1451,8 +1451,8 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_material_slots
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_material_slots - Get all material slot info for a skeletal mesh: slot names, material paths.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
+// MCP:get_skeletal_mesh_material_slots - List the material slots of a skeletal mesh asset found by content path, in slot-index order: slot name, assigned material and overlay material as object paths, "(none)" where a slot has none. Nothing is written; a mesh that does not load is an error. Pass a slot_index or slot_name from here to set_skeletal_mesh_material_slot to assign a material; get_skeletal_mesh_section_info gives the material_index each section of a LOD draws with; get_skeletal_mesh_info gives the slot count next to LODs, morph targets, sockets and bones.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @returns { skeletal_mesh_path: string, num_material_slots: int, material_slots: [{slot_index, slot_name, material_path, overlay_material_path}] }
 
 TSharedPtr<FJsonObject> HandleGetSkeletalMeshMaterialSlots(
@@ -1603,9 +1603,9 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 // next save.
 // ========================================================================== //
 
-// MCP:add_skeletal_mesh_lod - Append a new LOD entry to a skeletal mesh (clone of LOD 0 build settings).
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param screen_size - Optional override for ScreenSize.Default of the new LOD (default 0.5)
+// MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated, so build the LOD with bake_skeletal_mesh_lod (regenerate_even_if_imported=true) and keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_screen_size; take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param screen_size - Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped
 //   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }
 TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1719,9 +1719,9 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodScreenSize(const TSharedPtr<FJso
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_skeletal_mesh_min_lod - Set the platform-wide forced-min-LOD bias on a skeletal mesh.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param min_lod - New MinLodIdx (must be in [0, NumLODs-1])
+// MCP:set_skeletal_mesh_min_lod - Set the minimum LOD a skeletal mesh asset (found by content path) renders, so the more detailed LODs below it are skipped while they stay in the asset. It replaces the whole Minimum LOD property with this one value, per-platform overrides included, or the per-quality-level one when the project setting UseSkeletalMeshMinLODPerQualityLevels is on. A missing min_lod, one outside 0 to the LOD count minus 1, or a mesh that does not load is an error. One undo step; the mesh is marked dirty but not saved, so follow with save_asset. old_min_lod is the value in effect before the call. To take a LOD out of the asset use remove_skeletal_mesh_lod; to change switch distances, set_skeletal_mesh_lod_screen_size.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param min_lod - New minimum LOD index, 0-based (must be in [0, NumLODs-1])
 //   @returns { skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshMinLod(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1763,12 +1763,12 @@ Mesh->Modify();
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:bake_skeletal_mesh_lod - Run the editor's skeletal-mesh reduction pipeline via USkeletalMeshEditorSubsystem::RegenerateLOD.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param new_lod_count - Target LOD count; <= 0 keeps current and re-runs reduction
-//   @param regenerate_even_if_imported - bool, regenerate even when LODs are imported (default false)
-//   @param generate_base_lod - bool, re-derive LOD 0 from source (default false)
-//   @returns { skeletal_mesh_path: string, old_lod_count: int, new_lod_count: int, lod_count: int, baked: bool, regenerate_even_if_imported: bool, generate_base_lod: bool, bake_warning: string }
+// MCP:bake_skeletal_mesh_lod - Regenerate the LODs of a skeletal mesh asset (found by content path) with the engine's mesh reduction, driven by each LOD's reduction settings, then rebuild its render data; nothing is saved, so follow with save_asset. A new_lod_count below the current count drops the LODs above it; above it, appends reduced LODs up to that count; 0, omitted or equal re-reduces the LODs that were generated, plus imported LODs above 0 with regenerate_even_if_imported and LOD 0 with generate_base_lod. A mesh that does not load is an error; a run the engine refuses, as it does during PIE, is a success with baked=false and bake_warning. Author the settings first with set_skeletal_mesh_lod_reduction_settings; one empty LOD entry: add_skeletal_mesh_lod; one LOD out by index: remove_skeletal_mesh_lod; triangle counts: get_asset_lod_settings.
+//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
+//   @param new_lod_count - Target LOD count; fewer than now drops the extra LODs, more appends reduced ones, and <= 0 (the default when omitted) keeps the current count and re-runs reduction
+//   @param regenerate_even_if_imported - bool, also re-reduce imported LODs above 0 when the count is kept (default false)
+//   @param generate_base_lod - bool, re-derive LOD 0 from its reduction settings when the count is kept (default false)
+//   @returns { skeletal_mesh_path: string, old_lod_count: int, new_lod_count: int, lod_count: int, baked: bool, regenerate_even_if_imported: bool, generate_base_lod: bool, bake_warning?: string }
 TSharedPtr<FJsonObject> HandleBakeSkeletalMeshLod(const TSharedPtr<FJsonObject>& Params)
 {
     FString MeshPath;

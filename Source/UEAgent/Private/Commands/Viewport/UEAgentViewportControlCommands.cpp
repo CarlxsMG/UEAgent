@@ -228,8 +228,8 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
 // set_viewport_view_mode
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_view_mode - Set the rendering view mode of the active editor viewport
-//   @param view_mode - One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections
+// MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
+//   @param view_mode - One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode; CSGWireframe (read back as BrushWireframe) and ReflectionOverride are accepted too.
 //   @returns { applied: bool, requested: string, view_mode_index: int, view_mode: string }
 TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -263,8 +263,8 @@ TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>&
 // set_show_flag
 // ---------------------------------------------------------------------------
 
-// MCP:set_show_flag - Toggle a single engine show flag on the active editor viewport
-//   @param flag_name - Engine show flag name, e.g. Grid, Bounds, Collision, Wireframe, Lighting
+// MCP:set_show_flag - Set one engine show flag (Grid, Bounds, Collision, Wireframe, Lighting...) on the active level editor viewport, the focused one or else the first; no viewport is an error. It sets the given state rather than toggling: enabled true turns the flag on, false turns it off, and a repeat call changes nothing. flag_name is matched without case against the engine's show flags and registered custom flags; an unknown name is an error before anything changes. It lasts for this editor session, with no undo step, nothing saved and the earlier value not returned. value is the flag read back and flag_index its engine index. get_viewport_state reads Grid, Bounds, Collision, Wireframe and Lighting back; set_game_view swaps the whole flag set; set_viewport_view_mode changes the render mode.
+//   @param flag_name - Engine show flag name as FEngineShowFlags spells it, e.g. Grid, Bounds, Collision, Wireframe, Lighting; matched without case
 //   @param enabled - True to set the flag, false to clear it
 //   @returns { applied: bool, flag_name: string, flag_index: int, requested: bool, value: bool }
 TSharedPtr<FJsonObject> HandleSetShowFlag(const TSharedPtr<FJsonObject>& Params)
@@ -451,8 +451,8 @@ TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Pa
 // set_viewport_fov
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_fov - Set the perspective FOV (in degrees) of the active editor viewport
-//   @param fov - Field of view in degrees (positive; clamped to 5..170 by editor)
+// MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. The value goes into the viewport's current view FOV as given -- no clamp and no range check -- and fov is read straight back; an orthographic view ignores it. It lasts for this editor session with no undo step and no save, and the previous FOV is not returned. Only the current view FOV changes, not the value the toolbar FOV slider stores, so a camera reset or the end of a PIE session brings the slider's value back, and a viewport piloting a camera actor shows that camera's FOV instead. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
+//   @param fov - Field of view in degrees; stored as given, with no clamp or validation (the editor's FOV slider spans 5..170)
 //   @returns { applied: bool, requested: number, fov: number }
 TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Params)
 {
@@ -492,8 +492,8 @@ TSharedPtr<FJsonObject> HandleGetViewportFOV(const TSharedPtr<FJsonObject>& Para
 // set_near_clip_plane
 // ---------------------------------------------------------------------------
 
-// MCP:set_near_clip_plane - Override the near clip plane distance on the active editor viewport
-//   @param distance - Near clip distance (in cm). Pass -1 to clear the override (use GNearClippingPlane).
+// MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; 0 or more becomes the override as given, unvalidated, so use a small positive value. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
+//   @param distance - Near clip distance in cm; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane
 //   @returns { applied: bool, requested: number, near_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Params)
 {
@@ -537,8 +537,8 @@ TSharedPtr<FJsonObject> HandleGetNearClipPlane(const TSharedPtr<FJsonObject>& Pa
 // set_far_clip_plane
 // ---------------------------------------------------------------------------
 
-// MCP:set_far_clip_plane - Override the far clip plane distance on the active editor viewport
-//   @param distance - Far clip distance (in cm). Pass 0 to clear the override (use GFarClippingPlane).
+// MCP:set_far_clip_plane - Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_near_clip_plane reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
+//   @param distance - Far clip distance in cm; 0 or any negative value clears the override and the default far plane applies
 //   @returns { applied: bool, requested: number, far_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Params)
 {
@@ -610,7 +610,7 @@ TSharedPtr<FJsonObject> HandleGetViewportExposure(const TSharedPtr<FJsonObject>&
 // set_game_view
 // ---------------------------------------------------------------------------
 
-// MCP:set_game_view - Toggle "Game View" mode on the active editor viewport (hides editor-only chrome)
+// MCP:set_game_view - Turn Game View on or off on the active level editor viewport, the focused one or else the first (the view the editor's G key toggles); no viewport is an error. Turning it on swaps the viewport's show flags for the game set, hiding editor-only chrome such as sprites, the transform widget and selection outlines, and keeps the editor set to put back when it is turned off. It sets the given state, so a repeat call changes nothing; it lasts for this editor session with no undo step and nothing saved. in_game_view is read back. Single flags are set_show_flag, render modes set_viewport_view_mode; to run the game use start_play_in_editor.
 //   @param enabled - True to enable game view, false to revert to editor view
 //   @returns { applied: bool, requested: bool, in_game_view: bool }
 TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
@@ -676,8 +676,8 @@ TSharedPtr<FJsonObject> HandleGetAllowCinematicControl(const TSharedPtr<FJsonObj
 // set_view_type
 // ---------------------------------------------------------------------------
 
-// MCP:set_view_type - Set the active editor viewport type (perspective / top / bottom / left / right / front / back)
-//   @param type - View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back.
+// MCP:set_view_type - Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_view_type; render modes are set_viewport_view_mode, the camera position set_viewport_camera.
+//   @param type - View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. Matched without case.
 //   @returns { applied: bool, requested: string, view_type: string, view_type_index: int }
 TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Params)
 {

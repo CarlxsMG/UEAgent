@@ -404,10 +404,10 @@ TSharedPtr<FJsonObject> HandleSetAnimationSpeed(const TSharedPtr<FJsonObject>& P
     return Report;
 }
 
-// MCP:get_skeleton_info - Retrieve metadata and optional full bone/socket/slot data for a Skeleton asset
+// MCP:get_skeleton_info - Find a Skeleton asset in the Asset Registry and report its object path, class path, package, whether it is loaded, and the size and timestamp of its .uasset (left out when no file is on disk); nothing is changed. skeleton_name takes an object path, a package path or a short name searched under /Game; no match is an error, and so is a short name several skeletons share, with the candidates listed. Only with load_full_data true is the asset loaded, adding bone_count, the first 100 bones (name, index, parent_index) with bones_truncated, socket_count and slot_group_count. For the first 10 bone names plus virtual bones use get_skeleton_asset_info; the meshes using it: is_skeleton_shared; one bone's reference pose: get_bone_transform; a skeletal mesh: get_skeletal_mesh_info.
 //   @param skeleton_name - Object path, package path, or bare short name of the Skeleton asset (resolved via mcp_common::ResolveAssetFlexible; an ambiguous short name errors out listing every candidate instead of picking one silently)
 //   @param load_full_data - When true, loads the asset and reports bone list (capped at 100), sockets, and slot groups (optional, default false)
-//   @returns { skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number, file_size_kb: number, file_size_mb: number, last_modified: string, loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [object]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, load_error: string? }
+//   @returns { skeleton_name: string, skeleton_path: string, skeleton_class: string, package_name: string, is_loaded: bool, file_size_bytes: number?, file_size_kb: number?, file_size_mb: number?, last_modified: string?, loaded_successfully: bool?, is_valid: bool?, bone_count: number?, bones: [{ name, index, parent_index }]?, bones_truncated: bool?, socket_count: number?, slot_group_count: number?, load_error: string? }
 
 TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Params)
 {

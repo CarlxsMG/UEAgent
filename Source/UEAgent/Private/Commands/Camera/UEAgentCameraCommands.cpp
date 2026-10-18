@@ -199,8 +199,8 @@ TSharedPtr<FJsonObject> HandleSetCameraAssetDirector(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_asset_director")));
 }
 
-// MCP:build_camera_rig - Builds a UCameraRigAsset (UCameraRigAsset::BuildCameraRig) and reports the resulting build status.
-//   @param camera_rig_path - /Game/... path to the UCameraRigAsset (required)
+// MCP:build_camera_rig - Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true whenever the rig resolves; the outcome to read is build_status -- Clean, CleanWithWarnings or WithErrors -- with the build messages in the editor log. Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
+//   @param camera_rig_path - Content path to the UCameraRigAsset, e.g. "/Game/Cameras/CR_Player" (required)
 //   @returns { camera_rig_path, built, build_status }
 TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1104,8 +1104,8 @@ static UCineCameraComponent* FindCineCameraComponent(const FString& ActorName, F
 // ---------------------------------------------------------------------------
 // 1. set_cine_camera_focal_length
 // ---------------------------------------------------------------------------
-// MCP:set_cine_camera_focal_length - Set the focal length (mm) on a CineCameraActor's CineCameraComponent.
-//   @param camera_actor_name - Name or label of the CineCameraActor to modify.
+// MCP:set_cine_camera_focal_length - Set CurrentFocalLength (mm) on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps the value to its lens MinFocalLength and MaxFocalLength, so it is read back with the resulting horizontal and vertical FOV, and success is false (an outcome error) when the read-back differs from the request. No undo step, the level is not marked dirty, nothing is saved. A focal_length outside 0 to 1000, an empty name, or an actor without the component is an error. Widen the lens limits with set_cine_camera_lens; aperture: set_cine_camera_aperture; focus: set_cine_camera_focus; read all of it back with get_cine_camera_settings.
+//   @param camera_actor_name - Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify.
 //   @param focal_length - Focal length in millimetres. Must be between 0.0 and 1000.0.
 //   @returns { camera_actor_name: string, focal_length: number, horizontal_fov: number, vertical_fov: number, success: bool }
 
@@ -1151,8 +1151,8 @@ TSharedPtr<FJsonObject> HandleSetCineCameraFocalLength(const TSharedPtr<FJsonObj
 // ---------------------------------------------------------------------------
 // 2. set_cine_camera_aperture
 // ---------------------------------------------------------------------------
-// MCP:set_cine_camera_aperture - Set the aperture (f-stop) on a CineCameraActor for depth-of-field control.
-//   @param camera_actor_name - Name or label of the CineCameraActor to modify.
+// MCP:set_cine_camera_aperture - Set CurrentAperture, the f-stop that drives depth of field, on the CineCameraComponent of an editor-world actor found by object name or label (case-insensitive, first match): a CineCameraActor, or any actor carrying that component. The component clamps it to its lens MinFStop and MaxFStop, so the value is read back and success is false (an outcome error) when it differs from the request. No undo step, the level is not marked dirty, nothing is saved. An aperture outside 0.01 to 512, an empty name, or an actor without the component is an error. Widen the f-stop range with set_cine_camera_lens; focal length: set_cine_camera_focal_length; focus distance: set_cine_camera_focus; read back with get_cine_camera_settings.
+//   @param camera_actor_name - Object name or label of the CineCameraActor (or other actor with a CineCameraComponent) to modify.
 //   @param aperture - F-stop value. Must be between 0.01 and 512.0.
 //   @returns { camera_actor_name: string, aperture: number, success: bool }
 
@@ -1486,9 +1486,9 @@ TSharedPtr<FJsonObject> HandleCreateCameraRigRail(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // 7. set_camera_rig_rail_position
 // ---------------------------------------------------------------------------
-// MCP:set_camera_rig_rail_position - Set the camera position along a CameraRig_Rail (0.0 = start, 1.0 = end).
-//   @param rig_actor_name - Name or label of the CameraRig_Rail actor.
-//   @param position - Normalised position on the rail, 0.0 to 1.0.
+// MCP:set_camera_rig_rail_position - Set CurrentPositionOnRail of a CameraRig_Rail actor in the editor world, found by object name or label (case-insensitive, first match): 0.0 is the start of the rail spline and 1.0 its end, and the rig moves its camera mount there on its next tick. The property is written directly and read back: no undo step, the level is not marked dirty and nothing is saved. A position outside 0 to 1, an empty name or no such rail is an error; success is false (an outcome error) only when the read-back differs. Spawn a rail with create_camera_rig_rail and pass its internal_name here; a crane rig is create_camera_rig_crane; a plain camera moves with set_camera_transform.
+//   @param rig_actor_name - Object name or label of the CameraRig_Rail actor, e.g. the internal_name create_camera_rig_rail returns.
+//   @param position - Normalised position on the rail, 0.0 to 1.0, as a fraction of the spline length.
 //   @returns { rig_actor_name: string, position: number, success: bool }
 
 TSharedPtr<FJsonObject> HandleSetCameraRigRailPosition(const TSharedPtr<FJsonObject>& Params)

@@ -137,8 +137,8 @@ namespace UEAgentSaveGameImpl
 
 // Slot lifecycle and inspection.
 
-// MCP:create_save_game - Create a new SaveGame instance from a specified SaveGame class
-//   @param save_game_class - Optional SaveGame subclass; defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected)
+// MCP:create_save_game - Create a transient, in-memory SaveGame object of save_game_class (default UMCPSaveGame), which checks that the class resolves and can be instantiated; nothing is written to disk and no other tool takes the object as input. save_game_class is matched by name among loaded classes and must be a concrete USaveGame subclass: an unknown, non-SaveGame or abstract class is an error. Every call makes a new object, named by save_game_instance and save_game_path; save_game_class echoes the name given, empty for the default. To write a slot use save_game, which builds its own default-valued object; to serialize to memory, save_game_to_memory; to read a slot back, load_game.
+//   @param save_game_class - Optional name of a loaded, concrete USaveGame subclass, e.g. "MySaveGame" (found with FindFirstObject, never loaded from disk); defaults to the plugin's concrete UMCPSaveGame (the abstract USaveGame base is rejected)
 //   @returns { save_game_class: string, save_game_instance: string, save_game_path: string, success: bool }
 TSharedPtr<FJsonObject> HandleCreateSaveGame(const TSharedPtr<FJsonObject>& Params)
 {
@@ -412,10 +412,11 @@ TSharedPtr<FJsonObject> HandleSaveGameAsync(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOutcomeReply(Payload, bWritten, Failure);
 }
 
-// MCP:load_game_async - Load a SaveGame instance from slot, sync fallback over AsyncLoadGameFromSlot
-//   @param slot_name - Save slot name
-//   @param user_index - Optional user index, default 0
-//   @returns { slot_name: string, user_index: int, success: bool, mode: string, note: string, save_game_instance: string, save_game_class: string, save_game_path: string, error: string }
+// MCP:load_game_async - Load the SaveGame stored in a slot and report the object it rebuilds (save_game_instance, save_game_class, save_game_path). Despite the name it runs synchronously through LoadGameFromSlot (mode=sync_fallback), since waiting on the game thread for the async delegate would deadlock; the outcome matches load_game without its save_game_class check. It only reads: the slot file is not changed and the object is transient. An empty slot or a file that fails to deserialize gives success=false with an error; tell them apart with does_save_game_exist. Write a slot with save_game_async or save_game; file path, size and date: get_save_game_slot_info; every slot: list_save_games.
+//   @param slot_name - Save slot name, non-empty; on desktop the file is Saved/SaveGames/<slot>.sav.
+//   @param user_index - Platform user index for the save system; default 0 (the generic desktop save system ignores it)
+//   @returns { slot_name: string, user_index: int, success: bool, mode: string, note: string, save_game_instance?: string, save_game_class?: string, save_game_path?: string, error?: string }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleLoadGameAsync(const TSharedPtr<FJsonObject>& Params)
 {
     FString Slot;

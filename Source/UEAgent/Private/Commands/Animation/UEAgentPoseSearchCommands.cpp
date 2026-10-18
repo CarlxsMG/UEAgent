@@ -152,11 +152,11 @@ namespace
 // ---------------------------------------------------------------------------
 // create_pose_search_schema
 // ---------------------------------------------------------------------------
-// MCP:create_pose_search_schema - Create and save a UPoseSearchSchema data asset bound to a USkeleton
+// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and nothing saved, although its saved field reads true; skeleton_path and sample_rate are not applied to it. The skeleton is loaded first, so a skeleton that does not load is an error even then; an invalid path, or an asset of another class there, is an error too; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_pose_search_schema_properties, and inspect it with inspect_pose_search_schema.
 //   @param name - Asset name (e.g. 'PoseSearchSchema_Example').
-//   @param package_path - Target content package path (default /Game/MCP).
-//   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton).
-//   @param sample_rate - Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30).
+//   @param package_path - Target content package path (default /Game/MCP); trailing slashes are stripped.
+//   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); it must load even when the schema already exists.
+//   @param sample_rate - Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates.
 //   @returns { name, package_path, asset_path, schema_path, skeleton_path, sample_rate, schema_cardinality, channel_count, created, already_existed, saved, message }
 TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {

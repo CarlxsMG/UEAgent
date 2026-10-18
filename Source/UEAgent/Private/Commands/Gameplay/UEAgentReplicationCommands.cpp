@@ -200,11 +200,11 @@ TSharedPtr<FJsonObject> HandleSetActorNetDormancy(
 // ---------------------------------------------------------------------------
 // set_actor_net_update_frequency
 // ---------------------------------------------------------------------------
-// MCP:set_actor_net_update_frequency - Set AActor::NetUpdateFrequency (and optionally MinNetUpdateFrequency) for an editor-world actor.
-//   @param actor_label - Label of the actor in the editor world.
-//   @param frequency - Net update frequency in Hz.
-//   @param min_frequency - Optional minimum net update frequency in Hz.
-//   @returns { actor_label: string, frequency: float, min_frequency: float }
+// MCP:set_actor_net_update_frequency - Set how often an actor placed in the editor world is considered for replication: frequency goes to NetUpdateFrequency and, when given, min_frequency to MinNetUpdateFrequency, both in updates per second, through the AActor setters. The actor is found by label (first match); only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. Leaving out min_frequency keeps the current minimum. The reply echoes the requested numbers (min_frequency only when given), not a read-back: read them with get_actor_net_update_frequency. A missing label or frequency is an error; neither value is range-checked. Culling by distance: set_actor_net_cull_distance; priority when bandwidth is short: set_net_priority; dormancy: set_actor_net_dormancy.
+//   @param actor_label - Label of the actor in the editor world (first match).
+//   @param frequency - Net update frequency in Hz (updates per second), written as given; required.
+//   @param min_frequency - Optional minimum net update frequency in Hz, the floor adaptive net update frequency may drop to; omitted leaves it unchanged.
+//   @returns { actor_label: string, frequency: float, min_frequency: float? }
 TSharedPtr<FJsonObject> HandleSetActorNetUpdateFrequency(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -235,9 +235,9 @@ TSharedPtr<FJsonObject> HandleSetActorNetUpdateFrequency(
 // ---------------------------------------------------------------------------
 // set_actor_net_cull_distance
 // ---------------------------------------------------------------------------
-// MCP:set_actor_net_cull_distance - Set AActor::NetCullDistanceSquared for an editor-world actor (accepts the linear distance in cm).
-//   @param actor_label - Label of the actor in the editor world.
-//   @param distance - Net cull distance in cm (will be squared before being set).
+// MCP:set_actor_net_cull_distance - Set the net cull distance of an actor placed in the editor world, found by label (first match): distance is the linear radius in cm, squared before AActor::SetNetCullDistanceSquared stores it (15000, the engine default, stores 225000000). Past that distance from a client's viewer the actor is no longer relevant for replication to that client, unless it is always relevant. Only that placed instance changes, not its class defaults, with no undo step, no dirty mark and no save, and a PIE copy is never touched. distance echoes the request, not a read-back: get_actor_net_cull_distance returns both stored forms. A missing label or distance is an error; no range check is made. Update rate: set_actor_net_update_frequency; every replication setting at once: get_actor_replication_info.
+//   @param actor_label - Label of the actor in the editor world (first match).
+//   @param distance - Net cull distance in cm (will be squared before being set); a negative value squares to the same distance.
 //   @returns { actor_label: string, distance: float }
 TSharedPtr<FJsonObject> HandleSetActorNetCullDistance(
     const TSharedPtr<FJsonObject>& Params)
@@ -342,9 +342,10 @@ TSharedPtr<FJsonObject> HandleGetActorNetCullDistance(const TSharedPtr<FJsonObje
 // Force / flush / role / priority primitives.
 // ============================================================================
 
-// MCP:force_net_update - Call AActor::ForceNetUpdate on an editor-world actor found by label, which asks a net driver to replicate it on its next update. The editor world has no net driver, so nothing is sent and a PIE session is never reached; forced is always true.
+// MCP:force_net_update - Call AActor::ForceNetUpdate on an actor placed in the editor world, found by label (first match). The engine call asks the world's net drivers to replicate the actor on their next update, but the editor world has no net driver, so nothing is sent, no PIE server or client copy is reached and no state changes: nothing is marked dirty, saved or undoable, and repeating it is harmless. forced is always true and proves only that the call was made. A missing or unknown label is an error. To change how often the actor replicates use set_actor_net_update_frequency; to wake a dormant actor, flush_net_dormancy or set_actor_net_dormancy; to read its settings, get_actor_replication_info.
 //   @param actor_name - Label of the actor in the editor world (matched against labels, not object names); first match.
 //   @returns { actor_name, forced }
+//   @hints read-only
 TSharedPtr<FJsonObject> HandleForceNetUpdate(const TSharedPtr<FJsonObject>& Params)
 {
     FString ActorName;

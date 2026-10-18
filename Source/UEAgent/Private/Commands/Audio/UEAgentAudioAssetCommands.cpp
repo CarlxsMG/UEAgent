@@ -190,12 +190,12 @@ namespace
 // ---------------------------------------------------------------------------- //
 // create_sound_class
 // ---------------------------------------------------------------------------- //
-// MCP:create_sound_class - Create a USoundClass asset and optionally set its volume/pitch
+// MCP:create_sound_class - Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_sound_class_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
 //   @param name - Name of the new Sound Class asset
 //   @param package_path - Target content path, defaults to /Game/Audio
-//   @param volume - Optional Volume multiplier on FSoundClassProperties
-//   @param pitch - Optional Pitch multiplier on FSoundClassProperties
-//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, volume: number, pitch: number, applied_volume: bool, applied_pitch: bool, created: bool, already_exists: bool, saved: bool }
+//   @param volume - Optional Volume multiplier on FSoundClassProperties; also written to a class that already exists, unchanged when omitted
+//   @param pitch - Optional Pitch multiplier on FSoundClassProperties; also written to a class that already exists, unchanged when omitted
+//   @returns { name: string, package_path: string, asset_path: string, asset_class: string, volume: number, pitch: number, applied_volume: bool, applied_pitch: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateSoundClass(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetName, PackagePath;
@@ -437,11 +437,11 @@ TSharedPtr<FJsonObject> HandleCreateSoundSubmix(const TSharedPtr<FJsonObject>& P
 // preset asset if effect_preset_path is given; else NewObjects a concrete preset
 // subclass into the submix's package), appends it to SubmixEffectChain, and saves.
 // ---------------------------------------------------------------------------- //
-// MCP:add_submix_effect_to_chain - Append a submix effect preset to a USoundSubmix effect chain
+// MCP:add_submix_effect_to_chain - Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique <Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix.
 //   @param submix_path - Full content path of the target USoundSubmix
-//   @param effect_preset_path - Optional existing USoundEffectSubmixPreset to load
-//   @param effect_preset_class - Optional concrete USoundEffectSubmixPreset subclass path to NewObject
-//   @returns { submix_path: string, effect_name: string, effect_class: string, resolved_from: string, effect_added: bool, chain_length: int, saved: bool }
+//   @param effect_preset_path - Optional existing USoundEffectSubmixPreset asset to append by reference; wins over effect_preset_class
+//   @param effect_preset_class - Optional concrete USoundEffectSubmixPreset subclass (short name or path) to instantiate in the submix's package; with neither preset param a class is picked by reflection
+//   @returns { submix_path: string, effect_name: string, effect_class: string, resolved_from: string, effect_added: bool, chain_length: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddSubmixEffectToChain(const TSharedPtr<FJsonObject>& Params)
 {
     FString SubmixPath;
@@ -927,8 +927,8 @@ TSharedPtr<FJsonObject> HandleSetSoundWaveProperties(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------- //
 // get_sound_wave_properties  (REAL read)
 // ---------------------------------------------------------------------------- //
-// MCP:get_sound_wave_properties - Read USoundWave tunables (the object's own UPROPERTY fields) from an imported sound wave.
-//   @param sound_wave_path - Full content path of the target USoundWave.
+// MCP:get_sound_wave_properties - Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
+//   @param sound_wave_path - Full content path of the target USoundWave, e.g. "/Game/Audio/MySound".
 //   @returns { sound_wave_path: string, asset_class: string, settings: object, looping: bool }
 TSharedPtr<FJsonObject> HandleGetSoundWaveProperties(const TSharedPtr<FJsonObject>& Params)
 {

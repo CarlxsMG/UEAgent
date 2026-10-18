@@ -20,15 +20,15 @@ Add a scalar parameter (new GUID) to a Material Parameter Collection asset and s
 
 ## `add_collection_vector_param`
 
-*Additive.*
+*Destructive.*
 
-Append a vector RGBA parameter to a Material Parameter Collection
+Add a vector (RGBA color) parameter with a new GUID to a Material Parameter Collection asset found by content path, in one undo step, and save the asset; a new parameter changes the collection layout, so the engine recompiles the materials that use the collection. A vector of that name already there keeps its Id and has its default overwritten with default_value, or with [0, 0, 0, 1] when that is omitted, with already_existed=true. A collection that does not load is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. Scalars: add_collection_scalar_param; change a default: set_collection_param_default; take one out: remove_collection_param; read back: get_collection_info; per-world runtime values: set_mpci_vector_parameter_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_path` | string | yes | Full /Game path to the MPC asset |
-| `param_name` | string | yes | Name of the new vector parameter |
-| `default_value` | string | no | Optional [r, g, b, a] default color, default [0,0,0,1] |
+| `collection_path` | string | yes | Content path of the Material Parameter Collection asset, e.g. "/Game/MaterialCollections/MPC_Global" |
+| `param_name` | string | yes | Name of the vector parameter to add, or whose default to update when the collection has it |
+| `default_value` | string | no | Optional [r, g, b, a] default color as floats, default [0,0,0,1]; a shorter array keeps 0 for missing color channels and 1 for alpha |
 
 **Returns:** `{ collection_path: string, param_name: string, param_type: string, param_added: bool, already_existed: bool, vector_count_before: int, vector_count: int, default: object, default_rgba: [number], id: string, saved: bool }`
 
@@ -81,12 +81,12 @@ Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the
 
 *Additive.*
 
-Add a UMaterialExpressionFunctionOutput node to a material function.          '/Game/MyGame/MF_Example.MF_Example'
+Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_material_function_pins, edit it with set_material_function_output_props, and its inverse is delete_material_function_output; inputs are add_material_function_input; list pins with get_material_function_inputs; persist with save_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `function_path` | string | yes | Full path to the material function, e.g. |
-| `output_name` | string | yes | Name of the new output pin |
+| `function_path` | string | yes | Full path to the material function, e.g. "/Game/MyGame/MF_Example.MF_Example" |
+| `output_name` | string | yes | Name of the new output pin, stored as given: a name another output already uses is not made unique |
 
 **Returns:** `{ function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool }`
 
@@ -227,15 +227,15 @@ Copy parameter values from a source material or material instance into a transie
 
 ## `create_dynamic_material_on_actor`
 
-*Additive.*
+*Destructive.*
 
-Create a component-owned Material Instance Dynamic on a scene actor
+Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID (created still says true); with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Name or label of the actor in the editor world |
-| `element_index` | number | no | Material slot index on the mesh component (default 0) |
-| `parent_material_path` | string | no | Optional source material for the MID (default slot's current material) |
+| `actor_name` | string | yes | Name or label of the actor in the editor world; the first actor whose object name or label matches is used |
+| `element_index` | number | no | Material slot index on the mesh component (default 0); must be below the component's slot count |
+| `parent_material_path` | string | no | Optional source material for the MID (default slot's current material); when given it is assigned to the slot before the MID is made from it |
 
 **Returns:** `{ actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created }`
 
@@ -342,12 +342,12 @@ Create a material instance (MIC) asset under a /Game path, optionally parented t
 
 *Additive.*
 
-Create a runtime-only Material Instance Dynamic (MID) from a parent material
+Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. Nothing references it, so the next garbage collection can free it: set its parameters right away with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name already taken in the transient package gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `parent_material_path` | string | yes | Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example) |
-| `name` | string | no | Optional name for the MID (default auto-generated) |
+| `parent_material_path` | string | yes | Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example); a material or a material instance |
+| `name` | string | no | Optional name for the MID (default auto-generated from MID_ and the parent's name) |
 
 **Returns:** `{ mid_object_path, mid_name, parent_material_path, parent_material_name, created }`
 
@@ -679,11 +679,11 @@ List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: no
 
 *Read-only.*
 
-Read the full expression graph of a UMaterial (nodes + connections).  Enumerates UMaterial::GetExpressions() and walks each expression's FExpressionInput Inputs[] array. For every connected input, the connection is also flattened into the top-level connections[] list for easy graph-walking.
+Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's own name, which can be None on built-in nodes, so match inputs by index. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Full asset path of the UMaterial. |
+| `material_path` | string | yes | UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a material instance is not accepted |
 
 **Returns:** `{ material_path: string, node_count: number, nodes: [{ name: string, class: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }`
 
@@ -992,12 +992,12 @@ Set the default of an existing scalar or vector parameter of a Material Paramete
 
 *Destructive, idempotent.*
 
-Set a material's domain (EMaterialDomain) and recompile it.          'LightFunction', 'Volume'
+Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile it and mark its package dirty, without saving and without an undo transaction. domain is matched without case and also accepts spellings such as post_process, decal or light function; an unknown domain is an error before the material loads, and a material instance or a path that does not load is an error (Material not found). Setting the domain it already has still recompiles. previous_domain and domain are read back, and domain_set confirms the change took. Persist with save_asset; a new post-process material is create_post_process_material; a recompile alone is compile_material.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `material_path` | string | yes | Full path to the material, e.g. '/Game/MyGame/M_Example.M_Example' |
-| `domain` | string | yes | One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal', |
+| `material_path` | string | yes | Full path to the material, e.g. '/Game/MyGame/M_Example.M_Example'; a UMaterial, not a material instance |
+| `domain` | string | yes | One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal', 'LightFunction', 'Volume', matched without case; post_process, userinterface, decal, deferred_decal and light_function (or the same words with spaces) work too |
 
 **Returns:** `{ material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool }`
 
@@ -1277,7 +1277,7 @@ Rebuild the Material Parameter Collection Instance (MPCI: the transient per-worl
 
 *Destructive, idempotent.*
 
-Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a scalar parameter of the collection; vectors: set_mpci_vector_parameter_value.
+Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value and readback_ok report what the instance holds afterwards. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -33,7 +33,7 @@ No parameters.
 
 *Read-only.*
 
-Retrieves comprehensive network information including NetDriver, replicated actors, GameState, and PlayerController details.
+Read a network snapshot of the editor world, never a PIE world: its net mode; the net driver class, tick rates and client connection count; every replicating actor with its class and local role; and, when they exist, the GameState (class, player count) and the first PlayerController. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. Online subsystem config and the player list: get_network_settings; one actor in detail: get_replication_info; replicated actors filtered by role, with remote role and dormancy: list_replicated_actors; the net mode alone: get_world_net_mode.
 
 No parameters.
 

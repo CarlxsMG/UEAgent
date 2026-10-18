@@ -70,11 +70,11 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_skeleton
 // ---------------------------------------------------------------------------
-// MCP:create_editable_skeleton - Create an editable /Game skeleton by duplicating an engine skeleton
-//   @param package_path - UE content folder, e.g. /Game/MyGame
-//   @param name - Asset name for the new skeleton
-//   @param source_skeleton - Engine skeleton to duplicate, defaults to SkeletalCube_Skeleton
-//   @returns { asset_path: string, name: string, source: string, bone_count: int, created: bool, saved: bool, save_error: string }
+// MCP:create_editable_skeleton - Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false, and nothing is saved. A package_path that does not start with a slash, a source that does not exist, or another kind of asset at the target is an error; so is a source that is not a skeleton, though the copy it made is left behind unsaved. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: create_editable_skeletal_mesh; inspect the result: get_skeleton_asset_info.
+//   @param package_path - UE content folder starting with a slash, e.g. /Game/MyGame
+//   @param name - Asset name for the new skeleton, e.g. "SK_Creature_Skeleton"; with package_path it gives the asset path.
+//   @param source_skeleton - Asset path of the skeleton to duplicate, e.g. "/Engine/EngineMeshes/SkeletalCube_Skeleton", which is also the default.
+//   @returns { asset_path: string, name: string, source: string, bone_count: int, created: bool, saved?: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath, Name;
@@ -850,11 +850,11 @@ TSharedPtr<FJsonObject> HandleRenameBone(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // set_bone_transform
 // ---------------------------------------------------------------------------
-// MCP:set_bone_transform - Update the local reference-pose transform of an existing bone
-//   @param skeleton_path - Path to the USkeleton asset
-//   @param bone_name - Bone to update
-//   @param local_transform - {location:[x,y,z], rotation:[p,y,r], scale:[x,y,z]} — all three required
-//   @returns { asset_path, bone_name, bone_index, updated, not_found, bone_count, saved, op: "set_bone_transform" }
+// MCP:set_bone_transform - Overwrite the local, parent-relative reference-pose transform of an existing bone in a USkeleton asset loaded by path, through FReferenceSkeletonModifier, then save the skeleton. local_transform is written whole: an omitted location or rotation becomes zero and an omitted or zero scale becomes 1, so to change one component read the others with get_bone_transform first. The modifier notifies the skeleton listeners itself, so commit_bone_changes is not needed. Every call writes and saves, even with the same transform. An unknown bone is an error, so not_found is never true in a reply; a failed save makes success false with save_error and keeps the change in memory. Only the skeleton changes: skeletal meshes using it keep their own reference pose. Other bone edits: set_bone_parent, rename_bone, add_bone.
+//   @param skeleton_path - Asset path of the USkeleton, e.g. "/Game/Characters/SK_Hero_Skeleton".
+//   @param bone_name - Name of an existing bone of that skeleton, e.g. "spine_01".
+//   @param local_transform - Object {location:[x,y,z], rotation:[pitch,yaw,roll] or {pitch,yaw,roll}, scale:[x,y,z]} relative to the parent bone; the whole transform is written, so an omitted location or rotation becomes zero and an omitted or zero scale becomes 1.
+//   @returns { asset_path, bone_name, bone_index, updated, not_found, bone_count, saved, save_error?, op: "set_bone_transform" }
 TSharedPtr<FJsonObject> HandleSetBoneTransform(const TSharedPtr<FJsonObject>& Params)
 {
     FString SkeletonPath, BoneName;

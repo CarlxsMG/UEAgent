@@ -1052,9 +1052,9 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObj
     return Result;
 }
 
-// MCP:add_material_function_output - Add a UMaterialExpressionFunctionOutput node to a material function.          '/Game/MyGame/MF_Example.MF_Example'
-//   @param function_path - Full path to the material function, e.g.
-//   @param output_name - Name of the new output pin
+// MCP:add_material_function_output - Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_material_function_pins, edit it with set_material_function_output_props, and its inverse is delete_material_function_output; inputs are add_material_function_input; list pins with get_material_function_inputs; persist with save_asset.
+//   @param function_path - Full path to the material function, e.g. "/Game/MyGame/MF_Example.MF_Example"
+//   @param output_name - Name of the new output pin, stored as given: a name another output already uses is not made unique
 //   @returns { function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool }
 
 TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonObject>& Params)
@@ -1257,9 +1257,9 @@ TSharedPtr<FJsonObject> HandleCreatePostProcessMaterial(const TSharedPtr<FJsonOb
     return Result;
 }
 
-// MCP:set_material_domain - Set a material's domain (EMaterialDomain) and recompile it.          'LightFunction', 'Volume'
-//   @param material_path - Full path to the material, e.g. '/Game/MyGame/M_Example.M_Example'
-//   @param domain - One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal',
+// MCP:set_material_domain - Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile it and mark its package dirty, without saving and without an undo transaction. domain is matched without case and also accepts spellings such as post_process, decal or light function; an unknown domain is an error before the material loads, and a material instance or a path that does not load is an error (Material not found). Setting the domain it already has still recompiles. previous_domain and domain are read back, and domain_set confirms the change took. Persist with save_asset; a new post-process material is create_post_process_material; a recompile alone is compile_material.
+//   @param material_path - Full path to the material, e.g. '/Game/MyGame/M_Example.M_Example'; a UMaterial, not a material instance
+//   @param domain - One of 'Surface', 'PostProcess', 'UI', 'DeferredDecal', 'LightFunction', 'Volume', matched without case; post_process, userinterface, decal, deferred_decal and light_function (or the same words with spaces) work too
 //   @returns { material: string, material_path: string, previous_domain: string, requested_domain: string, domain: string, domain_set: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialDomain(const TSharedPtr<FJsonObject>& Params)
@@ -1427,8 +1427,8 @@ TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJson
     return Result;
 }
 
-// MCP:get_material_graph_info - Read the full expression graph of a UMaterial (nodes + connections).  Enumerates UMaterial::GetExpressions() and walks each expression's FExpressionInput Inputs[] array. For every connected input, the connection is also flattened into the top-level connections[] list for easy graph-walking.
-//   @param material_path - Full asset path of the UMaterial.
+// MCP:get_material_graph_info - Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's own name, which can be None on built-in nodes, so match inputs by index. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
+//   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a material instance is not accepted
 //   @returns { material_path: string, node_count: number, nodes: [{ name: string, class: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }
 
 TSharedPtr<FJsonObject> HandleGetMaterialGraphInfo(const TSharedPtr<FJsonObject>& Params)

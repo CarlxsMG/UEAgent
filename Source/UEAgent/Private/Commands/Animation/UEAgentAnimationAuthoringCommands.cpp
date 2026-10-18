@@ -6744,9 +6744,9 @@ TSharedPtr<FJsonObject> HandleCollapseMontageSegments(const TSharedPtr<FJsonObje
 // AnimCompositeBase.h — sorts AnimSegments by StartTime ascending.
 // WITH_EDITOR-only.
 // ---------------------------------------------------------------------------
-// MCP:sort_montage_segments - Sort a montage slot track's segments by start time ascending (FAnimTrack::SortAnimSegments, which then lays them end-to-end and clamps each end time to its animation length) in an undo transaction and save the montage. Segments the sort leaves as they are (already in order, end-to-end and within their animations) are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.
+// MCP:sort_montage_segments - Sort the segments of one slot track of a UAnimMontage asset by their position on the track, ascending (FAnimTrack::SortAnimSegments), which then lays them end-to-end from 0 and clamps each segment's end time to its animation's length, in one undo step, and save the montage. Segment indices follow the new order, and the sort key is the track position, not the AnimStartTime that set_montage_segment_start_time edits. Idempotent: a track the sort leaves unchanged (already in order, end-to-end and within its animations) is a success with applied=false and saved=false, and nothing is modified or saved. An unknown montage or slot is an error; a failed save makes success false with saved=false and save_error. To close gaps but keep the array order: collapse_montage_segments; slot names: get_montage_info.
 //   @param montage_path - Full asset path of the montage (e.g. '/Game/MyGame/AM_Example').
-//   @param slot_name - Name of the slot track to sort.
+//   @param slot_name - Name of the slot track to sort, e.g. "DefaultSlot" (case-insensitive); an unknown slot is an error.
 //   @returns { montage_path, slot_name, segment_count, applied, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleSortMontageSegments(const TSharedPtr<FJsonObject>& Params)
 {

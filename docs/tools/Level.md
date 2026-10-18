@@ -179,15 +179,15 @@ Assigns an editor-world actor to a data layer instance.  Uses UDataLayerEditorSu
 
 ## `attach_actor`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Attach one actor to another optionally at a socket keeping world transform
+Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses still returns success with attached false, so check it. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `child_actor_name` | string | yes | Name or label of the child actor to attach |
-| `parent_actor_name` | string | yes | Name or label of the parent actor to attach to |
-| `socket_name` | string | no | Optional socket on the parent to attach to |
+| `child_actor_name` | string | yes | Internal name or outliner label of the child actor to attach (first match in the editor world) |
+| `parent_actor_name` | string | yes | Internal name or outliner label of the parent actor to attach to (first match in the editor world) |
+| `socket_name` | string | no | Optional socket name on the parent, not checked; omitted or empty attaches without a socket |
 
 **Returns:** `{ child: string, parent: string, attached: bool }`
 
@@ -219,9 +219,9 @@ Start an asynchronous static lighting build of all levels in the editor world (n
 
 ## `build_minimap`
 
-*Destructive.*
+*Read-only.*
 
-Reports whether a World Partition minimap can be / has been built for the current editor world.  HONEST gate: minimap generation is a GPU scene-capture / commandlet-rendering operation (FWorldPartitionMiniMapHelper::CaptureBoundsMiniMapToTexture via ASceneCapture2D, or UWorldPartitionMiniMapBuilder whose RequiresCommandletRendering()==true, both gated by -AllowCommandletRendering) and cannot be driven synchronously from a single request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition, and on a WP world reads back whether a minimap texture already exists) and returns built=false with a note.
+Report whether the current editor world is World Partition and already has a minimap; it never builds one, because minimap generation is a GPU scene capture that only the WorldPartitionMiniMapBuilder commandlet (with -AllowCommandletRendering) or the editor's Build > Build Minimap can run. It reads the editor world, also during PIE, and on a partitioned world sets already_has_minimap from whether a WorldPartitionMiniMap actor holds a texture; built is always false and success true, note and message say why, and nothing is written. A non-partitioned world returns is_world_partition=false without already_has_minimap. A missing editor world is an error. Read the partition state with get_world_partition_info; HLODs have the same kind of gate in build_hlod.
 
 No parameters.
 
@@ -267,13 +267,13 @@ Set world gravity from a named preset (Earth -980, Moon -163, Mars -371, Zero, L
 
 ## `convert_map_to_world_partition`
 
-*Destructive.*
+*Read-only.*
 
-Reports whether the current editor world can be converted to World Partition.  HONEST gate: the only complete conversion path is the UWorldPartitionConvertCommandlet (commandlet-only, needs -run=WorldPartitionConvert -AllowCommandletRendering as a separate process), and the runtime FWorldPartitionConverter::Convert mutates the level in place WITHOUT saving, so it cannot be driven safely or synchronously from this request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition) and returns converted=false with a note explaining why (already WP, or commandlet-only).
+Report whether the current editor world is already World Partition; it never converts anything, because the only complete conversion is the WorldPartitionConvert commandlet run as a separate process (-run=WorldPartitionConvert -AllowCommandletRendering), and the in-editor converter edits the level in place without saving. It reads the editor world, also during PIE: a partitioned world returns already_converted=true, any other already_converted=false with a note naming the commandlet; converted is always false and success true, and nothing is written. map_path is accepted and ignored, so open the map first with load_level. A missing editor world is an error. To start a World Partition map from scratch use create_world_partition_map; read the partition state with get_world_partition_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `map_path` | string | no | Optional informational path of the map to convert (the world converted is always the current editor world). |
+| `map_path` | string | no | Accepted and ignored: the world checked is always the current editor world, whatever path is given. |
 
 **Returns:** `{ world: string, is_world_partition: bool, converted: bool, already_converted: bool, success: bool, note: string, message: string }`
 
@@ -294,16 +294,16 @@ Clone a rectangle of terrain relief: copy a heightmap region between two landsca
 
 ## `create_data_layer_asset`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates and saves a new UDataLayerAsset (World Partition data layer).
+Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true; type and color are not applied, and saved reads true though nothing is written), so repeat calls are idempotent; another asset class there, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the new data layer asset. |
+| `name` | string | yes | Name of the new data layer asset, also its package name under package_path. |
 | `package_path` | string | no | Target /Game package path (optional, default "/Game/DataLayers") |
-| `data_layer_type` | string | no | Data layer type: "Editor" or "Runtime" (optional, default "Editor") |
-| `debug_color` | string | no | Optional [r, g, b] or [r, g, b, a] integers 0-255 (defaults to [0, 128, 255, 255]) |
+| `data_layer_type` | string | no | Data layer type: "Editor" or "Runtime" (optional, default "Editor"); matched without case, any other value gives Editor |
+| `debug_color` | string | no | Optional [r, g, b] or [r, g, b, a] integers 0-255 (defaults to [0, 128, 255, 255]); rounded and clamped, alpha 255 when omitted, a shorter array is ignored |
 
 **Returns:** `{ name: string, package_path: string, asset_path: string, data_layer_type: string, is_runtime: bool, debug_color: [number, number, number, number], created: bool, already_exists: bool, success: bool, saved: bool, message: string }`
 
@@ -464,15 +464,15 @@ Level the terrain under a footprint: snap every heightmap vertex inside a world-
 
 ## `focus_viewport`
 
-*Destructive.*
+*Additive, idempotent.*
 
-Frame the editor viewport on an actor or the current selection
+Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_camera, read it back with get_viewport_state, and select actors first with select_actors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Optional actor to focus on, defaults to current selection |
+| `actor_name` | string | no | Optional internal name or outliner label of the actor to frame; omitted, the current selection is framed |
 
-**Returns:** `{ focused_actor: string, focused_count: int }`
+**Returns:** `{ focused_actor?: string, focused_count?: int }`
 
 ## `foliage_type_exists`
 
@@ -1572,12 +1572,12 @@ Replaces the spline points on a named actor's USplineComponent.  ClearSplinePoin
 
 *Destructive, idempotent.*
 
-Sets whether a streaming sub-level should be loaded (ULevelStreaming::SetShouldBeLoaded).
+Set the should-be-loaded request flag of a streaming sub-level of the editor world (ULevelStreaming::SetShouldBeLoaded), found by package path, object path or short name (case-insensitive), inside an undo transaction that marks the map dirty without saving. It is a request: this call streams nothing in or out itself, so is_level_loaded may not change. Only a sub-level class that stores the flag honors it, such as ULevelStreamingDynamic (what add_streaming_level creates); an always-loaded sub-level keeps reporting should_be_loaded true, so asking to unload it gives applied false (applied compares ShouldBeLoaded with loaded). Repeating it leaves the same state, though each call still adds an undo step. An unknown level is an error. Visibility: set_streaming_level_visible; current state: get_streaming_levels; detaching a sub-level: remove_streaming_level.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `level_package_path` | string | yes | Package path of an existing streaming sub-level. |
-| `loaded` | boolean | yes | Desired should-be-loaded state. |
+| `level_package_path` | string | yes | Package path of an existing streaming sub-level, e.g. "/Game/Maps/SubLevel"; an object path or the bare level name also matches. |
+| `loaded` | boolean | yes | Desired should-be-loaded state; required. |
 
 **Returns:** `{ package_name: string, name: string, streaming_class: string, should_be_loaded: bool, should_be_visible: bool, is_level_loaded: bool, is_level_visible: bool, requested_loaded: bool, applied: bool }`
 
@@ -1623,15 +1623,15 @@ Set an exact global gravity on the EDITOR world's WorldSettings: writes GlobalGr
 
 ## `set_world_partition_runtime_hash`
 
-*Destructive, idempotent.*
+*Read-only.*
 
-HONEST gate for editing the World Partition runtime hash grid settings.  Mirrors HandleBuildMinimap: the WP runtime grid settings (CellSize/LoadingRange) live in UWorldPartitionRuntimeSpatialHash::Grids, an editor-only private UPROPERTY with NO public setter, and the streaming grid is generated during cook/build (GenerateStreaming is WITH_EDITOR), so it cannot be set synchronously headless. The tool resolves the editor world + detects WP for real and reports applied=false; nothing is mutated. On the non-WP default map it honestly returns is_world_partition=false.
+Report, without changing anything, that the runtime hash grid settings of the editor world cannot be edited from here: CellSize and LoadingRange live in the private, editor-only Grids array of the runtime spatial hash, which has no public setter, and the streaming grid is generated at cook or build time. cell_size, loading_range and grid_name are accepted and ignored, so applied is always false and success true. A partitioned world also returns its runtime_hash_type and runtime_regenerated=false; any other world returns is_world_partition=false. Nothing is written, during PIE too. A missing editor world is an error. Read the hash and its generated grid count with get_world_partition_runtime_hash, the overall partition state with get_world_partition_info; grid settings are edited in the World Settings of the map.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cell_size` | number | no | Informative only (accepted, not applied): desired streaming cell size. |
-| `loading_range` | number | no | Informative only (accepted, not applied): desired loading range. |
-| `grid_name` | string | no | Informative only (accepted, not applied): target grid name. |
+| `cell_size` | number | no | Accepted and ignored, never applied: the desired streaming cell size, in world units. |
+| `loading_range` | number | no | Accepted and ignored, never applied: the desired loading range, in world units. |
+| `grid_name` | string | no | Accepted and ignored, never applied: the name of the target runtime grid. |
 
 **Returns:** `{ is_world_partition: bool, runtime_hash_type?: string, applied: bool, runtime_regenerated?: bool, success: bool, note: string }`
 

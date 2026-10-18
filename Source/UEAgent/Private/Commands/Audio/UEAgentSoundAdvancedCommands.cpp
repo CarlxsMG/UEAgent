@@ -261,11 +261,11 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
 // obtains a builder via FindOrBeginBuilding, calls SetGraphInputDefault, then
 // BuildAndOverwriteMetaSound to persist.
 // ---------------------------------------------------------------------------
-// MCP:set_metasound_preset_parameter - Sets a parameter default value on a MetaSound preset.  Loads the preset, obtains a builder via FindOrBeginBuilding, calls SetGraphInputDefault with the appropriate literal type, then BuildAndOverwriteMetaSound to persist.
-//   @param preset_path - Content path of the MetaSound preset asset.
-//   @param parameter_name - Name of the graph input parameter to set.
+// MCP:set_metasound_preset_parameter - Set the default value of one graph input on a MetaSound Source asset, normally a preset, found by content path. The value becomes a float, bool, int or string literal as parameter_type says, is written through the MetaSound editor builder in one undo step, built back into the asset, and the asset is saved. A path that does not load as a MetaSound Source (a patch is not accepted), no builder, or an input name the builder rejects is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. value_read_back is the default read back as text, verified says that read worked. Read the inputs with get_metasound_preset_parameters; make a preset with create_metasound_preset; metasound_set_input_default does the same with one typed value field per type.
+//   @param preset_path - Content path of the MetaSound preset asset, e.g. "/Game/Audio/MSP_Engine".
+//   @param parameter_name - Name of the graph input to set, as get_metasound_preset_parameters lists it.
 //   @param parameter_type - Literal type for the value: "float" (default), "bool", "int", "string".
-//   @param value - Value to set. Interpreted according to parameter_type.
+//   @param value - Value to set, read as parameter_type says; a missing value, or one that does not read as that type, writes 0, false or an empty string.
 //   @returns { preset_path: string, parameter_name: string, success: bool, verified: bool, value_read_back: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetMetasoundPresetParameter(

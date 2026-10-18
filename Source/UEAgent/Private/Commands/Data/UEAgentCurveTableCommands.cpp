@@ -148,10 +148,10 @@ namespace UEAgentCurveTableCommandsImpl
 // --------------------------------------------------------------------------- //
 // create_curve_table
 // --------------------------------------------------------------------------- //
-// MCP:create_curve_table - Create and save a new UCurveTable asset (a table of named rich-curve rows).
-//   @param name - Name of the new CurveTable asset.
-//   @param package_path - Content folder for the asset; defaults to /Game/CurveTables
-//   @returns { name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, message: string }
+// MCP:create_curve_table - Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a curve table already at that path, a composite one included, is returned untouched with created=false and already_exists=true; any other asset there, or an invalid package name, is an error. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
+//   @param name - Name of the new CurveTable asset, e.g. "CT_Damage"; also the last segment of its path.
+//   @param package_path - Content folder for the asset, e.g. "/Game/Data"; defaults to /Game/CurveTables
+//   @returns { name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, message?: string }
 
 TSharedPtr<FJsonObject> HandleCreateCurveTable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -546,8 +546,8 @@ TSharedPtr<FJsonObject> HandleCreateCompositeCurveTable(const TSharedPtr<FJsonOb
 // --------------------------------------------------------------------------- //
 // get_curve_table_info
 // --------------------------------------------------------------------------- //
-// MCP:get_curve_table_info - Get info about a UCurveTable: each row's name + key count, plus mode.
-//   @param curve_table_path - Full asset path to the UCurveTable (or UCompositeCurveTable).
+// MCP:get_curve_table_info - Read a UCurveTable or UCompositeCurveTable asset found by content path: its class, its mode (Empty, SimpleCurves or RichCurves) and every row with its name and key count; for a composite, the rows are the ones merged from its parent tables, and parent_count says how many it stacks. Key times and values are not returned. Nothing is written; a path that does not load as a curve table is an error. Write rows and keys with add_curve_table_row, add_curve_table_key, remove_curve_table_key, rename_curve_table_row and delete_curve_table_row; a DataTable is read with get_data_table_info, a standalone curve asset with get_curve_keys.
+//   @param curve_table_path - Content path of the UCurveTable (or UCompositeCurveTable), e.g. "/Game/CurveTables/CT_Damage".
 //   @returns { curve_table_path: string, curve_table_name: string, curve_class: string, curve_table_mode: string, rows: [{ name, key_count }], row_count: int, is_composite: bool, parent_count?: int }
 
 TSharedPtr<FJsonObject> HandleGetCurveTableInfo(const TSharedPtr<FJsonObject>& Params)

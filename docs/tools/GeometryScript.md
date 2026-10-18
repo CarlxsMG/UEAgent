@@ -181,13 +181,13 @@ Empty a DynamicMeshActor's live UDynamicMesh in place (keep the actor, drop the 
 
 ## `compact_mesh`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Compact vertex and triangle ID lists on a DynamicMeshActor's dynamic mesh, removing the gaps that deletes leave; the vertex and triangle counts stay the same. compacted is true when any ID moved. One undo step restores the previous IDs; an already compact mesh adds no undo step.
+Compact a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name): renumber its vertex, triangle and edge IDs into dense ranges, dropping the free ID slots that deletions leave. Geometry and the vertex and triangle counts stay the same, but IDs move, so vertex or triangle IDs read before (select_mesh_triangles, get_mesh_components_detail) are stale afterwards. Idempotent: compacted is true when any ID moved, and one undo step restores the old IDs; an already compact mesh is a success with compacted=false and adds no undo step. Nothing is saved; an unknown actor is an error. Run it after delete_selected_triangles_from_mesh or remove_unused_vertices, and before the xatlas method of auto_generate_mesh_uvs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
+| `actor_name` | string | yes | Label or object name of the DynamicMeshActor in the editor world (case-insensitive). |
 
 **Returns:** `{ actor_name: string, triangle_count: int, vertex_count: int, compacted: bool }`
 
@@ -360,12 +360,12 @@ Enumerate the connected components (physical pieces) of a DynamicMeshActor's liv
 
 *Read-only.*
 
-Count the number of topologically separate connected components (islands) in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumConnectedComponents.
+Count the connected components (islands: sets of triangles joined through shared edges) of one LOD of a UStaticMesh asset, computed on a transient dynamic mesh copy with build settings applied. One solid piece gives 1 and an empty mesh 0; parts that only touch or overlap without sharing edges count separately. Read-only: the asset is loaded, not changed. lod_index picks a source LOD, clamped to the ones the asset has (a hi-res source model, when present, is read instead). A path that does not load as a static mesh is an error. For a DynamicMeshActor in the level use get_num_connected_islands, or get_mesh_components_detail for each island's triangle count, bounds and material IDs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | Optional LOD index to query (default 0) |
+| `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
+| `lod_index` | number | no | 0-based source-model LOD to read (default 0), clamped to the asset's source LODs and ignored when the asset has a hi-res source model; a generated LOD without source geometry is an error. Echoed as sent. |
 
 **Returns:** `{ static_mesh_path, lod_index, connected_components }`
 
@@ -385,12 +385,12 @@ Return true if the mesh has at least one attribute set registered.
 
 *Read-only.*
 
-Test whether a static mesh has no topological boundary edges (i.e. is a closed manifold) via UGeometryScriptLibrary_MeshQueryFunctions::GetIsClosedMesh.
+Test whether one LOD of a UStaticMesh asset is closed (watertight): is_closed is true when the mesh, copied to a transient dynamic mesh with build settings applied, has triangles and no boundary edge, that is no edge with a single adjacent triangle. An empty mesh reports false. Read-only: the asset is loaded, not changed. lod_index picks a source LOD, clamped to the ones the asset has (a hi-res source model, when present, is read instead). A path that does not load as a static mesh is an error. To locate the holes use get_mesh_open_border_loops; area and volume (with is_closed): get_mesh_volume_area; a DynamicMeshActor in the level: get_num_open_border_edges or get_dynamic_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | Optional LOD index to query (default 0) |
+| `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
+| `lod_index` | number | no | 0-based source-model LOD to read (default 0), clamped to the asset's source LODs and ignored when the asset has a hi-res source model; a generated LOD without source geometry is an error. Echoed as sent. |
 
 **Returns:** `{ static_mesh_path, lod_index, is_closed }`
 
@@ -447,12 +447,12 @@ Resolve a region into a selection and report its local-space BOUNDING BOX via UG
 
 *Read-only.*
 
-Count the triangles in a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetNumTriangleIDs. This is the canonical triangle count after copy-from-asset; GetTriangleCount is also surfaced on UDynamicMesh directly (always == NumTriangleIDs for a freshly copied mesh).
+Count the triangles of one LOD of a UStaticMesh asset, copied to a transient dynamic mesh with build settings applied and degenerate triangles kept. triangle_count is the number of live triangles, triangle_id_count the size of the triangle ID space, and has_triangle_id_gaps is true when they differ (free ID slots, which a fresh copy does not normally have). Read-only: the asset is loaded, not changed. lod_index picks a source LOD, clamped to the ones the asset has (a hi-res source model, when present, is read instead). A path that does not load as a static mesh is an error. Vertices: get_mesh_vertex_count; LOD count and materials: get_static_mesh_info; a DynamicMeshActor in the level: get_dynamic_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | Optional LOD index to query (default 0) |
+| `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
+| `lod_index` | number | no | 0-based source-model LOD to read (default 0), clamped to the asset's source LODs and ignored when the asset has a hi-res source model; a generated LOD without source geometry is an error. Echoed as sent. |
 
 **Returns:** `{ static_mesh_path, lod_index, triangle_count, triangle_id_count, has_triangle_id_gaps }`
 
@@ -500,12 +500,12 @@ Count the vertices in a static mesh via UGeometryScriptLibrary_MeshQueryFunction
 
 *Read-only.*
 
-Read the surface area and signed volume of a static mesh via UGeometryScriptLibrary_MeshQueryFunctions::GetMeshVolumeArea.
+Read the surface area (cm^2) and signed volume (cm^3) of one LOD of a UStaticMesh asset, measured on a transient copy with the asset's build settings and build scale applied, in mesh-local space (no actor transform). The volume is an enclosed volume only when is_closed is true; on an open mesh it is not one, and reversed winding makes it negative. Read-only: the asset is loaded, not changed. lod_index picks a source LOD, clamped to the ones the asset has (a hi-res source model, when present, is read instead). A path that does not load as a static mesh is an error. Center of mass too: get_mesh_volume_area_center; bounds: get_mesh_bounding_box; watertightness alone: get_mesh_is_closed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | Optional LOD index to query (default 0) |
+| `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
+| `lod_index` | number | no | 0-based source-model LOD to read (default 0), clamped to the asset's source LODs and ignored when the asset has a hi-res source model; a generated LOD without source geometry is an error. Echoed as sent. |
 
 **Returns:** `{ static_mesh_path, lod_index, surface_area, volume, is_closed }`
 
@@ -1013,12 +1013,12 @@ Offset all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the e
 
 *Destructive.*
 
-Weld coincident open boundary edges of a DynamicMeshActor's dynamic mesh. One undo step restores the mesh; a call that changes nothing adds no undo step.
+Weld the coincident open boundary edges of a DynamicMeshActor's live dynamic mesh in the editor world (actor found by label or object name), merging boundary edge pairs whose endpoints lie within tolerance so cracks and duplicated seams close. The mesh changes in place as one undo step that restores it, and nothing is saved; a mesh with nothing to weld (closed, or no pair within tolerance) is a success with welded=false and adds no undo step. welded is true when the vertex or triangle count dropped; a failure inside the engine's welder is not reported. A negative tolerance or an unknown actor is an error. Count open edges first with get_num_open_border_edges; self-intersections: repair_mesh_self_intersections; orphan vertices: remove_unused_vertices; persist the result with copy_dynamic_mesh_to_static_mesh.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Label or name of the target DynamicMeshActor |
-| `tolerance` | number | no | Coincident-edge distance threshold in mesh units (default 1e-06) |
-| `only_unique_pairs` | boolean | no | Only merge unambiguous pairs with unique duplicate-edge matches (default true) |
+| `actor_name` | string | yes | Label or object name of the DynamicMeshActor in the editor world (case-insensitive). |
+| `tolerance` | number | no | Largest distance, in the mesh's local units (cm before actor scale), between the endpoints of two boundary edges for them to be welded; must be >= 0 (default 1e-06). |
+| `only_unique_pairs` | boolean | no | When true (default), weld only edges that have exactly one coincident partner; false also merges ambiguous matches. |
 
 **Returns:** `{ actor_name: string, tolerance: number, only_unique_pairs: bool, triangle_count: int, vertex_count: int, welded: bool }`

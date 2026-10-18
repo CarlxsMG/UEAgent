@@ -388,11 +388,11 @@ namespace
     }
 }
 
-// MCP:create_physics_asset - Creates a UPhysicsAsset at package_path/name, generating bodies and constraints from a skeletal mesh, sets that mesh as its preview mesh and saves it; the mesh is not pointed at the new asset. An existing one there is returned unchanged. Returns bodies, constraints, skeleton_bones, bodies_generated, saved.
+// MCP:create_physics_asset - Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true, nothing generated or written (saved still reads true), while another asset class there is an error. skeletal_mesh_path must load even when the asset exists. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
 //   @param name - Asset name (e.g. 'PA_Cube').
 //   @param package_path - Content folder for the new asset (default /Game/Physics; an empty string also uses it)
 //   @param skeletal_mesh_path - Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load
-//   @returns { package_path, already_existed, created, saved, bodies_generated, generation_message, save_error }
+//   @returns { asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -475,9 +475,9 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_physics_asset"), SaveError);
 }
 
-// MCP:get_physics_asset_info - Read a UPhysicsAsset's body count, constraint count, and bound skeletal mesh.
-//   @param physics_asset_path - /Game path to the UPhysicsAsset.
-//   @returns success or error payload
+// MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties or set_physics_body_advanced_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
+//   @param physics_asset_path - Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero".
+//   @returns { asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }
 TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>& Params)
 {
     UPhysicsAsset* PhysAsset = nullptr;

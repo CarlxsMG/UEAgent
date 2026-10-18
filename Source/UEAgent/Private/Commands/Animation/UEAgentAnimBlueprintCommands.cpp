@@ -755,15 +755,15 @@ TSharedPtr<FJsonObject> HandleAddAnimConduit(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_anim_transition
 // ---------------------------------------------------------------------------
-// MCP:add_anim_transition - Create a source->target transition in an anim state machine.
+// MCP:add_anim_transition - Add a transition from source_state to target_state in an existing state machine of an Animation Blueprint, set its crossfade, blend mode, bidirectional flag and priority, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). The machine (top-level AnimGraph) and both endpoints (a state or a conduit) are matched by name without case; a missing one, the same state twice or an unknown blend_mode is an error. Idempotent per pair: an existing source->target transition is returned unchanged with already_existed=true and nothing is saved (to change its settings, remove_anim_transition and add it again). It starts with no rule: wire one with set_anim_transition_rule_from_bool, set_anim_transition_rule_from_comparison or set_anim_transition_rule_automatic. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @param machine_name - Name of the state machine that owns both states
-//   @param source_state - Name of the source state (transition origin)
-//   @param target_state - Name of the target state (transition destination)
+//   @param source_state - Name of the source state or conduit (transition origin), matched without case
+//   @param target_state - Name of the target state or conduit (transition destination), matched without case
 //   @param crossfade_duration [number] - Optional blend duration in seconds (default 0.2)
-//   @param blend_mode [string] - Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic
-//   @param bidirectional [bool] - Optional; also allow the reverse target->source transition
-//   @param priority_order [int] - Optional evaluation priority (higher wins)
+//   @param blend_mode [string] - Optional EAlphaBlendOption name, e.g. Linear, Cubic, HermiteCubic (default HermiteCubic); an unknown name is an error
+//   @param bidirectional [bool] - Optional, default false; sets the Bidirectional flag so the same transition can also fire target->source (no second transition is added)
+//   @param priority_order [int] - Optional priority order (default 1); when several transitions out of a state pass at once, the smallest value wins
 //   @returns { anim_blueprint_path: string, machine_name: string, source_state: string, target_state: string, transition_created: bool, already_existed: bool, crossfade_duration: number, blend_mode: string, bidirectional: bool, priority_order: int, transition_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddAnimTransition(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1466,12 +1466,12 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleAutomatic(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_from_bool
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_from_bool - Wire a bool variable's getter as the rule of a transition.
+// MCP:set_anim_transition_rule_from_bool - Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or a non-bool one, is an error before anything changes; a variable known only from the blueprint's variable list (variable_kind new_blueprint) is not type-checked. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param machine_name - Name of the state machine that owns the transition
-//   @param source_state - Name of the source state (transition origin)
-//   @param target_state - Name of the target state (transition destination)
-//   @param variable_name - Name of an existing bool variable on the AnimBP (or its parent C++ class)
+//   @param machine_name - Name of the state machine that owns the transition, matched without case
+//   @param source_state - Name of the source state or conduit (transition origin)
+//   @param target_state - Name of the target state or conduit (transition destination)
+//   @param variable_name - Name of an existing bool variable on the AnimBP (or its parent C++ class); the rule reads it as is, true lets the transition pass
 //   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, variable_kind, rule_set, sink_present, contributor_count, contributor_node_class, saved, save_error? }
 //
 // Behavior: clears any existing contributor nodes from the transition's rule graph (preserving
@@ -1589,14 +1589,14 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_from_comparison
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_from_comparison - Wire a float comparison as the rule of a transition.
+// MCP:set_anim_transition_rule_from_comparison - Make (variable_name operator comparison_value) the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter, a literal and a comparison node are wired into the sink's bCanEnterTransition. Only a double variable (a Blueprint float) works: a C++ float property, or one known only from the variable list (variable_kind new_blueprint), maps to *_FloatFloat math functions the engine no longer has and is an error, like an unknown operator; both are found after the old rule is removed, which stays removed in memory. A missing blueprint, machine, transition or variable, or a non-float one, is an error before anything changes. Repeat calls rebuild the same rule (idempotent); saves without compiling (compile_anim_blueprint). Bool rule: set_anim_transition_rule_from_bool; empty rule: clear_anim_transition_rule. Refused while PIE runs unless force=true; a failed save is an error.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param machine_name - Name of the state machine that owns the transition
-//   @param source_state - Name of the source state (transition origin)
-//   @param target_state - Name of the target state (transition destination)
-//   @param variable_name - Name of an existing float variable on the AnimBP (or its parent C++ class)
+//   @param machine_name - Name of the state machine that owns the transition, matched without case
+//   @param source_state - Name of the source state or conduit (transition origin)
+//   @param target_state - Name of the target state or conduit (transition destination)
+//   @param variable_name - Name of an existing double variable (a Blueprint float) on the AnimBP or its parent class; the left-hand side of the comparison
 //   @param operator - One of "==", "!=", ">", "<", ">=", "<=" (compared against comparison_value)
-//   @param comparison_value [number] - Float literal on the right-hand side of the comparison
+//   @param comparison_value [number] - Right-hand side of the comparison (default 0), written into the literal node at float precision
 //   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, operator, comparison_value, variable_kind, rule_set, sink_present, contributor_count, contributor_node_classes, saved, save_error? }
 //
 // Behavior: clears existing contributor nodes (preserving the sink), creates a
@@ -1990,15 +1990,16 @@ TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("scaffold_locomotion_animbp"), SaveErr);
 }
 
-// MCP:wire_aim_offset - Create a UBlendSpace1D asset for aim-offset blending (yaw or pitch axis). Idempotent on re-run.
-//   @param package_path - UE content folder.
-//   @param asset_name - BlendSpace1D asset name.
-//   @param skeleton_path - Path to the target USkeleton.
-//   @param axis_name - Optional axis name (default "Yaw").
-//   @param min_value - Optional float (default -90.0). Axis minimum.
-//   @param max_value - Optional float (default 90.0). Axis maximum.
-//   @param num_grid_points - Optional int (default 4).
-//   @returns { asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved }
+// MCP:wire_aim_offset - Create a plain UBlendSpace1D asset (not an aim offset class) for a skeleton at package_path/asset_name and save it, or re-save the UBlendSpace1D already there (already_existed=true, its skeleton and samples kept); nothing is overwritten, so it is idempotent. axis_name, min_value, max_value and num_grid_points are only echoed in the reply (min and max sorted, the grid clamped to 1-10), never written to the asset: set the axis with set_blendspace_properties and add samples with add_blendspace_sample. A skeleton that does not load or a failed create is an error; a failed save, as during PIE, makes success false with save_error. A real 2D aim offset (UAimOffsetBlendSpace): scaffold_aim_offset_blend_space; other blend spaces: create_blend_space or scaffold_blend_space_2d; delete: remove_blendspace_1d.
+//   @param package_path - Content folder for the asset, e.g. /Game/Animation (a trailing slash is ignored).
+//   @param asset_name - Asset name; the object path becomes package_path/asset_name.asset_name.
+//   @param skeleton_path - Asset path of the USkeleton a new blend space targets; it must load even when the asset already exists, which keeps its own skeleton.
+//   @param axis_name - Optional axis label echoed in the reply (default "Yaw"); not written to the asset.
+//   @param min_value - Optional float (default -90.0) echoed as the axis minimum; not written to the asset.
+//   @param max_value - Optional float (default 90.0) echoed as the axis maximum; not written to the asset.
+//   @param num_grid_points - Optional int (default 4) echoed clamped to 1-10; not written to the asset.
+//   @returns { asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved, save_error? }
+//   @hints additive
 TSharedPtr<FJsonObject> HandleWireAimOffset(
     const TSharedPtr<FJsonObject>& Params)
 {

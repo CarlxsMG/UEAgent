@@ -445,10 +445,10 @@ TSharedPtr<FJsonObject> HandleRemoveFieldNode(
 // ---------------------------------------------------------------------------
 // 4. spawn_field_system_actor
 // ---------------------------------------------------------------------------
-// MCP:spawn_field_system_actor - Spawn an AFieldSystemActor in the editor world and assign a UFieldSystem.  Spawns the actor at the given location, assigns the asset via UFieldSystemComponent::SetFieldSystem, and sets the actor label.
-//   @param actor_label - Editor label for the spawned actor
-//   @param field_system_path - Asset path of the UFieldSystem to assign
-//   @param location - Optional [x, y, z] world location; defaults to (0,0,0)
+// MCP:spawn_field_system_actor - Spawn a new AFieldSystemActor in the editor world (not PIE) at location, unrotated, assign an existing UFieldSystem asset to its field system component, and set its outliner label. Every call spawns another actor; nothing is saved. A field system asset that does not load, or no editor world, is an error and spawns nothing; has_field_system confirms the assignment by reading it back. actor_label in the reply echoes the request, and actor_name is the new actor's internal name. Create the asset with create_field_system_asset, author its commands with add_field_node and inspect them with get_field_system_info; for any other actor class use spawn_actor.
+//   @param actor_label - Outliner label for the spawned actor
+//   @param field_system_path - Asset path of an existing UFieldSystem to assign, e.g. "/Game/MyGame/FS_Example"
+//   @param location - Optional [x, y, z] world location in cm; defaults to (0,0,0)
 //   @returns { actor_label: string, field_system_path: string, actor_name: string, has_field_system: bool, success: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnFieldSystemActor(

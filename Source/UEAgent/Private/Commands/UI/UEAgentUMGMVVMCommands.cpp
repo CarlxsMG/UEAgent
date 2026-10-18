@@ -458,14 +458,14 @@ namespace
 // add_viewmodel -- append a FMVVMBlueprintViewModelContext to the widget BP's
 // MVVM authoring extension. Idempotent by ContextName.
 // =============================================================================
-// MCP:add_viewmodel - Append a UMVVMViewModelContext to a Widget BP's MVVM authoring state.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint asset (string)
+// MCP:add_viewmodel - Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name already there is kept as it is, not updated, and comes back with already_existed=true, though the Blueprint is still compiled and saved. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
+//   @param widget_blueprint_name - /Game path of the Widget Blueprint asset, e.g. "/Game/UI/WBP_HUD".
 //   @param view_model_class - View model class: asset path (/Game/...) or /Script/<Module>.<ClassName>
 //   @param context_name - FName identifying this context (idempotency key)
 //   @param creation_type - Optional (default "CreateInstance"): one of "CreateInstance" | "PropertyPath" | "GlobalViewModelCollection" | "Manual" (EMVVMBlueprintViewModelContextCreationType).
 //   @param source_property_path - Optional: only used when creation_type="PropertyPath" (required in that case). Sets FMVVMBlueprintViewModelContext::ViewModelPropertyPath.
 //   @param global_identifier - Optional: only used when creation_type="GlobalViewModelCollection" (required in that case). Sets FMVVMBlueprintViewModelContext::GlobalViewModelIdentifier.
-//   @returns { widget_blueprint_name, view_model_class, context_name, creation_type, source_property_path?, global_identifier?, already_existed, view_model_count, has_mvvm_extension }
+//   @returns { widget_blueprint_name, view_model_class, context_name, creation_type, source_property_path?, global_identifier?, already_existed, view_model_count, has_mvvm_extension, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleAddViewModel(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -682,10 +682,10 @@ TSharedPtr<FJsonObject> HandleRemoveViewModel(const TSharedPtr<FJsonObject>& Par
 // set_viewmodel_field -- runtime path. Finds an in-world UserWidget instance,
 // instantiates the VM, and uses UMVVMBlueprintLibrary::SetViewModelByClass.
 // =============================================================================
-// MCP:set_viewmodel_field - Instantiate a UMVVMViewModelBase on a UUserWidget instance and set it via UMVVMBlueprintLibrary::SetViewModelByClass.
-//   @param widget_instance_name - Label (Actor label or asset path) used to find an in-world UUserWidget
+// MCP:set_viewmodel_field - Create a fresh instance of view_model_class and give it to a live UUserWidget through UMVVMBlueprintLibrary::SetViewModelByClass, which fills the view-model context of the widget whose class matches; context_name does not pick the context and is only echoed. The widget is the one a UWidgetComponent shows: on the first actor whose label matches widget_instance_name, or, when the name contains a slash, on the first actor whose component uses that widget class, searched across every open world, PIE included. Runtime state only: nothing is compiled or saved, and each call swaps in a new default instance. set is true whenever the call is made: a widget with no MVVM view only logs an error. A class that is not a UMVVMViewModelBase, or no matching widget, is an error. Authoring-time contexts: add_viewmodel; bindings: bind_widget_to_viewmodel.
+//   @param widget_instance_name - Label of an actor that has a widget component, matched case-insensitively, or, when it contains a slash, the widget class its component uses, e.g. "/Game/UI/WBP_Nameplate".
 //   @param view_model_class - VM class: asset path or /Script/<Module>.<ClassName>
-//   @param context_name - FName of the target context on the widget
+//   @param context_name - Name of the view-model context meant; echoed back only, since the context is chosen by the class of view_model_class.
 //   @returns { widget_instance_name, view_model_class, context_name, set, instance_class }
 TSharedPtr<FJsonObject> HandleSetViewModelField(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1210,11 +1210,11 @@ TSharedPtr<FJsonObject> HandleAddListView(const TSharedPtr<FJsonObject>& Params)
 // =============================================================================
 // add_tile_view -- same shape as add_list_view but forces UTileView.
 // =============================================================================
-// MCP:add_tile_view - Construct a UTileView under the widget BP root and add it to the tree.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint
-//   @param list_view_name - FName of the new UTileView widget
-//   @param entry_widget_class - Optional entry widget class
-//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added }
+// MCP:add_tile_view - Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. With no panel root it becomes the root, replacing any non-panel root widget. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false) and the Blueprint is still compiled and saved. A missing Blueprint or an entry class that is not a UUserWidget is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+//   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
+//   @param list_view_name - Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key.
+//   @param entry_widget_class - Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path.
+//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }
 TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1266,11 +1266,11 @@ TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
 // graph event node; this command returns the honest gap rather than
 // fabricating a property that doesn't exist.
 // =============================================================================
-// MCP:set_widget_drag_drop - Honest gap report: there is no UWidget UPROPERTY that exposes DragDropOperationClass, and OnDragDetected/OnDrop are DECLARE_DYNAMIC delegates (not reflectively assignable). The drag/drop behavior must be configured in the widget BP graph.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint
-//   @param widget_name - FName of the target widget inside the tree
-//   @param operation_class - /Script/...DragDropOperation or subclass path
-//   @returns { widget_blueprint_name, widget_name, operation_class, set: false, has_drag_drop_property: false, note }
+// MCP:set_widget_drag_drop - Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, property_set, saved). Among the engine UMG widgets only list, tile and tree views have that property (UListViewBase); for any other widget the call writes nothing and answers set=false with a note, because drag and drop there is the OnDragDetected and OnDrop events of a User Widget graph: author those with build_blueprint_graph, after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; one that does not load also gives set=false, with operation_class_loaded=false. A missing Blueprint or widget is an error. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
+//   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
+//   @param widget_name - Name of the widget in the tree of that Blueprint, e.g. "ItemTiles"; only a list, tile or tree view can take the class.
+//   @param operation_class - Class path of a UDragDropOperation subclass, e.g. "/Script/UMG.DragDropOperation" or "/Game/UI/DDO_Item.DDO_Item_C"; defaults to /Script/UMG.DragDropOperation.
+//   @returns { widget_blueprint_name, widget_name, operation_class, set, has_drag_drop_property, operation_class_loaded, property_set?, saved?, save_error?, note? }
 TSharedPtr<FJsonObject> HandleSetWidgetDragDrop(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;

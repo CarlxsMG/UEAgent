@@ -21,13 +21,13 @@ Configure shadow settings for a light actor using preset shadow qualities. Enabl
 
 *Destructive, idempotent.*
 
-Configure post-processing settings using preset levels (Enabled, Disabled, High, Medium, Low) that control bloom, motion blur, DOF, AO, GI, and other effects.
+Apply a post-processing quality preset with console commands that set nine renderer variables (r.PostProcessAAQuality, r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.GlobalIlluminationQuality, r.ColorGradingQuality, r.LensFlareQuality, r.SSRQuality). Enabled and High set all to 2; Medium sets anti-aliasing, bloom, depth of field, ambient occlusion and color grading to 1 and the rest to 0; Disabled and Low set all to 0, yet Low reports post_processing_enabled true. The change is engine-wide for this session: no volume is edited, no config written, nothing saved or undoable. An unknown preset changes nothing and still succeeds, with post_processing_configured false. The *_enabled flags echo the preset, not a read-back, so a variable this engine lacks (r.SSRQuality is r.SSR.Quality in UE5) still reads as set. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `post_process_settings` | string | yes | Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' |
+| `post_process_settings` | string | yes | Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'; case is ignored |
 
-**Returns:** `{ post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, global_illumination_enabled, anti_aliasing_enabled, color_grading_enabled, lens_flare_enabled, screen_space_reflections_enabled, world_name, post_process_volume_count, volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, x, y, z, post_process_volume_details, post_processing_recommendations, performance_impact, performance_rating }`
+**Returns:** `{ post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, anti_aliasing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, global_illumination_enabled, color_grading_enabled, lens_flare_enabled, screen_space_reflections_enabled, world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }`
 
 ## `get_directional_light_cascade_settings`
 
@@ -137,11 +137,11 @@ Read back every data property of an existing SceneCapture2D actor's USceneCaptur
 
 *Read-only.*
 
-Retrieve comprehensive shader information including shader type, quality level, API, world material/mesh/light counts, and shader complexity analysis.
+Read the shading setup the editor runs with, from console variables and the RHI, plus a census of the engine's first world context (normally the editor level); nothing is changed or compiled. shader_type is forward or deferred (r.ForwardShading), shader_api the RHI in use, shader_quality the r.MaterialQualityLevel level; each shader_*_enabled switch, vsync, frame-rate limit and screen percentage comes from its console variable and is omitted when the build lacks it, while shaders_enabled, shader_quality_auto and the platform architecture and OS are fixed. World counts are of actors owning a static mesh, skeletal mesh, light or FX component, plus post-process volumes; material_details lists each distinct material on their first mesh components. The complexity score, rating and recommendations are a heuristic of those counts, not a shader measurement. Renderer summary: get_rendering_settings; lights: get_lighting_quality; one variable: get_cvar.
 
 No parameters.
 
-**Returns:** `{ shader_info_found, shader_info_message, shader_type, shader_quality, shaders_enabled, shader_api, world_name, material_name, material_class, material_path, material_is_material, material_is_material_instance, material_is_dynamic_material_instance, material_scalar_parameter_count, material_vector_parameter_count, material_texture_parameter_count, material_total_parameter_count, world_material_count, world_static_mesh_count, world_skeletal_mesh_count, world_light_count, world_post_process_count, world_particle_system_count, material_details, engine_version, platform_name, platform_architecture, platform_os, shader_quality_level, shader_quality_preset, shader_quality_auto, shader_quality_score, shader_forward_shading_enabled, shader_deferred_shading_enabled, shader_shadows_enabled, shader_fog_enabled, shader_atmosphere_enabled, shader_anti_aliasing_enabled, shader_motion_blur_enabled, shader_depth_of_field_enabled, shader_ambient_occlusion_enabled, shader_global_illumination_enabled, shader_vsync_enabled, shader_frame_rate_limit, shader_screen_percentage, shader_resolution_scale (each read from its console variable; left out when the build lacks it), shader_recommendations, shader_complexity_score, shader_complexity_rating }`
+**Returns:** `{ shader_info_found, shader_info_message, shader_type, shader_quality, shaders_enabled, shader_api, world_name, world_material_count, world_static_mesh_count, world_skeletal_mesh_count, world_light_count, world_post_process_count, world_particle_system_count, material_details: [{ material_name, material_class, material_path, material_is_material, material_is_material_instance, material_is_dynamic_material_instance, material_scalar_parameter_count, material_vector_parameter_count, material_texture_parameter_count, material_total_parameter_count }], engine_version, platform_name, platform_architecture, platform_os, shader_quality_level, shader_quality_preset, shader_quality_auto, shader_quality_score, shader_forward_shading_enabled, shader_deferred_shading_enabled, shader_shadows_enabled, shader_fog_enabled, shader_atmosphere_enabled, shader_anti_aliasing_enabled, shader_motion_blur_enabled, shader_depth_of_field_enabled, shader_ambient_occlusion_enabled, shader_global_illumination_enabled, shader_vsync_enabled, shader_frame_rate_limit, shader_screen_percentage, shader_resolution_scale (each read from its console variable; left out when the build lacks it), shader_recommendations, shader_complexity_score, shader_complexity_rating }`
 
 ## `get_sky_atmosphere_properties`
 
@@ -232,27 +232,27 @@ Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogCompo
 
 *Destructive, idempotent.*
 
-Set the color of a light actor using either RGB/RGBA format (comma-separated floats) or hexadecimal format (#RRGGBB).
+Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The engine refuses runtime changes on a Static-mobility light, which keeps its color with color_set false and success still true. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or unparsable color is an error. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `light_name` | string | yes | Name of the light actor to modify |
-| `color` | string | yes | Color in 'R,G,B,A' or 'R,G,B' format (values 0-1) or hex '#RRGGBB' format |
+| `light_name` | string | yes | Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched |
+| `color` | string | yes | Color in 'R,G,B,A' or 'R,G,B' format (values 0-1) or hex '#RRGGBB' format; alpha defaults to 1, and in the comma form a part that is not a number reads as 0 |
 
-**Returns:** `{ light_name, requested_color, color_set, color_message, r, g, b, a, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_attenuation_radius, light_inner_cone_angle, light_outer_cone_angle, x, y, z }`
+**Returns:** `{ light_name, requested_color, color_set, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }`
 
 ## `set_light_intensity`
 
 *Destructive, idempotent.*
 
-Set the intensity value for a specified light actor and verify the change.
+Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The engine refuses runtime changes on a Static-mobility light, so it keeps its intensity and intensity_set is false while success stays true; old_intensity and new_intensity show what happened. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or a missing intensity is an error. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `light_name` | string | yes | Name of the light actor to modify |
-| `intensity` | number | yes | New intensity value (float) |
+| `light_name` | string | yes | Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched |
+| `intensity` | number | yes | New intensity as a float in the light's own units (lux for a directional light, its intensity units for a local light); not clamped |
 
-**Returns:** `{ light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light, light_attenuation_radius, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }`
+**Returns:** `{ light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }`
 
 ## `set_light_properties`
 
@@ -485,11 +485,11 @@ Spawns a BoxReflectionCapture actor into the editor world.  Optionally sets the 
 
 *Additive.*
 
-Spawns an ExponentialHeightFog actor and optionally sets its fog density.
+Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
+| `location` | array | no | Optional [X, Y, Z] world location in cm (defaults to origin); fewer than 3 numbers also means the origin |
 | `fog_density` | number | no | Optional fog density multiplier; if supplied, applied to the component and read back |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }`
@@ -511,12 +511,12 @@ Spawn a new PostProcessVolume actor in the editor world at location as one undoa
 
 *Additive.*
 
-Spawns a SceneCapture2D actor into the editor world.  Reports whether the capture component already has a UTextureRenderTarget2D assigned (has_render_target).
+Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture; any other actor class: spawn_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location (defaults to origin) |
-| `rotation` | array | no | Optional [Pitch, Yaw, Roll] world rotation (defaults to zero) |
+| `location` | array | no | Optional [X, Y, Z] world location; missing or shorter than three numbers means the origin |
+| `rotation` | array | no | Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {"pitch", "yaw", "roll"} by name (defaults to zero) |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, has_render_target: bool, spawned: bool }`
 

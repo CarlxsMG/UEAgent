@@ -104,9 +104,9 @@ namespace
 // -------------------------------------------------------------------------- //
 // get_asset_disk_size
 // -------------------------------------------------------------------------- //
-// MCP:get_asset_disk_size - Get the on-disk file size of an asset's package (.uasset/.umap).  Resolves the package filename via FPackageName::LongPackageNameToFilename and stats it with IFileManager::FileSize.
+// MCP:get_asset_disk_size - Stat the package file of an asset on disk, by object or package path, without loading the asset or changing anything: the package name is mapped through the mounted content roots to its .uasset file, else its .umap, and file_path and extension say which was found. A package with no file on disk, one never saved for instance, is still a success with exists_on_disk=false, size_bytes 0 and a message, and without size_kb or size_mb. The asset registry is not consulted and unsaved in-memory edits do not count. A malformed package name is an error. To look an asset up by name instead use get_asset_file_size; estimated memory is get_asset_memory_usage; what it pulls in is get_asset_dependencies_recursive.
 //   @param asset_path - Object path or package path of the asset (e.g. '/Game/MyGame/M_Example').
-//   @returns { asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb: number, size_mb: number, exists_on_disk: bool, message: string }
+//   @returns { asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb?: number, size_mb?: number, exists_on_disk: bool, message?: string }
 
 TSharedPtr<FJsonObject> HandleGetAssetDiskSize(const TSharedPtr<FJsonObject>& Params)
 {

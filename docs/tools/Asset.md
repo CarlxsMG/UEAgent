@@ -8,13 +8,13 @@
 
 *Additive.*
 
-Adds an asset to an existing collection and reads back its object count.          must match the share type the collection was created with.
+Add one asset, by object path, to an existing static Content Browser collection of the project and read the membership back. The collection is looked up by collection_name within share_type (default Local; an unrecognised value also means Local), which must be the share type it was created with: a name not found there is an error. The asset itself is not loaded or checked. An asset that is already a member makes the collection manager refuse the add, which comes back as an error with its reason. The manager writes the collection file itself, outside the undo history. verified confirms membership and object_count counts the direct members. Create the collection with create_collection; the inverse is remove_asset_from_collection; list members with get_collection_assets and collections with get_collections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `collection_name` | string | yes | Name of the (existing) collection. |
-| `asset_path` | string | yes | /Game path / object path of the asset to add. |
-| `share_type` | string | no | ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local") |
+| `asset_path` | string | yes | Object path of the asset to add, e.g. "/Game/Props/SM_Chair.SM_Chair"; used as given, without loading or checking the asset. |
+| `share_type` | string | no | ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local |
 
 **Returns:** `{ collection_name: string, share_type: string, asset_path: string, added: bool, verified: bool, object_count: number }`
 
@@ -94,12 +94,12 @@ Apply the binary ref-scan of scan_uasset_refs to the SAME asset (rel_path) acros
 
 *Additive, idempotent.*
 
-Creates a static Content Browser collection (idempotent).  Uses the UE 5.7 project ICollectionContainer. If the collection already exists a stable payload is returned (already_existed=True).          "Private", or "Shared".
+Create a static Content Browser collection named collection_name in the project's collection container, under share_type (default Local; Private or Shared otherwise, and an unrecognised value falls back to Local). Idempotent: when that name already exists under that share type nothing is created and the call succeeds with created false and already_existed true; the check looks at that share type only. The collection manager writes the collection file itself, outside the undo history, and a creation it refuses is an error carrying its reason. exists is read back afterwards. Fill it with add_asset_to_collection, list collections with get_collections and members with get_collection_assets; the inverse is delete_collection. A Material Parameter Collection is a different asset: create_material_parameter_collection.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `collection_name` | string | yes | Name of the collection. |
-| `share_type` | string | no | ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local") |
+| `collection_name` | string | yes | Name of the collection to create. |
+| `share_type` | string | no | ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local |
 
 **Returns:** `{ collection_name: string, share_type: string, created: bool, already_existed: bool, exists: bool }`
 
@@ -384,13 +384,13 @@ Recursively walk an asset's package dependencies via the Asset Registry.  Breadt
 
 *Read-only.*
 
-Get the on-disk file size of an asset's package (.uasset/.umap).  Resolves the package filename via FPackageName::LongPackageNameToFilename and stats it with IFileManager::FileSize.
+Stat the package file of an asset on disk, by object or package path, without loading the asset or changing anything: the package name is mapped through the mounted content roots to its .uasset file, else its .umap, and file_path and extension say which was found. A package with no file on disk, one never saved for instance, is still a success with exists_on_disk=false, size_bytes 0 and a message, and without size_kb or size_mb. The asset registry is not consulted and unsaved in-memory edits do not count. A malformed package name is an error. To look an asset up by name instead use get_asset_file_size; estimated memory is get_asset_memory_usage; what it pulls in is get_asset_dependencies_recursive.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Object path or package path of the asset (e.g. '/Game/MyGame/M_Example'). |
 
-**Returns:** `{ asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb: number, size_mb: number, exists_on_disk: bool, message: string }`
+**Returns:** `{ asset_path: string, package_name: string, file_path: string, extension: string, size_bytes: number, size_kb?: number, size_mb?: number, exists_on_disk: bool, message?: string }`
 
 ## `get_asset_file_size`
 
@@ -408,13 +408,13 @@ Read the ON-DISK size of an asset's .uasset in bytes, KB and MB, plus the absolu
 
 *Read-only.*
 
-Read an asset's UAssetImportData: source filename(s) and import timestamp.  Returns has_import_data, source_file (first resolved filename), the full source_files list (relative + resolved filename + import_time), and source_file_count.
+Read the source-file record (UAssetImportData) of an asset loaded by path: the file(s) it was imported from, as stored and resolved to absolute paths, with each file's import timestamp. Works for textures, sound waves and any class with an AssetImportData property (static and skeletal meshes, animation sequences). An asset that has none is a success with has_import_data=false, empty source_file and source_files, source_file_count 0 and no import_time. source_file is the first resolved file and import_time the first file's timestamp. Read-only: the asset is loaded if needed, not changed. An asset that does not load is an error. Interchange pipelines and node data: interchange_get_asset_import_data; reimport from the recorded file: reimport_asset or interchange_reimport_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Object path of the asset, e.g. /Game/Imported/MyTex.MyTex. |
+| `asset_path` | string | yes | Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock", or package form "/Game/Imported/T_Rock". |
 
-**Returns:** `{ asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time: string }`
+**Returns:** `{ asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time?: string }`
 
 ## `get_asset_last_modified`
 
@@ -625,11 +625,11 @@ Get detailed info about a static mesh: LODs, verts, materials (with slots), sock
 
 *Read-only.*
 
-Read lightmap resolution and lightmap UV coordinate index of a static mesh.
+Read the asset-level lightmap settings of a UStaticMesh, loaded from its package or object path, without changing it: lightmap_resolution, the texel resolution static lighting is baked at, and lightmap_coordinate_index, the UV channel that holds the lightmap UVs. These are the mesh defaults; an override set on a placed component in a level is not read. A mesh that does not load is an error. Write them with set_static_mesh_lightmap; LODs, materials, sockets, collision and bounds are get_static_mesh_info; per-section flags are get_static_mesh_sections.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
+| `static_mesh_path` | string | yes | Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate". |
 
 **Returns:** `{ static_mesh_path, lightmap_resolution, lightmap_coordinate_index }`
 
@@ -637,13 +637,13 @@ Read lightmap resolution and lightmap UV coordinate index of a static mesh.
 
 *Read-only.*
 
-Get section-level info for all LODs of a static mesh (shadow, collision, ray tracing flags).
+List every section of every render LOD of a UStaticMesh asset, loaded from its package or object path, without changing it: lod_index, section_index and the cast_shadow, collision_enabled and visible_in_ray_tracing flags of each, read through the StaticMeshEditor subsystem. A mesh without render data has no LODs and returns an empty list; a mesh that does not load, or a missing subsystem, is an error. total_sections counts the rows. Material slots, vertex counts, sockets and bounds are get_static_mesh_info; skeletal meshes use get_skeletal_mesh_section_info; lightmap settings are get_static_mesh_lightmap.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
+| `static_mesh_path` | string | yes | Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate". |
 
-**Returns:** `{ lod_index, section_index, cast_shadow, collision_enabled, visible_in_ray_tracing, static_mesh_path, sections, total_sections }`
+**Returns:** `{ static_mesh_path: string, sections: [{ lod_index: number, section_index: number, cast_shadow: bool, collision_enabled: bool, visible_in_ray_tracing: bool }], total_sections: number }`
 
 ## `get_static_mesh_sockets`
 
@@ -807,12 +807,12 @@ Delete a CUBE render target, but only after loading it and verifying it really i
 
 *Destructive, idempotent.*
 
-Remove a socket from a static mesh by name (idempotent).
+Remove one socket, found by name, from a UStaticMesh asset loaded from its package or object path, then save the mesh; there is no undo transaction. A name the mesh does not have is a success with removed=false, and nothing is touched or saved (idempotent). A mesh that does not load is an error, and so is a failed save -- refused while PIE runs or under a read-only root -- after which the socket is already gone from the mesh in memory. socket_count is the number of sockets left. List sockets with get_static_mesh_sockets, add one with add_static_mesh_socket, rename one with rename_static_mesh_socket; skeletal meshes use remove_skeletal_mesh_socket and skeletons remove_socket_from_skeleton_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
-| `socket_name` | string | yes | Name of the socket to remove. |
+| `static_mesh_path` | string | yes | Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate". |
+| `socket_name` | string | yes | Name of the socket to remove, compared as an FName (case-insensitive). |
 
 **Returns:** `{ static_mesh_path, socket_name, removed, socket_count }`
 

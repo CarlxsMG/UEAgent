@@ -59,7 +59,7 @@ Create an Interchange pipeline asset of a concrete pipeline class (the generic t
 
 *Read-only.*
 
-Read the UInterchangeAssetImportData of an asset.  Loads the asset via LoadObject&lt;UObject> and calls UInterchangeManager::GetAssetImportData(Asset) (InterchangeManager.h, INTERCHANGEENGINE_API). For assets imported via the legacy factory path the returned data is null — that is reported as ``present:false`` (a normal state, not an error). When present, also calls ScriptExtractFilenames / ScriptExtractDisplayLabels (UFUNCTION inline, InterchangeAssetImportData.h/65).
+Read the Interchange import data (UInterchangeAssetImportData) of an asset loaded by package or object path: its source_filenames, display_labels, pipelines_count and whether it holds a node container. An asset imported through the legacy factory path, or never imported, has none: that answers present=false with zeros and empty lists, a normal state and not an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. The legacy UAssetImportData of a factory import (source file and timestamp): get_asset_import_data; the pipeline objects: interchange_get_pipelines; the nodes the import produced: interchange_get_node_container; reimport from this data: interchange_reimport_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -71,26 +71,26 @@ Read the UInterchangeAssetImportData of an asset.  Loads the asset via LoadObjec
 
 *Read-only.*
 
-Read the UInterchangeBaseNodeContainer of an asset's UInterchangeAssetImportData.  Loads the asset + ID, then iterates factory nodes via IterateNodesOfType&lt;UInterchangeFactoryBaseNode> (InterchangeBaseNodeContainer.h, template header-only) and reads class via GetObjectClass() (InterchangeFactoryBaseNode.h, INTERCHANGECORE_API), UniqueID + DisplayLabel from UInterchangeBaseNode (InterchangeBaseNode.h, INTERCHANGECORE_API).
+Read the node container kept in the Interchange import data of an asset loaded by path: the root_uids and every factory node, each with its uid, display_label and the class of the object that factory produces. An asset with no Interchange import data (a legacy factory import, or one never imported), or with import data but no node container, answers present=false with empty lists rather than an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. Use it to see what an Interchange import produced; source files and pipeline count: interchange_get_asset_import_data; the pipeline stack: interchange_get_pipelines; reimport: interchange_reimport_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") |
+| `asset_path` | string | yes | Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo") |
 
-**Returns:** `{ asset_path: string, present: bool, root_uids: [string], factory_node_count: number, factory_nodes: [object] }`
+**Returns:** `{ asset_path: string, present: bool, root_uids: [string], factory_node_count: number, factory_nodes: [{ uid: string, class: string, display_label: string }] }`
 
 ## `interchange_get_pipeline_properties`
 
 *Read-only.*
 
-Read the properties of an Interchange pipeline asset by reflection; class_only lists only their names and types.
+Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). The values are the in-memory ones, so edits made with interchange_set_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with interchange_set_pipeline_properties and persist with interchange_save_pipeline; the pipelines an imported asset used: interchange_get_pipelines; a new pipeline asset: interchange_create_pipeline_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pipeline_path` | string | yes | Object path of the pipeline asset to read (loaded via LoadObject, must be a UInterchangePipelineBase). |
+| `pipeline_path` | string | yes | Object path of the pipeline asset to read (loaded via LoadObject, must be a UInterchangePipelineBase), e.g. "/Game/Pipelines/MyMeshPipeline.MyMeshPipeline". |
 | `class_only` | boolean | no | When true, return only the EditAnywhere property NAMES and types (no values) for discovery. Defaults to false (includes current values). |
 
-**Returns:** `{ pipeline_path: string, class: string, properties: [object], property_count: number }`
+**Returns:** `{ pipeline_path: string, class: string, properties: [{ name: string, type: string, value?: any }], property_count: number }`
 
 ## `interchange_get_pipelines`
 
@@ -108,9 +108,11 @@ List the UInterchangePipelineBase instances stored on an asset's UInterchangeAss
 
 *Read-only.*
 
-Read the project's Interchange settings (UInterchangeProjectSettings): the content and scene import settings (pipeline stacks, default stack and its per-asset-type overrides, import dialog class and flags, per-translator dialog overrides), the file picker and generic pipeline classes, the converter default pipeline and the Interchange groups.
+Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with interchange_set_pipeline_stack_default; read one pipeline asset with interchange_get_pipeline_properties; the formats translators accept: interchange_get_supported_formats.
 
 No parameters.
+
+**Returns:** `{ content_import_settings: { default_pipeline_stack: string, import_dialog_class: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, pipeline_stacks: [{ name: string, pipelines: [string] }], pipeline_stacks_count: int, default_pipeline_stack_override: [{ translator_type: string, stack_name: string }] }, scene_import_settings: { default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, per_translator_dialog_override_count: int }, file_picker_class: string, generic_pipeline_class: string, converter_default_pipeline: string, b_static_mesh_use_smooth_edges_if_smoothing_information_is_missing: bool, interchange_groups: [{ display_name: string, unique_id: string, default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool }], interchange_groups_count: int }`
 
 ## `interchange_get_supported_formats`
 
