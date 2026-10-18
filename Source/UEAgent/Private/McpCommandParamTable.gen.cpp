@@ -3591,7 +3591,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("schema_path"),
     nullptr,
     TEXT("inspect_subsystem_instance"),
-        TEXT("lifetime"), TEXT("player_index"), TEXT("subsystem_class"),
+        TEXT("lifetime"), TEXT("player_index"), TEXT("subsystem_class"), TEXT("world"),
     nullptr,
     TEXT("interchange_can_reset_actor"),
         TEXT("actor_path"),
@@ -3780,6 +3780,7 @@ static const TCHAR* const GFlatCommandParams[] =
         TEXT("actor_name_filter"),
     nullptr,
     TEXT("list_local_player_subsystems"),
+        TEXT("world"),
     nullptr,
     TEXT("list_localization_targets"),
         TEXT("scope"),
@@ -6846,7 +6847,7 @@ static const TCHAR* const GFlatCommandParams[] =
 };
 
 static constexpr int32 GNumCommands = 2097;
-static constexpr int32 GNumParamNames = 6431;
+static constexpr int32 GNumParamNames = 6433;
 
 // Built ONCE, on first use (function-local static => thread-safe init). The
 // dispatcher is game-thread only, so there is no contention after that.

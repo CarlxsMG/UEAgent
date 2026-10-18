@@ -2523,6 +2523,120 @@
      }
     }
    ]
+  },
+  {
+   "id": "integer_range-01",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": 3000000000
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "check_asset_circular_dependency: max_depth is 3000000000, outside the integer range the tool reads it into (-2147483648 to 2147483647). Out of that range the value cannot be read, and the tool would go on with its default instead. WHAT WORKS: a whole number from -2147483648 to 2147483647."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "integer_range-02",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": -2147483649
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "check_asset_circular_dependency: max_depth is -2147483649, outside the integer range the tool reads it into (-2147483648 to 2147483647). Out of that range the value cannot be read, and the tool would go on with its default instead. WHAT WORKS: a whole number from -2147483648 to 2147483647."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "integer_range-03",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": 2147483647.5
+     },
+     "probes": {},
+     "expect": {
+      "refused": true,
+      "message": "check_asset_circular_dependency: max_depth is 2147483647.5, outside the integer range the tool reads it into (-2147483648 to 2147483647). Out of that range the value cannot be read, and the tool would go on with its default instead. WHAT WORKS: a whole number from -2147483648 to 2147483647."
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "integer_range-04",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": 2147483647
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "integer_range-05",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": -2147483648
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
+  },
+  {
+   "id": "integer_range-06",
+   "steps": [
+    {
+     "op": "check",
+     "command": "check_asset_circular_dependency",
+     "params": {
+      "asset_name": "/Game/MyGame/BP_Door",
+      "max_depth": "3000000000"
+     },
+     "probes": {},
+     "expect": {
+      "refused": false,
+      "message": null
+     },
+     "expect_probe_calls": []
+    }
+   ]
   }
  ]
 }

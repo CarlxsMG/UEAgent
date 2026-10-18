@@ -197,20 +197,28 @@ def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
     regex is anchored to `Params`, so reads off result objects never count), and
     otherwise from the `[type!]` hint (default string/optional). Descriptions come
     from the annotation. Following the documented order keeps the schema stable
-    when a handler moves its reads into a helper."""
+    when a handler moves its reads into a helper. A param every read of which
+    lands in an integer variable also carries `intRange` (see _int_range)."""
     code: dict[str, tuple[str, bool]] = {}
     chains: dict[str, str] = {}
-    for pname, jt, req, chain_key in extracted:
+    ranges: dict[str, list[int]] = {}
+    for item in extracted:
+        pname, jt, req, chain_key = item[0], item[1], item[2], item[3]
         if pname not in code:
             code[pname] = (jt, req)
             if chain_key:
                 chains[pname] = chain_key
+            if len(item) > 4 and item[4]:
+                ranges[pname] = list(item[4])
     params: list[dict] = []
     for pname in [*ann_params, *(n for n in code if n not in ann_params)]:
         a = ann_params.get(pname)
         jt, req = code[pname] if pname in code else ((a["type"] or "string"), a["required"])
-        params.append({"name": pname, "jsonType": jt, "required": req,
-                       "description": (a["desc"] if a else "")})
+        param = {"name": pname, "jsonType": jt, "required": req}
+        if pname in ranges:
+            param["intRange"] = ranges[pname]
+        param["description"] = a["desc"] if a else ""
+        params.append(param)
     # Within an alias chain, the REQUIRED name must be the one the `@param`
     # documents -- otherwise the schema demands an undocumented alias and leaves
     # optional the only one that says what it is for.
@@ -487,6 +495,12 @@ def _find_function_body(text: str, name: str) -> str:
     Handles both methods (`FClass::name(...) {`) and free/static helpers
     (`Type name(...) {`). A definition is a `name(...)` whose matching `)` is
     followed by `{`; a call (`name(...);`) is skipped."""
+    return _find_function_def(text, name)[1]
+
+
+def _find_function_def(text: str, name: str) -> tuple[str, str]:
+    """(parameter list, body) of the DEFINITION of `name`, or ('', ''): the list,
+    parentheses included, is where an out-parameter such as `int32& OutIndex` is declared."""
     for m in re.finditer(r'\b' + re.escape(name) + r'\s*\(', text):
         depth = 0
         j = m.end() - 1                      # at the '('
@@ -502,8 +516,8 @@ def _find_function_body(text: str, name: str) -> str:
         while k < len(text) and text[k] in " \t\r\n":
             k += 1
         if k < len(text) and text[k] == "{":  # ')' followed by '{' => definition
-            return _body_from_brace(text, k)
-    return ""
+            return text[m.end() - 1:j + 1], _body_from_brace(text, k)
+    return "", ""
 
 
 _IF_OPEN_RE = re.compile(r'\bif\s*\(')
@@ -556,6 +570,62 @@ def _read_target(body: str, pos: int) -> str | None:
     return m.group(2).strip() if m else None
 
 
+# The integer types a JSON number is read into, with the values FJsonValue::TryGetNumber
+# accepts for each. Outside that range the read FAILS and the handler goes on with the
+# variable's default, so a number outside int32 silently became 0, -1 or the first slot.
+# The catalog publishes the range (`intRange`) of every number param whose reads all land
+# in such a variable, and the dispatcher refuses a value outside it before the handler runs
+# (McpPreconditions, check "integer_range").
+_INT_RANGES = {
+    "int8": (-128, 127), "uint8": (0, 255),
+    "int16": (-32768, 32767), "uint16": (0, 65535),
+    "int32": (-2147483648, 2147483647), "int": (-2147483648, 2147483647),
+    "uint32": (0, 4294967295),
+}
+_NUMERIC_TYPE_ALT = "|".join((*_INT_RANGES, "int64", "uint64", "float", "double", "bool"))
+_NUM_READ_RE = re.compile(r'\bParams\s*->\s*(Try)?Get(Number|Integer)Field\s*\(\s*TEXT\("([^"]+)"\)')
+
+
+def _declared_type(scope: str, target: str) -> str | None:
+    """The type `target` is declared with in `scope` (a function's parameter list and body),
+    or None when there is no declaration, or several of different types."""
+    if not re.fullmatch(r'[A-Za-z_]\w*', target):
+        return None  # a struct member or an array element: no declaration to read
+    name = re.escape(target)
+    found = {m.group(1) for m in re.finditer(rf'\b({_NUMERIC_TYPE_ALT})\s*&?\s*\b{name}\b(?!\s*\()', scope)}
+    # a later name of a multiple declaration: `double Roll = 0, Pitch = 0, Yaw = 0;`
+    later = rf'\b({_NUMERIC_TYPE_ALT})\s+\w+\s*(?:=\s*[^;,(){{}}]*)?(?:,\s*\w+\s*(?:=\s*[^;,(){{}}]*)?)*,\s*{name}\b'
+    found |= {m.group(1) for m in re.finditer(later, scope)}
+    return found.pop() if len(found) == 1 else None
+
+
+def _numeric_read_type(scope: str, body: str, m: re.Match) -> str | None:
+    """The C++ type a `Params->(Try)Get{Number,Integer}Field` read (match of _NUM_READ_RE in
+    `body`) lands in, or None when it cannot be told."""
+    if m.group(2) == "Integer":
+        return "int32"  # FJsonObject::GetIntegerField casts the double to int32
+    if m.group(1):
+        target = _read_target(body, m.start())
+        return _declared_type(scope, target) if target else None
+    before = body[body.rfind("\n", 0, m.start()) + 1:m.start()]
+    decl = re.search(rf'\b({_NUMERIC_TYPE_ALT})\s+\w+\s*=\s*(?:static_cast<\s*\w+\s*>\s*\(\s*)?$', before)
+    if decl:
+        return decl.group(1)
+    cast = re.search(r'\(\s*(' + "|".join(_INT_RANGES) + r')\s*\)\s*$', before)
+    if cast:
+        return cast.group(1)
+    if re.search(r'\bFMath::(?:Round|Floor|Ceil|Trunc)ToInt(?:32)?\s*\(\s*$', before):
+        return "int32"
+    return None
+
+
+def _int_range(types: list) -> tuple[int, int] | None:
+    """The values every read can hold when ALL of them land in an integer variable, else None."""
+    if not types or any(t not in _INT_RANGES for t in types):
+        return None
+    return max(_INT_RANGES[t][0] for t in types), min(_INT_RANGES[t][1] for t in types)
+
+
 def _missing_value_fails(body: str, start: int, target: str) -> bool:
     """Whether, after `start`, the handler fails the call when `target` is still empty or null:
     an if-condition testing it (`X.IsEmpty()`, `!X`, `X == nullptr`) whose statement returns.
@@ -588,7 +658,7 @@ def _missing_value_fails(body: str, start: int, target: str) -> bool:
     return False
 
 
-def _collect_params(text, body, visited, depth, ordered, required, chains=None):
+def _collect_params(text, body, visited, depth, ordered, required, chains=None, sig="", num_types=None):
     """Scan `body` for param reads, then follow `Params`-passing calls (forwarders
     and helpers like ResolveSkeleton) up to `depth` levels deep.
 
@@ -666,40 +736,46 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None):
         required.add(pname)
     for pname in HASFIELD_RE.findall(body):           # HasField-only -> assume string
         ordered.setdefault(pname, "string")
+    if num_types is not None:                         # the C++ type each number read lands in
+        for m in _NUM_READ_RE.finditer(body):
+            num_types.setdefault(m.group(3), []).append(_numeric_read_type(sig + body, body, m))
     if depth <= 0:
         return
     for callee in CALLEE_RE.findall(body):
         if callee in visited or callee in _CPP_KEYWORDS:
             continue
         visited.add(callee)
-        cbody = _find_function_body(text, callee)
+        csig, cbody = _find_function_def(text, callee)
         if cbody:
-            _collect_params(text, cbody, visited, depth - 1, ordered, required, chains)
+            _collect_params(text, cbody, visited, depth - 1, ordered, required, chains, csig, num_types)
 
 
-def _scan_params(text: str, body: str) -> list[tuple[str, str, bool, str | None]]:
-    """Extract (param_name, jsonType, required, chain_key), following Params-passing calls.
+def _scan_params(text: str, body: str, sig: str = "") -> list[tuple[str, str, bool, str | None, tuple[int, int] | None]]:
+    """Extract (param_name, jsonType, required, chain_key, int_range), following Params-passing calls.
 
     `chain_key` groups the alternative spellings of one param (the `&&` chain of
-    negated reads); it is `None` for everything else."""
+    negated reads); it is `None` for everything else. `int_range` is the range of a
+    number param whose every read lands in an integer variable (_int_range), else None."""
     ordered: "OrderedDict[str, str]" = OrderedDict()
     required: set[str] = set()
     chains: dict[str, str] = {}
-    _collect_params(text, body, set(), 2, ordered, required, chains)
+    num_types: dict[str, list] = {}
+    _collect_params(text, body, set(), 2, ordered, required, chains, sig, num_types)
     # An alias in an `&&` chain is still a VALID param (the handler reads it), but it is
     # NOT required: demanding both names at once would be the generator's invention, not
     # the handler's. The HEAD stays required; if it turns out not to be the documented one,
     # the merge with the annotation fixes that later (`_prefer_documented`), which is where
     # the descriptions are.
     required -= {a for a, cab in chains.items() if a != cab}
-    return [(p, jt, p in required, chains.get(p)) for p, jt in ordered.items()]
+    return [(p, jt, p in required, chains.get(p), _int_range(num_types.get(p, [])) if jt == "number" else None)
+            for p, jt in ordered.items()]
 
 
-def parse_handler_cpp(path: str) -> tuple[list[str], dict[str, list[tuple[str, str, bool, "str | None"]]], dict[str, dict], dict[str, int], list]:
+def parse_handler_cpp(path: str) -> tuple[list[str], dict[str, list[tuple[str, str, bool, "str | None", "tuple[int, int] | None"]]], dict[str, dict], dict[str, int], list]:
     """Returns:
         - list of command strings this handler responds to
-        - dict: command_string -> list of (param_name, jsonType, required, chain_key)
-          NOTE: FOUR-tuples, straight from _scan_params. Consumers should index, not
+        - dict: command_string -> list of (param_name, jsonType, required, chain_key, int_range)
+          NOTE: FIVE-tuples, straight from _scan_params. Consumers should index, not
           unpack by arity.
         - dict: command_string -> annotation block {description, params, returns}
         - dict: command_string -> duplicate count (>1 = same cmd annotated 2+ times)
@@ -726,7 +802,8 @@ def parse_handler_cpp(path: str) -> tuple[list[str], dict[str, list[tuple[str, s
         if cmd in params:
             continue
         cmds.append(cmd)
-        params[cmd] = _scan_params(text, _find_function_body(text, handler))
+        sig, body = _find_function_def(text, handler)
+        params[cmd] = _scan_params(text, body, sig)
     return cmds, params, annotations, annotation_dups, truncated
 
 # ---------------------------------------------------------------------------

@@ -202,12 +202,20 @@
               "name": "max_depth",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum recursion depth, default 100. Hitting it sets search_limit_reached and makes a `false` answer inconclusive."
             },
             {
               "name": "max_visited",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum total nodes visited, default 10000. Hitting it also sets search_limit_reached."
             },
             {
@@ -263,6 +271,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on components enumerated per live side, 1..10000 (default 2000)."
             }
           ],
@@ -300,6 +312,10 @@
               "name": "max_nodes",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on GUID-matched nodes examined (default 20000)."
             }
           ],
@@ -331,12 +347,20 @@
               "name": "max_nodes",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "TOTAL cap on nodes examined across every graph (default 20000). When it runs out, the remaining graphs are listed in graphs_not_examined[] instead of being silently reported as identical."
             },
             {
               "name": "max_nodes_per_graph",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Per-graph cap so one fat graph cannot starve the rest (default = max_nodes)."
             }
           ],
@@ -454,12 +478,20 @@
               "name": "max_scan",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Max Blueprints to load/inspect (default 5000)."
             },
             {
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Max erroring/warning Blueprints to return (default 500)."
             }
           ],
@@ -485,6 +517,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum dependencies to return, 1..50000 (default 5000). Read `results_truncated` for the real answer: `total_dependencies` counts the RAW registry edges before exclude_engine, so it exceeds dependencies_count on almost every asset without anything having been cut."
             },
             {
@@ -522,6 +558,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum dependents to return, 1..50000 (default 5000). Read `results_truncated`: `total_dependents` counts the RAW registry edges before exclude_engine, so it can exceed dependents_count with nothing cut."
             },
             {
@@ -565,6 +605,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on number of returned referencers (1..50000); defaults to 5000."
             }
           ],
@@ -590,6 +634,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum children to return, 1..10000 (default 1000); compare with children_count and results_truncated"
             }
           ],
@@ -663,12 +711,20 @@
               "name": "max_components",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on components enumerated, 1..10000 (default 500)."
             },
             {
               "name": "max_properties_per_component",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on properties examined per component, 1..20000 (default 1000)."
             }
           ],
@@ -694,6 +750,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum components to return, 1..10000 (default 1000)"
             },
             {
@@ -749,6 +809,10 @@
               "name": "max_samples",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Max trace-stack samples to scan (default 500)."
             }
           ],
@@ -774,6 +838,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum entries to return, 1..10000 (default 1000)"
             },
             {
@@ -860,6 +928,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on components returned, 1..10000 (default 1000)"
             }
           ],
@@ -885,6 +957,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum variables to return, 1..10000 (default 1000)"
             }
           ],
@@ -1002,7 +1078,7 @@
       "commands": [
         {
           "name": "add_anim_bone_track",
-          "description": "Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent). A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.",
+          "description": "Add the animation track of one skeleton bone to a UAnimSequence through its data controller, filled with num_keys identity keys (zero translation, identity rotation, unit scale), as one undo step, then save the package. An existing track stays but its keys are replaced (idempotent); when that leaves the stored track data as it was (measured with the data model GUID; the engine stores a constant track as one value, whatever num_keys is) the reply is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A missing sequence or skeleton is an error and a failed save makes success false, with saved=false and save_error. Real poses: set_anim_bone_track_keys; inverse: remove_anim_bone_track.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1023,7 +1099,7 @@
               "description": "Number of identity keys to write, rounded, minimum 1 (default 2); not checked against the frame count of the sequence."
             }
           ],
-          "returns": "{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, success, saved, save_error, message }",
+          "returns": "{ anim_sequence_path, bone_name, num_bone_tracks, num_keys, changed, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -1423,7 +1499,7 @@
         },
         {
           "name": "add_anim_transform_curve",
-          "description": "Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller. A failed save makes success false, with saved=false and save_error.",
+          "description": "Add a transform curve (RCT_Transform) to a UAnimSequence via the data controller and set its keys as linear keys per axis, in one undo step, then save the package; the sampling rate of the sequence is left as it is. An existing transform curve of that name is kept and its keys are replaced; one that already holds exactly those keys is a success with changed=false, keys_set=false and saved=false, and nothing is written or saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -1444,10 +1520,10 @@
               "description": "JSON array of {time, location:[x,y,z], rotation:[pitch,yaw,roll], scale:[x,y,z]} objects"
             }
           ],
-          "returns": "{ anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, success, saved, save_error }",
+          "returns": "{ anim_sequence_path, curve_name, num_transform_curves, num_keys, keys_set, changed, success, saved, save_error, message? }",
           "annotations": {
             "readOnlyHint": false,
-            "destructiveHint": false,
+            "destructiveHint": true,
             "idempotentHint": false,
             "openWorldHint": false
           }
@@ -1955,7 +2031,7 @@
         },
         {
           "name": "add_pose_to_pose_asset",
-          "description": "Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) and save it; refused when the asset has no skeleton. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.",
+          "description": "Add a pose copied from the skeleton reference pose to a UPoseAsset under the given name (a pose of that name is replaced) in an undo transaction and save it; refused when the asset has no skeleton. A pose of that name that already holds exactly that reference pose (every bone a track, zero curve values, no source animation GUID) is a success with added=false, already_existed=true and saved=false, and the asset is neither modified nor saved. Returns num_poses, num_tracks and already_existed. For poses from animation frames use create_pose_asset_from_anim_sequence. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "pose_asset_path",
@@ -2140,7 +2216,7 @@
         },
         {
           "name": "add_rigvm_link",
-          "description": "Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink, no undo entry); a link already into that input pin, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.",
+          "description": "Link an output pin to an input pin in the main RigVM graph of a Control Rig Blueprint (URigVMController::AddLink with its undo, as the editor links, so a new link is one undo step); a link already into that input pin, into a pin inside it or into the pin it is part of, or out of an execute output pin, is replaced. Pins are NodeName.PinName paths as get_rigvm_graph lists them. A new link is then compiled and saved; a failed link (pins missing, incompatible or already linked) is an error with linked and saved false, the graph is left as it was (links the attempt broke are restored) and nothing is compiled or saved. Refused during PIE unless force. Add nodes with add_rigvm_node and set unlinked inputs with set_rigvm_pin_default; Blueprint graphs use connect_pins.",
           "params": [
             {
               "name": "control_rig_path",
@@ -2430,6 +2506,10 @@
               "name": "new_lod_count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Target LOD count; <= 0 keeps current and re-runs reduction"
             },
             {
@@ -2622,7 +2702,7 @@
         },
         {
           "name": "collapse_montage_segments",
-          "description": "Collapse a montage slot track's segments end-to-end (no gaps, order preserved). A failed save makes success false, with saved=false and save_error.",
+          "description": "Collapse a montage slot track's segments end-to-end (FAnimTrack::CollapseAnimSegments: no gaps, order preserved) in an undo transaction and save the montage. Segments already end-to-end are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -3326,6 +3406,10 @@
               "name": "sample_rate",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30)."
             }
           ],
@@ -3665,6 +3749,10 @@
               "name": "max_trajectory_samples",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on emitted query trajectory samples (<=0 = all; default 0)."
             }
           ],
@@ -4197,12 +4285,20 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to read (default 0)"
             },
             {
               "name": "max_deltas",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional cap on how many deltas to return (default 5000); the response is honestly marked truncated if the LOD has more"
             }
           ],
@@ -4265,6 +4361,10 @@
               "name": "max_trajectory_samples",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on emitted trajectory samples (<=0 = all; default 0)."
             }
           ],
@@ -4416,6 +4516,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to query (default 0)"
             }
           ],
@@ -4479,6 +4583,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to query (default 0)"
             }
           ],
@@ -4755,7 +4863,7 @@
         },
         {
           "name": "refresh_anim_montage_cache",
-          "description": "Refresh derived cache data on a UAnimMontage (NotifyTracks / SequenceLength / bone-cache). Idempotent. A failed save makes success false, with saved=false and save_error.",
+          "description": "Re-run UAnimMontage::RefreshCacheData on a UAnimMontage in an undo transaction (it sorts the notifies, moves a notify off a missing or overlapping notify track, adding tracks as needed, and rebuilds the branching point markers) and save it. Idempotent: when the refresh rewrites none of those fields the reply is a success with refreshed=false and saved=false, the montage keeps the dirty state it had and nothing is saved. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -5555,6 +5663,10 @@
               "name": "channel_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the schema's source Channels array (optional; takes precedence over channel_type)."
             },
             {
@@ -5611,6 +5723,10 @@
               "name": "skeleton_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the roled-skeleton list of the entry to remove (provide this OR role)."
             }
           ],
@@ -6452,7 +6568,7 @@
         },
         {
           "name": "set_anim_bone_track_keys",
-          "description": "Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.",
+          "description": "Replace the keys of one bone track of a UAnimSequence with the given per-key transforms (translation, rotation, scale: real pose data, not identity), adding the track when it is missing, through its data controller as one undo step, then save the package; num_keys_readback and first_key are read back from the data model. A track that already holds exactly these keys (the stored track data comes out unchanged, measured with the data model GUID) is a success with changed=false and saved=false, the package keeps the dirty state it had and nothing is saved. A bone_name the sequence's skeleton does not have is an error and nothing is written; an omitted bone_name targets the root bone. A failed save makes success false, with saved=false and save_error. Identity keys: add_anim_bone_track.",
           "params": [
             {
               "name": "anim_sequence_path",
@@ -6473,7 +6589,7 @@
               "description": "Name of a bone of the skeleton of the sequence; omitted or empty means the root bone."
             }
           ],
-          "returns": "{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, success, saved, save_error, message }",
+          "returns": "{ anim_sequence_path, bone_name, num_keys, num_keys_readback, num_bone_tracks, first_key:{translation,rotation_euler}, changed, success, saved, save_error, message }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -6836,7 +6952,7 @@
         },
         {
           "name": "set_anim_number_of_frames",
-          "description": "Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed (only the default sampling rate is checked, not per-platform overrides of it). The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.",
+          "description": "Set the number of frames of the data model of a UAnimSequence (IAnimationDataController::SetNumberOfFrames, one undo step), then save the package; frame_count is read back from the data model. When the data model rate differs from the sequence sampling rate (as after set_anim_frame_rate), a count that is not a whole number of frames at the sampling rate is an error naming the multiple to use, with nothing changed. Each per-platform override of the sampling rate that the engine compresses at (a valid rate other than the default that is a multiple or a factor of it) is checked the same way, and the error names the platform; an override with a non-positive numerator is an error too. The current count gives saved=false and a note, with nothing saved. A count the data controller rejects is an error with nothing saved, and a failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "sequence_path",
@@ -6848,6 +6964,10 @@
               "name": "frame_count",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "New number of frames (integer > 0)."
             }
           ],
@@ -7795,6 +7915,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to populate (default 0)"
             }
           ],
@@ -8617,6 +8741,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based LOD index (default 0); an index the mesh does not have fails the call."
             },
             {
@@ -8671,6 +8799,10 @@
               "name": "bone_influence_limit",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum bone influences per vertex; 0 uses the DefaultBoneInfluenceLimit project setting, and values above the project limit have no effect."
             }
           ],
@@ -8696,6 +8828,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to modify (default 0)."
             },
             {
@@ -8756,6 +8892,10 @@
               "name": "base_lod",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "int base LOD index to generate from (default 0)."
             },
             {
@@ -8786,6 +8926,10 @@
               "name": "max_bones_per_vertex",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "int max bone influences per vertex (ClampMin 1)."
             },
             {
@@ -8872,6 +9016,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to modify (default 0)."
             },
             {
@@ -8939,6 +9087,10 @@
               "name": "slot_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Zero-based index of an existing material slot (mutually exclusive with slot_name)."
             },
             {
@@ -8970,6 +9122,10 @@
               "name": "min_lod",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "New MinLodIdx (must be in [0, NumLODs-1])"
             }
           ],
@@ -8995,12 +9151,20 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index containing the section (default 0)"
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section to modify (default 0)"
             },
             {
@@ -9032,12 +9196,20 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index containing the section (default 0)"
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section to modify (default 0)"
             },
             {
@@ -9069,12 +9241,20 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index containing the section (default 0)"
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section to modify (default 0)"
             },
             {
@@ -9199,7 +9379,7 @@
         },
         {
           "name": "sort_montage_segments",
-          "description": "Sort a montage slot track's segments by start time ascending. A failed save makes success false, with saved=false and save_error.",
+          "description": "Sort a montage slot track's segments by start time ascending (FAnimTrack::SortAnimSegments, which then lays them end-to-end and clamps each end time to its animation length) in an undo transaction and save the montage. Segments the sort leaves as they are (already in order, end-to-end and within their animations) are a success with applied=false and saved=false, and the montage is neither modified nor saved. An unknown slot is an error. A failed save makes success false, with saved=false and save_error.",
           "params": [
             {
               "name": "montage_path",
@@ -10412,6 +10592,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count."
             }
           ],
@@ -10443,6 +10627,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on number of returned assets (1..50000); defaults to 1000. `total_found` is the uncapped count."
             }
           ],
@@ -10468,6 +10656,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on number of returned assets (1..50000); defaults to 1000. Compare `count` against `total_found` (which is NOT capped) to see how much was left out."
             },
             {
@@ -10499,6 +10691,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Safety cap on how many array entries get processed (1..5000); defaults to 500. Entries past the cap are dropped and results_truncated goes true."
             }
           ],
@@ -11174,6 +11370,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on number of matched assets (1..50000); defaults to 1000. WARNING: Hitting the cap ABORTS the enumeration, so `total_scanned` then counts only the assets visited before the early-out, not the whole registry."
             },
             {
@@ -11267,12 +11467,20 @@
               "name": "lightmap_resolution",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Absolute lightmap texture resolution (optional)."
             },
             {
               "name": "lightmap_coordinate_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Absolute lightmap UV channel index (optional)."
             }
           ],
@@ -11304,6 +11512,10 @@
               "name": "material_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Zero-based index of an existing material slot."
             }
           ],
@@ -11555,6 +11767,10 @@
               "name": "int_value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Int32 default baked into the literal (optional, mutually exclusive with other defaults)"
             },
             {
@@ -13219,6 +13435,10 @@
               "name": "major_version",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional major version (default 1)."
             }
           ],
@@ -13293,6 +13513,10 @@
               "name": "int_value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Int32 default value (optional, mutually exclusive with value/bool_value/string_value)"
             },
             {
@@ -13348,6 +13572,10 @@
               "name": "int_value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Int32 default (optional, mutually exclusive)."
             },
             {
@@ -14356,6 +14584,10 @@
               "name": "send_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into BusSends; the entry is REPLACED in place. If out of range, the entry is appended (resize+append)."
             },
             {
@@ -14387,6 +14619,10 @@
               "name": "send_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into BusSends; the entry is mutated in place. Resized/extended with default-constructed entries if out of range."
             },
             {
@@ -14480,6 +14716,10 @@
               "name": "effect_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into SubmixEffectChain (same order add_submix_effect_to_chain appended / get_submix_effect_chain reports)"
             },
             {
@@ -17252,6 +17492,10 @@
               "name": "material_slot",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional material slot index; defaults to 0. It is not range-checked against the mesh's slot count."
             }
           ],
@@ -18223,6 +18467,10 @@
               "name": "max_nodes",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on the number of nodes emitted (<=0 or absent = unlimited); the response still counts every non-excluded node in total_node_count and sets truncated=true."
             }
           ],
@@ -19490,6 +19738,10 @@
               "name": "material_slot",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional slot index; defaults to 0"
             },
             {
@@ -19852,7 +20104,7 @@
       "commands": [
         {
           "name": "add_camera_component",
-          "description": "Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. An invalid projection_mode or a rejected post_process_settings is an error and nothing is created or written.",
+          "description": "Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.",
           "params": [
             {
               "name": "actor_name",
@@ -19930,7 +20182,7 @@
               "name": "post_process_settings",
               "jsonType": "object",
               "required": false,
-              "description": "Optional object (PostProcess fields, see get_camera_post_process for the schema)."
+              "description": "Optional object of FPostProcessSettings fields by property name, e.g. {\"BloomIntensity\": 2}; each value also turns on its bOverride_ companion unless the object sets that companion itself; a key that names no property is an error."
             },
             {
               "name": "post_process_blend_weight",
@@ -19967,6 +20219,10 @@
               "name": "index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional child slot. If given and < current child count, REPLACES that slot (deterministic re-runs); otherwise appends."
             }
           ],
@@ -20402,6 +20658,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum number of cameras to return (optional, default 1000, valid 1-10000)"
             }
           ],
@@ -20496,7 +20756,7 @@
         },
         {
           "name": "set_camera_node_parameters",
-          "description": "Sets parameters on a camera rig's RootNode by reflection, in one undo step, then saves the rig. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back. A failed save fails the call, with saved false and save_error, and leaves the change in memory.",
+          "description": "Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the root node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory.",
           "params": [
             {
               "name": "camera_rig_path",
@@ -20511,7 +20771,7 @@
               "description": "JSON object { PropertyName: value, ... } (e.g. {\"FieldOfView\": 90})"
             }
           ],
-          "returns": "{ camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error }",
+          "returns": "{ camera_rig_path, node_class, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -20931,7 +21191,7 @@
       "commands": [
         {
           "name": "add_chooser_column_to_table",
-          "description": "Append a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.",
+          "description": "Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. A Randomize column stays last, as the Chooser editor keeps it: a column added to a table that ends with one goes just before it, so the Randomize index grows by one; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.",
           "params": [
             {
               "name": "table_path",
@@ -21111,6 +21371,10 @@
               "name": "column_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based column index to read."
             }
           ],
@@ -21136,6 +21400,10 @@
               "name": "row_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based row index to read across all columns."
             }
           ],
@@ -21199,6 +21467,10 @@
               "name": "column_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based column index (default -1 = last column)."
             }
           ],
@@ -21224,6 +21496,10 @@
               "name": "row_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based row index to remove (default: last row)."
             }
           ],
@@ -21249,6 +21525,10 @@
               "name": "column_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based column index to update."
             },
             {
@@ -21328,6 +21608,10 @@
               "name": "row_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based row index to assign the outcome to (must be within the OutputObject column's RowValues range)."
             },
             {
@@ -22983,6 +23267,10 @@
               "name": "key_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the key to remove (0 <= index < key_count); provide this OR time"
             },
             {
@@ -23020,6 +23308,10 @@
               "name": "key_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the key to remove (0 <= index < key_count); provide this OR time"
             },
             {
@@ -23057,6 +23349,10 @@
               "name": "source_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Direct index into DataSources[] to remove. Provide this OR data_table_path."
             }
           ],
@@ -23967,12 +24263,20 @@
               "name": "width",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional target width to downscale/upscale to (omit to keep native viewport size)."
             },
             {
               "name": "height",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional target height (only used when width is also supplied)."
             },
             {
@@ -24620,6 +24924,10 @@
               "name": "min_group_size",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Minimum number of same-named assets to report as a duplicate group, default 2"
             },
             {
@@ -24632,6 +24940,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cap on the number of duplicate GROUPS returned (not raw assets), clamped 1..20000, default 2000"
             }
           ],
@@ -25053,6 +25365,10 @@
               "name": "max_entries",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Max entries to return, newest first (default 50, clamped to 1..500)."
             }
           ],
@@ -25306,6 +25622,10 @@
               "name": "max",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum number of entries to return (default 100, minimum 1)."
             }
           ],
@@ -25605,6 +25925,10 @@
               "name": "count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "How many transactions to redo (>= 1). Silently capped at what the redo stack holds."
             }
           ],
@@ -25816,6 +26140,10 @@
               "name": "to_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Target zero-based position among the user entries."
             }
           ],
@@ -25972,6 +26300,10 @@
               "name": "max",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum number of entries to return (default 50, minimum 1)."
             }
           ],
@@ -26652,6 +26984,10 @@
               "name": "count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "How many transactions to undo (>= 1). Silently capped at what the stack actually holds."
             }
           ],
@@ -26731,6 +27067,10 @@
               "name": "renderer_visibility",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int32 visibility tag (default 0)."
             },
             {
@@ -26836,18 +27176,30 @@
               "name": "spawn_number",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int particles to spawn per event (SpawnedParticles mode)."
             },
             {
               "name": "max_events_per_frame",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int cap on events consumed per frame."
             },
             {
               "name": "min_spawn_number",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int minimum spawn when random_spawn_number is set."
             },
             {
@@ -26988,6 +27340,10 @@
               "name": "target_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional stack index for insertion; INDEX_NONE (-1) appends to the end"
             }
           ],
@@ -27099,6 +27455,10 @@
               "name": "iteration_count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional iteration count for the stage; defaults to 1"
             }
           ],
@@ -27198,6 +27558,10 @@
               "name": "target_index_override",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional absolute target index for the duplicate; defaults to one-past-source"
             }
           ],
@@ -27390,6 +27754,10 @@
               "name": "emitter_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based position in the emitter list of the system, used only when emitter_name is absent or empty."
             }
           ],
@@ -27639,12 +28007,20 @@
               "name": "renderer_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into FVersionedNiagaraEmitterData::RendererProperties."
             },
             {
               "name": "handle_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional fallback when multiple emitters share a name (0-based)."
             }
           ],
@@ -27695,6 +28071,10 @@
               "name": "stage_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based index of a single stage to return."
             },
             {
@@ -27900,12 +28280,20 @@
               "name": "target_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Required 0-based target index the stage should occupy after the move (must be in [0, total_simulation_stages))."
             },
             {
               "name": "stage_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based index into the emitter's simulation stages; takes precedence over stage_name when both are supplied."
             },
             {
@@ -27968,6 +28356,10 @@
               "name": "emitter_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional zero-based index; used if emitter_name not provided"
             }
           ],
@@ -28067,6 +28459,10 @@
               "name": "renderer_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the emitter's renderers list (use get_niagara_emitter_renderers to find the index)"
             }
           ],
@@ -28098,6 +28494,10 @@
               "name": "stage_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based index into the emitter's simulation stages; takes precedence over stage_name when both are supplied."
             },
             {
@@ -28172,6 +28572,10 @@
               "name": "target_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Non-negative target index in the ordered stack"
             },
             {
@@ -28302,6 +28706,10 @@
               "name": "value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Integer value to set."
             }
           ],
@@ -28808,6 +29216,10 @@
               "name": "pre_allocation_count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int; only meaningful when not AutomaticEstimate"
             }
           ],
@@ -28944,6 +29356,10 @@
               "name": "max_gpu_particles",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Non-negative integer"
             }
           ],
@@ -29074,6 +29490,10 @@
               "name": "renderer_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the Mesh renderer (use get_niagara_emitter_renderers)."
             },
             {
@@ -29086,6 +29506,10 @@
               "name": "slot",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based slot index into Meshes[] (default 0). The array is grown with default elements up to this index if needed."
             }
           ],
@@ -29209,6 +29633,10 @@
               "name": "renderer_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the renderer (use get_niagara_emitter_renderers to find the index)"
             },
             {
@@ -29246,6 +29674,10 @@
               "name": "renderer_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the renderer (use get_niagara_emitter_renderers)."
             },
             {
@@ -29457,6 +29889,10 @@
               "name": "stage_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based index into the emitter's simulation stages (use add_niagara_simulation_stage / get_niagara_emitter_runtime_summary); takes precedence over stage_name"
             },
             {
@@ -29904,12 +30340,20 @@
               "name": "resolution_x",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Output width in pixels (optional, must be paired with resolution_y)"
             },
             {
               "name": "resolution_y",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Output height in pixels (optional, must be paired with resolution_x)"
             },
             {
@@ -30905,7 +31349,7 @@
         },
         {
           "name": "add_gameplay_effect_component",
-          "description": "Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them.",
+          "description": "Add one empty UGameplayEffectComponent of a standard type to the GEComponents of a GameplayEffect Blueprint CDO and save without recompiling. Idempotent: an existing component of that type returns already_existed=true. Configure it with the set_gameplay_effect_component_* tools; get_gameplay_effect_components lists them. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "gameplay_effect_path",
@@ -30930,7 +31374,7 @@
         },
         {
           "name": "add_gameplay_effect_modifier",
-          "description": "Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session or a read-only root fails before any edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.",
+          "description": "Append one modifier with a constant magnitude to the Modifiers array on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. attribute_name is looked up across every loaded AttributeSet class; an unknown attribute or modifier_op, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Each call appends a new entry, even an identical one; modifier_index says where it went. Change its magnitude type with set_gameplay_effect_modifier_set_by_caller, set_gameplay_effect_modifier_attribute_based or set_gameplay_effect_modifier_custom; remove_gameplay_effect_modifier drops it; get_gameplay_effect_modifiers lists them.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -31054,7 +31498,7 @@
         },
         {
           "name": "configure_ability_tags",
-          "description": "Set a GameplayAbility CDO's asset tags from a list of tag strings",
+          "description": "Set a GameplayAbility CDO's asset tags from a list of tag strings. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ability_blueprint_path",
@@ -31160,7 +31604,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_actor",
-          "description": "Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
+          "description": "Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -31191,7 +31635,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_burst",
-          "description": "Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.",
+          "description": "Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.",
           "params": [
             {
               "name": "name",
@@ -31222,7 +31666,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_looping",
-          "description": "Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error.",
+          "description": "Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.",
           "params": [
             {
               "name": "name",
@@ -31253,7 +31697,7 @@
         },
         {
           "name": "create_gameplay_cue_notify_static",
-          "description": "Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO; an unregistered one only yields cue_tag_set=false. Refused during PIE.",
+          "description": "Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.",
           "params": [
             {
               "name": "name",
@@ -31660,6 +32104,10 @@
               "name": "level",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Spec level, a whole number; default 1"
             }
           ],
@@ -31779,7 +32227,7 @@
         },
         {
           "name": "remove_gameplay_effect_component",
-          "description": "Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component)",
+          "description": "Remove a component from a GameplayEffect CDO's GEComponents array by index or by component_type/component_class (inverse of add_gameplay_effect_component), and save; the removed component is left out of the saved asset. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "gameplay_effect_path",
@@ -31816,7 +32264,7 @@
         },
         {
           "name": "remove_gameplay_effect_modifier",
-          "description": "Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD)",
+          "description": "Remove a modifier from a GameplayEffect CDO's Modifiers array by index (the D in add/set CRUD). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -31872,7 +32320,7 @@
         },
         {
           "name": "set_ability_cooldown",
-          "description": "Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires)",
+          "description": "Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ability_blueprint_path",
@@ -31897,7 +32345,7 @@
         },
         {
           "name": "set_ability_cost",
-          "description": "Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed)",
+          "description": "Set the Cost GameplayEffect class on a GameplayAbility CDO (the GE applied when the ability is committed). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ability_blueprint_path",
@@ -31984,7 +32432,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_actor_properties",
-          "description": "Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session or a read-only root fails before any edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.",
+          "description": "Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -32057,7 +32505,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_burst_properties",
-          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back.",
+          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -32088,7 +32536,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_looping_properties",
-          "description": "Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO",
+          "description": "Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -32167,7 +32615,7 @@
         },
         {
           "name": "set_gameplay_cue_notify_static_properties",
-          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back.",
+          "description": "Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "cue_notify_path",
@@ -32198,7 +32646,7 @@
         },
         {
           "name": "set_gameplay_effect_component_asset_tags",
-          "description": "Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent)",
+          "description": "Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32223,7 +32671,7 @@
         },
         {
           "name": "set_gameplay_effect_component_block_ability_tags",
-          "description": "Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent)",
+          "description": "Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32248,7 +32696,7 @@
         },
         {
           "name": "set_gameplay_effect_component_chance_to_apply",
-          "description": "Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)",
+          "description": "Configure a ChanceToApplyGameplayEffectComponent with the probability (0.0..1.0) that the GE applies to its target (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32273,7 +32721,7 @@
         },
         {
           "name": "set_gameplay_effect_component_granted_abilities",
-          "description": "Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique)",
+          "description": "Configure an AbilitiesGameplayEffectComponent to grant a GameplayAbility (by BP path/class name) to the target while the GE is active (creates the component if absent; AddGrantedAbilityConfig dedups via AddUnique). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32304,7 +32752,7 @@
         },
         {
           "name": "set_gameplay_effect_component_target_tag_requirements",
-          "description": "Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value)",
+          "description": "Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/Removal require & ignore tags (creates the component if absent; idempotent via FindOrAddComponent + set-to-fixed-value). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32359,7 +32807,7 @@
         },
         {
           "name": "set_gameplay_effect_component_target_tags",
-          "description": "Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent)",
+          "description": "Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32384,7 +32832,7 @@
         },
         {
           "name": "set_gameplay_effect_duration",
-          "description": "Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session or a read-only root fails before any edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.",
+          "description": "Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32446,7 +32894,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_attribute_based",
-          "description": "Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute)",
+          "description": "Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32513,7 +32961,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_attribute_based_up_to_channel",
-          "description": "Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel)",
+          "description": "Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32580,7 +33028,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_attribute_curve",
-          "description": "Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly",
+          "description": "Set the AttributeCurve (a CurveTable row) on a GE modifier whose magnitude is already AttributeBased; the captured attribute is remapped through the curve instead of used directly. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32617,7 +33065,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_attribute_tag_filters",
-          "description": "Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation",
+          "description": "Set the Source/Target tag filters on a GE modifier whose magnitude is already AttributeBased; only modifiers carrying all of a filter's tags factor into the captured attribute's evaluation. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32654,7 +33102,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_custom",
-          "description": "Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it)",
+          "description": "Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32703,7 +33151,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_custom_curve",
-          "description": "Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve",
+          "description": "Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32740,7 +33188,7 @@
         },
         {
           "name": "set_gameplay_effect_modifier_set_by_caller",
-          "description": "Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name)",
+          "description": "Switch an existing GE modifier's magnitude to SetByCaller (resolved at runtime by tag/name). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32777,7 +33225,7 @@
         },
         {
           "name": "set_gameplay_effect_period",
-          "description": "Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session or a read-only root fails before any edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.",
+          "description": "Set Period (seconds between periodic executions, 0 = not periodic) and bExecutePeriodicEffectOnApplication on the class default object of a GameplayEffect Blueprint, then save it without recompiling and without an undo entry. execute_on_application is always written, so leaving it out sets false. A non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. For damage or heal over time also give the effect a duration with set_gameplay_effect_duration; stacking is set_gameplay_effect_stacking.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -32808,7 +33256,7 @@
         },
         {
           "name": "set_gameplay_effect_stacking",
-          "description": "Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies).",
+          "description": "Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.",
           "params": [
             {
               "name": "ge_blueprint_path",
@@ -33906,6 +34354,10 @@
               "name": "surface_search_steps",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int >= 1, default 3. Marching-cubes vertex search steps."
             },
             {
@@ -34308,7 +34760,7 @@
         },
         {
           "name": "find_nearest_ray_intersection_with_mesh",
-          "description": "Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.",
+          "description": "Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. A ray_direction that cannot be normalized (all zeros, a non-finite value, or not an array of three numbers) is refused before anything else runs. hit is false when nothing is hit within max_distance. The mesh is not changed.",
           "params": [
             {
               "name": "actor_name",
@@ -34326,7 +34778,7 @@
               "name": "ray_direction",
               "jsonType": "array",
               "required": false,
-              "description": "[x, y, z] direction of the ray; the engine normalizes it, so its length does not matter."
+              "description": "[x, y, z] direction of the ray; the engine normalizes it, so its length does not matter, but a zero or non-finite direction is an error."
             },
             {
               "name": "max_distance",
@@ -34426,6 +34878,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0, MaxAvailable)"
             }
           ],
@@ -34482,6 +34938,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34526,6 +34986,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34570,6 +35034,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34686,6 +35154,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34711,12 +35183,20 @@
               "name": "uv_channel",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "UV channel index (default 0)"
             },
             {
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34742,6 +35222,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34767,6 +35251,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34792,6 +35280,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -34817,6 +35309,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to query (default 0)"
             }
           ],
@@ -36346,6 +36842,10 @@
               "name": "sort_order",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "New sort order value."
             }
           ],
@@ -37005,6 +37505,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Local player index (default 0)."
             },
             {
@@ -37075,6 +37579,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Player controller index to query (default 0)."
             }
           ],
@@ -37231,6 +37739,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional local player index used to resolve the PlayerController (default 0)."
             },
             {
@@ -37407,6 +37919,10 @@
               "name": "trigger_events_that_consume_legacy_keys",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "When set (int32 ETriggerEvent bitmask), updates TriggerEventsThatConsumeLegacyKeys."
             },
             {
@@ -37451,6 +37967,10 @@
               "name": "trigger_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the action's Triggers array to edit. Mutually exclusive with trigger_class."
             },
             {
@@ -37550,6 +38070,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Local player index used to resolve the PlayerController (default 0)."
             },
             {
@@ -37607,6 +38131,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional local player index used to resolve the PlayerController (default 0)."
             },
             {
@@ -40038,6 +40566,10 @@
               "name": "limit",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional int cap on the number of actors returned (default 2000); total_matched reports the full match count regardless of the cap."
             }
           ],
@@ -40738,6 +41270,10 @@
               "name": "slot_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Material slot index, from 0 to the component's slot count minus 1, default 0"
             }
           ],
@@ -41540,6 +42076,10 @@
               "name": "cell_size",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Informative only (accepted, not applied): desired streaming cell size."
             },
             {
@@ -41924,9 +42464,9 @@
         },
         {
           "name": "get_lighting_quality",
-          "description": "Read-only census of the actors with a light component in the engine's first world context (normally the editor level): counts by type and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max, per-light light_details, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. Sky lights are not counted. For one light use get_light_properties, for lights near a point get_lighting_in_area.",
+          "description": "Read-only census of every light component in the editor world (the editor level, even while Play-in-Editor runs), sky lights included, an actor with several counting each: counts by type (sky_light_count among them) and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max over all of them (a sky light's intensity is its scale), one light_details entry per component, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. For one light use get_light_properties, for lights near a point get_lighting_in_area.",
           "params": [],
-          "returns": "{ level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating }",
+          "returns": "{ level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_component, light_component_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, sky_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating } -- light_name and light_class are the owning actor's, light_component and light_component_class the component's",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -43916,6 +44456,10 @@
               "name": "chunk_id",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional chunk ID override for the rule"
             },
             {
@@ -44532,6 +45076,10 @@
               "name": "count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Informational only; accepted but does not bound the spawn (default 0)"
             }
           ],
@@ -44792,7 +45340,7 @@
         },
         {
           "name": "clear_mpci_parameter_overrides",
-          "description": "Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world, the editor world by default, to the collection's default values by dropping all its scalar and vector overrides. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.",
+          "description": "Reset the Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) of one collection on a world to the collection's default values by dropping all its scalar and vector overrides. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing is saved, no undo. The engine creates the instance on lookup when the world has none, so a missing instance is not an error. scalars_reset_to_default and vectors_reset_to_default count parameters now reading their default. For a Material Instance Constant asset use clear_material_parameter_overrides.",
           "params": [
             {
               "name": "collection_path",
@@ -44804,10 +45352,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, world_name: string, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }",
+          "returns": "{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, scalar_count: int, vector_count: int, scalars_reset_to_default: int, vectors_reset_to_default: int, cleared: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -45040,6 +45588,10 @@
               "name": "element_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Material slot index on the mesh component (default 0)"
             },
             {
@@ -45102,12 +45654,20 @@
               "name": "node_pos_x",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional graph editor X position; defaults to 0"
             },
             {
               "name": "node_pos_y",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional graph editor Y position; defaults to 0"
             }
           ],
@@ -45382,7 +45942,7 @@
         },
         {
           "name": "create_material_parameter_collection_instance",
-          "description": "Give a world (the editor world by default) a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.",
+          "description": "Give a world a fresh Material Parameter Collection Instance (MPCI: the transient per-world values of a collection asset) for collection_path, replacing the instance it had, so all its overrides are lost and values return to the collection defaults. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: nothing saved, no undo. The engine creates an instance on lookup, so already_existed comes back true and created false in practice. Rarely needed: set_mpci_scalar_parameter_value and set_mpci_vector_parameter_value create the instance themselves; get_mpci_info reads it.",
           "params": [
             {
               "name": "collection_path",
@@ -45394,10 +45954,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, world_name: string, is_valid: bool, already_existed: bool, created: bool }",
+          "returns": "{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_existed: bool, created: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -46062,6 +46622,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional zero-based index for Layer/Blend association (ignored for Global)."
             }
           ],
@@ -46099,6 +46663,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional zero-based index for Layer/Blend association (ignored for Global)."
             }
           ],
@@ -46338,7 +46906,7 @@
         },
         {
           "name": "get_mpci_info",
-          "description": "Read the transient Material Parameter Collection Instance of one collection on a world (editor by default): instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.",
+          "description": "Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.",
           "params": [
             {
               "name": "collection_path",
@@ -46350,10 +46918,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, world_name: string, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }",
+          "returns": "{ collection_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, instance_exists: bool, is_valid: bool, parent_collection_path: string, scalar_override_count: int, vector_override_count: int, scalars: [object], vectors: [object] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -46881,6 +47449,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional zero-based index for Layer/Blend association (ignored for Global)."
             }
           ],
@@ -46924,6 +47496,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional zero-based index for Layer/Blend association (ignored for Global)."
             }
           ],
@@ -47215,7 +47791,7 @@
         },
         {
           "name": "set_mpci_parent_collection",
-          "description": "Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world, the editor world by default. Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.",
+          "description": "Rebuild the Material Parameter Collection Instance (MPCI: the transient per-world values) of collection_path on a world: the editor world by default, or the Play-in-Editor world world_label selects (world_package and world_type say which one was reached). Instances are keyed by their collection, so this cannot move an instance to a different parent: it replaces the instance for collection_path with a fresh one at that collection's defaults, losing its overrides, and leaves other collections' instances alone -- the same effect as create_material_parameter_collection_instance. Runtime only: nothing saved, no undo. previous_parent_path is always the collection itself and already_attached always true.",
           "params": [
             {
               "name": "collection_path",
@@ -47227,10 +47803,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, previous_parent_path: string, world_name: string, is_valid: bool, already_attached: bool, attached: bool }",
+          "returns": "{ collection_path: string, previous_parent_path: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, is_valid: bool, already_attached: bool, attached: bool }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -47240,7 +47816,7 @@
         },
         {
           "name": "set_mpci_scalar_parameter_value",
-          "description": "Override a scalar parameter value on the world's MPCI",
+          "description": "Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a scalar parameter of the collection; vectors: set_mpci_vector_parameter_value.",
           "params": [
             {
               "name": "collection_path",
@@ -47264,10 +47840,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Optional world context label, default editor"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string }",
+          "returns": "{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -47277,7 +47853,7 @@
         },
         {
           "name": "set_mpci_vector_parameter_value",
-          "description": "Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, the editor world by default, creating the instance when needed, and push it to the renderer. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.",
+          "description": "Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.",
           "params": [
             {
               "name": "collection_path",
@@ -47325,10 +47901,10 @@
               "name": "world_label",
               "jsonType": "string",
               "required": false,
-              "description": "Empty or \"editor\" for the editor world (the default); otherwise the UWorld name of a live world context, compared case-insensitively (first match)"
+              "description": "Which world: empty or \"editor\" for the editor world (the default), even while Play-in-Editor runs; \"pie\" (alias \"game\") for the running PIE world, \"server\" or \"client\" for that PIE world, \"pie:N\" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present"
             }
           ],
-          "returns": "{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string }",
+          "returns": "{ collection_path: string, parameter_name: string, value_rgba: [number], readback_rgba: [number], readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }",
           "annotations": {
             "readOnlyHint": false,
             "destructiveHint": true,
@@ -47417,6 +47993,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47448,6 +48028,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47491,6 +48075,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47571,6 +48159,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             }
           ],
@@ -47602,6 +48194,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             }
           ],
@@ -47627,6 +48223,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47714,6 +48314,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47745,6 +48349,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -47800,6 +48408,10 @@
               "name": "component_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based PMC index on the actor; defaults to 0"
             },
             {
@@ -48125,6 +48737,10 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Option index (default 0)"
             }
           ],
@@ -48181,6 +48797,10 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the query option that holds the test (default 0)."
             }
           ],
@@ -48218,6 +48838,10 @@
               "name": "max_items",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional cap on how many items are serialized into the payload (default 50; the query still evaluates all)"
             }
           ],
@@ -48249,6 +48873,10 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Option index whose generator is edited (default 0)"
             }
           ],
@@ -48274,12 +48902,20 @@
               "name": "option_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Option index (default 0)"
             },
             {
               "name": "test_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Test index within the option (default 0)"
             },
             {
@@ -48684,6 +49320,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional cap on how many of asset_paths to process (default 200, clamped 1..2000). Entries beyond the cap are not processed."
             }
           ],
@@ -48975,6 +49615,10 @@
               "name": "slot_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into LandscapeProxy::RuntimeVirtualTextures (default 0)"
             },
             {
@@ -49037,12 +49681,20 @@
               "name": "tile_count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Exponent of the size in tiles: 2^n tiles, clamped to 0..12 (default 8 = 256 tiles); a texel value such as 256 is clamped to 12."
             },
             {
               "name": "tile_size",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Exponent of the tile size: 2^(n+6) texels, clamped to 0..4 (default 2 = 256 texels)."
             },
             {
@@ -49345,6 +49997,10 @@
               "name": "slot_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index to clear (default 0)"
             }
           ],
@@ -49459,12 +50115,20 @@
               "name": "interior_value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional RadialIntMask interior integer; defaults to 1"
             },
             {
               "name": "exterior_value",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional RadialIntMask exterior integer; defaults to 0"
             },
             {
@@ -49755,6 +50419,10 @@
               "name": "site_count",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Target cluster count before cluster_size_method scales it, minimum 1, default 10"
             }
           ],
@@ -49929,12 +50597,20 @@
               "name": "num_sites",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of random Voronoi sites to generate, minimum 1, default 20"
             },
             {
               "name": "random_seed",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Seed for the random site positions and the per-transform fracture chance, default 0"
             },
             {
@@ -50271,12 +50947,20 @@
               "name": "num_planes",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of random cutting planes to generate, minimum 1, default 3"
             },
             {
               "name": "random_seed",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional seed for plane generation, default 1337"
             },
             {
@@ -50394,6 +51078,10 @@
               "name": "index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional 0-based index into the GeometrySource array (exactly one of index / source_mesh_path)"
             },
             {
@@ -50462,6 +51150,10 @@
               "name": "constraint_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional constraint index to remove (used when constraint_name is absent)."
             }
           ],
@@ -50592,12 +51284,20 @@
               "name": "cluster_group_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Cluster group index, default 0"
             },
             {
               "name": "max_cluster_level",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum hierarchy level to cluster, default 100"
             },
             {
@@ -51030,6 +51730,10 @@
               "name": "body_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the body in the asset; wins over bone_name when both are given"
             },
             {
@@ -51103,6 +51807,10 @@
               "name": "body_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the body in the asset; wins over bone_name when both are given"
             },
             {
@@ -51432,24 +52140,40 @@
               "name": "slices_x",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of evenly spaced X slices, default 2"
             },
             {
               "name": "slices_y",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of evenly spaced Y slices, default 2"
             },
             {
               "name": "slices_z",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of evenly spaced Z slices, default 1"
             },
             {
               "name": "random_seed",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Seed passed to the slicer, default 1337; angle and offset variation are fixed at 0, so it changes little"
             },
             {
@@ -53411,6 +54135,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             }
           ],
@@ -53436,6 +54164,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             }
           ],
@@ -53461,6 +54193,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             }
           ],
@@ -53486,6 +54222,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             }
           ],
@@ -53505,6 +54245,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional user index, default 0. Passed to the platform's save system; the generic desktop one keeps every user's slots in one folder, so there it changes nothing."
             }
           ],
@@ -53530,6 +54274,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             },
             {
@@ -53561,6 +54309,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional user index, default 0"
             }
           ],
@@ -53624,6 +54376,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Platform user index for the save system; default 0 (the generic desktop save system ignores it)"
             },
             {
@@ -53655,6 +54411,10 @@
               "name": "user_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional user index, default 0"
             },
             {
@@ -53950,6 +54710,10 @@
               "name": "num_activity_slots",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Number of slots to add; defaults to 1"
             }
           ],
@@ -54825,6 +55589,10 @@
               "name": "global_task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree GlobalTasks, as listed by list_global_tasks; out of range is an error."
             },
             {
@@ -55024,6 +55792,10 @@
               "name": "condition_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the selected condition list, as counted by list_conditions or list_transitions."
             },
             {
@@ -55036,6 +55808,10 @@
               "name": "transition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state transitions; required when target_kind is \"transition\" and ignored otherwise."
             }
           ],
@@ -55079,12 +55855,20 @@
               "name": "condition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the selected condition list; omitting it fails as out of range."
             },
             {
               "name": "transition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state transitions; used only when target_kind is \"transition\", where omitting it fails."
             }
           ],
@@ -55116,6 +55900,10 @@
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into State->Considerations."
             }
           ],
@@ -55147,6 +55935,10 @@
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state Considerations, as listed by list_considerations."
             },
             {
@@ -55178,6 +55970,10 @@
               "name": "evaluator_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error."
             }
           ],
@@ -55209,6 +56005,10 @@
               "name": "evaluator_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree Evaluators, as listed by list_evaluators; omitting it fails as out of range."
             }
           ],
@@ -55278,6 +56078,10 @@
               "name": "task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into State->Tasks."
             }
           ],
@@ -55309,6 +56113,10 @@
               "name": "task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state Tasks, as listed by list_tasks."
             },
             {
@@ -55602,6 +56410,10 @@
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state's Considerations array."
             }
           ],
@@ -55627,6 +56439,10 @@
               "name": "evaluator_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree's Evaluators array."
             }
           ],
@@ -55689,6 +56505,10 @@
               "name": "condition_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state EnterConditions, as listed by list_conditions."
             }
           ],
@@ -55714,6 +56534,10 @@
               "name": "global_task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree's GlobalTasks array."
             }
           ],
@@ -55745,6 +56569,10 @@
               "name": "task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state's Tasks array."
             }
           ],
@@ -55776,6 +56604,10 @@
               "name": "transition_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state's Transitions array."
             }
           ],
@@ -55807,12 +56639,20 @@
               "name": "transition_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state transitions, as listed by list_transitions."
             },
             {
               "name": "condition_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the Conditions of that transition."
             }
           ],
@@ -55856,12 +56696,20 @@
               "name": "transition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state transitions; used only by the transition kind."
             },
             {
               "name": "target_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition."
             }
           ],
@@ -55979,12 +56827,20 @@
               "name": "transition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the state transitions; used only when target_kind is \"transition\", where omitting it fails."
             },
             {
               "name": "condition_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the selected condition list; omitting it fails as out of range."
             }
           ],
@@ -56016,6 +56872,10 @@
               "name": "consideration_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into State->Considerations."
             },
             {
@@ -56053,6 +56913,10 @@
               "name": "evaluator_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the tree Evaluators, as listed by list_evaluators; out of range is an error."
             },
             {
@@ -56294,6 +57158,10 @@
               "name": "task_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into State->Tasks."
             },
             {
@@ -56526,7 +57394,7 @@
       "commands": [
         {
           "name": "inspect_subsystem_instance",
-          "description": "Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.",
+          "description": "Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.",
           "params": [
             {
               "name": "subsystem_class",
@@ -56544,10 +57412,20 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Local player index, used only when lifetime is \"localplayer\" (default 0)."
+            },
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist"
             }
           ],
-          "returns": "{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }",
+          "returns": "{ subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- the world fields only for the world, gameinstance and localplayer lifetimes",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -56557,9 +57435,16 @@
         },
         {
           "name": "list_local_player_subsystems",
-          "description": "Enumerate every live ULocalPlayerSubsystem-derived instance across all local players in the editor world's GameInstance.",
-          "params": [],
-          "returns": "",
+          "description": "Enumerate every live ULocalPlayerSubsystem-derived instance across all local players of the game instance of a Play-in-Editor world, the running PIE world by default (world picks another; world_package and world_type say which one was read). Local players exist only while PIE runs: without PIE, or for a world with no game instance such as the editor world, it is an error that says so. Read-only.",
+          "params": [
+            {
+              "name": "world",
+              "jsonType": "string",
+              "required": false,
+              "description": "Optional world selector: absent or pie (the default, ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client, pie:N, or editor (which has no game instance, so it fails). An unrecognised value fails naming the worlds that exist"
+            }
+          ],
+          "returns": "{ world: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, local_player_count: int, subsystem_count: int, subsystems: [{ player_index, player_name, subsystem_class, subsystem_name, subsystem_path }] }",
           "annotations": {
             "readOnlyHint": true,
             "destructiveHint": false,
@@ -57097,12 +57982,20 @@
               "name": "max_samples",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional hard cap on recorded samples (default 400)."
             },
             {
               "name": "watch_id",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Target watch for \"status\" / \"stop\" / \"clear\" (omit = all of them)."
             }
           ],
@@ -58469,6 +59362,10 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved root audio track (default 0)."
             }
           ],
@@ -58538,12 +59435,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0; used when track_type omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -58556,6 +59461,10 @@
               "name": "channel_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the channel within its proxy view (default 0)."
             },
             {
@@ -58607,6 +59516,10 @@
               "name": "max_results",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Maximum number of sequences to return, 1 to 10000, default 1000"
             }
           ],
@@ -58670,12 +59583,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -58944,12 +59865,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0; used when track_type omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -58962,6 +59891,10 @@
               "name": "channel_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the channel within its proxy view (default 0)."
             },
             {
@@ -59163,12 +60096,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0; used when track_type omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -59181,6 +60122,10 @@
               "name": "channel_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the channel within its proxy view (default 0)."
             },
             {
@@ -59287,12 +60232,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track to remove (default 0)."
             },
             {
@@ -59446,6 +60399,10 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional index into the binding's tracks (default 0)."
             },
             {
@@ -59458,6 +60415,10 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional index of the section on the track (default 0)."
             },
             {
@@ -59526,6 +60487,10 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved root audio track (default 0)."
             },
             {
@@ -59631,12 +60596,20 @@
               "name": "audio_track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the root audio track (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section within the audio track (default 0)."
             },
             {
@@ -59674,12 +60647,20 @@
               "name": "audio_track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the root audio track (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section within the audio track (default 0)."
             },
             {
@@ -59736,12 +60717,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0; used when track_type omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -59754,6 +60743,10 @@
               "name": "channel_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the channel within its proxy view (default 0)."
             },
             {
@@ -59982,6 +60975,10 @@
               "name": "key_count",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Target number of keys (>= 0). 0 clears all keys; 1 seeds at section start; >=2 evenly distributes."
             },
             {
@@ -60038,12 +61035,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60101,12 +61106,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60158,36 +61171,60 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
               "name": "r",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Red component 0-255 (int; default 0)."
             },
             {
               "name": "g",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Green component 0-255 (int; default 0)."
             },
             {
               "name": "b",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Blue component 0-255 (int; default 0)."
             },
             {
               "name": "a",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Alpha component 0-255 (int; default 255)."
             },
             {
@@ -60245,12 +61282,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60302,12 +61347,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0; used when track_type is omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60383,12 +61436,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60440,12 +61501,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0; used when track_type is omitted)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60508,6 +61577,10 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             }
           ],
@@ -60539,6 +61612,10 @@
               "name": "row_index",
               "jsonType": "number",
               "required": true,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Desired row index (int, >= 0)."
             },
             {
@@ -60558,12 +61635,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60804,12 +61889,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -60934,6 +62027,10 @@
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved master track (default 0)."
             },
             {
@@ -60958,6 +62055,10 @@
               "name": "hierarchical_bias",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "HierarchicalBias (int; default engine value 100; omit to leave unchanged)."
             },
             {
@@ -61039,12 +62140,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -61108,12 +62217,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -61171,12 +62288,20 @@
               "name": "track_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the binding's tracks (0 = first track, default 0)."
             },
             {
               "name": "section_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index of the section on the resolved track (default 0)."
             },
             {
@@ -62111,6 +63236,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional (default 0): when set, only consider viewport UserWidgets owned by the local player with this index (single-player PIE resolves globally)."
             },
             {
@@ -62533,6 +63662,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional local player index whose viewport widgets are searched (default 0)."
             },
             {
@@ -62570,6 +63703,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional local player index whose viewport widgets are searched (default 0)."
             },
             {
@@ -63238,6 +64375,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional (default 0): restrict widget resolution to viewport UserWidgets owned by this local player index (single-player PIE resolves globally)."
             },
             {
@@ -63287,6 +64428,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional local player index whose viewport widgets are searched (default 0)."
             },
             {
@@ -63330,6 +64475,10 @@
               "name": "player_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional (default 0): filter to viewport UserWidgets owned by this local player index."
             },
             {
@@ -63681,6 +64830,10 @@
               "name": "binding_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "int index of the binding to remove (primary identifier; one of binding_index / binding_id required)"
             },
             {
@@ -64342,6 +65495,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into the layer stack (root layer is 0; session layers follow). Defaults to 0. Out-of-range returns an error rather than a synthetic empty payload."
             }
           ],
@@ -64504,6 +65661,10 @@
               "name": "index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based insertion position; -1 (default) appends to the back of the prepend list."
             }
           ],
@@ -64529,6 +65690,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Index into the actor's stage layer stack (default 0 = root layer)."
             },
             {
@@ -64982,6 +66147,10 @@
               "name": "layer_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "0-based index into GetLayerStack(true) of the new edit target. Defaults to 0 (the root layer)."
             }
           ],
@@ -65346,12 +66515,20 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "LOD index to inspect (default 0)"
             },
             {
               "name": "uv_channel",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "UV channel index to inspect (default 0)"
             }
           ],
@@ -65377,6 +66554,10 @@
               "name": "lod_index",
               "jsonType": "number",
               "required": false,
+              "intRange": [
+                -2147483648,
+                2147483647
+              ],
               "description": "Optional LOD index to inspect, or -1 to inventory every LOD (default -1)"
             }
           ],

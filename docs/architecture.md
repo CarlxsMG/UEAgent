@@ -50,7 +50,9 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
 4. **Preconditions** (`Mcp/McpPreconditions`). A call known to crash or freeze the editor is refused,
    with what to do instead. A check reads the arguments, probes the editor state in the same pass, or
    scans the Python that `execute_python` is about to run (`Mcp/McpPythonScan`). When a check exists to
-   prevent a crash and cannot verify, it refuses; any other check lets the call through.
+   prevent a crash and cannot verify, it refuses; any other check lets the call through. A number
+   outside the integer range its parameter is read into (`intRange` in the catalog) is refused too:
+   the engine cannot read it, and the tool would otherwise go on with its default.
 5. **The tool.** Each command family registers its tools in a route table
    (`Mcp/McpCommandFamilies`), and the registry runs the one named, inside one undo transaction
    named after it ("UEAgent: spawn_actor"): Ctrl+Z reverts the whole call, and a `batch` as one

@@ -32,7 +32,6 @@
 #include "Core/CameraNode.h"          // UCameraNode (rig RootNode + node-authoring)
 #include "Nodes/Common/ArrayCameraNode.h"  // composite rig node whose Children we populate
 #include "UObject/Package.h"
-#include "Commands/Camera/ClassReflectionUtils.h"  // property writes by reflection
 // Camera shake Blueprint authoring.
 #include "Camera/CameraShakeBase.h"
 #include "Engine/Blueprint.h"
@@ -313,6 +312,8 @@ namespace
 
     // Set a camera-node property. FXxxCameraParameter structs carry the value in a nested
     // "Value" field; write that. Everything else falls to the canonical SetObjectProperty.
+    // A value that does not convert to the Value field's type (AsBool/AsNumber would write a default
+    // and say nothing), or that it cannot hold, is refused.
     bool GC_SetNodeProperty(UObject* Node, const FString& Key, const TSharedPtr<FJsonValue>& Val, FString& OutErr)
     {
         FProperty* Prop = Node->GetClass()->FindPropertyByName(*Key);
@@ -325,13 +326,45 @@ namespace
             void* InnerAddr = Inner->ContainerPtrToValuePtr<void>(SP->ContainerPtrToValuePtr<void>(Node));
             if (FBoolProperty* BP = CastField<FBoolProperty>(Inner))
             {
-                BP->SetPropertyValue(InnerAddr, Val->AsBool());
+                bool bValue = false;
+                if (!Val.IsValid() || !Val->TryGetBool(bValue))
+                {
+                    OutErr = FString::Printf(TEXT("'%s' takes a bool"), *Key);
+                    return false;
+                }
+                BP->SetPropertyValue(InnerAddr, bValue);
                 return true;
             }
             if (FNumericProperty* NP = CastField<FNumericProperty>(Inner))
             {
-                if (NP->IsFloatingPoint()) { NP->SetFloatingPointPropertyValue(InnerAddr, Val->AsNumber()); }
-                else { NP->SetIntPropertyValue(InnerAddr, static_cast<int64>(Val->AsNumber())); }
+                double Number = 0.0;
+                if (!Val.IsValid() || !Val->TryGetNumber(Number))
+                {
+                    OutErr = FString::Printf(TEXT("'%s' takes a number"), *Key);
+                    return false;
+                }
+                if (NP->IsFloatingPoint())
+                {
+                    NP->SetFloatingPointPropertyValue(InnerAddr, Number);
+                    if (!FMath::IsFinite(NP->GetFloatingPointPropertyValue(InnerAddr)))
+                    {
+                        OutErr = FString::Printf(TEXT("%s is out of range for '%s'"), *FString::SanitizeFloat(Number), *Key);
+                        return false;
+                    }
+                    return true;
+                }
+                // A whole number the integer holds exactly: the read-back catches what the cast would wrap.
+                const bool bWhole = Number == FMath::FloorToDouble(Number)
+                    && Number >= static_cast<double>(MIN_int64) && Number < static_cast<double>(MAX_int64);
+                if (bWhole)
+                {
+                    NP->SetIntPropertyValue(InnerAddr, static_cast<int64>(Number));
+                }
+                if (!bWhole || NP->GetSignedIntPropertyValue(InnerAddr) != static_cast<int64>(Number))
+                {
+                    OutErr = FString::Printf(TEXT("'%s' takes a whole number its integer can hold, not %s"), *Key, *FString::SanitizeFloat(Number));
+                    return false;
+                }
                 return true;
             }
             OutErr = FString::Printf(TEXT("Unsupported CameraParameter Value type for '%s' (bool/numeric only)"), *Key);
@@ -391,10 +424,10 @@ TSharedPtr<FJsonObject> HandleSetCameraRigRootNode(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_rig_root_node")));
 }
 
-// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, in one undo step, then saves the rig. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
+// MCP:set_camera_node_parameters - Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the root node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
 //   @param camera_rig_path - /Game/... path to the UCameraRigAsset whose RootNode is edited (required)
 //   @param properties - JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90})
-//   @returns { camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error }
+//   @returns { camera_rig_path, node_class, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }
 TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -410,22 +443,103 @@ TSharedPtr<FJsonObject> HandleSetCameraNodeParameters(const TSharedPtr<FJsonObje
     if (!Node)
         return mcp_common::MakeErrorReply(TEXT("The rig has no RootNode (call set_camera_rig_root_node first)"));
 
-    // Same undo rule as set_camera_rig_root_node: Modify() before
-    // the mutation loop, inside an open transaction.
-    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetCameraNodeParameters", "Set Camera Node Parameters (MCP)"));
-    Node->Modify();
-    Rig->Modify();
-
-    const ClassReflectionUtils::FPropertyWrites Writes = ClassReflectionUtils::WriteProperties(Node, **PropsObj, &GC_SetNodeProperty);
-    FString SaveError;
-    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
+    // All or nothing: every property is parsed first into a transient scratch node of the same
+    // class, seeded with the value the root node holds (so a camera parameter keeps its Variable and
+    // VariableID, and a struct keeps the fields the JSON leaves out). The root node is written only
+    // when every property parses, so a refused one leaves the rig exactly as it was.
+    UClass* NodeClass = Node->GetClass();
+    UCameraNode* Scratch = NewObject<UCameraNode>(GetTransientPackage(), NodeClass, NAME_None, RF_Transient);
+    TArray<FProperty*> Parsed;
+    TArray<TPair<FString, FProperty*>> ParsedByName;
+    TArray<TSharedPtr<FJsonValue>> Names;
+    TArray<TSharedPtr<FJsonValue>> Failed;
+    TArray<FString> FailureTexts;
+    for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*PropsObj)->Values)
+    {
+        FProperty* Prop = NodeClass->FindPropertyByName(*Pair.Key);
+        if (Prop && !Parsed.Contains(Prop))
+        {
+            Prop->CopyCompleteValue_InContainer(Scratch, Node);
+        }
+        FString Error;
+        if (Prop && GC_SetNodeProperty(Scratch, Pair.Key, Pair.Value, Error))
+        {
+            Parsed.AddUnique(Prop);
+            ParsedByName.Emplace(Pair.Key, Prop);
+            Names.Add(MakeShared<FJsonValueString>(Pair.Key));
+            continue;
+        }
+        if (!Prop)
+        {
+            Error = FString::Printf(TEXT("Property not found: %s"), *Pair.Key);
+        }
+        TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+        Failure->SetStringField(TEXT("name"), Pair.Key);
+        Failure->SetStringField(TEXT("error"), Error);
+        Failed.Add(MakeShared<FJsonValueObject>(Failure));
+        FailureTexts.Add(FString::Printf(TEXT("%s (%s)"), *Pair.Key, *Error));
+    }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
-    Data->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
-    Data->SetArrayField(TEXT("set"), Writes.Set);
-    Data->SetArrayField(TEXT("failed"), Writes.Failed);
-    Data->SetObjectField(TEXT("applied"), Writes.Applied);
+    Data->SetStringField(TEXT("node_class"), NodeClass->GetName());
+    Data->SetArrayField(TEXT("failed"), Failed);
+    if (Failed.Num() > 0)
+    {
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+            TEXT("set_camera_node_parameters: %d of %d properties were refused, so nothing was written or saved. %s"),
+            Failed.Num(), (*PropsObj)->Values.Num(), *FString::Join(FailureTexts, TEXT("; "))));
+    }
+
+    // What each named property of the root node stores, as export text.
+    auto ReadBack = [&Data, Node, &ParsedByName]()
+    {
+        TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
+        for (const TPair<FString, FProperty*>& Entry : ParsedByName)
+        {
+            FString StoredText;
+            Entry.Value->ExportTextItem_Direct(StoredText, Entry.Value->ContainerPtrToValuePtr<void>(Node), nullptr, Node, PPF_None);
+            Applied->SetStringField(Entry.Key, StoredText);
+        }
+        Data->SetObjectField(TEXT("applied"), Applied);
+    };
+
+    // Values the node already holds change nothing: nothing is written, dirtied or saved.
+    bool bChanged = false;
+    for (FProperty* Prop : Parsed)
+    {
+        for (int32 Index = 0; Index < Prop->ArrayDim && !bChanged; ++Index)
+        {
+            bChanged = !Prop->Identical_InContainer(Scratch, Node, Index);
+        }
+    }
+    if (!bChanged)
+    {
+        Data->SetBoolField(TEXT("changed"), false);
+        Data->SetArrayField(TEXT("set"), TArray<TSharedPtr<FJsonValue>>());
+        ReadBack();
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), Parsed.Num() == 0
+            ? TEXT("properties is empty; nothing was written or saved")
+            : TEXT("The root node already holds every requested value; nothing was written or saved"));
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    // Same undo rule as set_camera_rig_root_node: Modify() before the writes, inside an open
+    // transaction, so every property lands in one undo step.
+    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetCameraNodeParameters", "Set Camera Node Parameters (MCP)"));
+    Node->Modify();
+    Rig->Modify();
+    for (FProperty* Prop : Parsed)
+    {
+        Prop->CopyCompleteValue_InContainer(Node, Scratch);
+    }
+    FString SaveError;
+    const bool bSaved = GC_MarkDirtyAndSave(Rig, SaveError);
+
+    Data->SetBoolField(TEXT("changed"), true);
+    Data->SetArrayField(TEXT("set"), Names);
+    ReadBack();
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_camera_node_parameters"), SaveError);
 }
 
@@ -2064,6 +2178,10 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
             return mcp_common::MakeErrorReply(
                 TEXT("Failed to instantiate USpringArmComponent"));
         }
+        // An instance component before it registers, as the editor's Add Component makes one (it
+        // calls AddInstanceComponent first): USceneComponent::OnRegister hands CreationMethod on to
+        // the editor-only sprite it may create, which AddInstanceComponent below does not reach.
+        Spring->CreationMethod = EComponentCreationMethod::Instance;
         Spring->RegisterComponent();
         // Attach to root if the actor has one; otherwise the component sits at origin.
         if (USceneComponent* Root = Actor->GetRootComponent())
@@ -2194,7 +2312,7 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Response);
 }
 
-// MCP:add_camera_component - Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. An invalid projection_mode or a rejected post_process_settings is an error and nothing is created or written.
+// MCP:add_camera_component - Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.
 //   @param actor_name - Name or label of the target actor.
 //   @param component_name - Optional name for a new component (defaults to "Camera"); a name another object of the actor already has gets a unique variant, returned in component_name. Ignored when the actor already has a camera component, which is configured whatever its name.
 //   @param parent_component - Optional name of a USceneComponent on the same actor to attach to (e.g. "SpringArm"). Default = actor root component.
@@ -2207,7 +2325,7 @@ TSharedPtr<FJsonObject> HandleAddSpringArm(const TSharedPtr<FJsonObject>& Params
 //   @param b_use_controller_view_rotation - Optional bool. Match pawn control rotation.
 //   @param b_use_pawn_control_rotation - Optional bool. Alias for b_use_controller_view_rotation — sets UCameraComponent::bUsePawnControlRotation.
 //   @param b_lock_to_hmd - Optional bool. Lock orientation to the HMD.
-//   @param post_process_settings - Optional object (PostProcess fields, see get_camera_post_process for the schema).
+//   @param post_process_settings - Optional object of FPostProcessSettings fields by property name, e.g. {"BloomIntensity": 2}; each value also turns on its bOverride_ companion unless the object sets that companion itself; a key that names no property is an error.
 //   @param post_process_blend_weight - Optional float. Weight of post-process (0..1). 0 means post-process disabled.
 //   @returns { actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll], post_process_blend_weight }
 TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& Params)
@@ -2275,16 +2393,55 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
 
     // The post-process blob is merged into a copy of the settings the camera has (a new camera
     // starts from the class defaults), so a rejected blob writes nothing; the copy is assigned below.
+    // Its keys are FPostProcessSettings property names. The JSON converter writes only the fields it
+    // is given and skips, without a word, a key that names no property, so such a key is refused
+    // here. A value counts only when its bOverride_* companion is on (FSceneView applies a camera's
+    // settings field by field, gated by those flags), so each value the blob sets turns its companion
+    // on, unless the blob sets that companion itself.
     TOptional<FPostProcessSettings> RequestedPostProcess;
     const TSharedPtr<FJsonObject>* PPJson = nullptr;
     if (Params->TryGetObjectField(TEXT("post_process_settings"), PPJson) && PPJson && PPJson->IsValid())
     {
+        UScriptStruct* PPStruct = FPostProcessSettings::StaticStruct();
+        TArray<FString> UnknownKeys;
+        TArray<FBoolProperty*> Companions;
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*PPJson)->Values)
+        {
+            FProperty* ValueProp = PPStruct->FindPropertyByName(*Pair.Key);
+            if (!ValueProp)
+            {
+                UnknownKeys.Add(Pair.Key);
+                continue;
+            }
+            // The converter writes nothing for a null value, so there is nothing to turn on.
+            if (!Pair.Value.IsValid() || Pair.Value->IsNull())
+            {
+                continue;
+            }
+            FBoolProperty* Companion = FindOverrideProperty(PPStruct, ValueProp);
+            const TSharedPtr<FJsonValue> CompanionValue = Companion ? (*PPJson)->TryGetField(Companion->GetName()) : TSharedPtr<FJsonValue>();
+            if (Companion && (!CompanionValue.IsValid() || CompanionValue->IsNull()))
+            {
+                Companions.AddUnique(Companion);
+            }
+        }
+        if (UnknownKeys.Num() > 0)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("post_process_settings rejected: no FPostProcessSettings property is named %s (keys are property names, e.g. BloomIntensity)"),
+                *FString::Join(UnknownKeys, TEXT(", "))));
+        }
+
         FPostProcessSettings Merged = CameraComp ? CameraComp->PostProcessSettings : GetDefault<UCameraComponent>()->PostProcessSettings;
         FString PPError;
-        if (!mcp_common::JsonToStruct(*PPJson, FPostProcessSettings::StaticStruct(), &Merged, PPError))
+        if (!mcp_common::JsonToStruct(*PPJson, PPStruct, &Merged, PPError))
         {
             return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("post_process_settings rejected: %s"), *PPError));
+        }
+        for (FBoolProperty* Companion : Companions)
+        {
+            Companion->SetPropertyValue_InContainer(&Merged, true);
         }
         RequestedPostProcess = MoveTemp(Merged);
     }
@@ -2311,6 +2468,11 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
             return mcp_common::MakeErrorReply(
                 TEXT("Failed to instantiate UCameraComponent"));
         }
+        // An instance component before it registers, as the editor's Add Component makes one (it
+        // calls AddInstanceComponent first): UCameraComponent::OnRegister copies CreationMethod into
+        // the proxy mesh and frustum components it creates, which AddInstanceComponent below does
+        // not reach.
+        CameraComp->CreationMethod = EComponentCreationMethod::Instance;
         CameraComp->RegisterComponent();
         Actor->AddInstanceComponent(CameraComp);
     }
@@ -2391,7 +2553,8 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
     }
 
     // Optional: post-process settings blob, merged above via FJsonObjectConverter into a copy of
-    // the camera's settings (fields the blob names; the rest keep their values).
+    // the camera's settings (fields the blob names, plus the bOverride_* companion of each value it
+    // sets; the rest keep their values).
     if (RequestedPostProcess.IsSet())
     {
         CameraComp->PostProcessSettings = RequestedPostProcess.GetValue();
@@ -2399,9 +2562,6 @@ TSharedPtr<FJsonObject> HandleAddCameraComponent(const TSharedPtr<FJsonObject>& 
     }
 
     CameraComp->MarkRenderStateDirty();
-    // (We don't unconditionally set bOverride_* companions — the user only opted
-    // in to whatever post_process_settings keys they passed in, and the JsonToStruct
-    // merge already turned on the relevant ones via FPostProcessSettings's metadata.)
     if (UPackage* Pkg = Actor->GetPackage())
     {
         Pkg->MarkPackageDirty();

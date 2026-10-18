@@ -280,13 +280,13 @@ Find the nearest point on the live dynamic mesh of a DynamicMeshActor to a 3D qu
 
 *Read-only.*
 
-Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. hit is false when nothing is hit within max_distance. The mesh is not changed.
+Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the nearest hit via UGeometryScriptLibrary_MeshSpatial::FindNearestRayIntersectionWithMesh. Every call builds a fresh BVH from the mesh as it is now (the plugin keeps none), so the answer always reflects the latest mesh edits. The engine normalizes ray_direction, so ray_parameter is the distance from ray_origin to the hit. A ray_direction that cannot be normalized (all zeros, a non-finite value, or not an array of three numbers) is refused before anything else runs. hit is false when nothing is hit within max_distance. The mesh is not changed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
 | `ray_origin` | array | no | [x, y, z] origin point of the ray in mesh-local space. |
-| `ray_direction` | array | no | [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter. |
+| `ray_direction` | array | no | [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter, but a zero or non-finite direction is an error. |
 | `max_distance` | number | no | Optional float; max search distance (0 = unlimited). |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 

@@ -22,22 +22,36 @@ namespace UEAgentSubsystemCommands
 
 // MCP-DOMAIN: Subsystem
 
-UWorld* GetWorld(const TSharedPtr<FJsonObject>& Params)
+// The world a world-hosted lifetime reads: the `world` selector as mcp_common::ResolveWorldSelector reads it, the
+// editor world when absent. Null, with OutError naming the worlds present, when that world does not exist.
+UWorld* GetWorld(const TSharedPtr<FJsonObject>& Params, FString& OutSelector, FString& OutError)
 {
-    // The editor's world when there is one; otherwise (no editor, or no editor world yet)
-    // the engine's first world context.
-    if (UWorld* EditorWorld = mcp_common::GetEditorWorld())
-    {
-        return EditorWorld;
-    }
-    return mcp_common::GetFirstContextWorld();
+    return mcp_common::ResolveWorldSelector(Params, TEXT("editor"), OutSelector, OutError);
 }
 
-UGameInstance* GetGameInstance(const TSharedPtr<FJsonObject>& Params)
+// The game instance of the world the `world` selector picks, the Play-in-Editor world when absent: only a game or
+// PIE world is given one (UWorld::SetGameInstance, from UGameInstance's world setup), never the editor world, so
+// without PIE there is none. Null, with OutError saying what is missing, when the world or its game instance is not
+// there; OutWorld is the world that was resolved, or null.
+UGameInstance* GetGameInstance(const TSharedPtr<FJsonObject>& Params, UWorld*& OutWorld, FString& OutSelector, FString& OutError)
 {
-    // The game instance of whichever world GetWorld picked; none without a world.
-    const UWorld* HostWorld = GetWorld(Params);
-    return HostWorld != nullptr ? HostWorld->GetGameInstance() : nullptr;
+    FString WorldError;
+    OutWorld = mcp_common::ResolveWorldSelector(Params, TEXT("pie"), OutSelector, WorldError);
+    if (OutWorld == nullptr)
+    {
+        OutError = FString::Printf(
+            TEXT("GameInstance not available: a game instance exists only in a Play-in-Editor world, never in the editor world. %s"),
+            *WorldError);
+        return nullptr;
+    }
+    UGameInstance* GameInstance = OutWorld->GetGameInstance();
+    if (GameInstance == nullptr)
+    {
+        OutError = FString::Printf(
+            TEXT("GameInstance not available: the %s world '%s' (world='%s') has no game instance; only a Play-in-Editor world has one, so start PIE and leave world unset or pass pie."),
+            LexToString(OutWorld->WorldType.GetValue()), *OutWorld->GetName(), *OutSelector);
+    }
+    return GameInstance;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,13 +65,18 @@ UGameInstance* GetGameInstance(const TSharedPtr<FJsonObject>& Params)
 // internal engine state.
 // ---------------------------------------------------------------------------
 
-// MCP:list_local_player_subsystems - Enumerate every live ULocalPlayerSubsystem-derived instance across all local players in the editor world's GameInstance.
+// MCP:list_local_player_subsystems - Enumerate every live ULocalPlayerSubsystem-derived instance across all local players of the game instance of a Play-in-Editor world, the running PIE world by default (world picks another; world_package and world_type say which one was read). Local players exist only while PIE runs: without PIE, or for a world with no game instance such as the editor world, it is an error that says so. Read-only.
+//   @param world - Optional world selector: absent or pie (the default, ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client, pie:N, or editor (which has no game instance, so it fails). An unrecognised value fails naming the worlds that exist
+//   @returns { world: string, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int, local_player_count: int, subsystem_count: int, subsystems: [{ player_index, player_name, subsystem_class, subsystem_name, subsystem_path }] }
 TSharedPtr<FJsonObject> HandleListLocalPlayerSubsystems(const TSharedPtr<FJsonObject>& Params)
 {
-    UGameInstance* GameInstance = GetGameInstance(Params);
+    UWorld* HostWorld = nullptr;
+    FString WorldSelector;
+    FString HostProblem;
+    UGameInstance* GameInstance = GetGameInstance(Params, HostWorld, WorldSelector, HostProblem);
     if (!GameInstance)
     {
-        return mcp_common::MakeErrorReply(TEXT("GameInstance not available"));
+        return mcp_common::MakeErrorReply(HostProblem);
     }
 
     TArray<TSharedPtr<FJsonValue>> Entries;
@@ -87,17 +106,20 @@ TSharedPtr<FJsonObject> HandleListLocalPlayerSubsystems(const TSharedPtr<FJsonOb
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("world"), WorldSelector);
+    mcp_common::AddWorldEvidence(ResultObj, HostWorld);
     ResultObj->SetNumberField(TEXT("local_player_count"), NumPlayers);
     ResultObj->SetNumberField(TEXT("subsystem_count"), Entries.Num());
     ResultObj->SetArrayField(TEXT("subsystems"), Entries);
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:inspect_subsystem_instance - Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world uses the editor world and gameinstance and localplayer its game instance, never PIE's, so those two fail when the editor world has none. A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
+// MCP:inspect_subsystem_instance - Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
 //   @param subsystem_class - Class name of the subsystem to inspect (short reflected name or /Script path).
 //   @param lifetime - Which host resolves the instance: one of engine | gameinstance | world | editor | localplayer.
 //   @param player_index - Local player index, used only when lifetime is "localplayer" (default 0).
-//   @returns { subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }] }
+//   @param world - Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist
+//   @returns { subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- the world fields only for the world, gameinstance and localplayer lifetimes
 TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObject>& Params)
 {
     FString ClassName;
@@ -119,7 +141,10 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
 
     // The live instance comes from the host the caller named. A host that does not exist
     // right now (no engine, no game instance, no such local player...) is its own error.
+    // HostWorld stays null for the engine and editor hosts, which live in no world.
     USubsystem* Instance = nullptr;
+    UWorld* HostWorld = nullptr;
+    FString WorldSelector;
     FString HostProblem;
     const auto HostIs = [&Host](const TCHAR* Candidate)
     {
@@ -138,22 +163,18 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
     }
     else if (HostIs(TEXT("gameinstance")))
     {
-        UGameInstance* GameInstance = GetGameInstance(Params);
-        if (GameInstance == nullptr)
-        {
-            HostProblem = TEXT("GameInstance not available");
-        }
-        else
+        if (UGameInstance* GameInstance = GetGameInstance(Params, HostWorld, WorldSelector, HostProblem))
         {
             Instance = GameInstance->GetSubsystemBase(TSubclassOf<UGameInstanceSubsystem>(WantedClass));
         }
     }
     else if (HostIs(TEXT("world")))
     {
-        UWorld* HostWorld = GetWorld(Params);
+        FString WorldError;
+        HostWorld = GetWorld(Params, WorldSelector, WorldError);
         if (HostWorld == nullptr)
         {
-            HostProblem = TEXT("World not available");
+            HostProblem = FString::Printf(TEXT("World not available: %s"), *WorldError);
         }
         else
         {
@@ -173,19 +194,17 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
     }
     else if (HostIs(TEXT("localplayer")))
     {
-        UGameInstance* GameInstance = GetGameInstance(Params);
-        ULocalPlayer* Player = (GameInstance != nullptr) ? GameInstance->GetLocalPlayerByIndex(LocalPlayerSlot) : nullptr;
-        if (GameInstance == nullptr)
+        if (UGameInstance* GameInstance = GetGameInstance(Params, HostWorld, WorldSelector, HostProblem))
         {
-            HostProblem = TEXT("GameInstance not available");
-        }
-        else if (Player == nullptr)
-        {
-            HostProblem = FString::Printf(TEXT("No ULocalPlayer at index %d"), LocalPlayerSlot);
-        }
-        else
-        {
-            Instance = Player->GetSubsystemBase(TSubclassOf<ULocalPlayerSubsystem>(WantedClass));
+            if (ULocalPlayer* Player = GameInstance->GetLocalPlayerByIndex(LocalPlayerSlot))
+            {
+                Instance = Player->GetSubsystemBase(TSubclassOf<ULocalPlayerSubsystem>(WantedClass));
+            }
+            else
+            {
+                HostProblem = FString::Printf(TEXT("No ULocalPlayer at index %d: the game instance of world '%s' has %d local player(s)"),
+                    LocalPlayerSlot, *HostWorld->GetName(), GameInstance->GetNumLocalPlayers());
+            }
         }
     }
     else
@@ -237,6 +256,11 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
     Payload->SetStringField(TEXT("subsystem_path"), Instance->GetPathName());
     Payload->SetNumberField(TEXT("property_count"), Exposed.Num());
     Payload->SetArrayField(TEXT("properties"), Exposed);
+    if (HostWorld != nullptr)
+    {
+        Payload->SetStringField(TEXT("world"), WorldSelector);
+        mcp_common::AddWorldEvidence(Payload, HostWorld);
+    }
     return mcp_common::MakeOkReply(Payload);
 }
 

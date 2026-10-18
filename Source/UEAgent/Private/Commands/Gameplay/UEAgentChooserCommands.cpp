@@ -645,7 +645,7 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeSavedReply(MakeReplyData(), bSaved, TEXT("create_chooser_table"), SaveError);
 }
 
-// MCP:add_chooser_column_to_table - Append a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call appends a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+// MCP:add_chooser_column_to_table - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. A Randomize column stays last, as the Chooser editor keeps it: a column added to a table that ends with one goes just before it, so the Randomize index grows by one; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_type - Column struct to append: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
 //   @param column_name - Label echoed back in the reply only; it is not stored on the column.
@@ -689,7 +689,7 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 	}
 
 	// A table holds any number of columns of one type (each bound to its own input), so a new column is
-	// always appended. The exception is Randomize: a table has at most one, as the Chooser editor's own
+	// always added. The exception is Randomize: a table has at most one, as the Chooser editor's own
 	// AddColumn enforces, so an existing one is returned instead (already_existed=true).
 	if (ColumnStruct == FRandomizeColumn::StaticStruct())
 	{
@@ -708,7 +708,7 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		}
 	}
 
-	// Append a fresh InstancedStruct, initialized as the requested column type, with
+	// Build a fresh InstancedStruct, initialized as the requested column type, with
 	// matching default-constructed InputValue where applicable. Its row array gets one
 	// DefaultRowValue cell per existing row (ResultsStructs, as the Chooser editor sizes
 	// columns), so the new column stays in step with the rows already in the table.
@@ -729,9 +729,19 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 		}
 	});
 
+	// A Randomize column filters the rows left by the columns before it down to one pick, so it must stay last:
+	// like the Chooser editor's AddColumn, a new column goes before a trailing Randomize column. Each column owns
+	// its row cells, so the insert leaves every row in step.
+	int32 NewIndex = Table->ColumnsStructs.Num();
+	const FChooserColumnBase* LastColumn = NewIndex > 0 ? Table->ColumnsStructs.Last().GetPtr<FChooserColumnBase>() : nullptr;
+	if (LastColumn && LastColumn->IsRandomizeColumn())
+	{
+		--NewIndex;
+	}
+
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddChooserColumn", "Add Chooser Column (MCP)"));
 	Table->Modify();
-	const int32 NewIndex = Table->ColumnsStructs.Add(MoveTemp(NewCol));
+	Table->ColumnsStructs.Insert(MoveTemp(NewCol), NewIndex);
 	FString SaveError;
 	const bool bSaved = Chooser_CompileAndSave(Table, SaveError);
 

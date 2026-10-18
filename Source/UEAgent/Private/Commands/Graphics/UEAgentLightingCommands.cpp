@@ -31,6 +31,7 @@
 #include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/RectLightComponent.h"     // URectLightComponent source/barn-door
+#include "Components/SkyLightComponent.h"      // USkyLightComponent: a ULightComponentBase, counted by get_lighting_quality
 #include "Engine/TextureLightProfile.h"        // IES profile asset for SetIESTexture
 #include "Components/StaticMeshComponent.h"
 #include "UnrealEngine.h"
@@ -76,7 +77,8 @@ namespace UEAgentLightingImpl
     // Shared building blocks
     // =============================================================================================
 
-    // Every command in this file works on the first world context the engine holds.
+    // The first world context the engine holds, which most commands of this file work on;
+    // get_lighting_quality reads the editor world instead.
     UWorld* FirstContextWorld()
     {
         return mcp_common::GetFirstContextWorld();
@@ -216,8 +218,9 @@ namespace UEAgentLightingImpl
     // =============================================================================================
 
     // light_enabled and light_mobility, plus the optional cast-shadows/affects-world pair and intensity;
-    // each caller picks the extras it reports.
-    void WriteLightStatus(const ULightComponent& Light, FJsonObject& Out, const bool bShadowSwitches, const bool bIntensity)
+    // each caller picks the extras it reports. Every field read here lives on ULightComponentBase, so a sky light
+    // reports them too.
+    void WriteLightStatus(const ULightComponentBase& Light, FJsonObject& Out, const bool bShadowSwitches, const bool bIntensity)
     {
         Out.SetBoolField(TEXT("light_enabled"), Light.IsVisible());
         if (bShadowSwitches)
@@ -490,7 +493,9 @@ namespace UEAgentLightingImpl
         return Variable->GetInt() > 0 ? TEXT("Dynamic") : TEXT("Static");
     }
 
-    // Per-light tallies of get_lighting_quality, accumulated in actor iteration order.
+    // Per-light tallies of get_lighting_quality, accumulated per light component in actor iteration order. A sky
+    // light is a ULightComponentBase but no ULightComponent (USkyLightComponent derives from the base directly),
+    // so the tally takes the base and counts sky lights apart from the four ULightComponent types.
     struct FLightTally
     {
         int32 Lights = 0;
@@ -498,6 +503,7 @@ namespace UEAgentLightingImpl
         int32 Point = 0;
         int32 Spot = 0;
         int32 Rect = 0;
+        int32 Sky = 0;
         int32 StaticMobility = 0;
         int32 StationaryMobility = 0;
         int32 MovableMobility = 0;
@@ -508,7 +514,7 @@ namespace UEAgentLightingImpl
         float IntensityMin = FLT_MAX;
         TArray<TSharedPtr<FJsonValue>> Details;
 
-        void Count(const AActor& Owner, const ULightComponent& Light)
+        void Count(const AActor& Owner, const ULightComponentBase& Light)
         {
             ++Lights;
 
@@ -529,6 +535,10 @@ namespace UEAgentLightingImpl
             {
                 ++Rect;
             }
+            else if (Light.IsA<USkyLightComponent>())
+            {
+                ++Sky;
+            }
 
             switch (Light.Mobility.GetValue())
             {
@@ -546,9 +556,13 @@ namespace UEAgentLightingImpl
             IntensityMax = FMath::Max(IntensityMax, Intensity);
             IntensityMin = FMath::Min(IntensityMin, Intensity);
 
+            // One entry per light component: an actor with several has several entries with the same light_name,
+            // told apart by light_component and light_component_class.
             TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
             Entry->SetStringField(TEXT("light_name"), Owner.GetName());
             Entry->SetStringField(TEXT("light_class"), Owner.GetClass()->GetName());
+            Entry->SetStringField(TEXT("light_component"), Light.GetName());
+            Entry->SetStringField(TEXT("light_component_class"), Light.GetClass()->GetName());
             WriteLightStatus(Light, *Entry, true, true);
             Entry->SetObjectField(TEXT("light_position"), mcp_common::VectorToJsonObject(Owner.GetActorLocation()));
             Entry->SetObjectField(TEXT("light_color"), mcp_common::LinearColorToJsonObject(FLinearColor(Light.LightColor)));
@@ -587,12 +601,17 @@ namespace UEAgentLightingImpl
         // There is no per-world switch to read: lighting is always reported as on.
         Report->SetBoolField(TEXT("lighting_enabled"), true);
 
+        // Every light component of every actor, sky lights included (see FLightTally).
         FLightTally Tally;
         for (AActor* Owner : TActorRange<AActor>(&World))
         {
-            if (const ULightComponent* Light = Owner->FindComponentByClass<ULightComponent>())
+            TInlineComponentArray<ULightComponentBase*> LightComponents(Owner);
+            for (const ULightComponentBase* Light : LightComponents)
             {
-                Tally.Count(*Owner, *Light);
+                if (Light != nullptr)
+                {
+                    Tally.Count(*Owner, *Light);
+                }
             }
         }
 
@@ -601,6 +620,7 @@ namespace UEAgentLightingImpl
         Report->SetNumberField(TEXT("point_light_count"), Tally.Point);
         Report->SetNumberField(TEXT("spot_light_count"), Tally.Spot);
         Report->SetNumberField(TEXT("rect_light_count"), Tally.Rect);
+        Report->SetNumberField(TEXT("sky_light_count"), Tally.Sky);
         Report->SetNumberField(TEXT("static_light_count"), Tally.StaticMobility);
         Report->SetNumberField(TEXT("stationary_light_count"), Tally.StationaryMobility);
         Report->SetNumberField(TEXT("movable_light_count"), Tally.MovableMobility);
@@ -1638,14 +1658,15 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
     return Reply;
 }
 
-// MCP:get_lighting_quality - Read-only census of the actors with a light component in the engine's first world context (normally the editor level): counts by type and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max, per-light light_details, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. Sky lights are not counted. For one light use get_light_properties, for lights near a point get_lighting_in_area.
-//   @returns { level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating }
+// MCP:get_lighting_quality - Read-only census of every light component in the editor world (the editor level, even while Play-in-Editor runs), sky lights included, an actor with several counting each: counts by type (sky_light_count among them) and mobility, shadow-casting and world-affecting counts, intensity total/average/min/max over all of them (a sky light's intensity is its scale), one light_details entry per component, plus r.LightingQuality and r.DynamicLighting. lighting_quality_score (0 to 1) and its rating are a heuristic of light count, shadow casters and type variety, not a measure of built lighting; nothing is built. For one light use get_light_properties, for lights near a point get_lighting_in_area.
+//   @returns { level_name, lighting_quality_found, lighting_quality_message, lighting_quality, lighting_type, lighting_enabled, light_name, light_class, light_component, light_component_class, light_intensity, light_enabled, light_cast_shadows, light_affect_world, light_mobility, x, y, z, r, g, b, a, light_count, directional_light_count, point_light_count, spot_light_count, rect_light_count, sky_light_count, static_light_count, stationary_light_count, movable_light_count, shadow_casting_light_count, world_affecting_light_count, total_intensity, average_intensity, max_intensity, min_intensity, light_details, lighting_quality_score, lighting_quality_rating } -- light_name and light_class are the owning actor's, light_component and light_component_class the component's
 TSharedPtr<FJsonObject> HandleGetLightingQuality(const TSharedPtr<FJsonObject>& Params)
 {
-    UWorld* World = UEAgentLightingImpl::FirstContextWorld();
-    if (!World)
+    // The editor world itself, not the engine's first world context, which nothing guarantees to be that world.
+    UWorld* World = nullptr;
+    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World, TEXT("No editor world: get_lighting_quality reads the editor level")))
     {
-        return mcp_common::MakeErrorReply(TEXT("No world found"));
+        return NoWorld;
     }
     return UEAgentLightingImpl::LightingQualityReport(*World);
 }

@@ -180,6 +180,7 @@ namespace UEAgentConfigImpl
             case EComponentCreationMethod::Native:                   return TEXT("Native");
             case EComponentCreationMethod::SimpleConstructionScript: return TEXT("SimpleConstructionScript");
             case EComponentCreationMethod::UserConstructionScript:   return TEXT("UserConstructionScript");
+            case EComponentCreationMethod::Instance:                 return TEXT("Instance");
             default:                                                 break;
         }
         return TEXT("Unknown");

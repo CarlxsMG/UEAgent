@@ -8,7 +8,7 @@
 
 *Destructive.*
 
-Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. An invalid projection_mode or a rejected post_process_settings is an error and nothing is created or written.
+Add a UCameraComponent to an actor placed in the editor world, found by name or label, optionally attaching it to a SpringArm (or any other USceneComponent) on the same actor; if the actor already has a camera component, that first one is configured instead, whatever its name, overwriting only the fields you pass. One undo step; the level is marked dirty, not saved. post_process_settings takes FPostProcessSettings property names, and each value it sets also turns on its bOverride_ flag so that it takes effect. An invalid projection_mode or a rejected post_process_settings (a key that names no property included) is an error and nothing is created or written.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Add a UCameraComponent to an actor placed in the editor world, found by name or 
 | `b_use_controller_view_rotation` | boolean | no | Optional bool. Match pawn control rotation. |
 | `b_use_pawn_control_rotation` | boolean | no | Optional bool. Alias for b_use_controller_view_rotation — sets UCameraComponent::bUsePawnControlRotation. |
 | `b_lock_to_hmd` | boolean | no | Optional bool. Lock orientation to the HMD. |
-| `post_process_settings` | object | no | Optional object (PostProcess fields, see get_camera_post_process for the schema). |
+| `post_process_settings` | object | no | Optional object of FPostProcessSettings fields by property name, e.g. {"BloomIntensity": 2}; each value also turns on its bOverride_ companion unless the object sets that companion itself; a key that names no property is an error. |
 | `post_process_blend_weight` | number | no | Optional float. Weight of post-process (0..1). 0 means post-process disabled. |
 
 **Returns:** `{ actor_name, component_name, parent_component, already_existed, applied_count, field_of_view, aspect_ratio, projection_mode, location: [x,y,z], rotation: [pitch,yaw,roll], post_process_blend_weight }`
@@ -300,14 +300,14 @@ Set the field of view (degrees, above 0 up to 180) of the camera component of an
 
 *Destructive, idempotent.*
 
-Sets parameters on a camera rig's RootNode by reflection, in one undo step, then saves the rig. FXxxCameraParameter props take the raw value (written to the nested .Value); other props set directly. Reads the stored values back. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
+Sets parameters on a camera rig's RootNode by reflection, all or nothing: every property is parsed first, and an unknown property or a value that does not fit fails the call, naming each one in failed, with nothing written or saved. FXxxCameraParameter props take the raw value, a bool or a number (a whole one for an integer), written to the nested .Value; other props set directly. Otherwise all of them are written in one undo step and the rig is saved; applied reads the stored values back. Values the root node already holds are a success with changed false, saved false and a note, and nothing is written or saved. A failed save fails the call, with saved false and save_error, and leaves the change in memory.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `camera_rig_path` | string | yes | /Game/... path to the UCameraRigAsset whose RootNode is edited (required) |
 | `properties` | object | yes | JSON object { PropertyName: value, ... } (e.g. {"FieldOfView": 90}) |
 
-**Returns:** `{ camera_rig_path, node_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error }`
+**Returns:** `{ camera_rig_path, node_class, changed, set:[name], failed:[{name, error}], applied:{name: stored_value_text}, saved, save_error, note }`
 
 ## `set_camera_post_process`
 
