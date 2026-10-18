@@ -4,6 +4,36 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.3 - 2026-10-18
+
+- A number outside the integer range a tool reads it into is refused before the tool runs, in every tool
+  and inside `batch`: the engine could not read it, and the tool went on with its default (a
+  `max_results` of 3000000000 became 1000). The catalog gives each of the 292 parameters read as an
+  integer its range (`intRange`).
+- A valid no-op succeeds without saving in the animation tools that still saved one: `add_anim_bone_track`
+  and `set_anim_bone_track_keys` (compared through the data model's content hash),
+  `add_anim_transform_curve`, `add_pose_to_pose_asset`, `collapse_montage_segments`,
+  `sort_montage_segments` and `refresh_anim_montage_cache`, which is undoable now.
+  `add_anim_transform_curve` no longer resets the sequence's sampling rate and per-platform overrides.
+- `set_anim_number_of_frames` also refuses a count that is not whole at a per-platform sampling rate, which
+  the engine `check()`s when it compresses for that platform.
+- Nothing is left half-written: a GameplayEffect, ability or cue setter whose save fails undoes its edit
+  (a `.uasset` read-only on disk is refused before it), `add_rigvm_link` leaves the graph as it was when
+  the link fails, and `set_camera_node_parameters` writes all of its properties or none (a value it could
+  not parse used to be written as 0 or false).
+- `remove_gameplay_effect_component` no longer writes the removed component back into the saved asset.
+- `add_chooser_column_to_table` keeps a Randomize column last, as the Chooser editor does.
+- `add_camera_component` turns on the `bOverride_` flag of each `post_process_settings` value it sets (a
+  value without it has no effect), and refuses a key that is not a post-process setting. The camera's
+  visualization components are created as instance components.
+- The MPCI tools reach the Play-in-Editor world (`world_label` `pie`, `server`, `client`, `pie:N` or the
+  PIE world's package name; a PIE world shares the editor world's object name), and every reply says which
+  world it reached. `inspect_subsystem_instance` and `list_local_player_subsystems` read the PIE game
+  instance and local player, through a new optional `world` parameter.
+- `get_lighting_quality` reads the editor world and counts every light component of an actor, sky lights
+  included; `find_nearest_ray_intersection_with_mesh` refuses a ray direction that cannot be normalized;
+  `get_component_properties` reported `Unknown` for an instance component's creation method.
+
 ## 1.2.2 - 2026-10-15
 
 - More calls that killed or hung the editor are refused before they touch anything:
