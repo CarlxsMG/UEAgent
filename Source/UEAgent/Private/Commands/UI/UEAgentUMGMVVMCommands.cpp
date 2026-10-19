@@ -124,6 +124,7 @@ namespace
             OutError = TEXT("Invalid Widget Blueprint");
             return false;
         }
+        UMGWidgetUtils::RegisterUntrackedWidgetVariables(WidgetBP);
         FKismetEditorUtilities::CompileBlueprint(WidgetBP, EBlueprintCompileOptions::SkipGarbageCollection);
         return mcp_common::SaveAssetPackage(WidgetBP->GetOutermost(), WidgetBP, OutError);
     }

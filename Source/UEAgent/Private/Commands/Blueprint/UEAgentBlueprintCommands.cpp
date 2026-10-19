@@ -59,6 +59,7 @@
 #include "JsonObjectConverter.h"   // FJsonObjectConverter::JsonValueToUProperty (same call shape as UEAgentAnimGraphCommands.cpp)
 #include "GameplayTagContainer.h"  // FGameplayTag / FGameplayTagContainer -- mirrors McpCommonUtils.cpp routing
 #include "UObject/UnrealType.h"    // FArrayProperty / FScriptArrayHelper / FDefaultConstructedPropertyElement (UnrealType.h)
+#include "Commands/UI/UMGWidgetUtils.h" // RegisterUntrackedWidgetVariables before a Widget Blueprint compiles
 
 /**
  * Blueprint asset commands: creation, compile and spawn, construction-script components and their
@@ -874,6 +875,10 @@ TSharedPtr<FJsonObject> HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Pa
     // compile). The log stays out of the output log unless the caller asked for the messages.
     FCompilerResultsLog Results;
     Results.SetSilentMode(!bReturnMessages);
+    if (UWidgetBlueprint* AsWidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint))
+    {
+        UMGWidgetUtils::RegisterUntrackedWidgetVariables(AsWidgetBlueprint);
+    }
     FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &Results);
 
     const bool bErrorFree = Results.NumErrors == 0;
