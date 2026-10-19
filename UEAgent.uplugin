@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 12,
-	"VersionName": "1.2.9",
+	"Version": 13,
+	"VersionName": "1.2.10",
 	"FriendlyName": "UEAgent",
 	"Description": "MCP server for Unreal Engine 5, served by the editor itself: about 2,100 tools for AI agents (Claude Code, Cursor, any MCP client), each call checked before it runs and re-read after.",
 	"Category": "Editor",

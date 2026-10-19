@@ -1485,6 +1485,7 @@ bool SaveWidgetBlueprint(UWidgetBlueprint* WidgetBP, FString& OutError, bool bSa
     }
 
     // Recompile so the generated class reflects the edited widget tree.
+    UMGWidgetUtils::RegisterUntrackedWidgetVariables(WidgetBP);
     FKismetEditorUtilities::CompileBlueprint(WidgetBP, EBlueprintCompileOptions::SkipGarbageCollection);
 
     return mcp_common::SaveAssetPackage(WidgetBP->GetOutermost(), WidgetBP, OutError);
@@ -5997,6 +5998,7 @@ TSharedPtr<FJsonObject> HandleScaffoldMenuScreen(const TSharedPtr<FJsonObject>& 
 
     // COMPILING HERE IS NOT OPTIONAL: the bound event resolves the widget as an FObjectProperty of
     // the generated class, so a freshly created widget does NOT EXIST for the binder until compiled.
+    UMGWidgetUtils::RegisterUntrackedWidgetVariables(WidgetBP);
     FKismetEditorUtilities::CompileBlueprint(WidgetBP, EBlueprintCompileOptions::None);
 
     // OnClicked of each button
@@ -6080,6 +6082,7 @@ TSharedPtr<FJsonObject> HandleScaffoldMenuScreen(const TSharedPtr<FJsonObject>& 
     if (bBindEvents)
     {
         FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+        UMGWidgetUtils::RegisterUntrackedWidgetVariables(WidgetBP);
         FKismetEditorUtilities::CompileBlueprint(WidgetBP, EBlueprintCompileOptions::None);
 
         // The verdict is RE-READ after compiling, never assumed from the node's creation.

@@ -7,10 +7,41 @@
 #include "EditorAssetLibrary.h"
 #include "Engine/LocalPlayer.h"
 #include "WidgetBlueprint.h"
+#include "Animation/WidgetAnimation.h"
+#include "Components/Widget.h"
 
 // UMG helpers shared by the widget, MVVM, level-widget and audit command families.
 namespace UMGWidgetUtils
 {
+    /**
+     * Gives every widget and animation of WidgetBP that has no variable GUID one, through
+     * UWidgetBlueprint::OnVariableAdded as the designer does when it adds a widget. The widget compiler fixes a
+     * missing GUID up itself, but behind an ensure (FWidgetBlueprintCompilerContext::ValidateAndFixUpVariableGuids),
+     * so a widget put in the tree without one (by a script, or by a tool before it registered its widgets) raised an
+     * ensure on every compile. An empty map is left alone: the compiler fills it without an ensure.
+     */
+    inline void RegisterUntrackedWidgetVariables(UWidgetBlueprint* WidgetBP)
+    {
+        if (!WidgetBP || WidgetBP->WidgetVariableNameToGuidMap.IsEmpty())
+        {
+            return;
+        }
+        WidgetBP->ForEachSourceWidget([WidgetBP](UWidget* Widget)
+        {
+            if (Widget && !WidgetBP->WidgetVariableNameToGuidMap.Contains(Widget->GetFName()))
+            {
+                WidgetBP->OnVariableAdded(Widget->GetFName());
+            }
+        });
+        for (UWidgetAnimation* Animation : WidgetBP->Animations)
+        {
+            if (Animation && !WidgetBP->WidgetVariableNameToGuidMap.Contains(Animation->GetFName()))
+            {
+                WidgetBP->OnVariableAdded(Animation->GetFName());
+            }
+        }
+    }
+
     /** The Widget Blueprint asset at the /Game path WidgetBPPath, or null with OutError saying why. */
     inline UWidgetBlueprint* LoadWidgetBlueprint(const FString& WidgetBPPath, FString& OutError)
     {

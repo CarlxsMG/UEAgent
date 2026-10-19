@@ -4,6 +4,12 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.10 - 2026-10-19
+
+- Compiling a Widget Blueprint no longer raises the engine's "widget was added but did not get a GUID" ensure: before
+  `compile_blueprint` or a widget tool compiles one, any widget or animation of its tree that has no variable GUID
+  (one a script put there, for instance) is registered as the designer registers a new widget.
+
 ## 1.2.9 - 2026-10-19
 
 - USD integer list ops (`inactiveIds` and other int, uint, int64 and uint64 list ops) read and write as JSON lists of
