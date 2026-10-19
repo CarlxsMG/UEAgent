@@ -185,11 +185,11 @@ Set the AGameModeBase::HUDClass UPROPERTY on the GameMode's CDO. A Blueprint Gam
 
 *Destructive, idempotent.*
 
-Set the AWorldSettings::DefaultGameMode override on the current editor world.
+Set the GameMode override in the World Settings of the current editor world (AWorldSettings::DefaultGameMode), the GameMode this level uses instead of the project default. game_mode_class can be a native class name, a /Script/ path or a Blueprint GameMode asset path, and must derive from AGameModeBase (AGameMode too; is_multiplayer says which). The World Settings actor is modified as part of the call's undo step and the level is marked dirty but not saved: persist it with save_level. Repeating the call leaves the same state (idempotent). An unknown or non-GameMode class, or no editor world, is an error. Clear it with reset_game_mode_override and read it back with get_game_mode_info; the GameMode's own class slots are set with set_game_mode_default_pawn and its siblings, and a GameMode Blueprint is made with create_game_mode_class_bp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `game_mode_class` | string | yes | AGameModeBase-derivative class name (short or /Script/ path) |
+| `game_mode_class` | string | yes | AGameModeBase-derivative class: a native short name (e.g. "GameModeBase"), a /Script/ path, or a Blueprint GameMode asset path (e.g. "/Game/Core/BP_MyGameMode") |
 
 **Returns:** `{ world_settings_path: string, default_game_mode: string, is_multiplayer: bool }`
 

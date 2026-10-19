@@ -375,10 +375,10 @@ TSharedPtr<FJsonObject> HandleAddCollectionScalarParam(const TSharedPtr<FJsonObj
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_collection_scalar_param"), SaveError);
 }
 
-// MCP:add_collection_vector_param - Append a vector RGBA parameter to a Material Parameter Collection
-//   @param collection_path - Full /Game path to the MPC asset
-//   @param param_name - Name of the new vector parameter
-//   @param default_value - Optional [r, g, b, a] default color, default [0,0,0,1]
+// MCP:add_collection_vector_param - Add a vector (RGBA color) parameter with a new GUID to a Material Parameter Collection asset found by content path, in one undo step, and save the asset; a new parameter changes the collection layout, so the engine recompiles the materials that use the collection. A vector of that name already there keeps its Id and has its default overwritten with default_value, or with [0, 0, 0, 1] when that is omitted, with already_existed=true. A collection that does not load is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. Scalars: add_collection_scalar_param; change a default: set_collection_param_default; take one out: remove_collection_param; read back: get_collection_info; per-world runtime values: set_mpci_vector_parameter_value.
+//   @param collection_path - Content path of the Material Parameter Collection asset, e.g. "/Game/MaterialCollections/MPC_Global"
+//   @param param_name - Name of the vector parameter to add, or whose default to update when the collection has it
+//   @param default_value - Optional [r, g, b, a] default color as floats, default [0,0,0,1]; a shorter array keeps 0 for missing color channels and 1 for alpha
 //   @returns { collection_path: string, param_name: string, param_type: string, param_added: bool, already_existed: bool, vector_count_before: int, vector_count: int, default: object, default_rgba: [number], id: string, saved: bool }
 TSharedPtr<FJsonObject> HandleAddCollectionVectorParam(const TSharedPtr<FJsonObject>& Params)
 {
@@ -992,7 +992,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollectionInstance(const TS
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_scalar_parameter_value - Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a scalar parameter of the collection; vectors: set_mpci_vector_parameter_value.
+// MCP:set_mpci_scalar_parameter_value - Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value and readback_ok report what the instance holds afterwards. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the scalar parameter to override
 //   @param value - New float value for the parameter

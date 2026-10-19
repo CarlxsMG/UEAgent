@@ -20,14 +20,14 @@ Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the 
 
 ## `end_behavior_on_actor`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Stop a UGameplayBehavior running on a Pawn in the editor world.
+Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every tracked behavior that is a behavior_class (subclasses included) gets EndBehavior with interrupted=true, and with behavior_class omitted every behavior on the pawn ends. behavior_class must be a full class path (a short name does not resolve), and one that does not resolve to a UGameplayBehavior subclass falls back silently to all of them; the reply behavior_class names the class used. ended carries the engine StopBehavior result, always false in UE 5.8, so it does not tell whether anything stopped. Runtime only: nothing is saved or undoable, and a repeat call finds nothing left to stop (idempotent). A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the Pawn actor in the editor world. |
-| `behavior_class` | string | no | Optional UGameplayBehavior subclass to stop; defaults to UGameplayBehavior (stop all). |
+| `behavior_class` | string | no | Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted, or a path that does not resolve, stops every behavior on the pawn |
 
 **Returns:** `{ actor_label: string, behavior_class: string, ended: bool }`
 
@@ -57,11 +57,11 @@ No parameters.
 
 *Read-only.*
 
-Enumerate every UGameplayBehaviorConfig asset under a package path via AssetRegistry.
+List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. There is no paging, and no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `package_path` | string | no | Optional path filter (default "/Game"). Pass "" to scan all. |
+| `package_path` | string | no | Optional content folder searched recursively (default "/Game"); an empty string also means /Game, so another mount point needs its own path |
 
 **Returns:** `{ package_path, total, configs:[{ config_path, config_name, behavior_class }] }`
 

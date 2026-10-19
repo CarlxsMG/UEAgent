@@ -119,12 +119,12 @@ Cancel one granted ability on an editor-world actor ability system component (Ca
 
 *Destructive, idempotent.*
 
-Set a GameplayAbility CDO's asset tags from a list of tag strings. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_activation_info; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component_asset_tags.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ability_blueprint_path` | string | yes | Full asset path of the GA Blueprint |
-| `asset_tags` | array | yes | List of gameplay tag strings, e.g. [Ability.Fire] |
+| `ability_blueprint_path` | string | yes | Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball". |
+| `asset_tags` | array | yes | Array of gameplay tag strings that becomes the whole asset-tag set, e.g. ["Ability.Fire", "Ability.Type.Magic"]; an empty array clears every asset tag. |
 
 **Returns:** `{ ability_blueprint_path: string, resolved_tags: [string], unknown_tags: [string], ability_tags: [string], tag_count: int, configured: bool }`
 
@@ -380,13 +380,13 @@ List every attribute of the attribute sets registered on the ability system comp
 
 *Read-only.*
 
-Read a GameplayCueNotify Blueprint CDO: variant, tag and (Actor/Looping) lifetime props
+Read the class default object of a GameplayCueNotify Blueprint, loaded by asset path: notify_type (Static, Burst, Actor or Looping), its direct parent_class, GameplayCueTag, GameplayCueName and IsOverride. The lifetime and instancing fields come back only for Actor and Looping notifies; a Static or Burst reply leaves them out. Read-only and editor-time: it writes nothing and needs no PIE or actor. A missing asset or a Blueprint that is not a GameplayCueNotify is an error. Use it to check a notify before or after editing it with set_gameplay_cue_notify_static_properties, set_gameplay_cue_notify_burst_properties, set_gameplay_cue_notify_actor_properties or set_gameplay_cue_notify_looping_properties; a new one: create_gameplay_cue_notify_static or create_gameplay_cue_notify_looping.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify Blueprint (Static/Burst/Actor/Looping) |
+| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify Blueprint (Static/Burst/Actor/Looping), e.g. "/Game/GAS/Cues/GCN_Hit". |
 
-**Returns:** `{ cue_notify_path: string, parent_class: string, notify_type: string, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, auto_destroy_on_remove: bool, auto_destroy_delay: number, auto_attach_to_owner: bool, unique_instance_per_instigator: bool, unique_instance_per_source_object: bool, allow_multiple_on_active_events: bool, allow_multiple_while_active_events: bool, num_preallocated_instances: int }`
+**Returns:** `{ cue_notify_path: string, parent_class: string, notify_type: string, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, auto_destroy_on_remove?: bool, auto_destroy_delay?: number, auto_attach_to_owner?: bool, unique_instance_per_instigator?: bool, unique_instance_per_source_object?: bool, allow_multiple_on_active_events?: bool, allow_multiple_while_active_events?: bool, num_preallocated_instances?: int }`
 
 ## `get_gameplay_effect_components`
 
@@ -538,12 +538,12 @@ Sends a FGameplayEvent to the target actor's UAbilitySystemComponent via UAbilit
 
 *Destructive, idempotent.*
 
-Set the Cooldown GameplayEffect class on a GameplayAbility CDO (gates re-use until it expires). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Point CooldownGameplayEffectClass on the class default object of a GameplayAbility Blueprint at the generated class of a GameplayEffect Blueprint, both loaded by asset path, then save the ability without recompiling. That effect is applied when the ability commits and the tags it grants block re-activation while it lasts, so give it a duration with set_gameplay_effect_duration and a cooldown tag with set_gameplay_effect_component_target_tags. Any cooldown class already set is overwritten, and every call writes and saves, even with the same class; there is no way to clear it here. A path that is not a GameplayAbility or GameplayEffect Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The cost effect: set_ability_cost; a new effect: create_gameplay_effect_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `ability_blueprint_path` | string | yes | Full asset path of the GameplayAbility Blueprint |
-| `cooldown_effect_path` | string | no | Full asset path of the GameplayEffect Blueprint to use as the cooldown (typically HasDuration) |
+| `ability_blueprint_path` | string | yes | Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball". |
+| `cooldown_effect_path` | string | no | Asset path of the GameplayEffect Blueprint used as the cooldown, e.g. "/Game/GAS/Effects/GE_Cooldown_Fireball"; typically a HasDuration effect. |
 
 **Returns:** `{ ability_blueprint_path: string, cooldown_effect_path: string, cooldown_effect_class: string, cooldown_effect_class_matches: bool, set: bool }`
 
@@ -627,11 +627,11 @@ Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO 
 
 *Destructive, idempotent.*
 
-Set GameplayCueTag + Actor lifetime/instancing/override props on an AGameplayCueNotify_Looping Blueprint CDO. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Looping Blueprint, then save it without recompiling. Properties left out keep their values, and every call writes and saves even when nothing differs; properties_set counts the ones given. Passing none, an unregistered tag or a Blueprint that is not a Looping notify is an error and nothing is written. The looping and application effects (particles, sounds) are not authored, as the note says. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. A plain Actor notify: set_gameplay_cue_notify_actor_properties; Static or Burst: set_gameplay_cue_notify_static_properties or set_gameplay_cue_notify_burst_properties; read back: get_gameplay_cue_notify_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify_Looping Blueprint |
+| `cue_notify_path` | string | yes | Full asset path of the GameplayCueNotify_Looping Blueprint, e.g. "/Game/GAS/Cues/GCN_Aura". |
 | `gameplay_cue_tag` | string | no | Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error |
 | `auto_destroy_on_remove` | boolean | no | Optional bool: auto recycle/destroy when OnRemove fires |
 | `auto_destroy_delay` | number | no | Optional float: seconds to stay alive before auto-destroy (needs auto_destroy_on_remove) |
@@ -795,7 +795,7 @@ Switch an existing GE modifier's magnitude to AttributeBased (scales off a captu
 
 *Destructive, idempotent.*
 
-Switch a GE modifier's magnitude to AttributeBased with the channel-terminated calculation policy (AttributeMagnitudeEvaluatedUpToChannel + FinalChannel). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one using the AttributeMagnitudeEvaluatedUpToChannel policy: backing_attribute, captured from attribute_source, is evaluated only through mod channel final_channel (0-9), then scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. An unknown attribute, a bad attribute_source or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The other three policies: set_gameplay_effect_modifier_attribute_based; refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -845,7 +845,7 @@ Set the Source/Target tag filters on a GE modifier whose magnitude is already At
 
 *Destructive, idempotent.*
 
-Switch an existing GE modifier's magnitude to CustomCalculationClass (a UGameplayModMagnitudeCalculation subclass computes it). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with a CustomCalculationClass one: calculation_class computes the base value, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole (a FinalLookupCurve included), and omitted coefficients take their defaults, not the old values. An unknown, abstract or non-UGameplayModMagnitudeCalculation class, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Make the class with create_gameplay_mod_magnitude_calculation_blueprint, add a lookup curve with set_gameplay_effect_modifier_custom_curve; other magnitudes: set_gameplay_effect_modifier_attribute_based, set_gameplay_effect_modifier_set_by_caller.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -906,7 +906,7 @@ Set Period (seconds between periodic executions, 0 = not periodic) and bExecuteP
 
 *Destructive, idempotent.*
 
-Set the stacking policy on a GameplayEffect CDO (StackingType + limit + refresh/reset policies). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Write the stacking policy on the class default object of a GameplayEffect Blueprint, loaded by asset path: StackingType always, and StackLimitCount, StackDurationRefreshPolicy and StackPeriodResetPolicy only when given (omitted ones keep their values), then save it without recompiling. Policy strings match case-insensitively. Every call writes and saves, even with the same values; stacking_type, stack_limit and stacking_matches are read back. An unknown stacking_type or policy, a non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Stacking only matters for effects that last: give it a duration with set_gameplay_effect_duration and a tick with set_gameplay_effect_period; the modifiers are add_gameplay_effect_modifier.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

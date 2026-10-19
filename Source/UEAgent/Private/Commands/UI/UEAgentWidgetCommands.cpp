@@ -1724,11 +1724,11 @@ TSharedPtr<FJsonObject> WidgetToTreeJson(UWidget* Widget, const FTreeDumpOptions
 // ---------------------------------------------------------------------------
 // create_widget_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_widget_blueprint - Create (and save) a new UWidgetBlueprint asset with a CanvasPanel root.
+// MCP:create_widget_blueprint - Create a UWidgetBlueprint at package_path/name with the editor Widget Blueprint factory, parented to parent_class (a class path such as /Game/UI/WBP_Base.WBP_Base_C, or a short class name), give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: a Widget Blueprint already there is returned untouched (created=false, already_existed=true) with nothing compiled or saved, and its parent is not checked against parent_class, which that reply only echoes. A parent that is not a UUserWidget subclass, an invalid path, or another kind of asset at that path is an error. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Then add widgets with add_widget_to_blueprint and read the tree with get_widget_blueprint_tree; an Editor Utility Widget is create_editor_utility_widget_blueprint.
 //   @param package_path - /Game folder to create the asset in (e.g. /Game/UI)
-//   @param name - Asset name (no extension)
+//   @param name - Asset name (no extension), e.g. "WBP_MainMenu"; with package_path it gives the asset path.
 //   @param parent_class - Parent UUserWidget subclass (default "UUserWidget").
-//   @returns { name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created: bool, root_widget: string, root_widget_class: string, saved: bool, save_error: string }
+//   @returns { name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created?: bool, root_widget: string, root_widget_class: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {

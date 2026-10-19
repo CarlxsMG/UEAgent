@@ -578,8 +578,8 @@ namespace UEAgentOptimizationImpl
 
 // Cost analysis
 
-// MCP:analyze_asset_performance - Analyzes an asset's performance characteristics including geometry, textures, and material complexity.
-//   @param asset_path - The path to the asset in the asset registry.
+// MCP:analyze_asset_performance - Grade one asset Good, Fair or Poor against fixed thresholds, without changing it: the path is looked up in the asset registry and the asset loaded synchronously. Static meshes are graded on triangles summed over all render LODs (above 50k Fair, above 100k Poor), Texture2D on resolution (above 2K, above 4K), materials and instances on parameter count (above 25, above 50); fewer than 2 LODs or mips, a mesh or texture package over 50 MB and over 10 texture parameters only add performance_issues. Other classes get performance_rating Unknown. suggestions is fixed advice per class, not derived from the numbers; texture_sample_count counts texture parameters and instruction_count is always 0. A path missing from the registry or failing to load is an error. Many assets: analyze_assets_performance_batch; a verdict: check_asset_optimization; shader stats: get_material_stats; memory: get_asset_memory_usage.
+//   @param asset_path - Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows
 //   @returns { asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, optimization_type: string, lod_count?: number, triangle_count?: number, vertex_count?: number, section_count?: number, performance_rating: string, performance_issues: [string], suggestions: [string], width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number, instruction_count?: number }
 
 TSharedPtr<FJsonObject> HandleAnalyzeAssetPerformance(const TSharedPtr<FJsonObject>& Params)
@@ -672,8 +672,8 @@ TSharedPtr<FJsonObject> HandleAnalyzeAssetsPerformanceBatch(const TSharedPtr<FJs
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_asset_memory_usage - Calculates estimated memory usage for an asset including file size and runtime memory consumption.
-//   @param asset_path - The path to the asset in the asset registry.
+// MCP:get_asset_memory_usage - Estimate the memory one asset needs from simple formulas, not a measurement, without changing it; the asset is found in the asset registry and loaded. Static meshes count 24-byte vectors, three per triangle plus one per vertex, over all render LODs; Texture2D 4 bytes per texel over the whole mip chain, whatever the compression; materials and instances 1 KB per parameter; any other class reports its package size. memory_usage bands the estimate per class (Low, Medium, High, Very High; Unknown for other classes) and optimization_tips is one fixed line per class. file_size_bytes is the package file on disk, 0 when there is none. A path missing from the registry or failing to load is an error. The disk size alone is get_asset_disk_size, a graded report analyze_asset_performance, the whole editor's memory get_memory_usage.
+//   @param asset_path - Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows
 //   @returns { asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, memory_type: string, lod_count?: number, triangle_count?: number, vertex_count?: number, section_count?: number, estimated_memory_usage_bytes: number, estimated_memory_usage_mb: number, memory_usage: string, optimization_tips: string, width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number }
 
 TSharedPtr<FJsonObject> HandleGetAssetMemoryUsage(const TSharedPtr<FJsonObject>& Params)
@@ -738,8 +738,8 @@ TSharedPtr<FJsonObject> HandleGetAssetMemoryUsage(const TSharedPtr<FJsonObject>&
     return Footprint;
 }
 
-// MCP:check_asset_optimization - Checks if an asset meets optimization standards and returns detailed optimization status with issues and recommendations.
-//   @param asset_path - The path to the asset in the asset registry.
+// MCP:check_asset_optimization - Check one asset against fixed optimization thresholds and return a verdict, without changing it; the asset is found in the asset registry and loaded. Static meshes: LOD count (under 2 severe, under 3 mild), triangles over all render LODs (above 100k, above 50k) and package size (above 50 MB, above 10 MB). Texture2D: resolution (above 4K, above 2K), mips (under 2, under 4), package size and an advisory note for the TC_Default preset. Materials and instances: parameters (above 50, above 25) and texture parameters (above 10, above 5). Other classes: package size only. is_optimized turns false on any severe finding, optimization_status is the worst tier (Good, Fair, Poor), and issues pair one to one with recommendations. A path missing from the registry or failing to load is an error. Graded stats: analyze_asset_performance; more advice: suggest_asset_optimizations; fixes: set_asset_lod_settings, set_asset_compression.
+//   @param asset_path - Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows
 //   @returns { asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, is_optimized: bool, optimization_status: string, issues: [string], recommendations: [string], lod_count?: number, triangle_count?: number, vertex_count?: number, width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number }
 
 TSharedPtr<FJsonObject> HandleCheckAssetOptimization(const TSharedPtr<FJsonObject>& Params)
@@ -805,8 +805,8 @@ TSharedPtr<FJsonObject> HandleCheckAssetOptimization(const TSharedPtr<FJsonObjec
     return Findings;
 }
 
-// MCP:suggest_asset_optimizations - Generates detailed optimization suggestions for an asset categorized by criticality, performance, and memory impact.
-//   @param asset_path - The path to the asset in the asset registry.
+// MCP:suggest_asset_optimizations - List optimization advice for one asset, without changing it; the asset is found in the asset registry and loaded. critical_suggestions come from thresholds: a static mesh with fewer than 2 render LODs or over 100k triangles across them, a Texture2D above 4K or with fewer than 2 mips, a material or instance with over 50 parameters or over 10 texture parameters, and any package over 50 MB. performance_suggestions and memory_suggestions are fixed advice per class plus package-size notes above 10 MB, and suggestions joins all of them with eight generic lines every asset gets; other classes get a not-analyzed note instead of class advice. A path missing from the registry or failing to load is an error. For a pass/fail verdict use check_asset_optimization, for graded stats analyze_asset_performance.
+//   @param asset_path - Object path ("/Game/Meshes/SM_Rock.SM_Rock") or package path ("/Game/Meshes/SM_Rock") of an asset the asset registry knows
 //   @returns { asset_path: string, asset_class: string, file_size_bytes: number, file_size_mb: number, suggestions: [string], critical_suggestions: [string], performance_suggestions: [string], memory_suggestions: [string], lod_count?: number, triangle_count?: number, vertex_count?: number, width?: number, height?: number, mip_count?: number, compression_settings?: string, pixel_format?: string, parameter_count?: number, texture_sample_count?: number }
 
 TSharedPtr<FJsonObject> HandleSuggestAssetOptimizations(const TSharedPtr<FJsonObject>& Params)

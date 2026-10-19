@@ -214,9 +214,9 @@ TSharedPtr<FJsonObject> HandleReimportAsset(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_asset_import_data - Read an asset's UAssetImportData: source filename(s) and import timestamp.  Returns has_import_data, source_file (first resolved filename), the full source_files list (relative + resolved filename + import_time), and source_file_count.
-//   @param asset_path - Object path of the asset, e.g. /Game/Imported/MyTex.MyTex.
-//   @returns { asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time: string }
+// MCP:get_asset_import_data - Read the source-file record (UAssetImportData) of an asset loaded by path: the file(s) it was imported from, as stored and resolved to absolute paths, with each file's import timestamp. Works for textures, sound waves and any class with an AssetImportData property (static and skeletal meshes, animation sequences). An asset that has none is a success with has_import_data=false, empty source_file and source_files, source_file_count 0 and no import_time. source_file is the first resolved file and import_time the first file's timestamp. Read-only: the asset is loaded if needed, not changed. An asset that does not load is an error. Interchange pipelines and node data: interchange_get_asset_import_data; reimport from the recorded file: reimport_asset or interchange_reimport_asset.
+//   @param asset_path - Asset path in object form, e.g. "/Game/Imported/T_Rock.T_Rock", or package form "/Game/Imported/T_Rock".
+//   @returns { asset_path: string, asset_class: string, has_import_data: bool, source_file: string, source_files: [{relative_filename, resolved_filename, import_time}], source_file_count: int, import_time?: string }
 
 TSharedPtr<FJsonObject> HandleGetAssetImportData(const TSharedPtr<FJsonObject>& Params)
 {

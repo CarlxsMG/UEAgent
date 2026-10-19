@@ -149,16 +149,16 @@ Create a curve asset (CurveFloat, CurveVector or CurveLinearColor) -- a reusable
 
 ## `create_curve_table`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a new UCurveTable asset (a table of named rich-curve rows).
+Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a curve table already at that path, a composite one included, is returned untouched with created=false and already_exists=true; any other asset there, or an invalid package name, is an error. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Name of the new CurveTable asset. |
-| `package_path` | string | no | Content folder for the asset; defaults to /Game/CurveTables |
+| `name` | string | yes | Name of the new CurveTable asset, e.g. "CT_Damage"; also the last segment of its path. |
+| `package_path` | string | no | Content folder for the asset, e.g. "/Game/Data"; defaults to /Game/CurveTables |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, message: string }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, message?: string }`
 
 ## `create_data_asset`
 
@@ -278,15 +278,15 @@ Export a whole DataTable to CSV with the native exporter (read-only), returning 
 
 ## `export_data_table_as_json`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Export a whole DataTable to JSON with the native exporter (read-only), so TMap&lt;Enum,SoftClass>, soft references and GameplayTags survive, unlike get_data_table_rows. Returns row_struct, row_count and the json string (an array of row objects), optionally also written to a UTF-8 file.
+Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap&lt;Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row_as_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable. |
-| `data_table` | string | no | Alias of table_path: pass one of the two. |
-| `file_path` | string | no | Optional OS path to also write the JSON string to (echoed back as written_to) |
+| `data_table` | string | no | Alias of table_path; it is read first, so it wins when both are given. |
+| `file_path` | string | no | Optional OS file path; the JSON is also written there as UTF-8, overwriting an existing file, and echoed back as written_to |
 
 **Returns:** `{ table_path, row_struct, row_count, json, written_to? }`
 
@@ -341,11 +341,11 @@ Read every keyframe of a curve asset -- time, value and interpolation mode, grou
 
 *Read-only.*
 
-Get info about a UCurveTable: each row's name + key count, plus mode.
+Read a UCurveTable or UCompositeCurveTable asset found by content path: its class, its mode (Empty, SimpleCurves or RichCurves) and every row with its name and key count; for a composite, the rows are the ones merged from its parent tables, and parent_count says how many it stacks. Key times and values are not returned. Nothing is written; a path that does not load as a curve table is an error. Write rows and keys with add_curve_table_row, add_curve_table_key, remove_curve_table_key, rename_curve_table_row and delete_curve_table_row; a DataTable is read with get_data_table_info, a standalone curve asset with get_curve_keys.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `curve_table_path` | string | yes | Full asset path to the UCurveTable (or UCompositeCurveTable). |
+| `curve_table_path` | string | yes | Content path of the UCurveTable (or UCompositeCurveTable), e.g. "/Game/CurveTables/CT_Damage". |
 
 **Returns:** `{ curve_table_path: string, curve_table_name: string, curve_class: string, curve_table_mode: string, rows: [{ name, key_count }], row_count: int, is_composite: bool, parent_count?: int }`
 
@@ -416,11 +416,11 @@ Read one column across every row of a DataTable as ExportText strings, so TMaps,
 
 *Read-only.*
 
-Retrieves detailed information about a DataTable, including all row names. When the asset is a UCompositeDataTable (see table_class) the reported row_count is the ALREADY-MERGED map, so the response additionally explains where those rows come from: parent_tables[] in precedence order, merged_row_count vs sum_parent_row_counts, shadowed_rows[] with the winning parent, and parent_row_struct_mismatch[] for parents the engine silently skips.
+Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, get_data_table_row or read_data_table_row_complex; one column: get_data_table_column; build a composite: create_composite_data_table.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | The full asset path to the DataTable. |
+| `table_path` | string | yes | The full asset path to the DataTable or UCompositeDataTable, e.g. "/Game/Data/DT_Items". |
 | `include_row_sources` | boolean | no | Composite tables only. Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables. |
 
 **Returns:** `{ table_path, table_name, table_class, row_struct, row_count, row_names, columns:[{ name, type, is_map, is_soft, is_tag }] } plus, for a UCompositeDataTable: { parent_tables:[{ index, path, name, table_class, row_struct, row_count, row_struct_matches, contributes, null_entry }], parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch:[], shadowed_rows:[{ row_name, winner, winner_parent_slot, shadowed_by_winner:[] }], shadowed_row_count, row_sources_included, row_sources? }`
@@ -503,13 +503,13 @@ Bulk-load a DataTable from a CSV string -- the fast path for authoring or restor
 
 ## `initialize_data_registry`
 
-*Destructive.*
+*Additive, idempotent.*
 
-Load, register, and initialize a UDataRegistry on the subsystem.  Calls UDataRegistrySubsystem::LoadRegistryPath so the registry's sources become live. Precached DataTable sources are cached for synchronous gets.
+Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). registered and initialized describe the registry the subsystem holds for this asset's registry_type afterwards -- with two assets of one type that can be the other one -- and loaded only says the path is on the load list. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `registry_path` | string | yes | Content path to the UDataRegistry asset. |
+| `registry_path` | string | yes | Path of the UDataRegistry asset, e.g. "/Game/Data/DR_Items" or "/Game/Data/DR_Items.DR_Items". |
 
 **Returns:** `{ registry_path: string, registry_type: string, success: bool, loaded: bool, registered: bool, initialized: bool }`
 
@@ -796,15 +796,15 @@ Upsert many DataTable rows with one native JSON import and one save, each deep-m
 
 *Destructive, idempotent.*
 
-Set a Key to SourceString entry in a UStringTable (upsert)
+Set the source string of key in a UStringTable asset loaded by path, adding the entry when the key is new (created=true) or overwriting its source string when it exists (updated=true, its metadata kept), in one undo step, then save the asset. Every call writes and saves, even with the same string; entry_set and verified both mean the read-back matched. The key must not be empty: an empty one is not refused here and trips an engine assertion that stops the editor. A missing table is an error. A failed save, as during PIE, still answers success, with saved=false and a message, and the entry set in memory only. Create the table with create_string_table; list entries with get_string_table_entries; take one out with remove_string_table_entry; per-entry metadata: set_string_table_metadata.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `string_table_path` | string | yes | Full asset path to the UStringTable |
-| `key` | string | yes | Entry key to upsert |
-| `source_string` | string | yes | Source string for the key |
+| `string_table_path` | string | yes | Asset path of the UStringTable, e.g. "/Game/StringTables/ST_UI". |
+| `key` | string | yes | Entry key, unique within the table and never empty, e.g. "Menu_Play"; an existing key gets the new source string. |
+| `source_string` | string | yes | Source text for the key, e.g. "Play"; an empty string is accepted. |
 
-**Returns:** `{ string_table_path: string, key: string, source_string: string, entry_set: bool, verified: bool, created: bool, updated: bool, namespace: string, entry_count: int, saved: bool }`
+**Returns:** `{ string_table_path: string, key: string, source_string: string, entry_set: bool, verified: bool, created: bool, updated: bool, namespace: string, entry_count: int, saved: bool, message?: string }`
 
 ## `set_string_table_metadata`
 

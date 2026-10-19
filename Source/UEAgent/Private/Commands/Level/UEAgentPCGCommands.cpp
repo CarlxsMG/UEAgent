@@ -371,10 +371,10 @@ namespace
 // saves it. Uses CreatePackage + NewObject<UPCGGraph> (the PCGGraphFactory lives
 // in the PCGEditor module and is not needed here; UPCGGraph has no modal setup).
 // ---------------------------------------------------------------------------
-// MCP:create_pcg_graph - Creates (or loads, idempotently) a UPCGGraph asset and saves it.  Uses CreatePackage + NewObject<UPCGGraph> (headless-safe). A fresh PCG graph has the implicit Input/Output nodes; node_count counts user-added nodes only (initially 0). Requires the PCG plugin to be enabled.
-//   @param name - Name of the PCG Graph asset to create.
-//   @param package_path - Destination /Game folder (default /Game/PCG).
-//   @returns { graph_name: string, asset_path: string, created: bool, already_exists: bool, node_count: int, saved: bool, save_error: string }
+// MCP:create_pcg_graph - Create an empty UPCGGraph asset at package_path/name and save it, or return the UPCGGraph already there unchanged (created=false, already_exists=true, nothing saved), so repeat calls are idempotent. A fresh graph holds only its implicit Input and Output nodes, which node_count leaves out (0). Another asset class at that path, or an invalid path, is an error; a failed save, as during PIE, makes success false with save_error. No undo step is recorded. Requires the PCG plugin. Next: add nodes with add_pcg_node (types from list_pcg_node_types), wire them with connect_pcg_nodes, expose tunables with add_pcg_graph_parameter, read back with get_pcg_graph_info, and use it in the level through spawn_pcg_volume or add_pcg_component.
+//   @param name - Name of the PCG Graph asset to create; the object path becomes package_path/name.name.
+//   @param package_path - Destination /Game folder (default /Game/PCG); a trailing slash is ignored.
+//   @returns { graph_name: string, asset_path: string, created: bool, already_exists?: bool, node_count: int, saved?: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreatePCGGraph(const TSharedPtr<FJsonObject>& Params)
 {

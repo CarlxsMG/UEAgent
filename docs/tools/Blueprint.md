@@ -1044,13 +1044,13 @@ Enumerate the functions/events that a Blueprint deriving from a class could over
 
 *Read-only.*
 
-List Editor Utility Blueprints that are scripted Asset/Actor Action Utilities
+List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_asset_action_utility or create_actor_action_utility; Editor Utility Widgets: list_editor_utility_widgets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | no | Optional content path to search under (default /Game) |
+| `path` | string | no | Content folder to search, subfolders included, e.g. "/Game/EditorTools", without a trailing slash (default /Game). |
 
-**Returns:** `{ name, path, package_name, kind, parent_class, search_path, count, utilities }`
+**Returns:** `{ search_path: string, count: int, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }`
 
 ## `list_widget_bound_events`
 
@@ -1278,12 +1278,12 @@ Guarded, rollback-capable Blueprint reparent -- PREFER THIS OVER the raw reparen
 
 *Destructive.*
 
-Run (or introspect) a scripted action on an Asset/Actor Action Utility
+Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on its class default object, as the right-click menu would but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, or a utility with no actions is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `utility_path` | string | yes | Object path of the utility blueprint, e.g. |
-| `function_name` | string | no | CallInEditor action to run (default first action) |
+| `utility_path` | string | yes | Asset path of the utility Blueprint, e.g. "/Game/EditorTools/EUA_RenameTextures" (the object path form also works). |
+| `function_name` | string | no | Name of the CallInEditor action to run, case-insensitive; when absent the first action found on the class runs. |
 
 **Returns:** `{ utility_path, kind, generated_class, action_functions, function_name, function_found, invoked, note }`
 
@@ -1291,11 +1291,11 @@ Run (or introspect) a scripted action on an Asset/Actor Action Utility
 
 *Destructive.*
 
-Spawn and register an Editor Utility Widget Blueprint as an editor tab
+Open an Editor Utility Widget Blueprint (by asset path) as an editor tab through UEditorUtilitySubsystem: register its tab spawner and invoke the tab, which creates the widget and so runs whatever its Blueprint does on construct. The tab ID is the asset path plus _ActiveTab, so a repeat call brings back the same tab instead of adding a second one. Nothing is saved. widget_spawned is false when no live widget came back; in a commandlet nothing is registered and tab_id is empty. A missing asset, or one that is not an Editor Utility Widget Blueprint, is an error. Create one with create_editor_utility_widget_blueprint; find them with list_editor_utility_widgets; right-click actions: run_asset_action_utility.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_blueprint_path` | string | yes | /Game path of the Editor Utility Widget Blueprint |
+| `widget_blueprint_path` | string | yes | Asset path of the Editor Utility Widget Blueprint, e.g. "/Game/EditorTools/EUW_Tools" (the object path form also works). |
 
 **Returns:** `{ widget_blueprint_path, asset_path, tab_id, registration_name, registered, tab_exists, widget_spawned }`
 

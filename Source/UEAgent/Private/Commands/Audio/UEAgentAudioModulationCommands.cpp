@@ -386,8 +386,8 @@ TSharedPtr<FJsonObject> HandleCreateModulationGeneratorLFO(
 // ---------------------------------------------------------------------------
 // get_modulation_info
 // ---------------------------------------------------------------------------
-// MCP:get_modulation_info - Reads a USoundControlBus asset and its live value in the editor world, without changing anything. Returns bus_path, default_value, current_value (the live modulator value; the engine returns 1.0 for a bus that is not active) and subsystem_active (whether the editor world has a modulation manager).
-//   @param bus_path - Asset path to the USoundControlBus
+// MCP:get_modulation_info - Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
+//   @param bus_path - Asset path to the USoundControlBus, e.g. "/Game/Audio/Bus_Music.Bus_Music"
 //   @returns { bus_path, default_value, current_value, subsystem_active }
 TSharedPtr<FJsonObject> HandleGetModulationInfo(
 	const TSharedPtr<FJsonObject>& Params)
@@ -846,9 +846,9 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchOutputParameter(
 // ---------------------------------------------------------------------------
 // get_sound_modulation_patch_info
 // ---------------------------------------------------------------------------
-// MCP:get_sound_modulation_patch_info - Reads a USoundModulationPatch asset without changing it. Returns patch_path, bBypass, output_parameter ({ path, class }, or null when unset), inputs (one { bus: { path }, name } per input; name is always empty) and input_count.
-//   @param patch_path - Asset path to the USoundModulationPatch
-//   @returns { patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path } }], input_count }
+// MCP:get_sound_modulation_patch_info - Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_modulation_info and the output parameter with get_modulation_parameter_info.
+//   @param patch_path - Asset path to the USoundModulationPatch, e.g. "/Game/Audio/Patch_Duck.Patch_Duck"
+//   @returns { patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path }, name }], input_count }
 TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {

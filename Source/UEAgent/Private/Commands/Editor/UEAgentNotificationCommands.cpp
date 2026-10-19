@@ -67,11 +67,12 @@ namespace
 // ---------------------------------------------------------------------------
 // show_notification
 // ---------------------------------------------------------------------------
-// MCP:show_notification - Show a fire-and-forget toast in the editor (Slate notification manager) with a message, an optional completion state and a lifetime in seconds. Returns shown and echoes message, completion_state and duration; an unrecognized completion_state silently falls back to None. Changes nothing else.
-//   @param message - The text to display in the notification.
+// MCP:show_notification - Show a transient toast in the editor through the Slate notification manager: message, an optional completion state icon and a lifetime in seconds, after which it fades on its own. completion_state is matched without case, and anything other than Pending, Success or Fail shows no state; the reply echoes it as sent, not as applied. Each call shows another toast, so it is not idempotent, and nothing else changes: no asset, log line or undo step. shown is false when the notification manager returned no toast, and the call still succeeds. An empty or missing message is an error. For a record that stays use print_to_output_log or add_message_log_entry.
+//   @param message - The text to display in the notification; empty is an error.
 //   @param completion_state - Completion state, case-insensitive: "None" (default), "Pending", "Success" or "Fail"; any other value counts as "None".
-//   @param duration - Notification lifetime in seconds (default 4.0).
+//   @param duration - Notification lifetime in seconds before it fades (default 4.0); the value is not validated.
 //   @returns { shown: bool, message: string, completion_state: string, duration: float }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandleShowNotification(const TSharedPtr<FJsonObject>& Params)
 {
@@ -158,10 +159,11 @@ TSharedPtr<FJsonObject> HandleShowNotification(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // print_to_output_log
 // ---------------------------------------------------------------------------
-// MCP:print_to_output_log - Print a message to the Unreal Output Log via UE_LOG(LogTemp, ...).
-//   @param message - The text to log.
-//   @param verbosity - UE_LOG verbosity: "Log" (default), "Warning", "Error".
+// MCP:print_to_output_log - Write one line to the editor Output Log under the LogTemp category, at Log, Warning or Error verbosity; verbosity is matched without case, anything else logs at Log, and the reply's verbosity is the level actually used. An empty or missing message is an error. Each call appends another line, so it is not idempotent, and nothing else changes: no asset, no undo step, no Message Log entry; like any UE_LOG line it also reaches the editor log file. Use it to mark a point in the log between other calls; read lines back with get_output_log_lines; a listing in Window > Message Log is add_message_log_entry, an on-screen toast show_notification.
+//   @param message - The text to log; empty is an error.
+//   @param verbosity - UE_LOG verbosity: "Log" (default), "Warning", "Error"; matched without case, and any other value logs at Log.
 //   @returns { logged: bool, message: string, verbosity: string }
+//   @hints additive
 
 TSharedPtr<FJsonObject> HandlePrintToOutputLog(const TSharedPtr<FJsonObject>& Params)
 {

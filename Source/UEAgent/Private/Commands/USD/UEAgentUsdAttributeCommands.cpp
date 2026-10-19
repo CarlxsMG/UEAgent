@@ -288,12 +288,12 @@ TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_usd_attribute_value
 // ---------------------------------------------------------------------------
-// MCP:get_usd_attribute_value - Read a USD attribute's value at a time code
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - Target prim path
-//   @param attr_name [string!] - Attribute name to read
-//   @param time [number] - Optional time code (default: unset = static default)
-//   @returns { present: bool, has_value: bool, has_authored_value: bool, type: string, type_name: string, value: object }
+// MCP:get_usd_attribute_value - Read the composed value of one attribute on a prim of a USD stage opened with open_usd_stage or create_usd_stage, at the time code given in time or, when it is omitted, at the default time, which gives the static default value rather than a time sample. The value may come from any layer or be a schema fallback (has_value true, has_authored_value false). value is an object {type, value}, converted only for bool, integer, floating-point, string, token and asset values; other types such as float3 or arrays, and an attribute with no value, give a null value with a note. A missing attribute is a success with present=false; an unregistered stage, an invalid prim path or a missing prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
+//   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
+//   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
+//   @param attr_name [string!] - Attribute name to read, e.g. "size"
+//   @param time [number] - Optional USD time code to read at, e.g. 24; when omitted the default time is read (the static default value, not a sample)
+//   @returns { prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, note?: string } | null, note?: string }
 
 TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>& Params)
 {

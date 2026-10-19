@@ -443,9 +443,10 @@ TSharedPtr<FJsonObject> HandleAddDataRegistrySource(
 // Loads + registers + initializes a registry through the subsystem so its
 // sources become live and (for precached sources) cached for synchronous gets.
 // ---------------------------------------------------------------------------
-// MCP:initialize_data_registry - Load, register, and initialize a UDataRegistry on the subsystem.  Calls UDataRegistrySubsystem::LoadRegistryPath so the registry's sources become live. Precached DataTable sources are cached for synchronous gets.
-//   @param registry_path - Content path to the UDataRegistry asset.
+// MCP:initialize_data_registry - Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). registered and initialized describe the registry the subsystem holds for this asset's registry_type afterwards -- with two assets of one type that can be the other one -- and loaded only says the path is on the load list. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
+//   @param registry_path - Path of the UDataRegistry asset, e.g. "/Game/Data/DR_Items" or "/Game/Data/DR_Items.DR_Items".
 //   @returns { registry_path: string, registry_type: string, success: bool, loaded: bool, registered: bool, initialized: bool }
+//   @hints additive idempotent
 
 TSharedPtr<FJsonObject> HandleInitializeDataRegistry(
     const TSharedPtr<FJsonObject>& Params)

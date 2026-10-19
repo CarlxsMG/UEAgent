@@ -246,9 +246,9 @@ TSharedPtr<FJsonObject> HandleGetSubsystemClassInfo(
 // ---------------------------------------------------------------------------
 // create_subsystem_class_bp
 // ---------------------------------------------------------------------------
-// MCP:create_subsystem_class_bp - Create a new USubsystem-derivative Blueprint asset (idempotent on re-run).
-//   @param asset_name - Name for the new Blueprint asset
-//   @param parent_class - Parent USubsystem class name
+// MCP:create_subsystem_class_bp - Create a Blueprint subclass of a USubsystem class at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, which compiles it; the package is marked dirty but not saved (save it with save_asset), there is no undo step, and it is refused while PIE runs unless force is set. A repeat call is idempotent: a Blueprint already at that path is returned as it is with already_exists true, without checking its parent, and parent_class then echoes the request rather than its real parent; another asset type there is an error. parent_class must resolve to a USubsystem class or nothing is created. lifetime is the family of the generated class: Editor, Engine, GameInstance, World, LocalPlayer or Unknown. Parent candidates: list_subsystem_classes; inspect: get_subsystem_class_info; inverse: remove_subsystem_class_bp; live instance check: is_subsystem_class_active.
+//   @param asset_name - Name for the new Blueprint asset, e.g. "BP_ScoreSubsystem"
+//   @param parent_class - Parent USubsystem class: short name with or without the U prefix (e.g. "GameInstanceSubsystem"), a /Script path, or a Blueprint asset path
 //   @param package_path - Optional content folder; defaults to /Game/MCP
 //   @returns { asset_name: string, asset_path: string, package_path: string, parent_class: string, lifetime: string, already_exists: bool }
 

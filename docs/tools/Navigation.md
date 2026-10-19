@@ -22,7 +22,7 @@ Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no g
 
 *Additive.*
 
-Appends a new empty option to a UEnvQuery and returns its index.
+Append a new empty option (no generator, no tests) after the existing options of the UEnvQuery asset at query_path and return its option_index, always the last one. Each call adds another option (not idempotent). The asset is only marked dirty, not saved (save_asset), and no undo step is recorded; a query that does not load is an error. An option without a generator is skipped, with an error log, when the query runs: give it one with add_eqs_generator (which can also append the option itself when option_index equals the option count), then add tests with add_eqs_test. Inspect with get_eqs_query_info; inverse: remove_eqs_option; a new query: create_eqs_query.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -222,13 +222,13 @@ Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunIn
 
 *Destructive, idempotent.*
 
-Sets properties on an option's generator by reflection (mcp_common::SetObjectProperty). Class-ref props (SearchedActorClass, SearchCenter) take a class path string; FAIDataProvider*Value props (SearchRadius, GenerateOnlyActorsInRadius) take an object like {"DefaultValue": &lt;n>}.
+Set properties of the generator of one option of a UEnvQuery asset by reflection, in one undo step; only the named properties change, the rest of the generator is kept. Keys are the generator class property names: a class property (SearchedActorClass, SearchCenter) takes a class path such as /Script/Engine.Pawn, checked against its base class; an FAIDataProvider value (SearchRadius, GenerateOnlyActorsInRadius) takes {"DefaultValue": number or bool}; any other property takes its JSON value. A property that is unknown or rejects the value lands in failed with its error without failing the call, so read set and failed; applied echoes the stored text of each named property. A query that does not load, an option_index out of range or an option with no generator (add_eqs_generator) is an error. The asset is marked dirty, not saved (save_asset). Test scoring: set_eqs_test_scoring; generator classes: list_eqs_generator_types; composition: get_eqs_query_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query_path` | string | yes | /Game/... path to the UEnvQuery asset (required) |
-| `properties` | object | yes | JSON object { PropertyName: value, ... } applied to the generator |
-| `option_index` | number | no | Option index whose generator is edited (default 0) |
+| `properties` | object | yes | JSON object { PropertyName: value, ... } applied to the generator, keys as named on its class (value formats in the description) |
+| `option_index` | number | no | Zero-based option index whose generator is edited (default 0); out of range is an error |
 
 **Returns:** `{ query_path, option_index, generator_class, set:[name], failed:[{name, error}], applied:{name: stored_value_text} }`
 
@@ -279,11 +279,11 @@ Configures generation settings on the editor world's default ARecastNavMesh (par
 
 *Additive.*
 
-Spawns an ANavLinkProxy actor in the editor world at a location
+Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. Each call adds a new actor (not idempotent); the link endpoints are not set here. The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the nav link proxy |
+| `location` | array | no | [x, y, z] world location for the nav link proxy in cm; missing or shorter than 3 numbers spawns at the origin |
 
 **Returns:** `{ actor_name, actor_label, actor_path, actor_class, success }`
 
@@ -291,12 +291,12 @@ Spawns an ANavLinkProxy actor in the editor world at a location
 
 *Additive.*
 
-Spawns an ANavModifierVolume in the editor world with a box brush
+Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve to one is not an error: area_class_applied comes back false and the default area stays. Each call adds a new actor (not idempotent). The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error. Navmesh bounds: spawn_navmesh_bounds_volume; jump or drop links: spawn_nav_link_proxy; inverse: delete_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the volume |
-| `area_class` | string | no | Optional UNavArea subclass name to apply via SetAreaClass |
-| `extent` | array | no | Optional [x, y, z] box half-extent (default 100,100,100) |
+| `location` | array | no | [x, y, z] world location for the volume in cm; missing or shorter than 3 numbers spawns at the origin |
+| `area_class` | string | no | Optional UNavArea subclass name to apply via SetAreaClass, e.g. NavArea_Null; unresolved names are ignored with area_class_applied false |
+| `extent` | array | no | Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100 |
 
 **Returns:** `{ actor_name, actor_label, actor_path, actor_class, brush_built, area_class_applied, area_class, success }`

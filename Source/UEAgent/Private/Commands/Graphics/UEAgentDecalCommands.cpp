@@ -175,9 +175,9 @@ TSharedPtr<FJsonObject> HandleSpawnDecalActor(
 // ---------------------------------------------------------------------------
 // set_decal_material {actor_label, material_path}
 // ---------------------------------------------------------------------------
-// MCP:set_decal_material - Assign a UMaterialInterface to the UDecalComponent on a named DecalActor.
-//   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param material_path - Content path of the UMaterialInterface.
+// MCP:set_decal_material - Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. No undo step, dirty flag or save: the component is written without Modify. Assigning the material it already has rewrites the same value. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
+//   @param actor_label - Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match).
+//   @param material_path - Asset path of the UMaterialInterface, e.g. "/Game/Decals/M_Decal_Crack" (the object path form also works); echoed back as given.
 //   @returns { actor_label: string, material_path: string }
 TSharedPtr<FJsonObject> HandleSetDecalMaterial(
 	const TSharedPtr<FJsonObject>& Params)
@@ -204,12 +204,12 @@ TSharedPtr<FJsonObject> HandleSetDecalMaterial(
 // set_decal_size {actor_label, decal_size?=[x,y,z], size_x?, size_y?, size_z?}
 //   Either a single decal_size array OR three named numbers are accepted.
 // ---------------------------------------------------------------------------
-// MCP:set_decal_size - Set the DecalSize half-extent on a UDecalComponent parented under a DecalActor.
-//   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param decal_size - Optional [x, y, z] half-extent (overrides size_x/size_y/size_z).
-//   @param size_x - Optional X half-extent.
-//   @param size_y - Optional Y half-extent.
-//   @param size_z - Optional Z half-extent.
+// MCP:set_decal_size - Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated, and there is no undo step, dirty flag or save. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
+//   @param actor_label - Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match).
+//   @param decal_size - Optional array of exactly 3 numbers [x, y, z], the half-extents in cm; when valid it overrides size_x, size_y and size_z, and any other length is ignored.
+//   @param size_x - Optional X half-extent in cm (the projection depth); used only without a valid decal_size.
+//   @param size_y - Optional Y half-extent in cm; used only without a valid decal_size.
+//   @param size_z - Optional Z half-extent in cm; used only without a valid decal_size.
 //   @returns { actor_label: string, size_x: float, size_y: float, size_z: float }
 TSharedPtr<FJsonObject> HandleSetDecalSize(
 	const TSharedPtr<FJsonObject>& Params)

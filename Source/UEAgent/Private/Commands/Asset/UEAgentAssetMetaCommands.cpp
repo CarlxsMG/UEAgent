@@ -184,9 +184,9 @@ TSharedPtr<FJsonObject> HandleGetAssetMetadata(const TSharedPtr<FJsonObject>& Pa
 // Collections
 // -------------------------------------------------------------------------- //
 
-// MCP:create_collection - Creates a static Content Browser collection (idempotent).  Uses the UE 5.7 project ICollectionContainer. If the collection already exists a stable payload is returned (already_existed=True).          "Private", or "Shared".
-//   @param collection_name - Name of the collection.
-//   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local")
+// MCP:create_collection - Create a static Content Browser collection named collection_name in the project's collection container, under share_type (default Local; Private or Shared otherwise, and an unrecognised value falls back to Local). Idempotent: when that name already exists under that share type nothing is created and the call succeeds with created false and already_existed true; the check looks at that share type only. The collection manager writes the collection file itself, outside the undo history, and a creation it refuses is an error carrying its reason. exists is read back afterwards. Fill it with add_asset_to_collection, list collections with get_collections and members with get_collection_assets; the inverse is delete_collection. A Material Parameter Collection is a different asset: create_material_parameter_collection.
+//   @param collection_name - Name of the collection to create.
+//   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local
 //   @returns { collection_name: string, share_type: string, created: bool, already_existed: bool, exists: bool }
 
 TSharedPtr<FJsonObject> HandleCreateCollection(const TSharedPtr<FJsonObject>& Params)
@@ -262,10 +262,10 @@ TSharedPtr<FJsonObject> HandleDeleteCollection(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_asset_to_collection - Adds an asset to an existing collection and reads back its object count.          must match the share type the collection was created with.
+// MCP:add_asset_to_collection - Add one asset, by object path, to an existing static Content Browser collection of the project and read the membership back. The collection is looked up by collection_name within share_type (default Local; an unrecognised value also means Local), which must be the share type it was created with: a name not found there is an error. The asset itself is not loaded or checked. An asset that is already a member makes the collection manager refuse the add, which comes back as an error with its reason. The manager writes the collection file itself, outside the undo history. verified confirms membership and object_count counts the direct members. Create the collection with create_collection; the inverse is remove_asset_from_collection; list members with get_collection_assets and collections with get_collections.
 //   @param collection_name - Name of the (existing) collection.
-//   @param asset_path - /Game path / object path of the asset to add.
-//   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local")
+//   @param asset_path - Object path of the asset to add, e.g. "/Game/Props/SM_Chair.SM_Chair"; used as given, without loading or checking the asset.
+//   @param share_type - ECollectionShareType: "Local", "Private", or "Shared" (optional, default "Local"); an unrecognised value falls back to Local
 //   @returns { collection_name: string, share_type: string, asset_path: string, added: bool, verified: bool, object_count: number }
 
 TSharedPtr<FJsonObject> HandleAddAssetToCollection(const TSharedPtr<FJsonObject>& Params)

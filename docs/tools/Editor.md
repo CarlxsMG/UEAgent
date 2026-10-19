@@ -858,16 +858,16 @@ Import a .ttf/.otf/.ttc/.otc font from disk as a UFontFace, and optionally the c
 
 ## `link_media_texture_to_player`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Links a media texture to a media player via SetMediaPlayer
+Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). linked confirms the texture now reports that player, and bound_player_path names the player it reports. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `media_texture_path` | string | yes | Asset path of the UMediaTexture (e.g. |
-| `media_player_path` | string | yes | Asset path of the UMediaPlayer to bind. |
+| `media_texture_path` | string | yes | Asset path of the UMediaTexture, e.g. "/Game/Media/T_Intro" (the object path form also works). |
+| `media_player_path` | string | yes | Asset path of the UMediaPlayer to bind, e.g. "/Game/Media/MP_Intro" (the object path form also works). |
 
-**Returns:** `{ media_texture_path, media_player_path, linked, saved, bound_player_path, save_error }`
+**Returns:** `{ media_texture_path, media_player_path, linked, saved, bound_player_path?, save_error? }`
 
 ## `list_automation_tests`
 
@@ -1030,14 +1030,14 @@ Ground an actor on the landscape by sampling the heightmap at its XY (no line tr
 
 ## `print_to_output_log`
 
-*Destructive.*
+*Additive.*
 
-Print a message to the Unreal Output Log via UE_LOG(LogTemp, ...).
+Write one line to the editor Output Log under the LogTemp category, at Log, Warning or Error verbosity; verbosity is matched without case, anything else logs at Log, and the reply's verbosity is the level actually used. An empty or missing message is an error. Each call appends another line, so it is not idempotent, and nothing else changes: no asset, no undo step, no Message Log entry; like any UE_LOG line it also reaches the editor log file. Use it to mark a point in the log between other calls; read lines back with get_output_log_lines; a listing in Window > Message Log is add_message_log_entry, an on-screen toast show_notification.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `message` | string | yes | The text to log. |
-| `verbosity` | string | no | UE_LOG verbosity: "Log" (default), "Warning", "Error". |
+| `message` | string | yes | The text to log; empty is an error. |
+| `verbosity` | string | no | UE_LOG verbosity: "Log" (default), "Warning", "Error"; matched without case, and any other value logs at Log. |
 
 **Returns:** `{ logged: bool, message: string, verbosity: string }`
 
@@ -1377,11 +1377,11 @@ Toggle the "bitflags" meta on a Blueprint Enum (UUserDefinedEnum) so its enumera
 
 *Destructive, idempotent.*
 
-Override the far clip plane distance on the active editor viewport
+Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_near_clip_plane reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `distance` | number | yes | Far clip distance (in cm). Pass 0 to clear the override (use GFarClippingPlane). |
+| `distance` | number | yes | Far clip distance in cm; 0 or any negative value clears the override and the default far plane applies |
 
 **Returns:** `{ applied: bool, requested: number, far_clip_plane: number, override_active: bool }`
 
@@ -1389,7 +1389,7 @@ Override the far clip plane distance on the active editor viewport
 
 *Destructive, idempotent.*
 
-Toggle "Game View" mode on the active editor viewport (hides editor-only chrome)
+Turn Game View on or off on the active level editor viewport, the focused one or else the first (the view the editor's G key toggles); no viewport is an error. Turning it on swaps the viewport's show flags for the game set, hiding editor-only chrome such as sprites, the transform widget and selection outlines, and keeps the editor set to put back when it is turned off. It sets the given state, so a repeat call changes nothing; it lasts for this editor session with no undo step and nothing saved. in_game_view is read back. Single flags are set_show_flag, render modes set_viewport_view_mode; to run the game use start_play_in_editor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1401,11 +1401,11 @@ Toggle "Game View" mode on the active editor viewport (hides editor-only chrome)
 
 *Destructive, idempotent.*
 
-Override the near clip plane distance on the active editor viewport
+Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; 0 or more becomes the override as given, unvalidated, so use a small positive value. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `distance` | number | yes | Near clip distance (in cm). Pass -1 to clear the override (use GNearClippingPlane). |
+| `distance` | number | yes | Near clip distance in cm; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane |
 
 **Returns:** `{ applied: bool, requested: number, near_clip_plane: number, override_active: bool }`
 
@@ -1426,11 +1426,11 @@ Sets engine scalability quality via the Scalability API and reads it back.  Modi
 
 *Destructive, idempotent.*
 
-Toggle a single engine show flag on the active editor viewport
+Set one engine show flag (Grid, Bounds, Collision, Wireframe, Lighting...) on the active level editor viewport, the focused one or else the first; no viewport is an error. It sets the given state rather than toggling: enabled true turns the flag on, false turns it off, and a repeat call changes nothing. flag_name is matched without case against the engine's show flags and registered custom flags; an unknown name is an error before anything changes. It lasts for this editor session, with no undo step, nothing saved and the earlier value not returned. value is the flag read back and flag_index its engine index. get_viewport_state reads Grid, Bounds, Collision, Wireframe and Lighting back; set_game_view swaps the whole flag set; set_viewport_view_mode changes the render mode.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `flag_name` | string | yes | Engine show flag name, e.g. Grid, Bounds, Collision, Wireframe, Lighting |
+| `flag_name` | string | yes | Engine show flag name as FEngineShowFlags spells it, e.g. Grid, Bounds, Collision, Wireframe, Lighting; matched without case |
 | `enabled` | boolean | yes | True to set the flag, false to clear it |
 
 **Returns:** `{ applied: bool, flag_name: string, flag_index: int, requested: bool, value: bool }`
@@ -1463,11 +1463,11 @@ No parameters.
 
 *Destructive, idempotent.*
 
-Set the active editor viewport type (perspective / top / bottom / left / right / front / back)
+Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_view_type; render modes are set_viewport_view_mode, the camera position set_viewport_camera.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `type` | string | yes | View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. |
+| `type` | string | yes | View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. Matched without case. |
 
 **Returns:** `{ applied: bool, requested: string, view_type: string, view_type_index: int }`
 
@@ -1501,11 +1501,11 @@ Set the exposure of the active level editor viewport: fixed at ev100 when fixed 
 
 *Destructive, idempotent.*
 
-Set the perspective FOV (in degrees) of the active editor viewport
+Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. The value goes into the viewport's current view FOV as given -- no clamp and no range check -- and fov is read straight back; an orthographic view ignores it. It lasts for this editor session with no undo step and no save, and the previous FOV is not returned. Only the current view FOV changes, not the value the toolbar FOV slider stores, so a camera reset or the end of a PIE session brings the slider's value back, and a viewport piloting a camera actor shows that camera's FOV instead. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `fov` | number | yes | Field of view in degrees (positive; clamped to 5..170 by editor) |
+| `fov` | number | yes | Field of view in degrees; stored as given, with no clamp or validation (the editor's FOV slider spans 5..170) |
 
 **Returns:** `{ applied: bool, requested: number, fov: number }`
 
@@ -1525,25 +1525,25 @@ Enable or disable realtime rendering on the active editor viewport
 
 *Destructive, idempotent.*
 
-Set the rendering view mode of the active editor viewport
+Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `view_mode` | string | yes | One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections |
+| `view_mode` | string | yes | One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode; CSGWireframe (read back as BrushWireframe) and ReflectionOverride are accepted too. |
 
 **Returns:** `{ applied: bool, requested: string, view_mode_index: int, view_mode: string }`
 
 ## `show_notification`
 
-*Destructive.*
+*Additive.*
 
-Show a fire-and-forget toast in the editor (Slate notification manager) with a message, an optional completion state and a lifetime in seconds. Returns shown and echoes message, completion_state and duration; an unrecognized completion_state silently falls back to None. Changes nothing else.
+Show a transient toast in the editor through the Slate notification manager: message, an optional completion state icon and a lifetime in seconds, after which it fades on its own. completion_state is matched without case, and anything other than Pending, Success or Fail shows no state; the reply echoes it as sent, not as applied. Each call shows another toast, so it is not idempotent, and nothing else changes: no asset, log line or undo step. shown is false when the notification manager returned no toast, and the call still succeeds. An empty or missing message is an error. For a record that stays use print_to_output_log or add_message_log_entry.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `message` | string | yes | The text to display in the notification. |
+| `message` | string | yes | The text to display in the notification; empty is an error. |
 | `completion_state` | string | no | Completion state, case-insensitive: "None" (default), "Pending", "Success" or "Fail"; any other value counts as "None". |
-| `duration` | number | no | Notification lifetime in seconds (default 4.0). |
+| `duration` | number | no | Notification lifetime in seconds before it fades (default 4.0); the value is not validated. |
 
 **Returns:** `{ shown: bool, message: string, completion_state: string, duration: float }`
 

@@ -192,9 +192,9 @@ namespace
 // ---------------------------------------------------------------------------
 // create_material_instance_dynamic
 // ---------------------------------------------------------------------------
-// MCP:create_material_instance_dynamic - Create a runtime-only Material Instance Dynamic (MID) from a parent material
-//   @param parent_material_path - Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example)
-//   @param name - Optional name for the MID (default auto-generated)
+// MCP:create_material_instance_dynamic - Create a Material Instance Dynamic (MID) of a parent material in the transient package: a runtime-only object that is never saved, belongs to no actor and has no undo step. Nothing references it, so the next garbage collection can free it: set its parameters right away with set_mid_scalar_param, set_mid_vector_param or set_mid_texture_param, which take its mid_object_path, or use create_dynamic_material_on_actor to have a mesh component own a MID it renders. A name already taken in the transient package gets a numbered suffix, so keep mid_name and mid_object_path from the reply; each call creates another MID. A parent that cannot be loaded is an error. Read its values with get_mid_all_params; a saved, reusable instance asset: create_material_instance_constant.
+//   @param parent_material_path - Content path to the parent material (e.g. /Game/MyGame/M_Example.M_Example); a material or a material instance
+//   @param name - Optional name for the MID (default auto-generated from MID_ and the parent's name)
 //   @returns { mid_object_path, mid_name, parent_material_path, parent_material_name, created }
 TSharedPtr<FJsonObject> HandleCreateMaterialInstanceDynamic(
 	const TSharedPtr<FJsonObject>& Params)
@@ -541,10 +541,10 @@ TSharedPtr<FJsonObject> HandleSetMidTextureParam(
 // ---------------------------------------------------------------------------
 // create_dynamic_material_on_actor
 // ---------------------------------------------------------------------------
-// MCP:create_dynamic_material_on_actor - Create a component-owned Material Instance Dynamic on a scene actor
-//   @param actor_name - Name or label of the actor in the editor world
-//   @param element_index - Material slot index on the mesh component (default 0)
-//   @param parent_material_path - Optional source material for the MID (default slot's current material)
+// MCP:create_dynamic_material_on_actor - Give one material slot of a mesh component on an editor-world actor its own Material Instance Dynamic (UPrimitiveComponent::CreateDynamicMaterialInstance), which replaces the slot's material with the MID, in one undo step that marks the level dirty; no asset is created or saved. The actor is matched by object name or label (first match), the component is its first StaticMeshComponent, else its first mesh component. Without parent_material_path the MID wraps the slot's current material, and a slot already holding a MID returns that same MID (created still says true); with it, the slot is first set to that material. Pass mid_object_path to set_mid_scalar_param, set_mid_vector_param, set_mid_texture_param or get_mid_all_params; verified confirms the slot holds the MID. A missing actor, mesh component or material, or an out-of-range element_index, is an error. Unowned MID: create_material_instance_dynamic; saved asset: create_material_instance_constant.
+//   @param actor_name - Name or label of the actor in the editor world; the first actor whose object name or label matches is used
+//   @param element_index - Material slot index on the mesh component (default 0); must be below the component's slot count
+//   @param parent_material_path - Optional source material for the MID (default slot's current material); when given it is assigned to the slot before the MID is made from it
 //   @returns { actor_name, actor_label, component_name, element_index, mid_object_path, mid_name, parent_material_path, verified, created }
 TSharedPtr<FJsonObject> HandleCreateDynamicMaterialOnActor(
 	const TSharedPtr<FJsonObject>& Params)

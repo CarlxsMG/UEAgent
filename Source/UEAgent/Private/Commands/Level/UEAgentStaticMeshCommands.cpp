@@ -426,9 +426,9 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 // ---------------------------------------------------------------------------
 // remove_static_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_static_mesh_socket - Remove a socket from a static mesh by name (idempotent).
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @param socket_name - Name of the socket to remove.
+// MCP:remove_static_mesh_socket - Remove one socket, found by name, from a UStaticMesh asset loaded from its package or object path, then save the mesh; there is no undo transaction. A name the mesh does not have is a success with removed=false, and nothing is touched or saved (idempotent). A mesh that does not load is an error, and so is a failed save -- refused while PIE runs or under a read-only root -- after which the socket is already gone from the mesh in memory. socket_count is the number of sockets left. List sockets with get_static_mesh_sockets, add one with add_static_mesh_socket, rename one with rename_static_mesh_socket; skeletal meshes use remove_skeletal_mesh_socket and skeletons remove_socket_from_skeleton_asset.
+//   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
+//   @param socket_name - Name of the socket to remove, compared as an FName (case-insensitive).
 //   @returns { static_mesh_path, socket_name, removed, socket_count }
 TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 	const TSharedPtr<FJsonObject>& Params)
@@ -738,9 +738,9 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshCollisionComplexity(
 // ---------------------------------------------------------------------------
 // get_static_mesh_sections
 // ---------------------------------------------------------------------------
-// MCP:get_static_mesh_sections - Get section-level info for all LODs of a static mesh (shadow, collision, ray tracing flags).
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @returns { lod_index, section_index, cast_shadow, collision_enabled, visible_in_ray_tracing, static_mesh_path, sections, total_sections }
+// MCP:get_static_mesh_sections - List every section of every render LOD of a UStaticMesh asset, loaded from its package or object path, without changing it: lod_index, section_index and the cast_shadow, collision_enabled and visible_in_ray_tracing flags of each, read through the StaticMeshEditor subsystem. A mesh without render data has no LODs and returns an empty list; a mesh that does not load, or a missing subsystem, is an error. total_sections counts the rows. Material slots, vertex counts, sockets and bounds are get_static_mesh_info; skeletal meshes use get_skeletal_mesh_section_info; lightmap settings are get_static_mesh_lightmap.
+//   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
+//   @returns { static_mesh_path: string, sections: [{ lod_index: number, section_index: number, cast_shadow: bool, collision_enabled: bool, visible_in_ray_tracing: bool }], total_sections: number }
 TSharedPtr<FJsonObject> HandleGetStaticMeshSections(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -848,8 +848,8 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshLightmap(
 // ---------------------------------------------------------------------------
 // get_static_mesh_lightmap
 // ---------------------------------------------------------------------------
-// MCP:get_static_mesh_lightmap - Read lightmap resolution and lightmap UV coordinate index of a static mesh.
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
+// MCP:get_static_mesh_lightmap - Read the asset-level lightmap settings of a UStaticMesh, loaded from its package or object path, without changing it: lightmap_resolution, the texel resolution static lighting is baked at, and lightmap_coordinate_index, the UV channel that holds the lightmap UVs. These are the mesh defaults; an override set on a placed component in a level is not read. A mesh that does not load is an error. Write them with set_static_mesh_lightmap; LODs, materials, sockets, collision and bounds are get_static_mesh_info; per-section flags are get_static_mesh_sections.
+//   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
 //   @returns { static_mesh_path, lightmap_resolution, lightmap_coordinate_index }
 TSharedPtr<FJsonObject> HandleGetStaticMeshLightmap(
 	const TSharedPtr<FJsonObject>& Params)

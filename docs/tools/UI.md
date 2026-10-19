@@ -20,17 +20,17 @@ Construct a UListView under the widget BP root and add it to the tree.
 
 ## `add_tile_view`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Construct a UTileView under the widget BP root and add it to the tree.
+Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. With no panel root it becomes the root, replacing any non-panel root widget. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false) and the Blueprint is still compiled and saved. A missing Blueprint or an entry class that is not a UUserWidget is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint |
-| `list_view_name` | string | yes | FName of the new UTileView widget |
-| `entry_widget_class` | string | no | Optional entry widget class |
+| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory". |
+| `list_view_name` | string | yes | Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key. |
+| `entry_widget_class` | string | no | Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path. |
 
-**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added }`
+**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }`
 
 ## `add_tree_view`
 
@@ -49,20 +49,20 @@ Construct a UTreeView under the widget BP root (or a named parent panel widget) 
 
 ## `add_viewmodel`
 
-*Additive.*
+*Additive, idempotent.*
 
-Append a UMVVMViewModelContext to a Widget BP's MVVM authoring state.
+Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name already there is kept as it is, not updated, and comes back with already_existed=true, though the Blueprint is still compiled and saved. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint asset (string) |
+| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint asset, e.g. "/Game/UI/WBP_HUD". |
 | `view_model_class` | string | yes | View model class: asset path (/Game/...) or /Script/&lt;Module>.&lt;ClassName> |
 | `context_name` | string | yes | FName identifying this context (idempotency key) |
 | `creation_type` | string | no | Optional (default "CreateInstance"): one of "CreateInstance" \| "PropertyPath" \| "GlobalViewModelCollection" \| "Manual" (EMVVMBlueprintViewModelContextCreationType). |
 | `source_property_path` | string | no | Optional: only used when creation_type="PropertyPath" (required in that case). Sets FMVVMBlueprintViewModelContext::ViewModelPropertyPath. |
 | `global_identifier` | string | no | Optional: only used when creation_type="GlobalViewModelCollection" (required in that case). Sets FMVVMBlueprintViewModelContext::GlobalViewModelIdentifier. |
 
-**Returns:** `{ widget_blueprint_name, view_model_class, context_name, creation_type, source_property_path?, global_identifier?, already_existed, view_model_count, has_mvvm_extension }`
+**Returns:** `{ widget_blueprint_name, view_model_class, context_name, creation_type, source_property_path?, global_identifier?, already_existed, view_model_count, has_mvvm_extension, saved, save_error?, note? }`
 
 ## `add_widget_animation`
 
@@ -239,17 +239,17 @@ Create a runtime UUserWidget instance of a concrete UserWidget class in a runnin
 
 ## `create_widget_blueprint`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create (and save) a new UWidgetBlueprint asset with a CanvasPanel root.
+Create a UWidgetBlueprint at package_path/name with the editor Widget Blueprint factory, parented to parent_class (a class path such as /Game/UI/WBP_Base.WBP_Base_C, or a short class name), give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: a Widget Blueprint already there is returned untouched (created=false, already_existed=true) with nothing compiled or saved, and its parent is not checked against parent_class, which that reply only echoes. A parent that is not a UUserWidget subclass, an invalid path, or another kind of asset at that path is an error. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Then add widgets with add_widget_to_blueprint and read the tree with get_widget_blueprint_tree; an Editor Utility Widget is create_editor_utility_widget_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | /Game folder to create the asset in (e.g. /Game/UI) |
-| `name` | string | yes | Asset name (no extension) |
+| `name` | string | yes | Asset name (no extension), e.g. "WBP_MainMenu"; with package_path it gives the asset path. |
 | `parent_class` | string | no | Parent UUserWidget subclass (default "UUserWidget"). |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created: bool, root_widget: string, root_widget_class: string, saved: bool, save_error: string }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created?: bool, root_widget: string, root_widget_class: string, saved: bool, save_error?: string }`
 
 ## `duplicate_widget`
 
@@ -707,13 +707,13 @@ Set ANY property of a widget's UPanelSlot BY REFLECTION, whatever the concrete s
 
 *Destructive, idempotent.*
 
-Instantiate a UMVVMViewModelBase on a UUserWidget instance and set it via UMVVMBlueprintLibrary::SetViewModelByClass.
+Create a fresh instance of view_model_class and give it to a live UUserWidget through UMVVMBlueprintLibrary::SetViewModelByClass, which fills the view-model context of the widget whose class matches; context_name does not pick the context and is only echoed. The widget is the one a UWidgetComponent shows: on the first actor whose label matches widget_instance_name, or, when the name contains a slash, on the first actor whose component uses that widget class, searched across every open world, PIE included. Runtime state only: nothing is compiled or saved, and each call swaps in a new default instance. set is true whenever the call is made: a widget with no MVVM view only logs an error. A class that is not a UMVVMViewModelBase, or no matching widget, is an error. Authoring-time contexts: add_viewmodel; bindings: bind_widget_to_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_instance_name` | string | yes | Label (Actor label or asset path) used to find an in-world UUserWidget |
+| `widget_instance_name` | string | yes | Label of an actor that has a widget component, matched case-insensitively, or, when it contains a slash, the widget class its component uses, e.g. "/Game/UI/WBP_Nameplate". |
 | `view_model_class` | string | yes | VM class: asset path or /Script/&lt;Module>.&lt;ClassName> |
-| `context_name` | string | yes | FName of the target context on the widget |
+| `context_name` | string | yes | Name of the view-model context meant; echoed back only, since the context is chosen by the class of view_model_class. |
 
 **Returns:** `{ widget_instance_name, view_model_class, context_name, set, instance_class }`
 
@@ -721,15 +721,15 @@ Instantiate a UMVVMViewModelBase on a UUserWidget instance and set it via UMVVMB
 
 *Destructive, idempotent.*
 
-Honest gap report: there is no UWidget UPROPERTY that exposes DragDropOperationClass, and OnDragDetected/OnDrop are DECLARE_DYNAMIC delegates (not reflectively assignable). The drag/drop behavior must be configured in the widget BP graph.
+Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, property_set, saved). Among the engine UMG widgets only list, tile and tree views have that property (UListViewBase); for any other widget the call writes nothing and answers set=false with a note, because drag and drop there is the OnDragDetected and OnDrop events of a User Widget graph: author those with build_blueprint_graph, after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; one that does not load also gives set=false, with operation_class_loaded=false. A missing Blueprint or widget is an error. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint |
-| `widget_name` | string | yes | FName of the target widget inside the tree |
-| `operation_class` | string | no | /Script/...DragDropOperation or subclass path |
+| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory". |
+| `widget_name` | string | yes | Name of the widget in the tree of that Blueprint, e.g. "ItemTiles"; only a list, tile or tree view can take the class. |
+| `operation_class` | string | no | Class path of a UDragDropOperation subclass, e.g. "/Script/UMG.DragDropOperation" or "/Game/UI/DDO_Item.DDO_Item_C"; defaults to /Script/UMG.DragDropOperation. |
 
-**Returns:** `{ widget_blueprint_name, widget_name, operation_class, set: false, has_drag_drop_property: false, note }`
+**Returns:** `{ widget_blueprint_name, widget_name, operation_class, set, has_drag_drop_property, operation_class_loaded, property_set?, saved?, save_error?, note? }`
 
 ## `set_widget_navigation`
 
@@ -787,12 +787,12 @@ Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blue
 
 *Destructive, idempotent.*
 
-Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisible, SelfHitTestInvisible.
+Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_name` | string | yes | Name of the widget to modify |
-| `visibility` | string | yes | Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible |
+| `widget_name` | string | yes | Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name |
+| `visibility` | string | yes | Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case) |
 
 **Returns:** `{ widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }`
 

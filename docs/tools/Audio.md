@@ -68,13 +68,13 @@ Appends a USoundControlBus as an input of a USoundModulationPatch asset and save
 
 *Additive.*
 
-Construct a USoundNode inside a Sound Cue and return its node_id
+Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `cue_path` | string | yes | Full asset path of the cue, e.g. /Game/SoundCues/SC_Foo |
-| `node_type` | string | yes | One of WavePlayer\|Mixer\|Random\|Looping\|Modulator\|Delay\|Concatenator\|Attenuation\|Branch\|DistanceCrossFade\|Doppler\|Enveloper\|GroupControl\|ModulatorContinuous\|Oscillator\|ParamCrossFade\|QualityLevel\|SoundClass\|Switch\|WaveParam |
-| `sound_wave_path` | string | no | Optional USoundWave path for WavePlayer nodes only |
+| `node_type` | string | yes | One of WavePlayer\|Mixer\|Random\|Looping\|Modulator\|Delay\|Concatenator\|Attenuation\|Branch\|DistanceCrossFade\|Doppler\|Enveloper\|GroupControl\|ModulatorContinuous\|Oscillator\|ParamCrossFade\|QualityLevel\|SoundClass\|Switch\|WaveParam (matched without case) |
+| `sound_wave_path` | string | no | Optional USoundWave path for WavePlayer nodes only; one that does not load leaves the node without a wave (sound_wave_set false) |
 
 **Returns:** `{ cue_path: string, node_id: int, node_type: string, node_class: string, max_child_nodes: int, child_count: int, sound_wave_set: bool, sound_wave_path: string, node_count: int, saved: bool }`
 
@@ -95,15 +95,15 @@ Append a new effect of a concrete USoundfieldEffectBase class to a USoundfieldSu
 
 *Additive.*
 
-Append a submix effect preset to a USoundSubmix effect chain
+Append one effect preset to the end of a USoundSubmix's effect chain and save the submix. effect_preset_path wins: that existing USoundEffectSubmixPreset asset is appended by reference. Otherwise a new preset of effect_preset_class, or, when neither is given, of a concrete class found by reflection (SubmixEffectDynamicsProcessorPreset when it is loaded), is created inside the submix's own package under a unique &lt;Submix>_Effect name; resolved_from says which of the three ran. Every call appends another entry, duplicates included. A submix or preset that does not load, or a class that is not a concrete preset subclass, is an error; a failed save makes success false with saved=false and save_error. Read the chain with get_submix_effect_chain and tune an entry with set_submix_effect_settings; a soundfield submix takes add_soundfield_effect_to_submix.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `submix_path` | string | yes | Full content path of the target USoundSubmix |
-| `effect_preset_path` | string | no | Optional existing USoundEffectSubmixPreset to load |
-| `effect_preset_class` | string | no | Optional concrete USoundEffectSubmixPreset subclass path to NewObject |
+| `effect_preset_path` | string | no | Optional existing USoundEffectSubmixPreset asset to append by reference; wins over effect_preset_class |
+| `effect_preset_class` | string | no | Optional concrete USoundEffectSubmixPreset subclass (short name or path) to instantiate in the submix's package; with neither preset param a class is picked by reflection |
 
-**Returns:** `{ submix_path: string, effect_name: string, effect_class: string, resolved_from: string, effect_added: bool, chain_length: int, saved: bool }`
+**Returns:** `{ submix_path: string, effect_name: string, effect_class: string, resolved_from: string, effect_added: bool, chain_length: int, saved: bool, save_error?: string }`
 
 ## `add_subtitle_cue`
 
@@ -155,14 +155,14 @@ Connects a graph input node's output to a graph output node's input.  Resolves t
 
 *Destructive.*
 
-Wire a child node into a parent node's input slot
+Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (both ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes) or a full parent is an error. Nothing checks for cycles or earlier links: repeating the call without input_index links the child again in another slot. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; the cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `cue_path` | string | yes | Full asset path of the cue |
-| `parent_node_id` | number | yes | node_id of the upstream node with inputs |
+| `parent_node_id` | number | yes | node_id of the upstream node with inputs (its index in the cue AllNodes) |
 | `child_node_id` | number | yes | node_id of the node to feed into the parent |
-| `input_index` | number | no | Optional target slot, defaults to next free slot |
+| `input_index` | number | no | Optional zero-based target slot; an occupied slot is overwritten. Omitted: the first empty slot, else a new slot appended |
 
 **Returns:** `{ cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, connected: bool, saved: bool }`
 
@@ -322,18 +322,18 @@ Create a USoundAttenuation asset at package_path/name, or load the one already t
 
 ## `create_sound_class`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Create a USoundClass asset and optionally set its volume/pitch
+Create a USoundClass asset at package_path/name (package_path defaults to /Game/Audio) and save it. A sound class already at that path is loaded instead (already_exists true, created false) and the volume and pitch you pass overwrite its values before it is saved again; omitted ones keep their current values, the engine defaults on a new class. Idempotent. The reply reads volume and pitch back from the asset, and applied_volume / applied_pitch say which were written. An invalid path, or an asset of another class there, is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Edit the other properties with set_sound_class_properties, read them with get_sound_class_properties, and wire the hierarchy with set_sound_class_parent.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new Sound Class asset |
 | `package_path` | string | no | Target content path, defaults to /Game/Audio |
-| `volume` | number | no | Optional Volume multiplier on FSoundClassProperties |
-| `pitch` | number | no | Optional Pitch multiplier on FSoundClassProperties |
+| `volume` | number | no | Optional Volume multiplier on FSoundClassProperties; also written to a class that already exists, unchanged when omitted |
+| `pitch` | number | no | Optional Pitch multiplier on FSoundClassProperties; also written to a class that already exists, unchanged when omitted |
 
-**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, volume: number, pitch: number, applied_volume: bool, applied_pitch: bool, created: bool, already_exists: bool, saved: bool }`
+**Returns:** `{ name: string, package_path: string, asset_path: string, asset_class: string, volume: number, pitch: number, applied_volume: bool, applied_pitch: bool, created: bool, already_exists: bool, saved: bool, save_error?: string }`
 
 ## `create_sound_concurrency`
 
@@ -590,11 +590,11 @@ Read one field of the Configuration struct of a MetaSound Source node by propert
 
 *Read-only.*
 
-Reads the MetaSound Source document graph: node/connection counts + I/O.  Reads the document's RootGraph default page (node + connection/edge counts) and the graph's declared interface inputs/outputs (names + types).          "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example").
+Read the graph summary of a MetaSound Source asset, loading it if needed: the node, connection (edge) and variable counts of the document's root graph default page, and the root graph's declared interface inputs and outputs with name and type, plus the root graph class name. Read-only. metasound_path is a package path or a full object path; one that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. For the document's interfaces and metadata use get_metasound_info; to list the nodes themselves with their ids use list_meta_sound_nodes, then get_meta_sound_node_info; find sources with list_meta_sounds.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path ("/Game/MetaSounds/MS_Example") or an object path ("/Game/MetaSounds/MS_Example.MS_Example"). |
 
 **Returns:** `{ asset_path: string, graph_class_name: string, node_count: number, connection_count: number, variable_count: number, input_count: number, output_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }`
 
@@ -638,11 +638,11 @@ Reads a USoundModulationGenerator asset without changing it. Returns generator_p
 
 *Read-only.*
 
-Reads a USoundControlBus asset and its live value in the editor world, without changing anything. Returns bus_path, default_value, current_value (the live modulator value; the engine returns 1.0 for a bus that is not active) and subsystem_active (whether the editor world has a modulation manager).
+Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `bus_path` | string | yes | Asset path to the USoundControlBus |
+| `bus_path` | string | yes | Asset path to the USoundControlBus, e.g. "/Game/Audio/Bus_Music.Bus_Music" |
 
 **Returns:** `{ bus_path, default_value, current_value, subsystem_active }`
 
@@ -722,13 +722,13 @@ Read the node graph of a USoundCue without changing it: every node in AllNodes w
 
 *Read-only.*
 
-Reads a USoundModulationPatch asset without changing it. Returns patch_path, bBypass, output_parameter ({ path, class }, or null when unset), inputs (one { bus: { path }, name } per input; name is always empty) and input_count.
+Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_modulation_info and the output parameter with get_modulation_parameter_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `patch_path` | string | yes | Asset path to the USoundModulationPatch |
+| `patch_path` | string | yes | Asset path to the USoundModulationPatch, e.g. "/Game/Audio/Patch_Duck.Patch_Duck" |
 
-**Returns:** `{ patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path } }], input_count }`
+**Returns:** `{ patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path }, name }], input_count }`
 
 ## `get_sound_source_bus`
 
@@ -746,11 +746,11 @@ Read the routing fields of a USoundSourceBus asset: source_bus_channels (Mono or
 
 *Read-only.*
 
-Read USoundWave tunables (the object's own UPROPERTY fields) from an imported sound wave.
+Read every reflected property of a USoundWave asset, its USoundBase fields included (CompressionQuality, SampleRateQuality, SoundGroup, Volume, Pitch, Priority, SoundClassObject, AttenuationSettings and the rest), as the settings object FJsonObjectConverter exports, so keys start lower-case (compressionQuality); settings also carries bLooping, echoed as looping. Read-only: it loads the asset if needed and changes nothing. A path that does not load as a USoundWave is an error. Write the same fields back with set_sound_wave_properties (bLooping through its looping param); a sound class is read with get_sound_class_properties and a level's audio component with get_audio_component_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sound_wave_path` | string | yes | Full content path of the target USoundWave. |
+| `sound_wave_path` | string | yes | Full content path of the target USoundWave, e.g. "/Game/Audio/MySound". |
 
 **Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, looping: bool }`
 
@@ -1137,14 +1137,14 @@ Write one field of a MetaSound Source node's Configuration struct by reflection,
 
 *Destructive, idempotent.*
 
-Sets a parameter default value on a MetaSound preset.  Loads the preset, obtains a builder via FindOrBeginBuilding, calls SetGraphInputDefault with the appropriate literal type, then BuildAndOverwriteMetaSound to persist.
+Set the default value of one graph input on a MetaSound Source asset, normally a preset, found by content path. The value becomes a float, bool, int or string literal as parameter_type says, is written through the MetaSound editor builder in one undo step, built back into the asset, and the asset is saved. A path that does not load as a MetaSound Source (a patch is not accepted), no builder, or an input name the builder rejects is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. value_read_back is the default read back as text, verified says that read worked. Read the inputs with get_metasound_preset_parameters; make a preset with create_metasound_preset; metasound_set_input_default does the same with one typed value field per type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `preset_path` | string | yes | Content path of the MetaSound preset asset. |
-| `parameter_name` | string | yes | Name of the graph input parameter to set. |
+| `preset_path` | string | yes | Content path of the MetaSound preset asset, e.g. "/Game/Audio/MSP_Engine". |
+| `parameter_name` | string | yes | Name of the graph input to set, as get_metasound_preset_parameters lists it. |
 | `parameter_type` | string | no | Literal type for the value: "float" (default), "bool", "int", "string". |
-| `value` | any | no | Value to set. Interpreted according to parameter_type. |
+| `value` | any | no | Value to set, read as parameter_type says; a missing value, or one that does not read as that type, writes 0, false or an empty string. |
 
 **Returns:** `{ preset_path: string, parameter_name: string, success: bool, verified: bool, value_read_back: string, saved: bool }`
 

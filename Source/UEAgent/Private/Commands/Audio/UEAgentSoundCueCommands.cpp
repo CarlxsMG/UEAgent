@@ -196,10 +196,10 @@ TSharedPtr<FJsonObject> HandleCreateSoundCue(const TSharedPtr<FJsonObject>& Para
 // ---------------------------------------------------------------------------
 // add_sound_cue_node
 // ---------------------------------------------------------------------------
-// MCP:add_sound_cue_node - Construct a USoundNode inside a Sound Cue and return its node_id
+// MCP:add_sound_cue_node - Append a new node of node_type to the AllNodes of a USoundCue asset, in one undo step, and save the cue; node_id is its index there, the id the other sound cue tools take. node_type is matched without case, and an unknown type or a cue that does not load is an error. The node starts unconnected and is not the cue output: wire it with connect_sound_cue_nodes and make the root with set_sound_cue_first_node. For a WavePlayer, sound_wave_path sets its wave; a wave that does not load is not an error (sound_wave_set=false), and other types ignore it. Each call adds another node (not idempotent). A failed save, as during PIE, makes success false with save_error. Node settings: set_sound_cue_node_properties; read back: get_sound_cue_graph; a new cue: create_sound_cue.
 //   @param cue_path - Full asset path of the cue, e.g. /Game/SoundCues/SC_Foo
-//   @param node_type - One of WavePlayer|Mixer|Random|Looping|Modulator|Delay|Concatenator|Attenuation|Branch|DistanceCrossFade|Doppler|Enveloper|GroupControl|ModulatorContinuous|Oscillator|ParamCrossFade|QualityLevel|SoundClass|Switch|WaveParam
-//   @param sound_wave_path - Optional USoundWave path for WavePlayer nodes only
+//   @param node_type - One of WavePlayer|Mixer|Random|Looping|Modulator|Delay|Concatenator|Attenuation|Branch|DistanceCrossFade|Doppler|Enveloper|GroupControl|ModulatorContinuous|Oscillator|ParamCrossFade|QualityLevel|SoundClass|Switch|WaveParam (matched without case)
+//   @param sound_wave_path - Optional USoundWave path for WavePlayer nodes only; one that does not load leaves the node without a wave (sound_wave_set false)
 //   @returns { cue_path: string, node_id: int, node_type: string, node_class: string, max_child_nodes: int, child_count: int, sound_wave_set: bool, sound_wave_path: string, node_count: int, saved: bool }
 TSharedPtr<FJsonObject> HandleAddSoundCueNode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -277,11 +277,11 @@ TSharedPtr<FJsonObject> HandleAddSoundCueNode(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // connect_sound_cue_nodes
 // ---------------------------------------------------------------------------
-// MCP:connect_sound_cue_nodes - Wire a child node into a parent node's input slot
+// MCP:connect_sound_cue_nodes - Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (both ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes) or a full parent is an error. Nothing checks for cycles or earlier links: repeating the call without input_index links the child again in another slot. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; the cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
 //   @param cue_path - Full asset path of the cue
-//   @param parent_node_id - node_id of the upstream node with inputs
+//   @param parent_node_id - node_id of the upstream node with inputs (its index in the cue AllNodes)
 //   @param child_node_id - node_id of the node to feed into the parent
-//   @param input_index - Optional target slot, defaults to next free slot
+//   @param input_index - Optional zero-based target slot; an occupied slot is overwritten. Omitted: the first empty slot, else a new slot appended
 //   @returns { cue_path: string, parent_node_id: int, child_node_id: int, input_index: int, parent_class: string, child_class: string, parent_child_count: int, connected: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>& Params)
 {

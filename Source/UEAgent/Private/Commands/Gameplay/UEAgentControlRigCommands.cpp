@@ -419,12 +419,12 @@ TSharedPtr<FJsonObject> HandleAddRigBone(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_rig_null
 // ---------------------------------------------------------------------------
-// MCP:add_rig_null - Add a null (space) to a Control Rig's hierarchy.
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
-//   @param null_name - Name of the new null
-//   @param parent_name - Optional existing element name to parent the new null under.
-//   @param parent_type - Element type of the parent ("Bone" default, "Null"/"Control"/etc).
-//   @param location - Optional [x, y, z] world location for the new null.
+// MCP:add_rig_null - Add a null (a space: a transform-only element) to the hierarchy of a Control Rig Blueprint at location in rig global space, with no rotation and unit scale, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the null really got. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request, so check with get_rig_hierarchy. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Each call adds another null. Controls and bones: add_rig_control, add_rig_bone; rename or take out: rename_rig_element, remove_rig_element.
+//   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
+//   @param null_name - Name of the new null; a name already in use gets a numbered suffix
+//   @param parent_name - Optional existing element name to parent the new null under; omitted or empty puts it at the root.
+//   @param parent_type - Element type of the parent ("Bone" default, "Null"/"Control"/etc); case is ignored, "Space" means Null, and an unknown type falls back to Bone.
+//   @param location - Optional [x, y, z] location in rig global space for the new null; defaults to the origin.
 //   @returns { asset_path: string, element_key: string, element_type: string, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleAddRigNull(const TSharedPtr<FJsonObject>& Params)
@@ -469,12 +469,12 @@ TSharedPtr<FJsonObject> HandleAddRigNull(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_rig_control
 // ---------------------------------------------------------------------------
-// MCP:add_rig_control - Add a control to a Control Rig's hierarchy.  Control types: Bool, Float, ScaleFloat, Integer, Vector2D, Position, Scale, Rotator, Transform, EulerTransform (defaults to Float).
-//   @param control_rig_path - Path to the UControlRigBlueprint asset
-//   @param control_name - Name of the new control
+// MCP:add_rig_control - Add an animation control to the hierarchy of a Control Rig Blueprint, with a zero or identity value and no limits, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the control really got. An unrecognised control_type makes a Float control with control_type_recognized false instead of failing. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Set it up with set_rig_control_value, set_rig_control_limits and set_rig_control_settings; bones and nulls: add_rig_bone, add_rig_null; inspect: get_rig_hierarchy; take it out: remove_rig_element.
+//   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
+//   @param control_name - Name of the new control, also used as its display name; a name already in use gets a numbered suffix
 //   @param control_type - One of: "bool", "float", "scalefloat", "integer", "int", "vector2d", "position", "scale", "rotator", "transform", "eulertransform" (default "float").
-//   @param parent_name - Optional existing element name to parent the new control under.
-//   @param parent_type - Element type of the parent (default "Null").
+//   @param parent_name - Optional existing element name to parent the new control under; omitted or empty puts it at the root.
+//   @param parent_type - Element type of the parent (default "Null"); case is ignored, "Space" means Null, and an unknown type falls back to Null.
 //   @returns { asset_path: string, element_key: string, element_type: string, control_type: string, control_type_recognized: bool, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
 
 TSharedPtr<FJsonObject> HandleAddRigControl(const TSharedPtr<FJsonObject>& Params)

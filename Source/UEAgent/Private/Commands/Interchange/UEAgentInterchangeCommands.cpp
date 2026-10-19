@@ -211,7 +211,7 @@ TSharedPtr<FJsonObject> HandleInterchangeGetSupportedFormats(const TSharedPtr<FJ
 // Reads UInterchangeAssetImportData from an asset (or reports absent honestly
 // for legacy assets that pre-date Interchange).
 // ---------------------------------------------------------------------------
-// MCP:interchange_get_asset_import_data - Read the UInterchangeAssetImportData of an asset.  Loads the asset via LoadObject<UObject> and calls UInterchangeManager::GetAssetImportData(Asset) (InterchangeManager.h, INTERCHANGEENGINE_API). For assets imported via the legacy factory path the returned data is null — that is reported as ``present:false`` (a normal state, not an error). When present, also calls ScriptExtractFilenames / ScriptExtractDisplayLabels (UFUNCTION inline, InterchangeAssetImportData.h/65).
+// MCP:interchange_get_asset_import_data - Read the Interchange import data (UInterchangeAssetImportData) of an asset loaded by package or object path: its source_filenames, display_labels, pipelines_count and whether it holds a node container. An asset imported through the legacy factory path, or never imported, has none: that answers present=false with zeros and empty lists, a normal state and not an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. The legacy UAssetImportData of a factory import (source file and timestamp): get_asset_import_data; the pipeline objects: interchange_get_pipelines; the nodes the import produced: interchange_get_node_container; reimport from this data: interchange_reimport_asset.
 //   @param asset_path [string!] - Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo")
 //   @returns { asset_path: string, present: bool, pipelines_count: number, has_node_container: bool, source_filenames: [string], display_labels: [string] }
 TSharedPtr<FJsonObject> HandleInterchangeGetAssetImportData(const TSharedPtr<FJsonObject>& Params)
@@ -367,9 +367,9 @@ TSharedPtr<FJsonObject> HandleInterchangeSetPipelines(const TSharedPtr<FJsonObje
 // Reads the UInterchangeBaseNodeContainer from the asset and lists root UIDs
 // plus every factory node (class + display label + unique ID).
 // ---------------------------------------------------------------------------
-// MCP:interchange_get_node_container - Read the UInterchangeBaseNodeContainer of an asset's UInterchangeAssetImportData.  Loads the asset + ID, then iterates factory nodes via IterateNodesOfType<UInterchangeFactoryBaseNode> (InterchangeBaseNodeContainer.h, template header-only) and reads class via GetObjectClass() (InterchangeFactoryBaseNode.h, INTERCHANGECORE_API), UniqueID + DisplayLabel from UInterchangeBaseNode (InterchangeBaseNode.h, INTERCHANGECORE_API).
-//   @param asset_path [string!] - Asset path (e.g. "/Game/Foo/Foo")
-//   @returns { asset_path: string, present: bool, root_uids: [string], factory_node_count: number, factory_nodes: [object] }
+// MCP:interchange_get_node_container - Read the node container kept in the Interchange import data of an asset loaded by path: the root_uids and every factory node, each with its uid, display_label and the class of the object that factory produces. An asset with no Interchange import data (a legacy factory import, or one never imported), or with import data but no node container, answers present=false with empty lists rather than an error; only a path that does not load is an error. Read-only: it writes nothing and needs no PIE. Use it to see what an Interchange import produced; source files and pipeline count: interchange_get_asset_import_data; the pipeline stack: interchange_get_pipelines; reimport: interchange_reimport_asset.
+//   @param asset_path [string!] - Asset path (e.g. "/Game/Foo/Foo") or fully-qualified object path ("/Game/Foo/Foo.Foo")
+//   @returns { asset_path: string, present: bool, root_uids: [string], factory_node_count: number, factory_nodes: [{ uid: string, class: string, display_label: string }] }
 TSharedPtr<FJsonObject> HandleInterchangeGetNodeContainer(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetPath;
@@ -432,7 +432,8 @@ TSharedPtr<FJsonObject> HandleInterchangeGetNodeContainer(const TSharedPtr<FJson
 
 // Project settings and registration.
 
-// MCP:interchange_get_project_settings - Read the project's Interchange settings (UInterchangeProjectSettings): the content and scene import settings (pipeline stacks, default stack and its per-asset-type overrides, import dialog class and flags, per-translator dialog overrides), the file picker and generic pipeline classes, the converter default pipeline and the Interchange groups.
+// MCP:interchange_get_project_settings - Read the project's Interchange settings, the live class defaults of UInterchangeProjectSettings as Project Settings shows them. For content import: the default pipeline stack, every pipeline stack with its pipeline paths, the per-asset-type default-stack overrides, the import dialog class and the import and reimport dialog flags. For scene import: the default stack, the two dialog flags and only a count of its per-translator dialog overrides. Plus the file picker, generic pipeline and converter default pipeline classes, the static mesh smoothing fallback flag and the Interchange groups. Read-only, with no parameters. Change the default stack with interchange_set_pipeline_stack_default; read one pipeline asset with interchange_get_pipeline_properties; the formats translators accept: interchange_get_supported_formats.
+//   @returns { content_import_settings: { default_pipeline_stack: string, import_dialog_class: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, pipeline_stacks: [{ name: string, pipelines: [string] }], pipeline_stacks_count: int, default_pipeline_stack_override: [{ translator_type: string, stack_name: string }] }, scene_import_settings: { default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool, per_translator_dialog_override_count: int }, file_picker_class: string, generic_pipeline_class: string, converter_default_pipeline: string, b_static_mesh_use_smooth_edges_if_smoothing_information_is_missing: bool, interchange_groups: [{ display_name: string, unique_id: string, default_pipeline_stack: string, b_show_import_dialog: bool, b_show_reimport_dialog: bool }], interchange_groups_count: int }
 TSharedPtr<FJsonObject> HandleInterchangeGetProjectSettings(const TSharedPtr<FJsonObject>& Params)
 {
     const UInterchangeProjectSettings* Settings = GetDefault<UInterchangeProjectSettings>();
@@ -755,10 +756,10 @@ TSharedPtr<FJsonObject> HandleInterchangeSetPipelineProperties(const TSharedPtr<
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:interchange_get_pipeline_properties - Read the properties of an Interchange pipeline asset by reflection; class_only lists only their names and types.
-//   @param pipeline_path [string!] - Object path of the pipeline asset to read (loaded via LoadObject, must be a UInterchangePipelineBase).
+// MCP:interchange_get_pipeline_properties - Read the editable (EditAnywhere) properties of an Interchange pipeline asset by reflection, inherited ones included: each entry gives name, C++ type and, unless class_only is true, the current value as JSON (left out when it cannot be converted). The values are the in-memory ones, so edits made with interchange_set_pipeline_properties and not yet saved already show. Read-only: it writes nothing and needs no PIE. A path that does not load as a UInterchangePipelineBase is an error. Discover the names with class_only=true, write them with interchange_set_pipeline_properties and persist with interchange_save_pipeline; the pipelines an imported asset used: interchange_get_pipelines; a new pipeline asset: interchange_create_pipeline_asset.
+//   @param pipeline_path [string!] - Object path of the pipeline asset to read (loaded via LoadObject, must be a UInterchangePipelineBase), e.g. "/Game/Pipelines/MyMeshPipeline.MyMeshPipeline".
 //   @param class_only [bool] - When true, return only the EditAnywhere property NAMES and types (no values) for discovery. Defaults to false (includes current values).
-//   @returns { pipeline_path: string, class: string, properties: [object], property_count: number }
+//   @returns { pipeline_path: string, class: string, properties: [{ name: string, type: string, value?: any }], property_count: number }
 TSharedPtr<FJsonObject> HandleInterchangeGetPipelineProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString PipelinePath;

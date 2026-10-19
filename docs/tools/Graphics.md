@@ -90,12 +90,12 @@ Set the FadeScreenSize on a UDecalComponent (the screen-size fraction below whic
 
 *Destructive, idempotent.*
 
-Assign a UMaterialInterface to the UDecalComponent on a named DecalActor.
+Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. No undo step, dirty flag or save: the component is written without Modify. Assigning the material it already has rewrites the same value. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `material_path` | string | yes | Content path of the UMaterialInterface. |
+| `actor_label` | string | yes | Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match). |
+| `material_path` | string | yes | Asset path of the UMaterialInterface, e.g. "/Game/Decals/M_Decal_Crack" (the object path form also works); echoed back as given. |
 
 **Returns:** `{ actor_label: string, material_path: string }`
 
@@ -103,15 +103,15 @@ Assign a UMaterialInterface to the UDecalComponent on a named DecalActor.
 
 *Destructive, idempotent.*
 
-Set the DecalSize half-extent on a UDecalComponent parented under a DecalActor.
+Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated, and there is no undo step, dirty flag or save. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Label of the ADecalActor in the editor world. |
-| `decal_size` | string | no | Optional [x, y, z] half-extent (overrides size_x/size_y/size_z). |
-| `size_x` | number | no | Optional X half-extent. |
-| `size_y` | number | no | Optional Y half-extent. |
-| `size_z` | number | no | Optional Z half-extent. |
+| `actor_label` | string | yes | Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match). |
+| `decal_size` | string | no | Optional array of exactly 3 numbers [x, y, z], the half-extents in cm; when valid it overrides size_x, size_y and size_z, and any other length is ignored. |
+| `size_x` | number | no | Optional X half-extent in cm (the projection depth); used only without a valid decal_size. |
+| `size_y` | number | no | Optional Y half-extent in cm; used only without a valid decal_size. |
+| `size_z` | number | no | Optional Z half-extent in cm; used only without a valid decal_size. |
 
 **Returns:** `{ actor_label: string, size_x: float, size_y: float, size_z: float }`
 

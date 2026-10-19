@@ -114,8 +114,8 @@ TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:spawn_exponential_height_fog - Spawns an ExponentialHeightFog actor and optionally sets its fog density.
-//   @param location - Optional [X, Y, Z] world location (defaults to origin)
+// MCP:spawn_exponential_height_fog - Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
+//   @param location - Optional [X, Y, Z] world location in cm (defaults to origin); fewer than 3 numbers also means the origin
 //   @param fog_density - Optional fog density multiplier; if supplied, applied to the component and read back
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }
 

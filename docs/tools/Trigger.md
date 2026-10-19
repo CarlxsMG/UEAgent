@@ -107,13 +107,13 @@ Delete a TriggerBox actor from the editor world after checking its class; the le
 
 ## `remove_trigger_sphere`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a TriggerSphere actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
+Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor, or an actor of another class, is not an error: the reply has deleted=false and a note, so read deleted; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Object name of the TriggerSphere actor (its editor label is not matched); the command fails without it. |
+| `actor_name` | string | no | Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 

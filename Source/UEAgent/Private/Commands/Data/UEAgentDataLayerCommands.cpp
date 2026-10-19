@@ -119,11 +119,11 @@ namespace
 
 // Data Layer asset authoring.
 
-// MCP:create_data_layer_asset - Creates and saves a new UDataLayerAsset (World Partition data layer).
-//   @param name - Name of the new data layer asset.
+// MCP:create_data_layer_asset - Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true; type and color are not applied, and saved reads true though nothing is written), so repeat calls are idempotent; another asset class there, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
+//   @param name - Name of the new data layer asset, also its package name under package_path.
 //   @param package_path - Target /Game package path (optional, default "/Game/DataLayers")
-//   @param data_layer_type - Data layer type: "Editor" or "Runtime" (optional, default "Editor")
-//   @param debug_color - Optional [r, g, b] or [r, g, b, a] integers 0-255 (defaults to [0, 128, 255, 255])
+//   @param data_layer_type - Data layer type: "Editor" or "Runtime" (optional, default "Editor"); matched without case, any other value gives Editor
+//   @param debug_color - Optional [r, g, b] or [r, g, b, a] integers 0-255 (defaults to [0, 128, 255, 255]); rounded and clamped, alpha 255 when omitted, a shorter array is ignored
 //   @returns { name: string, package_path: string, asset_path: string, data_layer_type: string, is_runtime: bool, debug_color: [number, number, number, number], created: bool, already_exists: bool, success: bool, saved: bool, message: string }
 
 TSharedPtr<FJsonObject> HandleCreateDataLayerAsset(const TSharedPtr<FJsonObject>& Params)

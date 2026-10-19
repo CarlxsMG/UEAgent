@@ -381,11 +381,11 @@ TSharedPtr<FJsonObject> HandleCreateProceduralGridMesh(
 //   section_index?, vertices?=[[x,y,z],...]}
 //   Updates an existing section in-place (same topology, new positions).
 // ---------------------------------------------------------------------------
-// MCP:update_procedural_mesh_section - Update an existing procedural mesh section in-place (same topology, new vertex positions). A negative or missing section is an error.
+// MCP:update_procedural_mesh_section - Move the vertices of an existing section of a UProceduralMeshComponent on an editor-world actor found by label: vertices sets every position in order, while triangles, normals, UVs, colors and tangents stay as they were (normals are not recomputed). When the section has collision its collision vertices follow, and the component bounds are rebuilt. Sending the same positions again leaves the section as it was, so the call is idempotent. A missing actor or component, a negative or nonexistent section, an empty vertices array or a count different from the section's is an error before anything changes. Transient: nothing is marked dirty, saved or undoable. New geometry or topology: create_procedural_box_mesh, create_procedural_grid_mesh; read the section back: get_procedural_mesh_section_data; counts: get_procedural_mesh_info.
 //   @param actor_label - Editor label of the actor carrying the PMC
 //   @param component_index - Optional 0-based PMC index on the actor; defaults to 0
 //   @param section_index - Optional target section index (>= 0); defaults to 0
-//   @param vertices - Required [[x, y, z], ...] array with the same vertex count as the existing section
+//   @param vertices - Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared
 //   @returns { actor_label: string, section_index: int, vertex_count: int }
 
 TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(

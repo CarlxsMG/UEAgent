@@ -129,10 +129,10 @@ TSharedPtr<FJsonObject> HandleGetActorFolder(const TSharedPtr<FJsonObject>& Para
     return Reply;
 }
 
-// MCP:attach_actor - Attach one actor to another optionally at a socket keeping world transform
-//   @param child_actor_name - Name or label of the child actor to attach
-//   @param parent_actor_name - Name or label of the parent actor to attach to
-//   @param socket_name - Optional socket on the parent to attach to
+// MCP:attach_actor - Attach one editor-world actor to another, both found by internal name or outliner label (first match), optionally at a socket of the parent, keeping the child's world transform, in one undo step; the level is marked dirty, not saved. A child that already has a parent moves to the new one, and repeating the same attachment changes nothing (idempotent). attached is the engine's verdict: an attachment it refuses still returns success with attached false, so check it. The socket name is not checked against the parent. A missing child or parent is an error. Inverse: detach_actor; for a component inside a Blueprint use attach_blueprint_component; to attach over time in a Level Sequence use add_attach_track.
+//   @param child_actor_name - Internal name or outliner label of the child actor to attach (first match in the editor world)
+//   @param parent_actor_name - Internal name or outliner label of the parent actor to attach to (first match in the editor world)
+//   @param socket_name - Optional socket name on the parent, not checked; omitted or empty attaches without a socket
 //   @returns { child: string, parent: string, attached: bool }
 TSharedPtr<FJsonObject> HandleAttachActor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -258,9 +258,10 @@ TSharedPtr<FJsonObject> HandleSetActorMaterial(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:focus_viewport - Frame the editor viewport on an actor or the current selection
-//   @param actor_name - Optional actor to focus on, defaults to current selection
-//   @returns { focused_actor: string, focused_count: int }
+// MCP:focus_viewport - Move the camera of every level editor viewport to frame one actor of the editor world, found by internal name or outliner label (first match), or, when actor_name is omitted, the actors currently selected. Only the viewport cameras change: nothing in the level, no undo entry, nothing saved, and the selection stays as it is. An actor_name that matches nothing, or no actor_name with an empty selection, is an error. The reply has focused_actor (the internal name) in actor mode or focused_count in selection mode, never both. To place the camera at an exact location and rotation use set_viewport_camera, read it back with get_viewport_state, and select actors first with select_actors.
+//   @param actor_name - Optional internal name or outliner label of the actor to frame; omitted, the current selection is framed
+//   @returns { focused_actor?: string, focused_count?: int }
+//   @hints additive idempotent
 TSharedPtr<FJsonObject> HandleFocusViewport(const TSharedPtr<FJsonObject>& Params)
 {
     if (!GEditor)

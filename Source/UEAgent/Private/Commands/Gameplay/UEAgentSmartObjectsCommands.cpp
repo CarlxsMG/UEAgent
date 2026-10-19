@@ -387,10 +387,10 @@ namespace UEAgentSmartObjectsImpl
 // ---------------------------------------------------------------------------
 // create_smart_object_definition
 // ---------------------------------------------------------------------------
-// MCP:create_smart_object_definition - Create (or load) a USmartObjectDefinition asset and seed it with N activity slots via the public DebugAddSlot API.
-//   @param definition_name - Name for the new Smart Object definition
+// MCP:create_smart_object_definition - Create a USmartObjectDefinition asset at package_path/definition_name, or load the one already there, add default slots (enabled, no tags) until it has num_activity_slots, then save it. Slots already there are kept and never taken away, so a smaller count adds nothing and a repeat call is idempotent; created says whether the asset is new. A name taken by another asset class, or a path that is not an asset path, is an error; a failed save, as during PIE, makes success false with saved=false. No undo step is recorded. Named slots: add_smart_object_slot; slot fields: set_smart_object_slot_activity_tags or set_smart_object_slot_enabled; a behavior, which register_smart_object_actor needs: add_smart_object_definition_default_behavior or add_smart_object_slot_behavior_definition; read back: get_smart_object_definition_summary.
+//   @param definition_name - Name for the new Smart Object definition, also its asset name
 //   @param package_path - Content folder; defaults to /Game/MCP
-//   @param num_activity_slots - Number of slots to add; defaults to 1
+//   @param num_activity_slots - Slot count to reach, default 1: slots are added until the definition has this many, none are taken away
 //   @returns { definition_path: string, definition_name: string, num_slots: int, created: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleCreateSmartObjectDefinition(
@@ -768,11 +768,11 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_activity_tags"));
 }
 
-// MCP:set_smart_object_slot_user_tag_filter - Set a slot's user tag filter (a gameplay tag query controlling which users may use it), built from a tag list and a match mode.
+// MCP:set_smart_object_slot_user_tag_filter - Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Names that are not registered gameplay tags are skipped silently (the reply lists the tags kept), and an unrecognized match acts as any but is echoed as sent. An empty list still builds a query (filter_is_empty false) that, with any, admits no user, so this cannot clear the filter. A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Repeat calls write the same query (idempotent). Object-level filter: set_smart_object_definition_user_tag_filter; slot activity tags: set_smart_object_slot_activity_tags; read slots back: get_smart_object_slots_detail.
 //   @param definition_path - Path to the USmartObjectDefinition asset
-//   @param slot_index - Index of the slot to edit
-//   @param user_tags - Gameplay tag names the filter query matches against
-//   @param match - Match mode: "any" (default), "all", or "none"
+//   @param slot_index - Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error
+//   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list does not clear the filter
+//   @param match - Match mode: "any" (default), "all", or "none"; any other value acts as any
 //   @returns { definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	const TSharedPtr<FJsonObject>& Params)
@@ -852,11 +852,11 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_transform"));
 }
 
-// MCP:set_smart_object_definition_activity_tags - Set the object-level activity tags of a USmartObjectDefinition, and optionally the tag merging/filtering policies.
+// MCP:set_smart_object_definition_activity_tags - Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error, but the policies are checked after the tags are written, so that error leaves the new tags in memory, unsaved. Repeat calls write the same state (idempotent); no undo step is recorded, and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
 //   @param definition_path - Path to the USmartObjectDefinition asset
-//   @param activity_tags - Gameplay tag names for the definition's object-level activity tags
-//   @param merging_policy - Optional activity-tag merging policy: "Combine" (default) or "Override"
-//   @param filtering_policy - Optional user-tag filtering policy: "NoFilter", "Combine", or "Override"
+//   @param activity_tags - Gameplay tag names for the definition's object-level activity tags; the list replaces the current tags whole
+//   @param merging_policy - Optional activity-tag merging policy: "Combine" (default) or "Override"; Combine merges slot and object tags, Override lets non-empty slot tags take their place; omitted keeps the current policy
+//   @param filtering_policy - Optional user-tag filtering policy: "NoFilter", "Combine", or "Override"; how the object and slot user filters apply to a request; omitted keeps the current policy
 //   @returns { definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, saved: bool }
 TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 	const TSharedPtr<FJsonObject>& Params)
@@ -969,8 +969,8 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectSlotsDetail(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_smart_object_definition_summary - Read back the object-level state of a USmartObjectDefinition: activity tags, tag policies, user-filter presence, slot count, world-space bounds, and a structural Validate() pass with any error messages.
-//   @param definition_path - Path to the USmartObjectDefinition asset
+// MCP:get_smart_object_definition_summary - Read the object-level state of a USmartObjectDefinition asset without changing it: its activity tags with their merging policy, the user-tag filtering policy and whether the object-level user filter is empty, the slot count, the default behavior count, and bounds around every slot in the object local space (slot offsets plus the default slot size, not world space). It also runs the engine Validate() pass: is_valid, and validation_errors with the messages of every severity. A missing definition_path, or one that does not load, is an error. Per-slot fields: get_smart_object_slots_detail; slot and registered-actor counts: get_smart_object_info; entrances: get_smart_object_slot_entrance_annotations; edit the object level with set_smart_object_definition_activity_tags or set_smart_object_definition_user_tag_filter.
+//   @param definition_path - Object path of the USmartObjectDefinition asset, e.g. /Game/AI/SO_Bench.SO_Bench
 //   @returns { definition_path: string, slot_count: int, activity_tags: [string], merging_policy: string, filtering_policy: string, user_filter_is_empty: bool, bounds: { min: [number, number, number], max: [number, number, number] }, is_valid: bool, validation_errors: [string], default_behavior_count: int }
 TSharedPtr<FJsonObject> HandleGetSmartObjectDefinitionSummary(
 	const TSharedPtr<FJsonObject>& Params)

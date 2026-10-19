@@ -397,9 +397,9 @@ TSharedPtr<FJsonObject> HandleGetWidgetProperties(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Facts);
 }
 
-// MCP:set_widget_visibility - Set widget visibility state to one of: Visible, Collapsed, Hidden, HitTestInvisible, SelfHitTestInvisible.
-//   @param widget_name - Name of the widget to modify
-//   @param visibility - Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible
+// MCP:set_widget_visibility - Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
+//   @param widget_name - Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name
+//   @param visibility - Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case)
 //   @returns { widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }
 
 TSharedPtr<FJsonObject> HandleSetWidgetVisibility(const TSharedPtr<FJsonObject>& Params)
