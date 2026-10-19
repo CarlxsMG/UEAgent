@@ -1860,12 +1860,12 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // add_widget_to_blueprint
 // ---------------------------------------------------------------------------
-// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes; a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel (the curated basic names; see list_widget_types), OR any native widget class path (e.g. /Script/UMG.Throbber), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
 //   @param parent_name - Optional name of a panel widget to host the new child; defaults to the root widget.
-//   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }
 
 TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1903,12 +1903,18 @@ TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>
     }
     if (Added.bAlreadyExisted)
     {
-        // Nothing was added. The widget is on disk only when the package holds no unsaved
-        // change; otherwise the blueprint is compiled and saved like a fresh add.
-        FString SaveErr;
-        const bool bSaved = !WidgetBP->GetPackage()->IsDirty() || SaveWidgetBlueprint(WidgetBP, SaveErr);
+        // Nothing was added. A package with unsaved changes is compiled and saved like a fresh add, so the
+        // widget reaches disk; a clean one is already there, and nothing is saved (saved=false).
         TSharedPtr<FJsonObject> Resp = AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, /*bAdded=*/ true);
         Resp->SetBoolField(TEXT("already_existed"), true);
+        if (!WidgetBP->GetPackage()->IsDirty())
+        {
+            Resp->SetBoolField(TEXT("saved"), false);
+            Resp->SetStringField(TEXT("note"), TEXT("the widget already exists and the Widget Blueprint has no unsaved changes; nothing saved"));
+            return mcp_common::MakeOkReply(Resp);
+        }
+        FString SaveErr;
+        const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
         return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_widget_to_blueprint"), SaveErr);
     }
 
@@ -2243,12 +2249,12 @@ TSharedPtr<FJsonObject> HandleGetWidgetBlueprintTree(const TSharedPtr<FJsonObjec
 // WidgetTree -> UPanelWidget::AddChild -> OnVariableAdded -> compile + save),
 // but supporting the EXTENDED widget-type set resolved via /Script/UMG.<Name>.
 // ---------------------------------------------------------------------------
-// MCP:add_widget_extended - Add an EXTENDED-palette widget to a Widget Blueprint's tree.  Same authoring path as add_widget_to_blueprint but supports a wider set of widget types (resolved via /Script/UMG.<Name>), PLUS arbitrary native widget classes and UserWidget (nested Widget Blueprint) instances.
+// MCP:add_widget_extended - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the extended palette of list_widget_types (ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned with already_existed=true, compiled and saved only if the blueprint has unsaved changes (else saved=false); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save gives success false. Basic palette: add_widget_to_blueprint; inspect: get_widget_blueprint_tree; inverse: remove_widget.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
 //   @param parent_name - Optional name of a panel widget to host the new child; defaults to the root widget.
-//   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }
 
 TSharedPtr<FJsonObject> HandleAddWidgetExtended(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2292,12 +2298,18 @@ TSharedPtr<FJsonObject> HandleAddWidgetExtended(const TSharedPtr<FJsonObject>& P
     }
     if (Added.bAlreadyExisted)
     {
-        // Nothing was added. The widget is on disk only when the package holds no unsaved
-        // change; otherwise the blueprint is compiled and saved like a fresh add.
-        FString SaveErr;
-        const bool bSaved = !WidgetBP->GetPackage()->IsDirty() || SaveWidgetBlueprint(WidgetBP, SaveErr);
+        // Nothing was added. A package with unsaved changes is compiled and saved like a fresh add, so the
+        // widget reaches disk; a clean one is already there, and nothing is saved (saved=false).
         TSharedPtr<FJsonObject> Resp = AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, /*bAdded=*/ true);
         Resp->SetBoolField(TEXT("already_existed"), true);
+        if (!WidgetBP->GetPackage()->IsDirty())
+        {
+            Resp->SetBoolField(TEXT("saved"), false);
+            Resp->SetStringField(TEXT("note"), TEXT("the widget already exists and the Widget Blueprint has no unsaved changes; nothing saved"));
+            return mcp_common::MakeOkReply(Resp);
+        }
+        FString SaveErr;
+        const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
         return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_widget_extended"), SaveErr);
     }
 
@@ -4094,11 +4106,12 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimationKeyframe(const TSharedPtr<FJsonO
     {
         return mcp_common::MakeErrorReply(TEXT("time_seconds must be >= 0.0"));
     }
-    TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
-    if (!Value.IsValid())
+    // A guard on the field itself, so the catalog publishes value as required (of any JSON type).
+    if (!Params->HasField(TEXT("value")))
     {
         return mcp_common::MissingParameterReply(TEXT("value"));
     }
+    TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
     FString InterpolationRaw = TEXT("linear");
     Params->TryGetStringField(TEXT("interpolation"), InterpolationRaw);
     const FString Interpolation = InterpolationRaw.ToLower();

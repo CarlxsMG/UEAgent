@@ -271,7 +271,7 @@ Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.
 
 *Additive, idempotent.*
 
-Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) still answers success, with created=true and saved=false and the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
+Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -279,7 +279,7 @@ Create an empty UMaterialFunction asset named name in package_path through the e
 | `name` | string | yes | Asset name for the new material function |
 | `description` | string | no | Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists. |
 
-**Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists?: bool }`
+**Returns:** `{ function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, save_error?: string, already_exists?: bool }`
 
 ## `create_material_function_expression`
 
@@ -300,7 +300,7 @@ Create a new UMaterialExpression node inside a UMaterialFunction's internal grap
 
 *Additive, idempotent.*
 
-Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false, with the new instance kept in memory and saved=false. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
+Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false with saved=false and save_error, the new instance kept in memory. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -308,7 +308,7 @@ Create a UMaterialFunctionInstance asset named instance_name in package_path thr
 | `instance_name` | string | yes | Name for the new UMaterialFunctionInstance asset |
 | `parent_function_path` | string | yes | Asset path of the parent UMaterialFunctionInterface |
 
-**Returns:** `{ asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool }`
+**Returns:** `{ asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool, save_error?: string }`
 
 ## `create_material_instance`
 
@@ -474,13 +474,13 @@ Delete ONE node from a material graph by name. Deliberately one at a time, and t
 
 *Destructive.*
 
-Force-delete the asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check and no class check (any asset there goes), open editors close and undo history may be cleared. Permanent. Returns deleted; success stays true when deleted is false, so read it.
+Force-delete the material function asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check, open editors close and undo history may be cleared. Permanent. Typed: the asset must be a UMaterialFunctionInterface (a material function, layer, layer blend or function instance); any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A missing asset is an error, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `material_function_path` | string | yes | Asset path of the UMaterialFunction to delete |
 
-**Returns:** `{ material_function_path: string, deleted: bool }`
+**Returns:** `{ material_function_path: string, asset_class: string, deleted: bool, note?: string }`
 
 ## `delete_material_function_input`
 
@@ -1024,14 +1024,14 @@ Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_
 
 *Destructive, idempotent.*
 
-Re-parent a UMaterialFunctionInstance asset to another material function or function instance in one undoable transaction, then save it; success requires the save. Returns old_parent and new_parent, read back from the asset ("(none)" when empty).
+Re-parent a UMaterialFunctionInstance asset loaded from instance_path to the material function or function instance at parent_function_path, in one undo step, then save it. old_parent and new_parent are read back from the asset ("(none)" when empty), and applied is true once the parent is set. Success requires the save: a failed save (PIE running, read-only file) makes success false with saved=false and save_error, the new parent kept in memory. A path containing // is refused before anything loads, and an instance or parent that does not load is an error; nothing changes then. The parent it already has is a success with applied=false, saved=false and a note, nothing changed or saved. Create an instance with create_material_function_instance; recompile it with recompile_material_function.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `instance_path` | string | yes | Asset path of the UMaterialFunctionInstance to re-parent |
 | `parent_function_path` | string | yes | Asset path of the new parent UMaterialFunctionInterface |
 
-**Returns:** `{ instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool }`
+**Returns:** `{ instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_material_function_output_props`
 
@@ -1283,7 +1283,7 @@ Override one scalar parameter on the Material Parameter Collection Instance (MPC
 |---|---|---|---|
 | `collection_path` | string | yes | Full /Game path of the parent MPC |
 | `parameter_name` | string | yes | Name of the scalar parameter to override |
-| `value` | number | no | New float value for the parameter |
+| `value` | number | yes | New float value for the parameter |
 | `world_label` | string | no | Which world: empty or "editor" for the editor world (the default), even while Play-in-Editor runs; "pie" (alias "game") for the running PIE world, "server" or "client" for that PIE world, "pie:N" for PIE instance N. any other value names a live world by its object name (the editor world is checked first, so a map name selects it) or by its package name (UEDPIE_N_ and the map name for a PIE world), and a value no world has fails and lists the worlds present |
 
 **Returns:** `{ collection_path: string, parameter_name: string, value: number, readback_value: number, readback_ok: bool, world_name: string, world_package: string, world_type: string, net_mode: string, pie_instance: int }`

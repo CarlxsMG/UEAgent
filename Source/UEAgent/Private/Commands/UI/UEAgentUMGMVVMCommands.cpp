@@ -95,6 +95,23 @@ namespace
         return Out;
     }
 
+    /**
+     * Out, the reply of an authoring edit whose save of the Widget Blueprint came back bSaved. A save that reached disk
+     * keeps the reply flat, like every other reply of this file, with saved=true. A failed save is MakeSavedReply's
+     * failure: success false, saved=false and SaveError as save_error, the edit kept in memory, the error naming Command.
+     */
+    TSharedPtr<FJsonObject> SavedReply_MVVM(const TSharedPtr<FJsonObject>& Out, bool bSaved, const TCHAR* Command,
+                                            const FString& SaveError)
+    {
+        if (bSaved)
+        {
+            Out->SetBoolField(TEXT("saved"), true);
+            return Out;
+        }
+        Out->SetBoolField(TEXT("success"), false);
+        return mcp_common::MakeSavedReply(Out, /*bSaved=*/false, Command, SaveError);
+    }
+
     // The note of the reply to a Widget Blueprint without MVVM authoring support.
     const TCHAR* const NoMvvmSupportNote_MVVM =
         TEXT("Widget does not have MVVM panel support -- enable 'Supports Extensions' on the widget BP class settings.");
@@ -250,21 +267,23 @@ namespace
 
     /**
      * What add_list_view / add_tile_view / add_tree_view resolve before they edit: the Widget Blueprint and its tree,
-     * the widget that already holds the view's name (of any class; null when none does), and the entry widget class
-     * (null when none is given).
+     * the view of the requested class that already holds the view's name (null when none does), and the entry widget
+     * class (null when none is given).
      */
     struct FListViewTarget_MVVM
     {
         UWidgetBlueprint* WidgetBP = nullptr;
         UWidgetTree*      Tree = nullptr;
         FName             ViewName;
-        bool              bAlreadyExisted = false;
         UWidget*          ExistingWidget = nullptr;
         UClass*           EntryClass = nullptr;
     };
 
-    /** Out for the view ViewName in WidgetBPName: the error reply when the blueprint, its tree or the entry class cannot be found. */
-    TSharedPtr<FJsonObject> ResolveListViewTarget_MVVM(const FString& WidgetBPName, const FString& ViewName,
+    /**
+     * Out for the view ViewName of class ViewClass in WidgetBPName: the error reply when the blueprint, its tree or the
+     * entry class cannot be found, or when the name is held by anything but a ViewClass widget of the tree.
+     */
+    TSharedPtr<FJsonObject> ResolveListViewTarget_MVVM(const FString& WidgetBPName, const FString& ViewName, const UClass* ViewClass,
                                                        const FString& EntryClassRef, FListViewTarget_MVVM& Out)
     {
         FString LoadErr;
@@ -275,10 +294,25 @@ namespace
             return mcp_common::MakeErrorReply(LoadErr);
         }
 
-        // Idempotent dedup by widget name.
+        // Idempotent by widget name, as add_widget_to_blueprint is: only a widget of the requested class is the same
+        // view; another class under that name is a conflict the caller has to resolve.
         Out.ViewName = FName(*ViewName);
         Out.ExistingWidget = FindWidgetInTreeByName(Out.Tree, Out.ViewName);
-        Out.bAlreadyExisted = Out.ExistingWidget != nullptr;
+        if (Out.ExistingWidget && Out.ExistingWidget->GetClass()->GetAuthoritativeClass() != ViewClass)
+        {
+            const UClass* ExistingClass = Out.ExistingWidget->GetClass();
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("A widget named '%s' already exists in the tree as a %s%s, not a %s%s; nothing was added. Pick another name."),
+                *ViewName, ExistingClass->GetPrefixCPP(), *ExistingClass->GetName(), ViewClass->GetPrefixCPP(), *ViewClass->GetName()));
+        }
+        // An object of the tree outside its hierarchy (a widget dropped from it) can hold the name too: constructing
+        // the view under that name would make NewObject abort the editor when the classes differ.
+        if (!Out.ExistingWidget && StaticFindObjectFast(UObject::StaticClass(), Out.Tree, Out.ViewName))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("'%s' already names an object of the widget tree that is not in its hierarchy; nothing was added. Pick another name."),
+                *ViewName));
+        }
 
         if (!EntryClassRef.IsEmpty())
         {
@@ -374,6 +408,12 @@ namespace
                 Tree->RootWidget = NewView;
             }
         }
+        // Register the view as a Blueprint variable, as the designer does for an added widget: the widget compiler
+        // ensures every widget of the tree is in WidgetVariableNameToGuidMap. The tree's outer is its Widget Blueprint.
+        if (UWidgetBlueprint* OwnerBP = Cast<UWidgetBlueprint>(Tree->GetOuter()))
+        {
+            OwnerBP->OnVariableAdded(NewView->GetFName());
+        }
         return NewView;
     }
 
@@ -390,6 +430,27 @@ namespace
         const UClass* EntryClass = AsListView ? AsListView->GetEntryWidgetClass().Get() : nullptr;
         Out->SetStringField(ClassField, FString(ViewClass->GetPrefixCPP()) + ViewClass->GetName());
         Out->SetStringField(TEXT("entry_widget_class"), EntryClass ? EntryClass->GetPathName() : FString());
+    }
+
+    /**
+     * The reply of add_list_view / add_tile_view / add_tree_view when Existing, a view of the requested class, already
+     * holds the requested name ViewName: it is left as it is, and nothing is modified, compiled or saved. ClassField and
+     * entry_widget_class are its own; NameField is the name param of the tool.
+     */
+    TSharedPtr<FJsonObject> ExistingViewReply_MVVM(const FString& WidgetBPName, const TCHAR* NameField, const FString& ViewName,
+                                                   const TCHAR* ClassField, const UWidget* Existing)
+    {
+        const UClass* ExistingClass = Existing->GetClass();
+        TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
+        Out->SetStringField(NameField, ViewName);
+        AddViewClassFields_MVVM(Out, ClassField, Existing);
+        Out->SetBoolField(TEXT("already_existed"), true);
+        Out->SetBoolField(TEXT("widget_added"), false);
+        Out->SetBoolField(TEXT("saved"), false);
+        Out->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("A widget named %s (%s%s) already exists and is left as it is; nothing was added, compiled or saved."),
+            *ViewName, ExistingClass->GetPrefixCPP(), *ExistingClass->GetName()));
+        return Out;
     }
 
     // Parse a "Context.Property" string into its two segments. Multi-segment nested sub-paths
@@ -560,7 +621,7 @@ namespace
 // add_viewmodel -- append a FMVVMBlueprintViewModelContext to the widget BP's
 // MVVM authoring extension. Idempotent by ContextName.
 // =============================================================================
-// MCP:add_viewmodel - Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name already there is kept as it is, not updated, and comes back with already_existed=true, though the Blueprint is still compiled and saved. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
+// MCP:add_viewmodel - Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name and class is kept as it is, answered with its own creation_type, already_existed=true, saved=false and a note, nothing changed, compiled or saved; one of another class is an error. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint asset, e.g. "/Game/UI/WBP_HUD".
 //   @param view_model_class - View model class: asset path (/Game/...) or /Script/<Module>.<ClassName>
 //   @param context_name - FName identifying this context (idempotency key)
@@ -638,16 +699,38 @@ TSharedPtr<FJsonObject> HandleAddViewModel(const TSharedPtr<FJsonObject>& Params
             TEXT("MVVMWidgetBlueprintExtension_View has no BlueprintView (corrupted extension state)"));
     }
 
-    // Idempotent check by ContextName.
-    bool bAlreadyExisted = false;
-    int32 ExistingCount = BlueprintView->GetViewModels().Num();
-    for (const FMVVMBlueprintViewModelContext& Ctx : BlueprintView->GetViewModels())
+    // Idempotent by ContextName: a context of that name and class is kept as it is, so nothing is modified, compiled
+    // or saved, and the reply describes that context, not the request. Another class under that name is a conflict.
+    if (const FMVVMBlueprintViewModelContext* Existing = BlueprintView->FindViewModel(ContextName))
     {
-        if (Ctx.GetViewModelName() == ContextName)
+        const UClass* ExistingClass = Existing->GetViewModelClass();
+        if (!ExistingClass || ExistingClass->GetAuthoritativeClass() != VMClass->GetAuthoritativeClass())
         {
-            bAlreadyExisted = true;
-            break;
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("A view-model context named '%s' already exists with class %s, not %s; nothing was changed. Pick another context_name."),
+                *ContextName.ToString(), ExistingClass ? *ExistingClass->GetName() : TEXT("(none)"), *VMClass->GetName()));
         }
+        TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
+        Out->SetStringField(TEXT("view_model_class"), ExistingClass ? ExistingClass->GetPathName() : FString());
+        Out->SetStringField(TEXT("context_name"), ContextName.ToString());
+        Out->SetStringField(TEXT("creation_type"), StaticEnum<EMVVMBlueprintViewModelContextCreationType>()
+            ->GetNameStringByValue(static_cast<int64>(Existing->CreationType)));
+        if (Existing->CreationType == EMVVMBlueprintViewModelContextCreationType::PropertyPath)
+        {
+            Out->SetStringField(TEXT("source_property_path"), Existing->ViewModelPropertyPath);
+        }
+        else if (Existing->CreationType == EMVVMBlueprintViewModelContextCreationType::GlobalViewModelCollection)
+        {
+            Out->SetStringField(TEXT("global_identifier"), Existing->GlobalViewModelIdentifier.ToString());
+        }
+        Out->SetBoolField(TEXT("already_existed"), true);
+        Out->SetNumberField(TEXT("view_model_count"), BlueprintView->GetViewModels().Num());
+        Out->SetBoolField(TEXT("has_mvvm_extension"), true);
+        Out->SetBoolField(TEXT("saved"), false);
+        Out->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("A view-model context named %s already exists and is kept as it is; nothing was changed, compiled or saved."),
+            *ContextName.ToString()));
+        return Out;
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddViewModel", "MCP: Add MVVM ViewModel Context"));
@@ -655,24 +738,21 @@ TSharedPtr<FJsonObject> HandleAddViewModel(const TSharedPtr<FJsonObject>& Params
     MvvmExt->Modify();
     BlueprintView->Modify();
 
-    if (!bAlreadyExisted)
+    FMVVMBlueprintViewModelContext NewContext(VMClass, ContextName);
+    NewContext.CreationType = CreationType;
+    if (CreationType == EMVVMBlueprintViewModelContextCreationType::PropertyPath)
     {
-        FMVVMBlueprintViewModelContext NewContext(VMClass, ContextName);
-        NewContext.CreationType = CreationType;
-        if (CreationType == EMVVMBlueprintViewModelContextCreationType::PropertyPath)
-        {
-            NewContext.ViewModelPropertyPath = SourcePropertyPathStr;
-        }
-        else if (CreationType == EMVVMBlueprintViewModelContextCreationType::GlobalViewModelCollection)
-        {
-            NewContext.GlobalViewModelIdentifier = FName(*GlobalIdentifierStr);
-        }
-        BlueprintView->AddViewModel(NewContext);
-        UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_viewmodel: added %s (%s) to %s (creation_type=%s)"),
-               *ContextName.ToString(), *VMClass->GetName(), *WidgetBPName, *CreationTypeStr);
+        NewContext.ViewModelPropertyPath = SourcePropertyPathStr;
     }
+    else if (CreationType == EMVVMBlueprintViewModelContextCreationType::GlobalViewModelCollection)
+    {
+        NewContext.GlobalViewModelIdentifier = FName(*GlobalIdentifierStr);
+    }
+    BlueprintView->AddViewModel(NewContext);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_viewmodel: added %s (%s) to %s (creation_type=%s)"),
+           *ContextName.ToString(), *VMClass->GetName(), *WidgetBPName, *CreationTypeStr);
 
-    int32 NewCount = BlueprintView->GetViewModels().Num();
+    const int32 NewCount = BlueprintView->GetViewModels().Num();
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
@@ -689,11 +769,10 @@ TSharedPtr<FJsonObject> HandleAddViewModel(const TSharedPtr<FJsonObject>& Params
     {
         Out->SetStringField(TEXT("global_identifier"), GlobalIdentifierStr);
     }
-    Out->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Out->SetBoolField(TEXT("already_existed"), false);
     Out->SetNumberField(TEXT("view_model_count"), NewCount);
     Out->SetBoolField(TEXT("has_mvvm_extension"), true);
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    return SavedReply_MVVM(Out, bSaved, TEXT("add_viewmodel"), SaveErr);
 }
 
 // =============================================================================
@@ -701,7 +780,7 @@ TSharedPtr<FJsonObject> HandleAddViewModel(const TSharedPtr<FJsonObject>& Params
 // FMVVMBlueprintViewModelContext from the widget BP's MVVM authoring extension
 // by FGuid. Idempotent: already-absent is an honest success, not an error.
 // =============================================================================
-// MCP:remove_viewmodel - Remove the view-model context named context_name from the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step; view_model_count is what the view keeps. Idempotent: a name that matches no context, or a Blueprint with no MVVM view at all (has_mvvm_extension=false), is a success with removed=false, saved=false and a note, and nothing is changed or saved. A missing Blueprint is an error; a failed save keeps the removal in memory with saved=false and save_error. Refused during PIE unless force=true. Inverse: add_viewmodel; drop a single binding instead: unbind_widget_from_viewmodel.
+// MCP:remove_viewmodel - Remove the view-model context named context_name from the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step; view_model_count is what the view keeps. Idempotent: a name that matches no context, or a Blueprint with no MVVM view at all (has_mvvm_extension=false), is a success with removed=false, saved=false and a note, and nothing is changed or saved. A missing Blueprint is an error; a failed save makes success false with saved=false and save_error, the removal kept in memory. Refused during PIE unless force=true. Inverse: add_viewmodel; drop a single binding instead: unbind_widget_from_viewmodel.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint asset (string)
 //   @param context_name - FName identifying the context to remove (idempotency key)
 //   @returns { widget_blueprint_name, context_name, already_existed, removed, view_model_count, has_mvvm_extension, saved, save_error?, note? }
@@ -784,8 +863,7 @@ TSharedPtr<FJsonObject> HandleRemoveViewModel(const TSharedPtr<FJsonObject>& Par
     Out->SetBoolField(TEXT("removed"), bRemoved);
     Out->SetNumberField(TEXT("view_model_count"), NewCount);
     Out->SetBoolField(TEXT("has_mvvm_extension"), true);
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    return SavedReply_MVVM(Out, bSaved, TEXT("remove_viewmodel"), SaveErr);
 }
 
 // =============================================================================
@@ -987,12 +1065,12 @@ TSharedPtr<FJsonObject> HandleSetViewModelField(const TSharedPtr<FJsonObject>& P
 //   non-goal (see ParseTwoSegmentPath): they'd need a chain of FStructProperty lookups this
 //   tool does not attempt (a verified subset is preferred over a guessed general case).
 // =============================================================================
-// MCP:bind_widget_to_viewmodel - Append an FMVVMBlueprintViewBinding to a Widget BP's MVVM authoring state, with a REAL SourcePath/DestinationPath (resolved via reflection and written through UMVVMEditorSubsystem, then re-read to verify the write actually stuck).
+// MCP:bind_widget_to_viewmodel - Add a binding to the MVVM view of a Widget Blueprint loaded by asset path, from a view-model property (source_path) to a widget property (destination_path), then compile and save the Blueprint in one undo step. Both paths are resolved by reflection, written through UMVVMEditorSubsystem as the MVVM editor does, and read back: a write that did not stick is rolled back and is an error, with nothing saved. Not idempotent: each call adds another binding. An unknown binding_mode, context, widget or property, or a path that is not Context.Property, is an error before anything changes; a Blueprint without MVVM support fails with a note. A failed save makes success false with saved=false and save_error, the binding kept in memory. Refused during PIE unless force=true. Add the context with add_viewmodel; inverse: unbind_widget_from_viewmodel.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint asset
 //   @param source_path - "ViewModel.Property" (exactly one dot): ViewModel = an existing viewmodel context name (added via add_viewmodel), Property = a reflected property on that viewmodel's class. Multi-segment ("A.B.C") is NOT supported.
 //   @param destination_path - "Widget.Property" (exactly one dot): Widget = a widget name in this Widget BP's WidgetTree, Property = a reflected property on that widget's class. Multi-segment is NOT supported.
 //   @param binding_mode - optional: "OneWay" (default), "TwoWay", "OneTime", "OneWayToSource"
-//   @returns { widget_blueprint_name, source_path, destination_path, binding_mode, created, binding_count, binding_id, source_path_verified, destination_path_verified, has_mvvm_extension }
+//   @returns { widget_blueprint_name, source_path, destination_path, binding_mode, created, binding_count, binding_id, source_path_verified, destination_path_verified, has_mvvm_extension, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleBindWidgetToViewModel(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1001,9 +1079,14 @@ TSharedPtr<FJsonObject> HandleBindWidgetToViewModel(const TSharedPtr<FJsonObject
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("source_path"), SourcePath)) { return Missing; }
     FString DestinationPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("destination_path"), DestinationPath)) { return Missing; }
-    FString BindingModeStr = TEXT("OneWay");
+    FString BindingModeStr;
     Params->TryGetStringField(TEXT("binding_mode"), BindingModeStr);
+    if (BindingModeStr.IsEmpty())
+    {
+        BindingModeStr = TEXT("OneWay");
+    }
 
+    // "OneWay" is the engine's OneWayToDestination. Any other name is refused before anything loads.
     EMVVMBindingMode BindingMode = EMVVMBindingMode::OneWayToDestination;
     if (BindingModeStr.Equals(TEXT("TwoWay"), ESearchCase::IgnoreCase))
     {
@@ -1019,7 +1102,12 @@ TSharedPtr<FJsonObject> HandleBindWidgetToViewModel(const TSharedPtr<FJsonObject
     {
         BindingMode = EMVVMBindingMode::OneWayToSource;
     }
-    // else leave as OneWayToDestination (the enum name UE uses for "OneWay").
+    else if (!BindingModeStr.Equals(TEXT("OneWay"), ESearchCase::IgnoreCase))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("binding_mode '%s' is not one of: OneWay, TwoWay, OneTime, OneWayToSource. Nothing was changed."),
+            *BindingModeStr));
+    }
 
     // Parse both dot-paths BEFORE touching any asset (fail fast on bad input).
     FString SourceContextName, SourcePropertyName, ParseErr;
@@ -1181,8 +1269,7 @@ TSharedPtr<FJsonObject> HandleBindWidgetToViewModel(const TSharedPtr<FJsonObject
     Out->SetBoolField(TEXT("source_path_verified"), bSourceWritten);
     Out->SetBoolField(TEXT("destination_path_verified"), bDestWritten);
     Out->SetBoolField(TEXT("has_mvvm_extension"), true);
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    return SavedReply_MVVM(Out, bSaved, TEXT("bind_widget_to_viewmodel"), SaveErr);
 }
 
 // =============================================================================
@@ -1191,11 +1278,11 @@ TSharedPtr<FJsonObject> HandleBindWidgetToViewModel(const TSharedPtr<FJsonObject
 // Identified by index (primary, always usable) or by binding GUID (optional).
 // Idempotent: out-of-range / unknown-GUID is an honest already-absent success.
 // =============================================================================
-// MCP:unbind_widget_from_viewmodel - Remove an FMVVMBlueprintViewBinding from a Widget BP's MVVM authoring state, by index (primary) or binding GUID. Inverse of bind_widget_to_viewmodel; idempotent (already-absent is an honest success).
+// MCP:unbind_widget_from_viewmodel - Remove one binding from the MVVM view of a Widget Blueprint loaded by asset path, picked by binding_index or, when no index is given, by binding_id, then compile and save the Blueprint in one undo step; binding_count is what the view keeps. A binding that is not there (an index out of range, an id no binding has, or a Blueprint with no MVVM view: has_mvvm_extension=false) is a success with removed=false, saved=false and a note, and nothing is changed or saved. By index a repeat call removes the binding that moved into that index. Neither identifier, a binding_id that is not a GUID, or a missing Blueprint is an error. A failed save makes success false with saved=false and save_error, the removal kept in memory. Refused during PIE unless force=true. Inverse: bind_widget_to_viewmodel; a whole context: remove_viewmodel.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint asset
 //   @param binding_index - int index of the binding to remove (primary identifier; one of binding_index / binding_id required)
 //   @param binding_id - optional GUID string of the binding to remove (alternative to binding_index)
-//   @returns { widget_blueprint_name, binding_index?, binding_id?, already_existed, removed, binding_count, has_mvvm_extension, saved, save_error? }
+//   @returns { widget_blueprint_name, binding_index?, binding_id?, already_existed, removed, binding_count, has_mvvm_extension, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleUnbindWidgetFromViewModel(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1212,6 +1299,16 @@ TSharedPtr<FJsonObject> HandleUnbindWidgetFromViewModel(const TSharedPtr<FJsonOb
             TEXT("one of binding_index (int) or binding_id (GUID string) is required"));
     }
 
+    // Primary identifier: index. GUID is only consulted when no index was supplied, and is parsed before anything
+    // is loaded or touched.
+    const bool bUseIndex = bHasIndex;
+    FGuid BindingId;
+    if (!bUseIndex && !FGuid::Parse(BindingIdStr, BindingId))
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("binding_id is not a valid GUID: %s"), *BindingIdStr));
+    }
+
     FString LoadErr;
     UWidgetBlueprint* WidgetBP = UMGWidgetUtils::LoadWidgetBlueprint(WidgetBPName, LoadErr);
     if (!WidgetBP)
@@ -1219,14 +1316,34 @@ TSharedPtr<FJsonObject> HandleUnbindWidgetFromViewModel(const TSharedPtr<FJsonOb
         return mcp_common::MakeErrorReply(LoadErr);
     }
 
-    // Resolve the MVVM BP-side authoring extension. Returns nullptr if the widget
-    // BP doesn't have MVVM panel support ("Supports Extensions" not enabled). For an
-    // unbind, that means there is nothing to delete -- honest already-absent success.
+    // The reply opened with the identifier the call used.
+    const auto StartUnbindReply = [&]()
+    {
+        TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
+        if (bUseIndex)
+        {
+            Out->SetNumberField(TEXT("binding_index"), BindingIndex);
+        }
+        else
+        {
+            Out->SetStringField(TEXT("binding_id"), BindingIdStr);
+        }
+        return Out;
+    };
+
+    // Resolve the MVVM BP-side authoring extension. Returns nullptr if the widget BP has no MVVM view. For an
+    // unbind, that means there is no binding to remove: an already-absent success, with nothing modified or saved.
     UMVVMWidgetBlueprintExtension_View* MvvmExt = UWidgetBlueprintExtension::GetExtension<UMVVMWidgetBlueprintExtension_View>(WidgetBP);
     if (!MvvmExt)
     {
-        TSharedPtr<FJsonObject> Out = StartReply_MVVM(false, WidgetBPName);
-        Out->SetStringField(TEXT("note"), NoMvvmSupportNote_MVVM);
+        TSharedPtr<FJsonObject> Out = StartUnbindReply();
+        Out->SetBoolField(TEXT("already_existed"), false);
+        Out->SetBoolField(TEXT("removed"), false);
+        Out->SetNumberField(TEXT("binding_count"), 0);
+        Out->SetBoolField(TEXT("has_mvvm_extension"), false);
+        Out->SetBoolField(TEXT("saved"), false);
+        Out->SetStringField(TEXT("note"),
+            TEXT("The Widget Blueprint has no MVVM view, so it has no binding to remove; nothing was changed or saved."));
         return Out;
     }
 
@@ -1237,89 +1354,64 @@ TSharedPtr<FJsonObject> HandleUnbindWidgetFromViewModel(const TSharedPtr<FJsonOb
             TEXT("MVVMWidgetBlueprintExtension_View has no BlueprintView"));
     }
 
-    // Primary identifier: index. GUID is only consulted when no index was supplied.
-    const bool bUseIndex = bHasIndex;
+    // The binding to remove, looked up before anything is modified: an index out of range or an unknown GUID is an
+    // already-absent success with nothing modified or saved.
+    const FMVVMBlueprintViewBinding* Binding = bUseIndex
+        ? (BindingIndex >= 0 && BindingIndex < BlueprintView->GetNumBindings() ? BlueprintView->GetBindingAt(BindingIndex) : nullptr)
+        : BlueprintView->GetBinding(BindingId);
+    if (!Binding)
+    {
+        TSharedPtr<FJsonObject> Out = StartUnbindReply();
+        Out->SetBoolField(TEXT("already_existed"), false);
+        Out->SetBoolField(TEXT("removed"), false);
+        Out->SetNumberField(TEXT("binding_count"), BlueprintView->GetNumBindings());
+        Out->SetBoolField(TEXT("has_mvvm_extension"), true);
+        Out->SetBoolField(TEXT("saved"), false);
+        Out->SetStringField(TEXT("note"), bUseIndex
+            ? TEXT("No binding has that index; nothing was changed or saved.")
+            : TEXT("No binding has that id; nothing was changed or saved."));
+        return Out;
+    }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_UnbindWidget", "MCP: Remove MVVM Binding"));
     WidgetBP->Modify();
     MvvmExt->Modify();
     BlueprintView->Modify();
 
-    bool bAlreadyExisted = false;
-    bool bRemoved = false;
-
     if (bUseIndex)
     {
-        const int32 NumBindings = BlueprintView->GetNumBindings();
-        if (BindingIndex >= 0 && BindingIndex < NumBindings)
-        {
-            bAlreadyExisted = true;
-            BlueprintView->RemoveBindingAt(BindingIndex);
-            bRemoved = true;
-        }
-        // else: out-of-range -> already-absent honest success (bAlreadyExisted/bRemoved stay false).
+        BlueprintView->RemoveBindingAt(BindingIndex);
     }
     else
     {
-        FGuid Id;
-        if (!FGuid::Parse(BindingIdStr, Id))
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("binding_id is not a valid GUID: %s"), *BindingIdStr));
-        }
-        FMVVMBlueprintViewBinding* B = BlueprintView->GetBinding(Id);
-        if (B != nullptr)
-        {
-            bAlreadyExisted = true;
-            BlueprintView->RemoveBinding(B);
-            bRemoved = true;
-        }
-        // else: unknown GUID -> already-absent honest success.
+        BlueprintView->RemoveBinding(Binding);
     }
 
     const int32 BindingCount = BlueprintView->GetNumBindings();
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] unbind_widget_from_viewmodel: removed=%d (by %s) on %s (count=%d)"),
-           bRemoved ? 1 : 0, bUseIndex ? TEXT("index") : TEXT("guid"), *WidgetBPName, BindingCount);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] unbind_widget_from_viewmodel: removed (by %s) on %s (count=%d)"),
+           bUseIndex ? TEXT("index") : TEXT("guid"), *WidgetBPName, BindingCount);
 
-    // Only persist when we actually mutated the view.
-    bool bSaved = false;
     FString SaveErr;
-    if (bRemoved)
-    {
-        bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
-    }
+    const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
 
-    TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
-    if (bUseIndex)
-    {
-        Out->SetNumberField(TEXT("binding_index"), BindingIndex);
-    }
-    else
-    {
-        Out->SetStringField(TEXT("binding_id"), BindingIdStr);
-    }
-    Out->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Out->SetBoolField(TEXT("removed"), bRemoved);
+    TSharedPtr<FJsonObject> Out = StartUnbindReply();
+    Out->SetBoolField(TEXT("already_existed"), true);
+    Out->SetBoolField(TEXT("removed"), true);
     Out->SetNumberField(TEXT("binding_count"), BindingCount);
     Out->SetBoolField(TEXT("has_mvvm_extension"), true);
-    Out->SetBoolField(TEXT("saved"), bSaved);
-    if (bRemoved && !bSaved)
-    {
-        Out->SetStringField(TEXT("save_error"), SaveErr);
-    }
-    return Out;
+    return SavedReply_MVVM(Out, bSaved, TEXT("unbind_widget_from_viewmodel"), SaveErr);
 }
 
 // =============================================================================
 // add_list_view -- adds a UListView to the widget BP's WidgetTree root.
 // Idempotent by list_view_name.
 // =============================================================================
-// MCP:add_list_view - Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false; list_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. A missing Blueprint, or an entry class that is not a UUserWidget, is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+// MCP:add_list_view - Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UListView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint
 //   @param list_view_name - FName of the new UListView widget
 //   @param entry_widget_class - Optional entry widget class (asset or /Script path)
-//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }
+//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleAddListView(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1331,58 +1423,52 @@ TSharedPtr<FJsonObject> HandleAddListView(const TSharedPtr<FJsonObject>& Params)
     Params->TryGetStringField(TEXT("entry_widget_class"), EntryClassRef);
 
     FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, EntryClassRef, View))
+    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, UListView::StaticClass(), EntryClassRef, View))
     {
         return Failure;
     }
-    if (!View.bAlreadyExisted)
+    if (View.ExistingWidget)
     {
-        const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
-        if (!HostError.IsEmpty())
-        {
-            return mcp_common::MakeErrorReply(HostError);
-        }
+        return ExistingViewReply_MVVM(WidgetBPName, TEXT("list_view_name"), ListViewName, TEXT("list_view_class"), View.ExistingWidget);
+    }
+    const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
+    if (!HostError.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(HostError);
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddListView", "MCP: Add ListView"));
     View.WidgetBP->Modify();
     View.Tree->Modify();
 
-    // The widget the reply describes: the one already holding the name, left untouched, or the new view.
-    UWidget* ReportedView = View.ExistingWidget;
-    if (!ReportedView)
+    UListView* NewView = AddListTypeView_MVVM<UListView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
+    if (!NewView)
     {
-        ReportedView = AddListTypeView_MVVM<UListView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
-        if (!ReportedView)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Tree->ConstructWidget<UListView> returned null"));
-        }
+        return mcp_common::MakeErrorReply(
+            TEXT("Tree->ConstructWidget<UListView> returned null"));
     }
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_list_view: %s on %s (already=%d)"),
-           *ListViewName, *WidgetBPName, View.bAlreadyExisted ? 1 : 0);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_list_view: %s added on %s"), *ListViewName, *WidgetBPName);
 
     TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
     Out->SetStringField(TEXT("list_view_name"), ListViewName);
-    AddViewClassFields_MVVM(Out, TEXT("list_view_class"), ReportedView);
-    Out->SetBoolField(TEXT("already_existed"), View.bAlreadyExisted);
-    Out->SetBoolField(TEXT("widget_added"), !View.bAlreadyExisted);
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    AddViewClassFields_MVVM(Out, TEXT("list_view_class"), NewView);
+    Out->SetBoolField(TEXT("already_existed"), false);
+    Out->SetBoolField(TEXT("widget_added"), true);
+    return SavedReply_MVVM(Out, bSaved, TEXT("add_list_view"), SaveErr);
 }
 
 // =============================================================================
 // add_tile_view -- same shape as add_list_view but forces UTileView.
 // =============================================================================
-// MCP:add_tile_view - Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false; list_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. A missing Blueprint or a non-UUserWidget entry class is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+// MCP:add_tile_view - Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTileView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
 //   @param list_view_name - Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key.
 //   @param entry_widget_class - Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path.
-//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }
+//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1394,48 +1480,42 @@ TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
     Params->TryGetStringField(TEXT("entry_widget_class"), EntryClassRef);
 
     FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, EntryClassRef, View))
+    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, UTileView::StaticClass(), EntryClassRef, View))
     {
         return Failure;
     }
-    if (!View.bAlreadyExisted)
+    if (View.ExistingWidget)
     {
-        const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
-        if (!HostError.IsEmpty())
-        {
-            return mcp_common::MakeErrorReply(HostError);
-        }
+        return ExistingViewReply_MVVM(WidgetBPName, TEXT("list_view_name"), ListViewName, TEXT("list_view_class"), View.ExistingWidget);
+    }
+    const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
+    if (!HostError.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(HostError);
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddTileView", "MCP: Add TileView"));
     View.WidgetBP->Modify();
     View.Tree->Modify();
 
-    // The widget the reply describes: the one already holding the name, left untouched, or the new view.
-    UWidget* ReportedView = View.ExistingWidget;
-    if (!ReportedView)
+    UTileView* NewView = AddListTypeView_MVVM<UTileView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
+    if (!NewView)
     {
-        ReportedView = AddListTypeView_MVVM<UTileView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
-        if (!ReportedView)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Tree->ConstructWidget<UTileView> returned null"));
-        }
+        return mcp_common::MakeErrorReply(
+            TEXT("Tree->ConstructWidget<UTileView> returned null"));
     }
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tile_view: %s on %s (already=%d)"),
-           *ListViewName, *WidgetBPName, View.bAlreadyExisted ? 1 : 0);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tile_view: %s added on %s"), *ListViewName, *WidgetBPName);
 
     TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
     Out->SetStringField(TEXT("list_view_name"), ListViewName);
-    AddViewClassFields_MVVM(Out, TEXT("list_view_class"), ReportedView);
-    Out->SetBoolField(TEXT("already_existed"), View.bAlreadyExisted);
-    Out->SetBoolField(TEXT("widget_added"), !View.bAlreadyExisted);
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    AddViewClassFields_MVVM(Out, TEXT("list_view_class"), NewView);
+    Out->SetBoolField(TEXT("already_existed"), false);
+    Out->SetBoolField(TEXT("widget_added"), true);
+    return SavedReply_MVVM(Out, bSaved, TEXT("add_tile_view"), SaveErr);
 }
 
 // =============================================================================
@@ -1447,7 +1527,7 @@ TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
 // graph event node; this command returns the honest gap rather than
 // fabricating a property that doesn't exist.
 // =============================================================================
-// MCP:set_widget_drag_drop - Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set, saved). A widget already holding that class is left as it is: changed=false, saved=false and a note, nothing compiled or saved. Among the engine UMG widgets only list, tile and tree views have that property (UListViewBase); any other widget gets nothing written and set=false with a note, because drag and drop there is the OnDragDetected and OnDrop events of a User Widget graph: author those with build_blueprint_graph, after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; one that does not load or is not a UDragDropOperation subclass is an error, and so is a missing Blueprint or widget: nothing is written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
+// MCP:set_widget_drag_drop - Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
 //   @param widget_name - Name of the widget in the tree of that Blueprint, e.g. "ItemTiles"; only a list, tile or tree view can take the class.
 //   @param operation_class - Class path of a UDragDropOperation subclass, e.g. "/Script/UMG.DragDropOperation" or "/Game/UI/DDO_Item.DDO_Item_C"; defaults to /Script/UMG.DragDropOperation.
@@ -1519,6 +1599,9 @@ TSharedPtr<FJsonObject> HandleSetWidgetDragDrop(const TSharedPtr<FJsonObject>& P
     }
 
     TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+    bool bWritten = false;
+    bool bSaved = false;
+    FString SaveErr;
     if (bHasProp)
     {
         FProperty* P = Target->GetClass()->FindPropertyByName(*PropName);
@@ -1544,11 +1627,10 @@ TSharedPtr<FJsonObject> HandleSetWidgetDragDrop(const TSharedPtr<FJsonObject>& P
                 Target->Modify();
                 AsClassProp->SetPropertyValue_InContainer(Target, OpClass);
 
-                FString SaveErr;
-                const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
+                bWritten = true;
+                bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
 
                 Out->SetBoolField(TEXT("changed"), true);
-                mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
             }
         }
         else
@@ -1573,12 +1655,16 @@ TSharedPtr<FJsonObject> HandleSetWidgetDragDrop(const TSharedPtr<FJsonObject>& P
     Out->SetStringField(TEXT("operation_class"), OperationClassRef);
     Out->SetBoolField(TEXT("has_drag_drop_property"), bHasProp);
     Out->SetBoolField(TEXT("operation_class_loaded"), OpClass != nullptr);
+    if (bWritten)
+    {
+        return SavedReply_MVVM(Out, bSaved, TEXT("set_widget_drag_drop"), SaveErr);
+    }
     return Out;
 }
 
 // =============================================================================
-// create_common_ui_stack -- replace the WidgetTree root with a
-// UCommonActivatableWidgetStack (or create one as root).
+// create_common_ui_stack -- make a UCommonActivatableWidgetStack the root of an
+// empty WidgetTree; a stack root is kept, any other root is refused.
 //
 // root_class is the class of the root widget being constructed: UCommonActivatableWidgetStack
 // is a normal UWidget, so a project can author a BP subclass of it (e.g. with custom
@@ -1587,10 +1673,10 @@ TSharedPtr<FJsonObject> HandleSetWidgetDragDrop(const TSharedPtr<FJsonObject>& P
 // AddWidget(TSubclassOf<UCommonActivatableWidget>) (CommonActivatableWidgetContainer.h).
 // root_class is optional; omitted = the base UCommonActivatableWidgetStack.
 // =============================================================================
-// MCP:create_common_ui_stack - Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if absent). root_class, when given, picks which UCommonActivatableWidgetStack subclass gets constructed (e.g. a project-authored BP subclass) -- an unresolvable or non-subclass value does not fail the call, it honestly falls back to the base stack class with a note (see root_class_note in the response).
+// MCP:create_common_ui_stack - Make a UCommonActivatableWidgetStack the root of the empty tree of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step. root_class picks the UCommonActivatableWidgetStack subclass to construct; one that does not resolve, or is not such a subclass, falls back to the base class with root_class_resolved=false and root_class_note. The stack is named CommonActivatableWidgetStack, made unique when an object of the tree holds that name. Idempotent: a root that is already a stack is kept as it is (already_existed=true, root_changed=false, saved=false, a note), nothing compiled or saved. Any other root, or a missing Blueprint, is an error and nothing changes. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Screens go on the stack at runtime: push_common_ui_widget and pop_common_ui_widget; read it with read_pie_widgets.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint
 //   @param root_class - Optional. Asset path (/Game/...) or /Script/<Module>.<ClassName> of a UCommonActivatableWidgetStack subclass. Omitted = base UCommonActivatableWidgetStack.
-//   @returns { widget_blueprint_name, root_class?, already_existed, stack_class, root_class_requested, root_class_resolved, root_class_note?, root_changed, root_widget, root_widget_class }
+//   @returns { widget_blueprint_name, root_class?, already_existed, stack_class, root_class_requested, root_class_resolved, root_class_note?, root_changed, root_widget, root_widget_class, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleCreateCommonUIStack(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
@@ -1608,8 +1694,19 @@ TSharedPtr<FJsonObject> HandleCreateCommonUIStack(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(LoadErr);
     }
 
-    bool bAlreadyExisted = (Tree->RootWidget != nullptr)
+    const bool bAlreadyExisted = (Tree->RootWidget != nullptr)
         && Tree->RootWidget->IsA<UCommonActivatableWidgetStack>();
+
+    // A root of another kind is refused, as ListViewHostError_MVVM refuses it for the list views: making the stack
+    // the root instead would orphan that root and its subtree.
+    if (Tree->RootWidget && !bAlreadyExisted)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("the root widget '%s' is a %s, not a CommonActivatableWidgetStack, and making the stack the root would ")
+            TEXT("orphan it and its subtree. Use a Widget Blueprint whose tree is empty or whose root is already a stack. ")
+            TEXT("Nothing was changed."),
+            *Tree->RootWidget->GetName(), *Tree->RootWidget->GetClass()->GetName()));
+    }
 
     // Resolve root_class to a real UClass BEFORE mutating anything. Honest fallback (not a hard
     // error): an unresolvable or non-subclass root_class falls back to the base stack class with
@@ -1642,50 +1739,68 @@ TSharedPtr<FJsonObject> HandleCreateCommonUIStack(const TSharedPtr<FJsonObject>&
         }
     }
 
+    // The reply fields of both outcomes, the root read off the tree as it now is.
+    const auto StartStackReply = [&](bool bRootChanged)
+    {
+        TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
+        if (bHasRootClass)
+        {
+            Out->SetStringField(TEXT("root_class"), RootClassStr);
+        }
+        Out->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+        Out->SetStringField(TEXT("stack_class"), TEXT("UCommonActivatableWidgetStack"));
+        Out->SetBoolField(TEXT("root_class_requested"), bHasRootClass);
+        Out->SetBoolField(TEXT("root_class_resolved"), bRootClassResolved);
+        if (!RootClassNote.IsEmpty())
+        {
+            Out->SetStringField(TEXT("root_class_note"), RootClassNote);
+        }
+        Out->SetBoolField(TEXT("root_changed"), bRootChanged);
+        Out->SetStringField(TEXT("root_widget"), Tree->RootWidget ? Tree->RootWidget->GetName() : FString());
+        Out->SetStringField(TEXT("root_widget_class"), Tree->RootWidget ? Tree->RootWidget->GetClass()->GetName() : FString());
+        return Out;
+    };
+
+    // A root that is already a stack is kept as it is: nothing is modified, compiled or saved.
+    if (bAlreadyExisted)
+    {
+        TSharedPtr<FJsonObject> Out = StartStackReply(/*bRootChanged=*/false);
+        Out->SetBoolField(TEXT("saved"), false);
+        Out->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("The root %s is already a %s and is kept as it is; nothing was changed, compiled or saved."),
+            *Tree->RootWidget->GetName(), *Tree->RootWidget->GetClass()->GetName()));
+        return Out;
+    }
+
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_CreateCommonStack", "MCP: Create CommonUI Stack"));
     WidgetBP->Modify();
     Tree->Modify();
 
-    bool bRootChanged = false;
-    if (!bAlreadyExisted)
+    // Build a new UCommonActivatableWidgetStack (or the resolved subclass) as the root of the empty tree. Named as the
+    // UMG designer names a new widget (FWidgetTemplateClass::CreateNamed): the base name, made unique when an object
+    // of the tree already holds it -- NewObject aborts the editor on a name held by another class.
+    FName StackName(TEXT("CommonActivatableWidgetStack"));
+    if (StaticFindObjectFast(UObject::StaticClass(), Tree, StackName))
     {
-        // Build a new UCommonActivatableWidgetStack (or the resolved subclass) and graft it as root.
-        UCommonActivatableWidgetStack* NewStack = Tree->ConstructWidget<UCommonActivatableWidgetStack>(
-            StackClass,
-            TEXT("CommonActivatableWidgetStack"));
-        if (!NewStack)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("ConstructWidget<UCommonActivatableWidgetStack> returned null -- ensure CommonUI plugin is enabled in this project."));
-        }
-        Tree->RootWidget = NewStack;
-        bRootChanged = true;
+        StackName = MakeUniqueObjectName(Tree, StackClass, StackName);
     }
+    UCommonActivatableWidgetStack* NewStack = Tree->ConstructWidget<UCommonActivatableWidgetStack>(StackClass, StackName);
+    if (!NewStack)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("ConstructWidget<UCommonActivatableWidgetStack> returned null -- ensure CommonUI plugin is enabled in this project."));
+    }
+    Tree->RootWidget = NewStack;
+    // Registered as a Blueprint variable, as add_list_view registers its view, so the widget compiler finds its GUID.
+    WidgetBP->OnVariableAdded(NewStack->GetFName());
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] create_common_ui_stack: %s (already=%d, root_changed=%d, root_class_resolved=%d)"),
-           *WidgetBPName, bAlreadyExisted ? 1 : 0, bRootChanged ? 1 : 0, bRootClassResolved ? 1 : 0);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] create_common_ui_stack: %s (root_changed=1, root_class_resolved=%d)"),
+           *WidgetBPName, bRootClassResolved ? 1 : 0);
 
-    TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
-    if (bHasRootClass)
-    {
-        Out->SetStringField(TEXT("root_class"), RootClassStr);
-    }
-    Out->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Out->SetStringField(TEXT("stack_class"), TEXT("UCommonActivatableWidgetStack"));
-    Out->SetBoolField(TEXT("root_class_requested"), bHasRootClass);
-    Out->SetBoolField(TEXT("root_class_resolved"), bRootClassResolved);
-    if (!RootClassNote.IsEmpty())
-    {
-        Out->SetStringField(TEXT("root_class_note"), RootClassNote);
-    }
-    Out->SetBoolField(TEXT("root_changed"), bRootChanged);
-    Out->SetStringField(TEXT("root_widget"), Tree->RootWidget ? Tree->RootWidget->GetName() : FString());
-    Out->SetStringField(TEXT("root_widget_class"), Tree->RootWidget ? Tree->RootWidget->GetClass()->GetName() : FString());
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    return SavedReply_MVVM(StartStackReply(/*bRootChanged=*/true), bSaved, TEXT("create_common_ui_stack"), SaveErr);
 }
 
 // =============================================================================
@@ -1881,7 +1996,7 @@ TSharedPtr<FJsonObject> HandleSetPieListViewItems(const TSharedPtr<FJsonObject>&
 // widget and wires its EntryWidgetClass, exactly like add_list_view/
 // add_tile_view do.
 // =============================================================================
-// MCP:add_tree_view - Construct a UTreeView under the widget BP root (or a named parent panel widget) and add it to the tree. A root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called widget_name, of any class, is left untouched (already_existed=true; tree_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. HONEST SCOPE: authoring only, same posture as add_list_view/add_tile_view -- constructs the widget + wires EntryWidgetClass. Populating the tree's actual hierarchy (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is OUT OF SCOPE: that delegate is a native TSlateDelegates callback, not reflectively assignable -- wire it in the widget BP graph (native C++/BP override) or drive it live in PIE.
+// MCP:add_tree_view - Construct a UTreeView named widget_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTreeView already called widget_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: the tree items and their children are supplied at runtime. A list: add_list_view; tiles: add_tile_view.
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint
 //   @param widget_name - FName of the new UTreeView widget
 //   @param entry_widget_class - Optional entry widget class (asset or /Script path)
@@ -1901,7 +2016,7 @@ TSharedPtr<FJsonObject> HandleAddTreeView(const TSharedPtr<FJsonObject>& Params)
     Params->TryGetStringField(TEXT("parent_widget_name"), ParentWidgetName);
 
     FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, TreeViewName, EntryClassRef, View))
+    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, TreeViewName, UTreeView::StaticClass(), EntryClassRef, View))
     {
         return Failure;
     }
@@ -1925,50 +2040,50 @@ TSharedPtr<FJsonObject> HandleAddTreeView(const TSharedPtr<FJsonObject>& Params)
                 *ParentWidgetName, *ParentWidget->GetClass()->GetName()));
         }
     }
-    if (!View.bAlreadyExisted)
+    if (View.ExistingWidget)
     {
-        const FString HostError = ListViewHostError_MVVM(View.Tree, ParentPanel);
-        if (!HostError.IsEmpty())
+        TSharedPtr<FJsonObject> Out =
+            ExistingViewReply_MVVM(WidgetBPName, TEXT("widget_name"), TreeViewName, TEXT("tree_view_class"), View.ExistingWidget);
+        if (!ParentWidgetName.IsEmpty())
         {
-            return mcp_common::MakeErrorReply(HostError);
+            Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
         }
+        return Out;
+    }
+    const FString HostError = ListViewHostError_MVVM(View.Tree, ParentPanel);
+    if (!HostError.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(HostError);
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddTreeView", "MCP: Add TreeView"));
     View.WidgetBP->Modify();
     View.Tree->Modify();
 
-    // The widget the reply describes: the one already holding the name, left untouched, or the new view.
-    UWidget* ReportedView = View.ExistingWidget;
-    if (!ReportedView)
+    UTreeView* NewView = AddListTypeView_MVVM<UTreeView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
+    if (!NewView)
     {
-        ReportedView = AddListTypeView_MVVM<UTreeView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
-        if (!ReportedView)
-        {
-            return mcp_common::MakeErrorReply(
-                TEXT("Tree->ConstructWidget<UTreeView> returned null"));
-        }
+        return mcp_common::MakeErrorReply(
+            TEXT("Tree->ConstructWidget<UTreeView> returned null"));
     }
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tree_view: %s on %s (already=%d)"),
-           *TreeViewName, *WidgetBPName, View.bAlreadyExisted ? 1 : 0);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tree_view: %s added on %s"), *TreeViewName, *WidgetBPName);
 
     TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
     Out->SetStringField(TEXT("widget_name"), TreeViewName);
-    AddViewClassFields_MVVM(Out, TEXT("tree_view_class"), ReportedView);
-    Out->SetBoolField(TEXT("already_existed"), View.bAlreadyExisted);
+    AddViewClassFields_MVVM(Out, TEXT("tree_view_class"), NewView);
+    Out->SetBoolField(TEXT("already_existed"), false);
     if (!ParentWidgetName.IsEmpty())
     {
         Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
     }
-    Out->SetBoolField(TEXT("widget_added"), !View.bAlreadyExisted);
+    Out->SetBoolField(TEXT("widget_added"), true);
     Out->SetStringField(TEXT("note"),
         TEXT("Authoring only: constructs the UTreeView + EntryWidgetClass. Populating the tree (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is out of scope -- that delegate is a native TSlateDelegates callback, not reflectively assignable; wire it in the widget BP graph or drive it live in PIE."));
-    mcp_common::AddSaveOutcome(Out, bSaved, SaveErr);
-    return Out;
+    return SavedReply_MVVM(Out, bSaved, TEXT("add_tree_view"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------

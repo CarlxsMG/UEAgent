@@ -35,6 +35,7 @@
 #include "UDynamicMesh.h"
 #include "GeometryScript/MeshAssetFunctions.h"   // CopyMeshFromStaticMesh / CopyMeshToStaticMesh
 #include "GeometryScript/MeshUVFunctions.h"      // UGeometryScriptLibrary_MeshUVFunctions::ClearUVChannel / SetMeshTriangleUVs / RepackMeshUVs
+#include "GeometryScript/MeshQueryFunctions.h"   // UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets
 #include "GeometryScript/GeometryScriptTypes.h"  // FGeometryScriptUVTriangle, EGeometryScriptUVLayoutType, FGeometryScriptRepackUVsOptions
 
 /**
@@ -73,15 +74,45 @@ namespace
         return nullptr;
     }
 
-    /** StaticMesh (highest available LOD, build settings applied) copied into a new transient dynamic mesh:
-     *  null once OutDynMesh holds it, otherwise the error reply. */
+    /**
+     * Why CopyMeshFromStaticMesh cannot read LOD 0 of StaticMesh with an EGeometryScriptLODType::SourceModel request,
+     * or empty when it can. The rule is the one the GeometryScript static-mesh queries apply
+     * (GeometryScript_ResolveStaticMeshReadLOD): in the editor the engine reads the source model of the LOD when it
+     * holds geometry, else that LOD's render data, and a mesh with no source model, or with neither for LOD 0, makes
+     * it index LOD -1 and kill the editor.
+     */
+    FString UVMapping_ReadLOD0Error(const UStaticMesh* StaticMesh)
+    {
+        if (StaticMesh->GetNumSourceModels() == 0)
+        {
+            return FString::Printf(TEXT("Static mesh '%s' has no source model, so no source geometry to read; nothing was changed"),
+                *StaticMesh->GetPathName());
+        }
+        if (!StaticMesh->GetSourceModel(0).IsSourceModelInitialized() && StaticMesh->GetNumLODs() == 0)
+        {
+            return FString::Printf(TEXT("Static mesh '%s' LOD 0 has no source geometry and no render LOD to read; nothing was changed"),
+                *StaticMesh->GetPathName());
+        }
+        return FString();
+    }
+
+    /** LOD 0 of StaticMesh (build settings applied), the LOD the write side writes back, copied into a new transient
+     *  dynamic mesh: null once OutDynMesh holds it, otherwise the error reply. */
     TSharedPtr<FJsonObject> UVMapping_CopyToDynamicMesh(UStaticMesh* StaticMesh, UDynamicMesh*& OutDynMesh)
     {
+        const FString LODError = UVMapping_ReadLOD0Error(StaticMesh);
+        if (!LODError.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(LODError);
+        }
         OutDynMesh = NewObject<UDynamicMesh>(GetTransientPackage());
         FGeometryScriptCopyMeshFromAssetOptions Opts;
         Opts.bApplyBuildSettings = true;
+        // LOD 0 itself, which the default FGeometryScriptMeshWriteLOD of UVMapping_CopyToStaticMesh writes back:
+        // MaxAvailable would read the hi-res source model of a mesh that has one, and write it over LOD 0.
         FGeometryScriptMeshReadLOD ReadLOD;
-        ReadLOD.LODType = EGeometryScriptLODType::MaxAvailable;
+        ReadLOD.LODType = EGeometryScriptLODType::SourceModel;
+        ReadLOD.LODIndex = 0;
         EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
         UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh(StaticMesh, OutDynMesh, Opts, ReadLOD, Outcome);
         if (Outcome != EGeometryScriptOutcomePins::Success)
@@ -380,9 +411,9 @@ TSharedPtr<FJsonObject> HandleGetUVHealthReport(const TSharedPtr<FJsonObject>& P
 //   5. SaveAssetPackage
 // ===========================================================================
 
-// MCP:clear_uv_channel - Drop all UVs from one UV channel on a static mesh. Idempotent on already-empty channels. Resizes the UV-channel count if the cleared channel is the highest one (UE 5.8 doesn't auto-shrink channel count, so callers that want to "remove" a UV channel should follow up with set_num_uv_channels).
+// MCP:clear_uv_channel - Drop every UV from one UV channel of LOD 0 of a UStaticMesh asset: LOD 0 (its source model, or its render data when it has none) is copied to a transient dynamic mesh, the channel's UVs are cleared there, and the copy is written back over LOD 0 in one undo step and the package saved. The channel itself stays, so the channel count does not change, and an already-empty channel is still written and saved. A uv_channel LOD 0 lacks, a mesh with no source model, a path that does not load or a mesh under /Engine is an error and nothing changes; a failed save makes success false. Inventory first: list_uv_channels; one triangle: set_triangle_uvs; channel count of a DynamicMeshActor: set_num_uv_channels.
 //   @param static_mesh_path - Asset path to the UStaticMesh
-//   @param uv_channel - Index of the UV channel to clear (0-based; default 0)
+//   @param uv_channel - Index of the UV channel to clear (0-based; default 0); one LOD 0 does not have is an error
 //   @returns { static_mesh_path, uv_channel, uv_channel_count_before, uv_channel_count_after, cleared, saved }
 TSharedPtr<FJsonObject> HandleClearUVChannel(const TSharedPtr<FJsonObject>& Params)
 {
@@ -397,6 +428,15 @@ TSharedPtr<FJsonObject> HandleClearUVChannel(const TSharedPtr<FJsonObject>& Para
 
     UDynamicMesh* DynMesh = nullptr;
     if (TSharedPtr<FJsonObject> CopyError = UVMapping_CopyToDynamicMesh(StaticMesh, DynMesh)) { return CopyError; }
+    // ClearUVChannel leaves a channel the copy does not have untouched and says so only in its debug object, so such a
+    // channel is refused here, before the copy would be written back and saved unchanged.
+    const int32 CopyUVChannels = UGeometryScriptLibrary_MeshQueryFunctions::GetNumUVSets(DynMesh);
+    if (UVChannel < 0 || UVChannel >= CopyUVChannels)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("uv_channel %d does not exist: LOD 0 of %s has %d UV channels; nothing was changed"),
+            UVChannel, *StaticMesh->GetPathName(), CopyUVChannels));
+    }
     UGeometryScriptLibrary_MeshUVFunctions::ClearUVChannel(DynMesh, UVChannel, /*Debug*/ nullptr);
 
     if (TSharedPtr<FJsonObject> WriteError = UVMapping_CopyToStaticMesh(DynMesh, StaticMesh)) { return WriteError; }
@@ -413,13 +453,13 @@ TSharedPtr<FJsonObject> HandleClearUVChannel(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("clear_uv_channel"));
 }
 
-// MCP:set_triangle_uvs - Set the 3 UV corners of a single triangle in one UV channel. Use this for granular UV edits without a full repack / regeneration. The triangle becomes an isolated UV island (the engine allocates fresh UV elements per call). Triangle IDs are 0-based into the mesh's triangle list. The bIsValidTriangle out-param surfaces the engine's validity verdict (false if TriangleID is out of range, the UV channel doesn't exist, or the resulting topology would be invalid).
+// MCP:set_triangle_uvs - Set the three UV corners of one triangle in one UV channel of LOD 0 of a UStaticMesh asset, a granular edit without a repack: LOD 0 (its source model, or its render data when it has none) is copied to a transient dynamic mesh, the triangle gets three new UV elements there, so it becomes its own UV island, and the copy is written back over LOD 0 in one undo step and the package saved. triangle_id counts the copy's triangles from 0. A negative uv_channel, a triangle or channel the copy lacks, a missing corner, a path that does not load or a mesh under /Engine is an error and nothing changes; a failed save makes success false. Whole channel: clear_uv_channel; check the result: get_uv_health_report.
 //   @param static_mesh_path - Asset path to the UStaticMesh
-//   @param uv_channel - UV channel index (default 0)
+//   @param uv_channel - UV channel index (default 0); a negative one, or one LOD 0 does not have, is an error
 //   @param triangle_id - Triangle ID to update (0-based; default 0)
-//   @param uv0 [array] - First triangle corner as a [u, v] pair. Read by the local ParseUV helper, which the extractor cannot follow, so this hint is what puts the param in the schema at all -- documenting the three on one line made all three unparseable and the tool had NO way to pass UVs.
-//   @param uv1 [array] - Second corner as [u, v].
-//   @param uv2 [array] - Third corner as [u, v]. Alternatively pass the six flat numbers u0/v0/u1/v1/u2/v2 instead of the three arrays.
+//   @param uv0 [array] - First triangle corner as a [u, v] pair of numbers (required).
+//   @param uv1 [array] - Second corner as [u, v] (required).
+//   @param uv2 [array] - Third corner as [u, v] (required).
 //   @returns { static_mesh_path, uv_channel, triangle_id, is_valid_triangle, modified, saved }
 TSharedPtr<FJsonObject> HandleSetTriangleUVs(const TSharedPtr<FJsonObject>& Params)
 {
@@ -429,6 +469,11 @@ TSharedPtr<FJsonObject> HandleSetTriangleUVs(const TSharedPtr<FJsonObject>& Para
     { double D = 0.0; if (Params->TryGetNumberField(TEXT("uv_channel"), D)) { UVChannel = static_cast<int32>(D); } }
     int32 TriangleID = 0;
     { double D = 0.0; if (Params->TryGetNumberField(TEXT("triangle_id"), D)) { TriangleID = static_cast<int32>(D); } }
+    // SetMeshTriangleUVs checks only the upper bound of the channel, so a negative one would index UV layer -1.
+    if (UVChannel < 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("uv_channel must be >= 0 (got %d); nothing was changed"), UVChannel));
+    }
 
     // Parse the 3 UVs. Accept either separate uv0/uv1/uv2 fields (arrays) or flat u0/v0/u1/v1/u2/v2 numbers.
     auto ParseUV = [&](const TCHAR* FieldName, FVector2D& Out) -> bool

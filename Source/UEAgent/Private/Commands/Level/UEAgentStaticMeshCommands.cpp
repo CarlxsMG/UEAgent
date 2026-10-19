@@ -630,7 +630,7 @@ TSharedPtr<FJsonObject> HandleRenameStaticMeshSocket(
 // ---------------------------------------------------------------------------
 // set_static_mesh_material_slot
 // ---------------------------------------------------------------------------
-// MCP:set_static_mesh_material_slot - Assign a material to an existing material slot of a static mesh.
+// MCP:set_static_mesh_material_slot - Assign a material to one existing material slot of a UStaticMesh asset, picked by zero-based material_index, then save the mesh. This edits the asset, so every component without its own override of that slot shows the new material. The slot array never grows: an index outside the existing slots is an error, as is a mesh or material path that does not load. No undo transaction and no same-material check, so a repeat call writes and saves the slot again (idempotent). A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- is an error, with the material already set in memory. material_path is read back. Slots: get_static_mesh_info; per-actor override: set_actor_material; skeletal meshes: set_skeletal_mesh_material_slot; a Blueprint component template: apply_material_to_blueprint.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param material_index - Zero-based index of an existing material slot.
 //   @param material_path - Content path to the UMaterialInterface to assign.
@@ -641,10 +641,8 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshMaterialSlot(
 	FString MeshPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("static_mesh_path"), MeshPath)) { return Missing; }
 
-	if (!Params->HasField(TEXT("material_index")))
-		return mcp_common::MakeErrorReply(TEXT("material_index is required"));
 	int32 MaterialIndex = 0;
-	Params->TryGetNumberField(TEXT("material_index"), MaterialIndex);
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("material_index"), MaterialIndex)) { return Missing; }
 
 	FString MaterialPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), MaterialPath)) { return Missing; }

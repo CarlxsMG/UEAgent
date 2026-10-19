@@ -931,11 +931,11 @@ namespace UEAgentMaterialExtraImpl
     }
 }
 
-// MCP:create_material_function - Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) still answers success, with created=true and saved=false and the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
+// MCP:create_material_function - Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
 //   @param package_path - /Game package directory, e.g. '/Game/MyGame'
 //   @param name - Asset name for the new material function
 //   @param description - Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists.
-//   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists?: bool }
+//   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, save_error?: string, already_exists?: bool }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -965,7 +965,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
             R->SetBoolField(TEXT("already_exists"), true);
             R->SetBoolField(TEXT("created"), false);
             R->SetBoolField(TEXT("saved"), false);
-            return R;
+            return mcp_common::MakeOkReply(R);
         }
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Asset exists but is not a UMaterialFunction: %s"), *FullPath));
     }
@@ -993,8 +993,9 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
     Function->PostEditChange();
     Function->MarkPackageDirty();
 
-    // Save the package to disk.
-    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Function);
+    // Save the package to disk. A failed save keeps the new function in memory and fails the call.
+    FString SaveError;
+    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Function, SaveError);
 
     int32 NumInputs = 0, NumOutputs = 0;
     CountFunctionIO(Function, NumInputs, NumOutputs);
@@ -1007,8 +1008,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
     Result->SetNumberField(TEXT("num_inputs"), NumInputs);
     Result->SetNumberField(TEXT("num_outputs"), NumOutputs);
     Result->SetBoolField(TEXT("created"), true);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result;
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function"), SaveError);
 }
 
 // MCP:add_material_function_input - Add a FunctionInput node (a new input pin) to a UMaterialFunction asset with the optional props applied, then recompile the function and mark it dirty without saving. Returns node_id, the handle for set_material_function_input_props and delete_material_function_input, plus num_inputs and added.
@@ -1629,11 +1629,11 @@ TSharedPtr<FJsonObject> HandleConnectMaterialFunctionPins(const TSharedPtr<FJson
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("connect_material_function_pins"));
 }
 
-// MCP:create_material_function_instance - Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false, with the new instance kept in memory and saved=false. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
+// MCP:create_material_function_instance - Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false with saved=false and save_error, the new instance kept in memory. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
 //   @param package_path - Target folder as a long package path, e.g. /Game/Materials or /MyPlugin/Funcs; a relative folder is read under /Game
 //   @param instance_name - Name for the new UMaterialFunctionInstance asset
 //   @param parent_function_path - Asset path of the parent UMaterialFunctionInterface
-//   @returns { asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool }
+//   @returns { asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleCreateMaterialFunctionInstance(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath, InstanceName, ParentPath;
@@ -1706,25 +1706,32 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunctionInstance(const TSharedPtr<FJ
             FString::Printf(TEXT("Failed to create material function instance %s"), *FullPath));
     }
 
-    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(CreatedAsset);
+    FString SaveError;
+    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(CreatedAsset, SaveError);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("asset_path"), FullPath);
     Result->SetStringField(TEXT("instance_name"), InstanceName);
     Result->SetStringField(TEXT("parent_function_path"), Parent->GetPathName());
     Result->SetBoolField(TEXT("created"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function_instance"));
+    Result->SetBoolField(TEXT("already_existed"), false);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function_instance"), SaveError);
 }
 
-// MCP:set_material_function_instance_parent - Re-parent a UMaterialFunctionInstance asset to another material function or function instance in one undoable transaction, then save it; success requires the save. Returns old_parent and new_parent, read back from the asset ("(none)" when empty).
+// MCP:set_material_function_instance_parent - Re-parent a UMaterialFunctionInstance asset loaded from instance_path to the material function or function instance at parent_function_path, in one undo step, then save it. old_parent and new_parent are read back from the asset ("(none)" when empty), and applied is true once the parent is set. Success requires the save: a failed save (PIE running, read-only file) makes success false with saved=false and save_error, the new parent kept in memory. A path containing // is refused before anything loads, and an instance or parent that does not load is an error; nothing changes then. The parent it already has is a success with applied=false, saved=false and a note, nothing changed or saved. Create an instance with create_material_function_instance; recompile it with recompile_material_function.
 //   @param instance_path - Asset path of the UMaterialFunctionInstance to re-parent
 //   @param parent_function_path - Asset path of the new parent UMaterialFunctionInterface
-//   @returns { instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool }
+//   @returns { instance_path: string, old_parent: string, new_parent: string, applied: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetMaterialFunctionInstanceParent(const TSharedPtr<FJsonObject>& Params)
 {
     FString InstancePath, ParentPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("instance_path"), InstancePath)) { return Missing; }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parent_function_path"), ParentPath)) { return Missing; }
+
+    // Both paths are checked before the first load: LoadObject creates the package a path names, and creating one
+    // whose name holds "//" is a Fatal error.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(InstancePath)) { return Invalid; }
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(ParentPath)) { return Invalid; }
 
     UMaterialFunctionInstance* Instance = LoadObject<UMaterialFunctionInstance>(nullptr, *InstancePath);
     if (!Instance)
@@ -1740,18 +1747,33 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInstanceParent(const TSharedPtr
     }
 
     const FString OldParent = Instance->Parent ? Instance->Parent->GetPathName() : TEXT("(none)");
+
+    // The parent it already has: nothing is modified or saved.
+    if (Instance->Parent == Parent)
+    {
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("instance_path"), Instance->GetPathName());
+        Result->SetStringField(TEXT("old_parent"), OldParent);
+        Result->SetStringField(TEXT("new_parent"), OldParent);
+        Result->SetBoolField(TEXT("applied"), false);
+        Result->SetBoolField(TEXT("saved"), false);
+        Result->SetStringField(TEXT("note"), TEXT("The instance already has that parent; nothing was changed or saved."));
+        return mcp_common::MakeOkReply(Result);
+    }
+
     const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetMaterialFunctionInstanceParent", "Set Material Function Instance Parent (MCP)"));
     Instance->Modify();
     Instance->SetParent(Parent);
 
-    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Instance);
+    FString SaveError;
+    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Instance, SaveError);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("instance_path"), Instance->GetPathName());
     Result->SetStringField(TEXT("old_parent"), OldParent);
     Result->SetStringField(TEXT("new_parent"), Instance->Parent ? Instance->Parent->GetPathName() : TEXT("(none)"));
     Result->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_material_function_instance_parent"));
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_material_function_instance_parent"), SaveError);
 }
 
 // MCP:get_material_function_inputs - List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs. Read-only. Function instances are not accepted; for the whole node graph use get_material_function_graph.
@@ -1811,9 +1833,9 @@ TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:delete_material_function - Force-delete the asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check and no class check (any asset there goes), open editors close and undo history may be cleared. Permanent. Returns deleted; success stays true when deleted is false, so read it.
+// MCP:delete_material_function - Force-delete the material function asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check, open editors close and undo history may be cleared. Permanent. Typed: the asset must be a UMaterialFunctionInterface (a material function, layer, layer blend or function instance); any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A missing asset is an error, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
 //   @param material_function_path - Asset path of the UMaterialFunction to delete
-//   @returns { material_function_path: string, deleted: bool }
+//   @returns { material_function_path: string, asset_class: string, deleted: bool, note?: string }
 TSharedPtr<FJsonObject> HandleDeleteMaterialFunction(const TSharedPtr<FJsonObject>& Params)
 {
     FString FunctionPath;
@@ -1825,11 +1847,34 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunction(const TSharedPtr<FJsonObjec
             FString::Printf(TEXT("Material function asset not found: %s"), *FunctionPath));
     }
 
-    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(FunctionPath);
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(FunctionPath);
+    if (!Asset)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("delete_material_function: the asset at %s does not load, so its class cannot be checked; nothing deleted"), *FunctionPath));
+    }
+    // Read before the delete, which can collect garbage and free the asset.
+    const FString AssetClassName = Asset->GetClass()->GetName();
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material_function_path"), FunctionPath);
+    Result->SetStringField(TEXT("asset_class"), AssetClassName);
+    if (!Asset->IsA<UMaterialFunctionInterface>())
+    {
+        // The typed-delete guard: an asset of another class fails the call and is not deleted.
+        const FString Refusal = FString::Printf(
+            TEXT("asset is not a UMaterialFunctionInterface (got %s) - wrong type, refusing to delete"), *AssetClassName);
+        Result->SetBoolField(TEXT("deleted"), false);
+        Result->SetStringField(TEXT("note"), Refusal);
+        return mcp_common::MakeOutcomeReply(Result, false,
+            FString::Printf(TEXT("delete_material_function: %s at %s"), *Refusal, *FunctionPath));
+    }
+
+    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(FunctionPath);
     Result->SetBoolField(TEXT("deleted"), bDeleted);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bDeleted, bDeleted ? FString() : FString::Printf(
+        TEXT("delete_material_function: the asset at %s was not deleted (UEditorAssetLibrary::DeleteAsset returned false: a ")
+        TEXT("Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
+        TEXT("the Output Log names which)"), *FunctionPath));
 }
 
 // ========================================================================== //

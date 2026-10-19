@@ -137,10 +137,10 @@ namespace
 // canonical direct-create path (no USubtitleFactory needed — and we avoid it
 // because it's an editor factory with dialog surface and not headless-safe).
 // ---------------------------------------------------------------------------
-// MCP:create_subtitles_asset - Creates a USubtitleAssetUserData asset (the UE 5.8 subtitle authoring asset).  Creates a new package under /Game and NewObject<USubtitleAssetUserData> into it, then saves. Idempotent: if the asset already exists, returns it with already_existed: true.
+// MCP:create_subtitles_asset - Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; the inverse is remove_subtitles_asset.
 //   @param name - Name of the new subtitles asset.
 //   @param package_path - Destination /Game folder (default /Game/MCP).
-//   @returns { asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool }
+//   @returns { asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }
 
 TSharedPtr<FJsonObject> HandleCreateSubtitlesAsset(
     const TSharedPtr<FJsonObject>& Params)
@@ -166,7 +166,9 @@ TSharedPtr<FJsonObject> HandleCreateSubtitlesAsset(
             ResultObj->SetBoolField(TEXT("success"), true);
             ResultObj->SetBoolField(TEXT("already_existed"), true);
             ResultObj->SetNumberField(TEXT("cue_count"), Existing->Subtitles.Num());
-            ResultObj->SetBoolField(TEXT("saved"), true);
+            // Returned unchanged: nothing was written, so nothing is saved.
+            ResultObj->SetBoolField(TEXT("saved"), false);
+            ResultObj->SetStringField(TEXT("message"), TEXT("the subtitles asset already exists; returned it unchanged, nothing saved"));
             return mcp_common::MakeOkReply(ResultObj);
         }
     }
@@ -203,7 +205,7 @@ TSharedPtr<FJsonObject> HandleCreateSubtitlesAsset(
 // FSubtitleAssetData::operator== (text+duration+start+priority+type; ignores
 // Comment), and either appends or returns the existing cue's index.
 // ---------------------------------------------------------------------------
-// MCP:add_subtitle_cue - Appends a subtitle cue (FSubtitleAssetData) to a USubtitleAssetUserData.  Builds the cue from the supplied text/timing/priority/type/comment, dedupes by FSubtitleAssetData::operator== (text, duration, start_offset, priority, subtitle_type), and either appends or returns the existing cue's index with already_existed: true.
+// MCP:add_subtitle_cue - Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue with set_subtitle_cue_text or set_subtitle_cue_timing and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
 //   @param asset_path - Content path of the USubtitleAssetUserData asset.
 //   @param text - The subtitle text (required).
 //   @param start_offset - Initial delay in seconds before the subtitle is visible (default 0).
@@ -212,7 +214,7 @@ TSharedPtr<FJsonObject> HandleCreateSubtitlesAsset(
 //   @param subtitle_type - "subtitle", "closed_caption", or "audio_description" (default "subtitle").
 //   @param priority - Subtitle priority; higher values play instead of lower (default 1).
 //   @param comment - Editor-only author comment (default "").
-//   @returns { asset_path: string, cue_index: int, text: string, success: bool, already_existed: bool, cue_count: int, saved: bool }
+//   @returns { asset_path: string, cue_index: int, text: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }
 
 TSharedPtr<FJsonObject> HandleAddSubtitleCue(
     const TSharedPtr<FJsonObject>& Params)
@@ -288,7 +290,9 @@ TSharedPtr<FJsonObject> HandleAddSubtitleCue(
         ResultObj->SetBoolField(TEXT("success"), true);
         ResultObj->SetBoolField(TEXT("already_existed"), true);
         ResultObj->SetNumberField(TEXT("cue_count"), Asset->Subtitles.Num());
-        ResultObj->SetBoolField(TEXT("saved"), true);
+        // The identical cue is already there: nothing was added, so nothing is saved.
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("message"), TEXT("an identical cue already exists; nothing added, nothing saved"));
         return mcp_common::MakeOkReply(ResultObj);
     }
 
@@ -541,7 +545,7 @@ TSharedPtr<FJsonObject> HandleRemoveSubtitleCue(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_subtitle_cue"), SaveError);
 }
 
-// MCP:remove_subtitles_asset - Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_subtitles_asset - Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 //   @param asset_path - Full /Game/... asset path of the subtitles asset.
 //   @returns { asset_path, deleted, already_existed, asset_class?, note? }
 //   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
@@ -567,7 +571,7 @@ TSharedPtr<FJsonObject> HandleRemoveSubtitlesAsset(const TSharedPtr<FJsonObject>
     }
     if (!Asset->IsA<USubtitleAssetUserData>())
     {
-        return mcp_common::MakeOkReply(AssetCommandHelpers::WrongTypeRefusal(AssetPath, *Asset, TEXT("USubtitleAssetUserData")));
+        return AssetCommandHelpers::WrongTypeRefusal(TEXT("remove_subtitles_asset"), AssetPath, *Asset, TEXT("USubtitleAssetUserData"));
     }
 
     const FString AssetClassName = Asset->GetClass()->GetName();
@@ -578,7 +582,7 @@ TSharedPtr<FJsonObject> HandleRemoveSubtitlesAsset(const TSharedPtr<FJsonObject>
     Resp->SetStringField(TEXT("asset_class"), AssetClassName);
     Resp->SetBoolField(TEXT("deleted"), bDeleted);
     Resp->SetBoolField(TEXT("already_existed"), true);
-    return mcp_common::MakeOkReply(Resp);
+    return AssetCommandHelpers::DeleteOutcomeReply(TEXT("remove_subtitles_asset"), Resp, bDeleted, AssetPath);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

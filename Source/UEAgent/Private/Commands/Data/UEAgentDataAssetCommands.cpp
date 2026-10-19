@@ -1536,10 +1536,10 @@ TSharedPtr<FJsonObject> HandleSetDataTableRow(const TSharedPtr<FJsonObject>& Par
     return WriteDataTableRow(Params, /*bRequireExisting*/ true);
 }
 
-// MCP:delete_data_table_row - Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key". Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
+// MCP:delete_data_table_row - Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
 //   @param table_path - Full asset path of the DataTable
 //   @param row_name - Name (key) of the row to remove
-//   @returns { table_path, row_name, existed, removed, still_exists, row_count, saved }
+//   @returns { table_path, row_name, existed, removed, still_exists, row_count, saved, note? }
 TSharedPtr<FJsonObject> HandleDeleteDataTableRow(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentDataAssetCommandsImpl;
@@ -1561,7 +1561,7 @@ TSharedPtr<FJsonObject> HandleDeleteDataTableRow(const TSharedPtr<FJsonObject>& 
     const bool bExisted = Table->FindRowUnchecked(RowKey) != nullptr;
 
     // A key that is not there is answered (existed=false) without touching the asset; nothing to save then.
-    bool bSaved = true;
+    bool bSaved = false;
     if (bExisted)
     {
         // FDataTableEditorUtils::RemoveRow opens its own FScopedTransaction, calls Modify(), frees the row
@@ -1582,6 +1582,12 @@ TSharedPtr<FJsonObject> HandleDeleteDataTableRow(const TSharedPtr<FJsonObject>& 
     Reply->SetBoolField(TEXT("still_exists"), bStillThere);
     Reply->SetBoolField(TEXT("removed"), bExisted && !bStillThere);
     Reply->SetNumberField(TEXT("row_count"), Table->GetRowMap().Num());
+    if (!bExisted)
+    {
+        Reply->SetBoolField(TEXT("saved"), false);
+        Reply->SetStringField(TEXT("note"), TEXT("row_name is not a row of the table; nothing removed, nothing saved"));
+        return mcp_common::MakeOkReply(Reply);
+    }
 
     return mcp_common::MakeSavedReply(Reply, bSaved, TEXT("delete_data_table_row"));
 }
@@ -1734,24 +1740,26 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFromJson(const TSharedPtr<FJsonObje
     // form when a caller parses get_data_table_row_as_json's row_json string) OR as a JSON STRING (that
     // verbatim native JSON text). Accept EITHER: a string-only read (TryGetStringField) fails object
     // payloads with "Missing required parameter: row_json".
+    // Both reads sit in one negated guard, so the catalog publishes row_json as required (of either type).
     FString RowJsonStr;
     TSharedPtr<FJsonObject> RowJsonObj;
     const TSharedPtr<FJsonObject>* RowJsonObjPtr = nullptr;
-    if (Params->TryGetObjectField(TEXT("row_json"), RowJsonObjPtr) && RowJsonObjPtr && RowJsonObjPtr->IsValid())
+    const bool bRowJsonIsObject = Params->TryGetObjectField(TEXT("row_json"), RowJsonObjPtr) && RowJsonObjPtr && RowJsonObjPtr->IsValid();
+    if (!bRowJsonIsObject && !Params->TryGetStringField(TEXT("row_json"), RowJsonStr))
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: row_json (a JSON object of {column:value}, or that JSON as a string)"));
+    }
+    if (bRowJsonIsObject)
     {
         RowJsonObj = *RowJsonObjPtr;
     }
-    else if (Params->TryGetStringField(TEXT("row_json"), RowJsonStr))
+    else
     {
         TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(RowJsonStr);
         if (!FJsonSerializer::Deserialize(Reader, RowJsonObj) || !RowJsonObj.IsValid())
         {
             return mcp_common::MakeErrorReply(TEXT("row_json string is not valid JSON"));
         }
-    }
-    else
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: row_json (a JSON object of {column:value}, or that JSON as a string)"));
     }
 
     bool bMerge = false;
@@ -2204,12 +2212,12 @@ TSharedPtr<FJsonObject> HandleReadDataTableRowComplex(const TSharedPtr<FJsonObje
 // MCPExt_DeepMergeJsonObjectInto / ColumnExportText / UEAgentDataAssetCommandsImpl).
 // ==========================================================================
 
-// MCP:set_data_table_rows_from_json - Upsert many DataTable rows with one native JSON import and one save, each deep-merged onto its current values like set_data_table_row_fields; missing rows are created from defaults. Returns per-row results and a summary. A failed row does not fail the call: check summary.failed and saved.
+// MCP:set_data_table_rows_from_json - Upsert many rows of a DataTable, loaded by asset path, in one call: each row's fields are deep-merged onto its current values (objects merge into struct members, scalars and arrays take their place), a new row name starts from struct defaults, all merged rows go through one native JSON import, and the table is saved once. Unnamed rows are untouched; no undo step. A bad row (a value that is not an object, or one the import drops) fails alone in results while the call succeeds: check summary.failed, unknown_columns, unchanged_despite_request and problems. save=false leaves the table dirty in memory; a failed save is success false, with saved=false and save_error, the rows kept in memory. A missing table or row struct is an error. One row: set_data_table_row_fields; native whole row: set_data_table_row_from_json; read back: get_data_table_rows.
 //   @param table_path - Full asset path of the DataTable (data_table also accepted)
 //   @param rows - Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace)
 //   @param save - When true (default) save the package once after all rows are written; when false leave it dirty in memory
 //   @param data_table - Alias of table_path (the DataTable asset path, e.g. "/Game/Data/DT_Items"); table_path wins when both are given
-//   @returns { table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, row_count, problems:[..] }
+//   @returns { table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, save_error?, row_count, problems:[..] }
 TSharedPtr<FJsonObject> HandleSetDataTableRowsFromJson(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentDataAssetCommandsImpl;
@@ -2221,27 +2229,26 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowsFromJson(const TSharedPtr<FJsonObj
         return mcp_common::MissingParameterReply(TEXT("table_path"));
     }
 
-    // rows: an object { row_name: {column:value} }. Accept a stringified JSON object too.
+    // rows: an object { row_name: {column:value} }. Accept a stringified JSON object too. Both reads sit in one
+    // negated guard, so the catalog publishes rows as required (of either type).
     TSharedPtr<FJsonObject> RowsObj;
     const TSharedPtr<FJsonObject>* RowsObjPtr = nullptr;
-    if (Params->TryGetObjectField(TEXT("rows"), RowsObjPtr) && RowsObjPtr && (*RowsObjPtr).IsValid())
+    FString RowsStr;
+    const bool bRowsIsObject = Params->TryGetObjectField(TEXT("rows"), RowsObjPtr) && RowsObjPtr && (*RowsObjPtr).IsValid();
+    if (!bRowsIsObject && !Params->TryGetStringField(TEXT("rows"), RowsStr))
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: rows (object of {row_name:{column:value}})"));
+    }
+    if (bRowsIsObject)
     {
         RowsObj = *RowsObjPtr;
     }
     else
     {
-        FString RowsStr;
-        if (Params->TryGetStringField(TEXT("rows"), RowsStr))
+        TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(RowsStr);
+        if (!FJsonSerializer::Deserialize(Reader, RowsObj) || !RowsObj.IsValid())
         {
-            TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(RowsStr);
-            if (!FJsonSerializer::Deserialize(Reader, RowsObj) || !RowsObj.IsValid())
-            {
-                return mcp_common::MakeErrorReply(TEXT("rows string is not a valid JSON object of {row_name:{column:value}}"));
-            }
-        }
-        else
-        {
-            return mcp_common::MakeErrorReply(TEXT("Missing required parameter: rows (object of {row_name:{column:value}})"));
+            return mcp_common::MakeErrorReply(TEXT("rows string is not a valid JSON object of {row_name:{column:value}}"));
         }
     }
 
@@ -2415,7 +2422,12 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowsFromJson(const TSharedPtr<FJsonObj
     SummaryObj->SetNumberField(TEXT("failed"), FailedCount);
     ResultObj->SetObjectField(TEXT("summary"), SummaryObj);
 
-    return mcp_common::MakeOkReply(ResultObj);
+    // save=false leaves the table dirty on purpose; a save that was asked for and failed fails the call.
+    if (!bSave)
+    {
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_data_table_rows_from_json"), SaveError);
 }
 
 // MCP:rename_data_table_row - Rename a DataTable row key, copying its value byte-exact (safer than delete plus re-add, which can drop GameplayTags), then save and verify the swap (new_exists, old_removed). Refuses a case-only rename, and an existing new_name unless overwrite=true. Row handles that reference the old name are not updated.

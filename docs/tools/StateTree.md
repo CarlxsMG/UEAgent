@@ -151,7 +151,7 @@ Append a new condition node, of the struct named by condition_struct and with th
 
 *Additive, idempotent.*
 
-Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
+Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -190,14 +190,14 @@ Create a StateTree asset at package_path/tree_name (or load the one already ther
 
 *Destructive, idempotent.*
 
-Delete a UStateTree asset from the project. Idempotent — deleting a non-existent asset is a no-op (returns deleted:false, already_existed:false) so re-runs don't fail.
+Delete a UStateTree asset from the project with the editor's delete (UEditorAssetLibrary::DeleteLoadedAsset): permanent, with no reference check, and open editors of it close. confirm must be true, or nothing happens and the call is an error. Typed: the asset at tree_path must be a UStateTree; any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. Idempotent: a path with no asset is a success with deleted false and already_existed false. A delete the engine does not carry out (a Play-in-Editor session running, a file that cannot be deleted) is success false with deleted false. A path that cannot name an asset is an error. List trees with list_state_trees; create one with create_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
-| `confirm` | boolean | no | Must be true to actually delete. Honest-headless safety against accidental wipe. |
+| `confirm` | boolean | yes | Must be true to actually delete. Honest-headless safety against accidental wipe. |
 
-**Returns:** `{ tree_path, deleted, already_existed, note }`
+**Returns:** `{ tree_path, deleted, already_existed, asset_class?, note? }`
 
 ## `get_component_state_tree_path`
 
@@ -446,7 +446,7 @@ List every state of a StateTree asset, found by asset path, as one flat breadth-
 | `tree_path` | string | yes | Asset path to the UStateTree. |
 | `root_state` | string | no | Optional. If set, walk from this state as root (top-level SubTrees are skipped). |
 
-**Returns:** `{ tree_path, count, states: [{ name, type, completion, has_children, child_count, depth, parent }] }`
+**Returns:** `{ tree_path, count, states: [{ name, type, completion, has_children, child_count, task_count, enter_condition_count, transition_count, depth, parent }] }`
 
 ## `list_task_types`
 
@@ -746,7 +746,7 @@ Turn a state into a LinkedAsset state pointing at another UStateTree (UStateTree
 
 *Destructive, idempotent.*
 
-Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), overwriting the previous value, then save the asset without compiling it; there is no undo step. Setting the value it already has still saves. An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type, set_state_completion_type, set_state_linked_asset; read back with get_state_tree_info; check the tree with compile_state_tree.
+Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), in one undo step, then save the asset without compiling it. A state that already has that behavior changes and saves nothing (changed false, saved false). An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type, set_state_completion_type, set_state_linked_asset; read back with get_state_tree_info; check the tree with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -754,7 +754,7 @@ Set how one state of a StateTree asset is entered when the tree selects it (USta
 | `state_name` | string | yes | Name of the state to change; the first state with that name in a depth-first walk of the hierarchy is used |
 | `selection_behavior` | string | yes | One of None \| TryEnterState \| TrySelectChildrenInOrder \| TrySelectChildrenAtRandom \| TrySelectChildrenWithHighestUtility \| TrySelectChildrenAtRandomWeightedByUtility \| TryFollowTransitions; an EStateTreeStateSelectionBehavior:: prefix is accepted |
 
-**Returns:** `{ tree_path, state_name, selection_behavior, set, saved }`
+**Returns:** `{ tree_path, state_name, selection_behavior, set, changed, saved, note? }`
 
 ## `set_state_theme_color`
 
@@ -790,7 +790,7 @@ Make a top-level state the root of a StateTree asset by moving it to the first S
 
 *Destructive, idempotent.*
 
-Set the type of a StateTree state (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree) and save the asset without recompiling it. An unknown name is an error. To point a state at another tree prefer set_state_linked_asset, which also sets the linked asset.
+Set the type of one state of a StateTree asset (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree), in one undo step, then save the asset without compiling it. The state is the first one named state_name in a depth-first walk of the hierarchy. Only the type is written: the follow-up the StateTree details panel applies (clearing a group's tasks, resetting a link) does not run, so to point a state at another tree prefer set_state_linked_asset. A state that already has that type changes and saves nothing (changed false, saved false). An unknown name, or a missing tree or state, is an error; a failed save makes success false. Read back with get_state_tree_info; selection: set_state_selection_behavior.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -798,7 +798,7 @@ Set the type of a StateTree state (EStateTreeStateType: State, Group, Linked, Li
 | `state_name` | string | yes | Name of the state to change; the command fails without it. |
 | `state_type` | string | yes | Enum value name: State, Group, Linked, LinkedAsset or Subtree (an EStateTreeStateType:: prefix is accepted). |
 
-**Returns:** `{ tree_path, state_name, state_type, set, saved }`
+**Returns:** `{ tree_path, state_name, state_type, set, changed, saved, note? }`
 
 ## `set_task_property`
 
@@ -820,7 +820,7 @@ Set a single field of a task instance by reflection (FJsonObjectConverter::JsonV
 
 *Destructive, idempotent.*
 
-Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
+Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, in one undo step, then save the asset without compiling it. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. A call that leaves every field as it was changes and saves nothing (changed false, saved false). An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -833,7 +833,7 @@ Change the trigger, priority, enabled flag and delay of an existing transition o
 | `delay` | boolean | no | Optional whether to delay the transition |
 | `delay_duration` | number | no | Optional delay duration in seconds (requires delay=true to take effect) |
 
-**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, enabled, delay, delay_duration, saved }`
+**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, enabled, delay, delay_duration, changed, saved, note? }`
 
 ## `set_tree_parameter`
 

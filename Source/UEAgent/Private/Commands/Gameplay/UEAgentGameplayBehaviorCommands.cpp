@@ -438,10 +438,10 @@ TSharedPtr<FJsonObject> HandleGetBehaviorSubsystemInfo(
 // Typed delete config + enumeration.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_behavior_config - Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UGameplayBehaviorConfig, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_behavior_config - Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UGameplayBehaviorConfig, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 //   @param config_path - Full /Game/... asset path of the config.
 //   @returns { config_path, deleted, already_existed, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
+//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteLoadedAsset once the type check passes.
 
 TSharedPtr<FJsonObject> HandleRemoveBehaviorConfig(
     const TSharedPtr<FJsonObject>& Params)
@@ -479,14 +479,16 @@ TSharedPtr<FJsonObject> HandleRemoveBehaviorConfig(
     UGameplayBehaviorConfig* Config = Cast<UGameplayBehaviorConfig>(Asset);
     if (!Config)
     {
+        // The typed-delete guard: an asset of another class fails the call and is not deleted.
+        const FString Refusal = FString::Printf(TEXT("asset is not a UGameplayBehaviorConfig (got %s) - wrong type, refusing to delete"),
+            *Asset->GetClass()->GetName());
         TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
         Resp->SetStringField(TEXT("config_path"), ConfigPath);
         Resp->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
         Resp->SetBoolField(TEXT("deleted"), false);
-        Resp->SetStringField(TEXT("note"),
-            FString::Printf(TEXT("asset is not a UGameplayBehaviorConfig (got %s) - wrong type, refusing to delete"),
-                *Asset->GetClass()->GetName()));
-        return mcp_common::MakeOkReply(Resp);
+        Resp->SetStringField(TEXT("note"), Refusal);
+        return mcp_common::MakeOutcomeReply(Resp, false,
+            FString::Printf(TEXT("remove_behavior_config: %s at %s"), *Refusal, *ConfigPath));
     }
 
     // Capture behavior_class BEFORE delete (Config pointer is invalidated below).
@@ -505,7 +507,10 @@ TSharedPtr<FJsonObject> HandleRemoveBehaviorConfig(
     }
     Resp->SetBoolField(TEXT("deleted"), bDeleted);
     Resp->SetBoolField(TEXT("already_existed"), true);
-    return mcp_common::MakeOkReply(Resp);
+    return mcp_common::MakeOutcomeReply(Resp, bDeleted, bDeleted ? FString() : FString::Printf(
+        TEXT("remove_behavior_config: the config at %s was not deleted (UEditorAssetLibrary::DeleteLoadedAsset returned false: ")
+        TEXT("a Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
+        TEXT("the Output Log names which)"), *ConfigPath));
 }
 
 // MCP:list_behavior_configs - List the UGameplayBehaviorConfig assets under package_path, recursively, from the Asset Registry, without changing them: each config path and name with the name of its BehaviorClass (empty when unset), plus total. Each match is loaded to read that protected field, so a big folder costs one load per config. Only assets whose class is exactly UGameplayBehaviorConfig are listed: subclass configs such as GameplayBehaviorConfig_Animation or GameplayBehaviorConfig_BehaviorTree, and Blueprint subclasses, are skipped. There is no paging, and no match is total 0, not an error. One config in detail: get_behavior_config_info; create one: create_behavior_config; set its class: set_behavior_class; delete one: remove_behavior_config.

@@ -222,7 +222,7 @@ TSharedPtr<FJsonObject> HandleGetWorldPartitionInfo(const TSharedPtr<FJsonObject
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:create_world_partition_map - Creates and saves a new World Partition-enabled UWorld map asset on disk.  The editor world is NOT swapped: a new Inactive UWorld is created inside a /Game package with World Partition enabled (mirroring UWorldFactory's headless creation path) and saved as a .umap. A map already at the path is returned unchanged with created=false, already_exists=true and saved=false, and nothing is saved; its world_partition_enabled says whether it has World Partition. An asset of another class there is an error. With Play-in-Editor running, or a path under a read-only content root, a new map is refused before anything is created: success false with save_error. A failed save makes success false with saved=false and save_error. Read a map's state with get_world_partition_info once it is open.
+// MCP:create_world_partition_map - Creates and saves a new World Partition-enabled UWorld map asset on disk.  The editor world is NOT swapped: a new Inactive UWorld is created inside a /Game package with World Partition enabled and saved by the editor's map save as a .umap, with the actor files World Partition creates for it under __ExternalActors__. A map already at the path is returned unchanged with created=false, already_exists=true and saved=false, and nothing is saved; its world_partition_enabled says whether it has World Partition. An asset of another class there is an error. With Play-in-Editor running, or a path under a read-only content root, a new map is refused before anything is created: success false with save_error. A failed save makes success false with saved=false and save_error. Read a map's state with get_world_partition_info once it is open.
 //   @param name - Name of the new map.
 //   @param package_path - Destination /Game folder (default /Game/Maps).
 //   @param enable_streaming - bool, enable World Partition streaming (default true).
@@ -266,10 +266,10 @@ TSharedPtr<FJsonObject> HandleCreateWorldPartitionMap(const TSharedPtr<FJsonObje
         return mcp_common::MakeOkReply(ExistObj);
     }
 
-    // A map is saved as a .umap, which mcp_common::SaveAssetPackage cannot write (it always writes a .uasset), so
-    // its two refusals are applied here, and BEFORE the world is created, so a refused call leaves no world behind in
-    // memory: nothing is saved while Play-in-Editor runs, and a package under a read-only content root must not be
-    // written (`mcp.ReadOnlyRootEnforcement 0` only logs it).
+    // mcp_common::SaveAssetPackage refuses these two cases too, but only once the world exists; checking them here,
+    // BEFORE the world is created, leaves no world behind in memory when the call is refused: nothing is saved while
+    // Play-in-Editor runs, and a package under a read-only content root must not be written
+    // (`mcp.ReadOnlyRootEnforcement 0` only logs it, which the save helper does).
     FString Refusal;
     if (mcp_common::IsPieActive())
     {
@@ -279,22 +279,13 @@ TSharedPtr<FJsonObject> HandleCreateWorldPartitionMap(const TSharedPtr<FJsonObje
             TEXT("(stop_play_in_editor) and retry."),
             *FullPath);
     }
-    else if (mcp_common::IsUnderReadOnlyRoot(FullPath))
+    else if (mcp_common::IsUnderReadOnlyRoot(FullPath) && mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
     {
-        if (mcp_common::IsReadOnlyRootSaveEnforcementEnabled())
-        {
-            Refusal = FString::Printf(
-                TEXT("Refusing to create '%s': it lives under a read-only root. Read-only roots are vendored upstream content ")
-                TEXT("that tools must never write. Create the map under a writable root, or set the console variable ")
-                TEXT("'mcp.ReadOnlyRootEnforcement 0' if this really is intended."),
-                *FullPath);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning,
-                TEXT("[UEAgent] READ-ONLY ROOT WRITE: creating the map '%s' under a read-only root, with enforcement turned OFF ")
-                TEXT("(mcp.ReadOnlyRootEnforcement 0)."), *FullPath);
-        }
+        Refusal = FString::Printf(
+            TEXT("Refusing to create '%s': it lives under a read-only root. Read-only roots are vendored upstream content ")
+            TEXT("that tools must never write. Create the map under a writable root, or set the console variable ")
+            TEXT("'mcp.ReadOnlyRootEnforcement 0' if this really is intended."),
+            *FullPath);
     }
     if (!Refusal.IsEmpty())
     {
@@ -355,36 +346,11 @@ TSharedPtr<FJsonObject> HandleCreateWorldPartitionMap(const TSharedPtr<FJsonObje
 
     FAssetRegistryModule::AssetCreated(NewWorld);
 
-    // Persist as a .umap (map package extension) on disk.
-    FString FileName;
+    // Persist as a .umap: the package holds the world (PKG_ContainsMap), so the shared save helper saves it through the
+    // editor's map save, which also writes the actor packages World Partition spawned for it (AWorldDataLayers, the
+    // minimap), and measures the usual cause of a failed save.
     FString SaveError;
-    bool bSaved = false;
-    if (FPackageName::TryConvertLongPackageNameToFilename(
-            Package->GetName(), FileName, FPackageName::GetMapPackageExtension()))
-    {
-        Package->MarkPackageDirty();
-
-        FSavePackageArgs SaveArgs;
-        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-        SaveArgs.SaveFlags = SAVE_NoError;
-        SaveArgs.Error = GError;
-
-        bSaved = UPackage::SavePackage(Package, NewWorld, *FileName, SaveArgs);
-        if (!bSaved)
-        {
-            // The usual cause is measured, as SaveAssetPackage does: a .umap left read-only on disk (an unlocked
-            // Git LFS `lockable` path).
-            const bool bFileReadOnly = IFileManager::Get().FileExists(*FileName) && IFileManager::Get().IsReadOnly(*FileName);
-            SaveError = FString::Printf(TEXT("Failed to save map package to disk: %s. %s"), *FileName,
-                bFileReadOnly
-                    ? TEXT("MEASURED CAUSE: the file is READ-ONLY on disk (in an LFS repo, a `lockable` path you have not locked: git lfs lock <file>).")
-                    : TEXT("The file is NOT read-only (measured): look at a full disk, a permission problem, or the SavePackage error in the Output Log."));
-        }
-    }
-    else
-    {
-        SaveError = FString::Printf(TEXT("Could not convert package name to map filename: %s"), *Package->GetName());
-    }
+    const bool bSaved = mcp_common::SaveAssetPackage(Package, NewWorld, SaveError);
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), MapName);
@@ -1090,7 +1056,10 @@ TSharedPtr<FJsonObject> HandleListWorldPartitionActors(const TSharedPtr<FJsonObj
 
 TSharedPtr<FJsonObject> HandleLoadWorldPartitionRegion(const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params->HasField(TEXT("min")) || !Params->HasField(TEXT("max")))
+    // Typed reads, so the catalog publishes min and max as the required arrays they are.
+    const TArray<TSharedPtr<FJsonValue>>* MinJson = nullptr;
+    const TArray<TSharedPtr<FJsonValue>>* MaxJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("min"), MinJson) || !Params->TryGetArrayField(TEXT("max"), MaxJson))
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required parameters: min and max ([x,y,z] each)"));
     }

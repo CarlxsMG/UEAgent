@@ -8,7 +8,7 @@
 
 *Additive, idempotent.*
 
-Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false; list_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. A missing Blueprint, or an entry class that is not a UUserWidget, is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UListView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -16,13 +16,13 @@ Construct a UListView named list_view_name in the tree of a Widget Blueprint loa
 | `list_view_name` | string | yes | FName of the new UListView widget |
 | `entry_widget_class` | string | no | Optional entry widget class (asset or /Script path) |
 
-**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }`
+**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }`
 
 ## `add_tile_view`
 
 *Additive, idempotent.*
 
-Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, and add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called list_view_name, of any class, is left untouched (already_existed=true, widget_added=false; list_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. A missing Blueprint or a non-UUserWidget entry class is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTileView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -30,13 +30,13 @@ Construct a UTileView named list_view_name in the tree of a Widget Blueprint loa
 | `list_view_name` | string | yes | Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key. |
 | `entry_widget_class` | string | no | Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path. |
 
-**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error? }`
+**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }`
 
 ## `add_tree_view`
 
 *Additive, idempotent.*
 
-Construct a UTreeView under the widget BP root (or a named parent panel widget) and add it to the tree. A root that is not a panel, or a full single-child panel, is an error and nothing is added. Idempotent by name: a widget already called widget_name, of any class, is left untouched (already_existed=true; tree_view_class and entry_widget_class are its own), the Blueprint still compiled and saved. HONEST SCOPE: authoring only, same posture as add_list_view/add_tile_view -- constructs the widget + wires EntryWidgetClass. Populating the tree's actual hierarchy (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is OUT OF SCOPE: that delegate is a native TSlateDelegates callback, not reflectively assignable -- wire it in the widget BP graph (native C++/BP override) or drive it live in PIE.
+Construct a UTreeView named widget_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTreeView already called widget_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: the tree items and their children are supplied at runtime. A list: add_list_view; tiles: add_tile_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -51,7 +51,7 @@ Construct a UTreeView under the widget BP root (or a named parent panel widget) 
 
 *Additive, idempotent.*
 
-Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name already there is kept as it is, not updated, and comes back with already_existed=true, though the Blueprint is still compiled and saved. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save keeps the edit in memory with saved=false and save_error. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
+Add a view-model context named context_name, of class view_model_class, to the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint, in one undo step. creation_type says how the widget gets its instance at runtime: CreateInstance by default, PropertyPath from source_property_path, GlobalViewModelCollection by global_identifier, or Manual (supplied at runtime, e.g. by set_viewmodel_field). Idempotent by context_name: a context of that name and class is kept as it is, answered with its own creation_type, already_existed=true, saved=false and a note, nothing changed, compiled or saved; one of another class is an error. A Blueprint without MVVM support fails with a note; a bad class or creation_type is an error; a failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Undo it with remove_viewmodel; bind fields with bind_widget_to_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -90,7 +90,7 @@ Add a keyframe to an existing widget-animation property track's section (call ad
 | `widget_name` | string | yes | name of the animated widget |
 | `property_path` | string | yes | the SAME property_path used in add_widget_animation_track |
 | `time_seconds` | number | yes | time (seconds, >= 0) at which to place the key |
-| `value` | any | no | key value: a number for float, a bool for bool, or a [R,G,B,A] (A optional, defaults 1.0) array for color |
+| `value` | any | yes | key value: a number for float, a bool for bool, or a [R,G,B,A] (A optional, defaults 1.0) array for color |
 | `interpolation` | string | no | Optional "linear" (default) \| "cubic" \| "constant" (float/color only; ignored for bool) |
 
 **Returns:** `{ widget_bp_path: string, animation_name: string, widget_name: string, property_path: string, track_type: string, time_seconds: float, key_frame: int, keys_added: int, interpolation: string, saved: bool, save_error: string }`
@@ -113,9 +113,9 @@ Add (or reuse) a MovieScene property track for a widget's property inside a UWid
 
 ## `add_widget_extended`
 
-*Additive.*
+*Additive, idempotent.*
 
-Add an EXTENDED-palette widget to a Widget Blueprint's tree.  Same authoring path as add_widget_to_blueprint but supports a wider set of widget types (resolved via /Script/UMG.&lt;Name>), PLUS arbitrary native widget classes and UserWidget (nested Widget Blueprint) instances.
+Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the extended palette of list_widget_types (ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned with already_existed=true, compiled and saved only if the blueprint has unsaved changes (else saved=false); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save gives success false. Basic palette: add_widget_to_blueprint; inspect: get_widget_blueprint_tree; inverse: remove_widget.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -124,7 +124,7 @@ Add an EXTENDED-palette widget to a Widget Blueprint's tree.  Same authoring pat
 | `widget_name` | string | yes | unique name for the new widget |
 | `parent_name` | string | no | Optional name of a panel widget to host the new child; defaults to the root widget. |
 
-**Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }`
+**Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }`
 
 ## `add_widget_property_binding`
 
@@ -146,7 +146,7 @@ Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "
 
 *Additive, idempotent.*
 
-Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes; a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -155,7 +155,7 @@ Add a widget to the tree of a Widget Blueprint asset as the last child of the pa
 | `widget_name` | string | yes | unique name for the new widget |
 | `parent_name` | string | no | Optional name of a panel widget to host the new child; defaults to the root widget. |
 
-**Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string }`
+**Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }`
 
 ## `apply_widget_style_preset`
 
@@ -182,7 +182,7 @@ Apply ONE block of style properties to EVERY widget of a Widget Blueprint that m
 
 *Destructive.*
 
-Append an FMVVMBlueprintViewBinding to a Widget BP's MVVM authoring state, with a REAL SourcePath/DestinationPath (resolved via reflection and written through UMVVMEditorSubsystem, then re-read to verify the write actually stuck).
+Add a binding to the MVVM view of a Widget Blueprint loaded by asset path, from a view-model property (source_path) to a widget property (destination_path), then compile and save the Blueprint in one undo step. Both paths are resolved by reflection, written through UMVVMEditorSubsystem as the MVVM editor does, and read back: a write that did not stick is rolled back and is an error, with nothing saved. Not idempotent: each call adds another binding. An unknown binding_mode, context, widget or property, or a path that is not Context.Property, is an error before anything changes; a Blueprint without MVVM support fails with a note. A failed save makes success false with saved=false and save_error, the binding kept in memory. Refused during PIE unless force=true. Add the context with add_viewmodel; inverse: unbind_widget_from_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -191,7 +191,7 @@ Append an FMVVMBlueprintViewBinding to a Widget BP's MVVM authoring state, with 
 | `destination_path` | string | yes | "Widget.Property" (exactly one dot): Widget = a widget name in this Widget BP's WidgetTree, Property = a reflected property on that widget's class. Multi-segment is NOT supported. |
 | `binding_mode` | string | no | optional: "OneWay" (default), "TwoWay", "OneTime", "OneWayToSource" |
 
-**Returns:** `{ widget_blueprint_name, source_path, destination_path, binding_mode, created, binding_count, binding_id, source_path_verified, destination_path_verified, has_mvvm_extension }`
+**Returns:** `{ widget_blueprint_name, source_path, destination_path, binding_mode, created, binding_count, binding_id, source_path_verified, destination_path_verified, has_mvvm_extension, saved, save_error?, note? }`
 
 ## `click_pie_widget`
 
@@ -211,16 +211,16 @@ Fire a LIVE UMG widget's event in the running PIE session (game thread): resolve
 
 ## `create_common_ui_stack`
 
-*Additive.*
+*Additive, idempotent.*
 
-Set the WidgetTree root to a UCommonActivatableWidgetStack (creating one if absent). root_class, when given, picks which UCommonActivatableWidgetStack subclass gets constructed (e.g. a project-authored BP subclass) -- an unresolvable or non-subclass value does not fail the call, it honestly falls back to the base stack class with a note (see root_class_note in the response).
+Make a UCommonActivatableWidgetStack the root of the empty tree of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step. root_class picks the UCommonActivatableWidgetStack subclass to construct; one that does not resolve, or is not such a subclass, falls back to the base class with root_class_resolved=false and root_class_note. The stack is named CommonActivatableWidgetStack, made unique when an object of the tree holds that name. Idempotent: a root that is already a stack is kept as it is (already_existed=true, root_changed=false, saved=false, a note), nothing compiled or saved. Any other root, or a missing Blueprint, is an error and nothing changes. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Screens go on the stack at runtime: push_common_ui_widget and pop_common_ui_widget; read it with read_pie_widgets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint |
 | `root_class` | string | no | Optional. Asset path (/Game/...) or /Script/&lt;Module>.&lt;ClassName> of a UCommonActivatableWidgetStack subclass. Omitted = base UCommonActivatableWidgetStack. |
 
-**Returns:** `{ widget_blueprint_name, root_class?, already_existed, stack_class, root_class_requested, root_class_resolved, root_class_note?, root_changed, root_widget, root_widget_class }`
+**Returns:** `{ widget_blueprint_name, root_class?, already_existed, stack_class, root_class_requested, root_class_resolved, root_class_note?, root_changed, root_widget, root_widget_class, saved, save_error?, note? }`
 
 ## `create_widget`
 
@@ -441,7 +441,7 @@ Read LIVE UMG from the running PIE session (game thread): enumerate the active U
 
 *Destructive, idempotent.*
 
-Remove the view-model context named context_name from the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step; view_model_count is what the view keeps. Idempotent: a name that matches no context, or a Blueprint with no MVVM view at all (has_mvvm_extension=false), is a success with removed=false, saved=false and a note, and nothing is changed or saved. A missing Blueprint is an error; a failed save keeps the removal in memory with saved=false and save_error. Refused during PIE unless force=true. Inverse: add_viewmodel; drop a single binding instead: unbind_widget_from_viewmodel.
+Remove the view-model context named context_name from the MVVM view of a Widget Blueprint loaded by asset path, then compile and save the Blueprint in one undo step; view_model_count is what the view keeps. Idempotent: a name that matches no context, or a Blueprint with no MVVM view at all (has_mvvm_extension=false), is a success with removed=false, saved=false and a note, and nothing is changed or saved. A missing Blueprint is an error; a failed save makes success false with saved=false and save_error, the removal kept in memory. Refused during PIE unless force=true. Inverse: add_viewmodel; drop a single binding instead: unbind_widget_from_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -721,7 +721,7 @@ Create a fresh instance of view_model_class and give it to a live UUserWidget th
 
 *Destructive, idempotent.*
 
-Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set, saved). A widget already holding that class is left as it is: changed=false, saved=false and a note, nothing compiled or saved. Among the engine UMG widgets only list, tile and tree views have that property (UListViewBase); any other widget gets nothing written and set=false with a note, because drag and drop there is the OnDragDetected and OnDrop events of a User Widget graph: author those with build_blueprint_graph, after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; one that does not load or is not a UDragDropOperation subclass is an error, and so is a missing Blueprint or widget: nothing is written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
+Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -812,9 +812,9 @@ Stop a widget animation. REAL stop (UUserWidget::StopAnimation) when a live PIE 
 
 ## `unbind_widget_from_viewmodel`
 
-*Destructive, idempotent.*
+*Destructive.*
 
-Remove an FMVVMBlueprintViewBinding from a Widget BP's MVVM authoring state, by index (primary) or binding GUID. Inverse of bind_widget_to_viewmodel; idempotent (already-absent is an honest success).
+Remove one binding from the MVVM view of a Widget Blueprint loaded by asset path, picked by binding_index or, when no index is given, by binding_id, then compile and save the Blueprint in one undo step; binding_count is what the view keeps. A binding that is not there (an index out of range, an id no binding has, or a Blueprint with no MVVM view: has_mvvm_extension=false) is a success with removed=false, saved=false and a note, and nothing is changed or saved. By index a repeat call removes the binding that moved into that index. Neither identifier, a binding_id that is not a GUID, or a missing Blueprint is an error. A failed save makes success false with saved=false and save_error, the removal kept in memory. Refused during PIE unless force=true. Inverse: bind_widget_to_viewmodel; a whole context: remove_viewmodel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -822,4 +822,4 @@ Remove an FMVVMBlueprintViewBinding from a Widget BP's MVVM authoring state, by 
 | `binding_index` | number | no | int index of the binding to remove (primary identifier; one of binding_index / binding_id required) |
 | `binding_id` | string | no | optional GUID string of the binding to remove (alternative to binding_index) |
 
-**Returns:** `{ widget_blueprint_name, binding_index?, binding_id?, already_existed, removed, binding_count, has_mvvm_extension, saved, save_error? }`
+**Returns:** `{ widget_blueprint_name, binding_index?, binding_id?, already_existed, removed, binding_count, has_mvvm_extension, saved, save_error?, note? }`

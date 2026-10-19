@@ -357,7 +357,7 @@ TSharedPtr<FJsonObject> HandleAddCurveTableKey(const TSharedPtr<FJsonObject>& Pa
 //   @param row_name - Name of the row (rich curve) to edit.
 //   @param key_index - Index of the key to remove (0 <= index < key_count); provide this OR time
 //   @param time - Time of the key to remove; provide this OR key_index
-//   @returns { curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool }
+//   @returns { curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>& Params)
 {
@@ -412,6 +412,7 @@ TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>&
     // on IsKeyHandleValid. An unresolved key is an honest no-op (key_existed=false).
     const bool bKeyExisted = Curve->IsKeyHandleValid(Handle);
     bool bSaved = false;
+    FString SaveError;
     if (bKeyExisted)
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveCurveTableKey", "Remove Curve Table Key"));
@@ -419,7 +420,6 @@ TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>&
 
         Curve->DeleteKey(Handle);
 
-        FString SaveError;
         bSaved = Impl::SaveTableChange(Table, SaveError);
     }
 
@@ -429,8 +429,14 @@ TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>&
     ResultObj->SetBoolField(TEXT("removed"), bKeyExisted);
     ResultObj->SetNumberField(TEXT("key_count"), Curve->GetNumKeys());
     Impl::AddRowCountAndMode(ResultObj, *Table);
+    if (!bKeyExisted)
+    {
+        // Nothing to remove: the table is untouched and nothing is saved.
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(ResultObj);
+    }
 
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_curve_table_key"));
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_curve_table_key"), SaveError);
 }
 
 // --------------------------------------------------------------------------- //
@@ -606,10 +612,10 @@ TSharedPtr<FJsonObject> HandleGetCurveTableInfo(const TSharedPtr<FJsonObject>& P
 // a transaction + broadcast/PostEditChange/save exactly like HandleAddCurveTableRow.
 // Both are mode-agnostic (RowMap is FRealCurve*), so no SimpleCurves guard needed.
 // --------------------------------------------------------------------------- //
-// MCP:delete_curve_table_row - Delete a named row (curve) from a UCurveTable and verify it is gone.  Idempotent: deleting a missing row reports existed=false/removed=false without error.
+// MCP:delete_curve_table_row - Delete one named row (curve) from a UCurveTable loaded by asset path, in one undo step, then save the table and read back that the row is gone. Works in either table mode, simple or rich curves. Idempotent: a row_name the table does not have (row names compare case-insensitively) is a success with existed=false, removed=false, saved=false and a note, and nothing is touched or saved. A table that does not load is an error. A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false, saved=false and save_error, with the row already gone in memory. List rows with get_curve_table_info; drop one key but keep the row: remove_curve_table_key; rename a row: rename_curve_table_row; add one: add_curve_table_row; DataTable rows: delete_data_table_row.
 //   @param curve_table_path - Full asset path to the UCurveTable.
 //   @param row_name - Name of the row (curve) to remove.
-//   @returns { curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool }
+//   @returns { curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }
 TSharedPtr<FJsonObject> HandleDeleteCurveTableRow(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentCurveTableCommandsImpl;
@@ -627,14 +633,14 @@ TSharedPtr<FJsonObject> HandleDeleteCurveTableRow(const TSharedPtr<FJsonObject>&
     const FName RowFName(*RowName);
     const bool bExisted = (Table->FindCurveUnchecked(RowFName) != nullptr);
 
-    bool bSaved = true;
+    bool bSaved = false;
+    FString SaveError;
     if (bExisted)
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "DeleteCurveTableRow", "Delete Curve Table Row"));
         Table->Modify();
         Table->DeleteRow(RowFName);
 
-        FString SaveError;
         bSaved = Impl::SaveTableChange(Table, SaveError);
     }
 
@@ -645,14 +651,21 @@ TSharedPtr<FJsonObject> HandleDeleteCurveTableRow(const TSharedPtr<FJsonObject>&
     ResultObj->SetBoolField(TEXT("removed"), bExisted && !bStillExists);
     ResultObj->SetBoolField(TEXT("still_exists"), bStillExists);
     Impl::AddRowCountAndMode(ResultObj, *Table);
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("delete_curve_table_row"));
+    if (!bExisted)
+    {
+        // Nothing to delete: the table is untouched and nothing is saved.
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("row_name is not a row of the table; nothing removed, nothing saved"));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("delete_curve_table_row"), SaveError);
 }
 
-// MCP:rename_curve_table_row - Rename a row (curve) in a UCurveTable.  UCurveTable::RenameRow silently no-ops if the source is missing or the target name already exists, so those cases are reported via the boolean flags (not errors).
+// MCP:rename_curve_table_row - Rename one row (curve) of a UCurveTable loaded by asset path, in one undo step, then save it and read back both names. UCurveTable::RenameRow would silently do nothing when row_name is missing, new_row_name is already a row, or the names are equal (row names compare case-insensitively, so a case-only rename is one of these); the call checks first and answers those as a success with renamed=false, saved=false and a note, nothing touched -- source_existed and target_existed say which -- so a repeat call is an idempotent no-op. A table that does not load is an error. A failed save -- PIE running, a read-only root or file -- gives success false, saved=false and save_error, with the rename done in memory. List rows: get_curve_table_info; drop one: delete_curve_table_row; DataTable keys: rename_data_table_row.
 //   @param curve_table_path - Full asset path to the UCurveTable.
 //   @param row_name - Current name of the row to rename.
 //   @param new_row_name - New name for the row.
-//   @returns { curve_table_path: string, row_name: string, new_row_name: string, source_existed: bool, target_existed: bool, renamed: bool, old_still_exists: bool, new_exists: bool, row_count: int, curve_table_mode: string, saved: bool }
+//   @returns { curve_table_path: string, row_name: string, new_row_name: string, source_existed: bool, target_existed: bool, renamed: bool, old_still_exists: bool, new_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }
 TSharedPtr<FJsonObject> HandleRenameCurveTableRow(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentCurveTableCommandsImpl;
@@ -677,14 +690,14 @@ TSharedPtr<FJsonObject> HandleRenameCurveTableRow(const TSharedPtr<FJsonObject>&
     // RenameRow refuses (no-ops) if source missing or target already present.
     const bool bWillRename = bSourceExisted && !bTargetExisted && OldFName != NewFName;
 
-    bool bSaved = true;
+    bool bSaved = false;
+    FString SaveError;
     if (bWillRename)
     {
         FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RenameCurveTableRow", "Rename Curve Table Row"));
         Table->Modify();
         Table->RenameRow(OldFName, NewFName);
 
-        FString SaveError;
         bSaved = Impl::SaveTableChange(Table, SaveError);
     }
 
@@ -699,7 +712,14 @@ TSharedPtr<FJsonObject> HandleRenameCurveTableRow(const TSharedPtr<FJsonObject>&
     ResultObj->SetBoolField(TEXT("old_still_exists"), bOldStillExists);
     ResultObj->SetBoolField(TEXT("new_exists"), bNewExists);
     Impl::AddRowCountAndMode(ResultObj, *Table);
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("rename_curve_table_row"));
+    if (!bWillRename)
+    {
+        // RenameRow would no-op: the table is untouched and nothing is saved.
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("row_name is missing, new_row_name is taken, or they are the same; nothing renamed, nothing saved"));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("rename_curve_table_row"), SaveError);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

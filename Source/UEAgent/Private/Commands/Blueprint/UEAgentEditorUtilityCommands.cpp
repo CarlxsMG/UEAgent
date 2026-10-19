@@ -459,7 +459,8 @@ TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObj
 
 // Shared create path for the two scripted-action-utility commands. ParentClass is
 // UAssetActionUtility or UActorActionUtility. CreateBlueprint(parent), compile+save.
-TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass)
+// Command names the tool in the error of a failed save.
+TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass, const TCHAR* Command)
 {
     if (!ParentClass)
     {
@@ -477,22 +478,30 @@ TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *NormalizedPath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load it and return the same stable payload.
+    // An asset of another kind at that path is an error before anything is created: CreatePackage and
+    // CreateBlueprint would otherwise meet it under the same name.
+    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UEditorUtilityBlueprint::StaticClass());
+    if (!Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Idempotent: an existing Editor Utility Blueprint is returned as it is, with its own parent class and nothing
+    // compiled or saved.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
-        UObject* ExistingObj = UEditorAssetLibrary::LoadAsset(FullPath);
-        UBlueprint* Existing = Cast<UBlueprint>(ExistingObj);
-        if (Existing)
+        UEditorUtilityBlueprint* Existing = Cast<UEditorUtilityBlueprint>(UEditorAssetLibrary::LoadAsset(FullPath));
+        if (!Existing)
         {
-            TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, ParentClass->GetName());
-            Resp->SetBoolField(TEXT("created"), false);
-            Resp->SetBoolField(TEXT("already_existed"), true);
-            Resp->SetBoolField(TEXT("saved"), true);
-            return mcp_common::MakeOkReply(Resp);
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("an asset already exists at %s but does not load as an Editor Utility Blueprint; nothing was created"),
+                *FullPath));
         }
-        // Existing asset is not a blueprint -- fall through to error below.
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("An asset already exists at %s and is not a Blueprint"), *FullPath));
+        TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
     }
 
     if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
@@ -537,32 +546,31 @@ TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject
     TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, NewBP, ParentClass->GetName());
     Resp->SetBoolField(TEXT("created"), true);
     Resp->SetBoolField(TEXT("already_existed"), false);
-    mcp_common::AddSaveOutcome(Resp, bSaved, SaveErr);
-    return mcp_common::MakeOkReply(Resp);
+    return mcp_common::MakeSavedReply(Resp, bSaved, Command, SaveErr);
 }
 
 // ---------------------------------------------------------------------------
 // create_asset_action_utility
 // ---------------------------------------------------------------------------
-// MCP:create_asset_action_utility - Create, compile and save a Blueprint parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+// MCP:create_asset_action_utility - Create an Editor Utility Blueprint at package_path/name parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be AssetActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on level actors: create_actor_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
 //   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
 //   @param name - Asset name without path or extension, e.g. "EUA_RenameTextures".
-//   @returns success or error payload
+//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }
 TSharedPtr<FJsonObject> HandleCreateAssetActionUtility(const TSharedPtr<FJsonObject>& Params)
 {
-    return CreateScriptedActionUtility(Params, UAssetActionUtility::StaticClass());
+    return CreateScriptedActionUtility(Params, UAssetActionUtility::StaticClass(), TEXT("create_asset_action_utility"));
 }
 
 // ---------------------------------------------------------------------------
 // create_actor_action_utility
 // ---------------------------------------------------------------------------
-// MCP:create_actor_action_utility - Create, compile and save a Blueprint parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+// MCP:create_actor_action_utility - Create an Editor Utility Blueprint at package_path/name parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be ActorActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on Content Browser assets: create_asset_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
 //   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
 //   @param name - Asset name without path or extension, e.g. "EUA_AlignToFloor".
-//   @returns success or error payload
+//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }
 TSharedPtr<FJsonObject> HandleCreateActorActionUtility(const TSharedPtr<FJsonObject>& Params)
 {
-    return CreateScriptedActionUtility(Params, UActorActionUtility::StaticClass());
+    return CreateScriptedActionUtility(Params, UActorActionUtility::StaticClass(), TEXT("create_actor_action_utility"));
 }
 
 // ---------------------------------------------------------------------------

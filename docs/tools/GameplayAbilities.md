@@ -663,12 +663,12 @@ Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO 
 
 *Destructive, idempotent.*
 
-Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Set the gameplay tags a GameplayEffect asset owns (they describe the GE and are not given to its target): the Added tags of the AssetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with asset_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; read back: get_gameplay_effect_components.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
-| `tags` | string | no | List of gameplay tag strings the GE asset owns (replaces the component's Added tags) |
+| `tags` | array | yes | List of gameplay tag strings the GE asset owns (replaces the component's Added tags) |
 
 **Returns:** `{ ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], asset_tags: [string], tag_count: int, already_existed: bool, set: bool }`
 
@@ -676,12 +676,12 @@ Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tag
 
 *Destructive, idempotent.*
 
-Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Set which abilities, by ability tag, a GameplayEffect blocks on its target while active: the Added tags of the BlockAbilityTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with block_ability_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; owned tags: set_gameplay_effect_component_asset_tags; read back: get_gameplay_effect_components.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
-| `tags` | string | no | List of gameplay tag strings of abilities to block (replaces the component's Added tags) |
+| `tags` | array | yes | List of gameplay tag strings of abilities to block (replaces the component's Added tags) |
 
 **Returns:** `{ ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], block_ability_tags: [string], tag_count: int, already_existed: bool, set: bool }`
 
@@ -734,12 +734,12 @@ Configure a TargetTagRequirementsGameplayEffectComponent's Application/Ongoing/R
 
 *Destructive, idempotent.*
 
-Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+Set the gameplay tags a GameplayEffect grants its target actor while active: the Added tags of the TargetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with granted_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Owned asset tags: set_gameplay_effect_component_asset_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; require/ignore tags: set_gameplay_effect_component_target_tag_requirements; read back: get_gameplay_effect_components.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ge_blueprint_path` | string | yes | Full asset path of the GE Blueprint |
-| `tags` | string | no | List of gameplay tag strings to grant to the target (replaces the component's Added tags) |
+| `tags` | array | yes | List of gameplay tag strings to grant to the target (replaces the component's Added tags) |
 
 **Returns:** `{ ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], granted_tags: [string], tag_count: int, already_existed: bool, set: bool }`
 

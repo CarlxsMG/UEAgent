@@ -163,7 +163,8 @@ namespace
 		return FString();
 	}
 
-	// {"type", "value"} of Value; a type with no JSON scalar form gets a placeholder string as its "value".
+	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form (a dictionary, a list op
+	// such as apiSchemas) gets a placeholder string as its "value".
 	TSharedPtr<FJsonObject> UsdPrim_VtValueToJson(const UE::FVtValue& Value)
 	{
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -491,11 +492,11 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_usd_prim_metadata - Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return; unsupported value types become a placeholder string. Read-only.
+// MCP:get_usd_prim_metadata - Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return. Values read as get_usd_attribute_value reads them: scalars as booleans, numbers or strings, vectors and arrays as JSON arrays (an array with length and truncated, cut to its first 600 numbers or strings, fewer long strings), matrices as arrays of rows; an Sdf enum such as specifier gives its number, and a dictionary or list op (apiSchemas, references) a placeholder string. Read-only. Author one field with set_usd_prim_metadata; prim summary: get_usd_prim_info.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param key [string] - Metadata field to read, e.g. "documentation"; empty or omitted (default) returns all entries.
-//   @returns { present: bool, key: string, value: object, metadata: object, count: number, note?: string }
+//   @returns { present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool }, metadata: object, count: number, note?: string }
 TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;

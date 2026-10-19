@@ -563,7 +563,7 @@ TSharedPtr<FJsonObject> HandleSetStateTreeRoot(
 //   Build one descriptor (name + scalar type) and read back via the public
 //   GetRootParametersPropertyBag() getter.
 // ---------------------------------------------------------------------------
-// MCP:add_tree_parameter - Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
+// MCP:add_tree_parameter - Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param parameter_name - Name of the parameter to add, e.g. "Speed"; a name already in the bag, compared case-insensitively, is never added a second time.
 //   @param parameter_type - Scalar type: bool, int (default), int64, float, double, name, string, text, byte; case is ignored, int32 and fstring are accepted as aliases, and an unrecognised type silently becomes a string parameter
@@ -611,7 +611,10 @@ TSharedPtr<FJsonObject> HandleAddTreeParameter(
 		return mcp_common::MakeOkReply(Data);
 	}
 
-	// CreateRootProperties writes the name the parameter really got back into the descriptor.
+	// The root parameter bag lives on the editor data, which is what the StateTree editor records before it
+	// creates a parameter (Promote to Parameter), so the addition is one undo step. CreateRootProperties writes
+	// the name the parameter really got back into the descriptor.
+	ED->Modify();
 	ED->CreateRootProperties(MakeArrayView(&Desc, 1));
 	const FName AddedName = Desc.PropertyDesc.Name;
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
@@ -792,11 +795,11 @@ TSharedPtr<FJsonObject> HandleAddStateEnterCondition(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_enter_condition"));
 }
 
-// MCP:set_state_type - Set the type of a StateTree state (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree) and save the asset without recompiling it. An unknown name is an error. To point a state at another tree prefer set_state_linked_asset, which also sets the linked asset.
+// MCP:set_state_type - Set the type of one state of a StateTree asset (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree), in one undo step, then save the asset without compiling it. The state is the first one named state_name in a depth-first walk of the hierarchy. Only the type is written: the follow-up the StateTree details panel applies (clearing a group's tasks, resetting a link) does not run, so to point a state at another tree prefer set_state_linked_asset. A state that already has that type changes and saves nothing (changed false, saved false). An unknown name, or a missing tree or state, is an error; a failed save makes success false. Read back with get_state_tree_info; selection: set_state_selection_behavior.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state to change; the command fails without it.
 //   @param state_type - Enum value name: State, Group, Linked, LinkedAsset or Subtree (an EStateTreeStateType:: prefix is accepted).
-//   @returns { tree_path, state_name, state_type, set, saved }
+//   @returns { tree_path, state_name, state_type, set, changed, saved, note? }
 TSharedPtr<FJsonObject> HandleSetStateType(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -812,20 +815,34 @@ TSharedPtr<FJsonObject> HandleSetStateType(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Unknown state_type: %s (expected State|Group|Linked|LinkedAsset|Subtree)"), *TypeStr));
 	}
+	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
+	if (State->Type == NewType)
+	{
+		Data->SetStringField(TEXT("state_type"), EnumToName(State->Type));
+		Data->SetBoolField(TEXT("set"), true);
+		Data->SetBoolField(TEXT("changed"), false);
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The state already has that type; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	// The state is recorded before the write, as the StateTree editor's details panel does, so the change is one
+	// undo step.
+	State->Modify();
 	State->Type = NewType;
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
-	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetStringField(TEXT("state_type"), EnumToName(State->Type));
 	Data->SetBoolField(TEXT("set"), true);
+	Data->SetBoolField(TEXT("changed"), true);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_state_type"));
 }
 
-// MCP:set_state_selection_behavior - Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), overwriting the previous value, then save the asset without compiling it; there is no undo step. Setting the value it already has still saves. An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type, set_state_completion_type, set_state_linked_asset; read back with get_state_tree_info; check the tree with compile_state_tree.
+// MCP:set_state_selection_behavior - Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), in one undo step, then save the asset without compiling it. A state that already has that behavior changes and saves nothing (changed false, saved false). An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type, set_state_completion_type, set_state_linked_asset; read back with get_state_tree_info; check the tree with compile_state_tree.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state to change; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param selection_behavior - One of None | TryEnterState | TrySelectChildrenInOrder | TrySelectChildrenAtRandom | TrySelectChildrenWithHighestUtility | TrySelectChildrenAtRandomWeightedByUtility | TryFollowTransitions; an EStateTreeStateSelectionBehavior:: prefix is accepted
-//   @returns { tree_path, state_name, selection_behavior, set, saved }
+//   @returns { tree_path, state_name, selection_behavior, set, changed, saved, note? }
 TSharedPtr<FJsonObject> HandleSetStateSelectionBehavior(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -841,12 +858,26 @@ TSharedPtr<FJsonObject> HandleSetStateSelectionBehavior(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Unknown selection_behavior: %s"), *BehaviorStr));
 	}
+	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
+	if (State->SelectionBehavior == NewBehavior)
+	{
+		Data->SetStringField(TEXT("selection_behavior"), EnumToName(State->SelectionBehavior));
+		Data->SetBoolField(TEXT("set"), true);
+		Data->SetBoolField(TEXT("changed"), false);
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The state already has that selection behavior; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	// The state is recorded before the write, as the StateTree editor's details panel does, so the change is one
+	// undo step.
+	State->Modify();
 	State->SelectionBehavior = NewBehavior;
 	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
 
-	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetStringField(TEXT("selection_behavior"), EnumToName(State->SelectionBehavior));
 	Data->SetBoolField(TEXT("set"), true);
+	Data->SetBoolField(TEXT("changed"), true);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_state_selection_behavior"));
 }
 
@@ -961,7 +992,7 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTask(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_state_tree_global_task"));
 }
 
-// MCP:set_transition_properties - Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
+// MCP:set_transition_properties - Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, in one undo step, then save the asset without compiling it. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. A call that leaves every field as it was changes and saves nothing (changed false, saved false). An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
 //   @param tree_path - Asset path of the StateTree, e.g. "/Game/AI/ST_Guard".
 //   @param state_name [string!] - Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used
 //   @param transition_index - 0-based index of the transition within that state (the index field of list_transitions or get_state_tree_info); required
@@ -970,7 +1001,7 @@ TSharedPtr<FJsonObject> HandleAddStateTreeGlobalTask(
 //   @param enabled - Optional whether the transition is enabled
 //   @param delay - Optional whether to delay the transition
 //   @param delay_duration - Optional delay duration in seconds (requires delay=true to take effect)
-//   @returns { tree_path, state_name, transition_index, trigger, priority, enabled, delay, delay_duration, saved }
+//   @returns { tree_path, state_name, transition_index, trigger, priority, enabled, delay, delay_duration, changed, saved, note? }
 TSharedPtr<FJsonObject> HandleSetTransitionProperties(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1004,15 +1035,32 @@ TSharedPtr<FJsonObject> HandleSetTransitionProperties(
 			FString::Printf(TEXT("Unknown priority: %s; nothing was changed"), *PriorityStr));
 	}
 
-	if (bHasTrigger) { T.Trigger = Trig; }
-	if (bHasPriority) { T.Priority = Prio; }
-	bool bEnabled = true;
-	if (Params->TryGetBoolField(TEXT("enabled"), bEnabled)) { T.bTransitionEnabled = bEnabled; }
-	bool bDelay = false;
-	if (Params->TryGetBoolField(TEXT("delay"), bDelay)) { T.bDelayTransition = bDelay; }
+	// The values the call leaves the transition with; a field not passed keeps its value.
+	const EStateTreeTransitionTrigger NewTrigger = bHasTrigger ? Trig : T.Trigger;
+	const EStateTreeTransitionPriority NewPriority = bHasPriority ? Prio : T.Priority;
+	bool bNewEnabled = T.bTransitionEnabled;
+	Params->TryGetBoolField(TEXT("enabled"), bNewEnabled);
+	bool bNewDelay = T.bDelayTransition;
+	Params->TryGetBoolField(TEXT("delay"), bNewDelay);
+	float NewDelayDuration = T.DelayDuration;
 	double DelayDur = 0.0;
-	if (Params->TryGetNumberField(TEXT("delay_duration"), DelayDur)) { T.DelayDuration = static_cast<float>(DelayDur); }
-	const bool bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+	if (Params->TryGetNumberField(TEXT("delay_duration"), DelayDur)) { NewDelayDuration = static_cast<float>(DelayDur); }
+
+	const bool bChanged = NewTrigger != T.Trigger || NewPriority != T.Priority || bNewEnabled != T.bTransitionEnabled
+		|| bNewDelay != T.bDelayTransition || NewDelayDuration != T.DelayDuration;
+	bool bSaved = false;
+	if (bChanged)
+	{
+		// The transition lives in the state, which is what the StateTree editor's details panel records when a
+		// transition field is edited, so the change is one undo step.
+		State->Modify();
+		T.Trigger = NewTrigger;
+		T.Priority = NewPriority;
+		T.bTransitionEnabled = bNewEnabled;
+		T.bDelayTransition = bNewDelay;
+		T.DelayDuration = NewDelayDuration;
+		bSaved = mcp_common::SaveAssetPackage(Tree->GetPackage(), Tree);
+	}
 
 	TSharedPtr<FJsonObject> Data = StateTree_NewStateData(Tree, State);
 	Data->SetNumberField(TEXT("transition_index"), Ti);
@@ -1021,6 +1069,13 @@ TSharedPtr<FJsonObject> HandleSetTransitionProperties(
 	Data->SetBoolField(TEXT("enabled"), T.bTransitionEnabled);
 	Data->SetBoolField(TEXT("delay"), T.bDelayTransition);
 	Data->SetNumberField(TEXT("delay_duration"), T.DelayDuration);
+	Data->SetBoolField(TEXT("changed"), bChanged);
+	if (!bChanged)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The transition already has those values; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_transition_properties"));
 }
 
@@ -1338,7 +1393,7 @@ TSharedPtr<FJsonObject> HandleListStateTrees(
 // MCP:list_states - List every state of a StateTree asset, found by asset path, as one flat breadth-first list, read as loaded in memory (unsaved edits included) without changing anything: the top-level states (SubTrees) at depth 0 first, then each level of children. Each entry gives the name, type (State, Group, Linked, LinkedAsset or Subtree), task completion (All or Any), parent name (empty at depth 0), depth, child_count (direct children only, not recursive), and task, enter-condition and transition counts. root_state, matched by name (case-insensitive, first match in tree order), lists only that state, at depth 0, and its descendants. An unknown tree or root_state, or a tree without editor data, is an error. Whole structure with transitions: get_state_tree_info; one state's details: list_transitions, list_tasks, list_conditions; finding trees: list_state_trees.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param root_state - Optional. If set, walk from this state as root (top-level SubTrees are skipped).
-//   @returns { tree_path, count, states: [{ name, type, completion, has_children, child_count, depth, parent }] }
+//   @returns { tree_path, count, states: [{ name, type, completion, has_children, child_count, task_count, enter_condition_count, transition_count, depth, parent }] }
 TSharedPtr<FJsonObject> HandleListStates(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1616,41 +1671,66 @@ TSharedPtr<FJsonObject> HandleListTreeParameters(
 // ---------------------------------------------------------------------------
 // delete_state_tree — full asset deletion via UEditorAssetLibrary
 // ---------------------------------------------------------------------------
-// MCP:delete_state_tree - Delete a UStateTree asset from the project. Idempotent — deleting a non-existent asset is a no-op (returns deleted:false, already_existed:false) so re-runs don't fail.
+// MCP:delete_state_tree - Delete a UStateTree asset from the project with the editor's delete (UEditorAssetLibrary::DeleteLoadedAsset): permanent, with no reference check, and open editors of it close. confirm must be true, or nothing happens and the call is an error. Typed: the asset at tree_path must be a UStateTree; any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. Idempotent: a path with no asset is a success with deleted false and already_existed false. A delete the engine does not carry out (a Play-in-Editor session running, a file that cannot be deleted) is success false with deleted false. A path that cannot name an asset is an error. List trees with list_state_trees; create one with create_state_tree.
 //   @param tree_path - Asset path to the UStateTree.
 //   @param confirm - Must be true to actually delete. Honest-headless safety against accidental wipe.
-//   @returns { tree_path, deleted, already_existed, note }
+//   @returns { tree_path, deleted, already_existed, asset_class?, note? }
 TSharedPtr<FJsonObject> HandleDeleteStateTree(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString TreePath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tree_path"), TreePath)) { return Missing; }
 	bool bConfirm = false;
-	Params->TryGetBoolField(TEXT("confirm"), bConfirm);
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredBool(Params, TEXT("confirm"), bConfirm)) { return Missing; }
 	if (!bConfirm)
 	{
 		return mcp_common::MakeErrorReply(
 			TEXT("delete_state_tree is destructive; pass confirm=true to proceed"));
 	}
-
-	const bool bExisted = UEditorAssetLibrary::DoesAssetExist(TreePath);
-	if (!bExisted)
+	// Loading a path that cannot name a package creates it, and CreatePackage aborts the editor on such a name.
+	const FString InvalidName = mcp_common::InvalidPackageName(TreePath);
+	if (!InvalidName.IsEmpty())
 	{
-		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetStringField(TEXT("tree_path"),        TreePath);
-		Data->SetBoolField  (TEXT("deleted"),          false);
-		Data->SetBoolField  (TEXT("already_existed"),  false);
-		Data->SetStringField(TEXT("note"),             TEXT("No asset at the given path; nothing to delete."));
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("delete_state_tree: %s; nothing was deleted"), *InvalidName));
+	}
+
+	// The loaded object is the existence check (the Asset Registry can lag behind an asset created this session),
+	// and LoadObject needs the object path, so a bare package path gets its asset name appended.
+	FString ObjectPath = TreePath;
+	if (!ObjectPath.Contains(TEXT(".")))
+	{
+		ObjectPath += TEXT(".") + FPackageName::GetShortName(ObjectPath);
+	}
+	UObject* Asset = LoadObject<UObject>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("tree_path"), TreePath);
+	if (!Asset)
+	{
+		Data->SetBoolField(TEXT("deleted"), false);
+		Data->SetBoolField(TEXT("already_existed"), false);
+		Data->SetStringField(TEXT("note"), TEXT("No asset at the given path; nothing to delete."));
 		return mcp_common::MakeOkReply(Data);
 	}
 
-	const bool bDeleted = UEditorAssetLibrary::DeleteAsset(TreePath);
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("tree_path"),        TreePath);
-	Data->SetBoolField  (TEXT("deleted"),          bDeleted);
-	Data->SetBoolField  (TEXT("already_existed"),  true);
-	Data->SetStringField(TEXT("note"),             bDeleted ? TEXT("") : TEXT("UEditorAssetLibrary::DeleteAsset returned false."));
-	return mcp_common::MakeOkReply(Data);
+	const FString AssetClassName = Asset->GetClass()->GetName();
+	Data->SetStringField(TEXT("asset_class"), AssetClassName);
+	Data->SetBoolField(TEXT("already_existed"), true);
+	if (!Asset->IsA<UStateTree>())
+	{
+		// The typed-delete guard: an asset of another class fails the call and is not deleted.
+		const FString Refusal = FString::Printf(TEXT("asset is not a UStateTree (got %s) - wrong type, refusing to delete"), *AssetClassName);
+		Data->SetBoolField(TEXT("deleted"), false);
+		Data->SetStringField(TEXT("note"), Refusal);
+		return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(TEXT("delete_state_tree: %s at %s"), *Refusal, *TreePath));
+	}
+
+	const bool bDeleted = UEditorAssetLibrary::DeleteLoadedAsset(Asset);
+	Data->SetBoolField(TEXT("deleted"), bDeleted);
+	return mcp_common::MakeOutcomeReply(Data, bDeleted, bDeleted ? FString() : FString::Printf(
+		TEXT("delete_state_tree: the tree at %s was not deleted (UEditorAssetLibrary::DeleteLoadedAsset returned false: ")
+		TEXT("a Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
+		TEXT("the Output Log names which)"), *TreePath));
 }
 
 // ---------------------------------------------------------------------------

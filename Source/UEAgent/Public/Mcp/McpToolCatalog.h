@@ -49,6 +49,10 @@ public:
 		bool bHasIntRange = false;
 		double IntRangeMin = 0.0;
 		double IntRangeMax = 0.0;
+		/** A string, or array of strings, the engine makes a name of (`nameLike` in the catalog): an FName
+		 *  holds fewer than NAME_SIZE characters and building a longer one aborts the editor, so
+		 *  McpPreconditions refuses such a value before the handler runs. */
+		bool bNameLike = false;
 	};
 
 	struct FTool
@@ -108,6 +112,14 @@ public:
 	 * or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
 	 */
 	static FString CheckIntegerRanges(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+
+	/**
+	 * The first name-like argument (FParam::bNameLike), a string or a string element of an array, of
+	 * NAME_SIZE characters or more, as an error message naming the parameter, its length and the
+	 * limit; empty when every one fits or the catalog does not know CommandType. Game thread
+	 * (McpPreconditions::Check).
+	 */
+	static FString CheckNameLengths(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
 	/** Does the parameter NAME read as a rotation: rot, *rotation or *rotator? */
 	static bool LooksLikeRotationName(const FString& ParamName);

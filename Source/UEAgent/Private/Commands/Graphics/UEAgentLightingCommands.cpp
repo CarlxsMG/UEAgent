@@ -1163,6 +1163,9 @@ namespace UEAgentLightingImpl
     };
 
     // Preset names compare with FString ==, so case is ignored. An unknown name is null.
+    // Low writes the same levels as Disabled, every feature off: the presets are a scale where Medium already
+    // gives its three features level 1, the lowest each variable has above off, and turns the other three off,
+    // so a Low with any feature on would be heavier than Medium.
     const FPostProcessPreset* FindPostProcessPreset(const FString& Requested)
     {
         static const FPostProcessPreset Presets[] =
@@ -1171,7 +1174,7 @@ namespace UEAgentLightingImpl
             { TEXT("Disabled"), { 0, 0, 0, 0, 0, 0 }, TEXT("Post processing disabled successfully using official APIs") },
             { TEXT("High"),     { 2, 2, 2, 2, 2, 2 }, TEXT("High quality post processing configured successfully using official APIs") },
             { TEXT("Medium"),   { 1, 0, 1, 1, 0, 0 }, TEXT("Medium quality post processing configured successfully using official APIs") },
-            { TEXT("Low"),      { 0, 0, 0, 0, 0, 0 }, TEXT("Low quality post processing configured successfully using official APIs") },
+            { TEXT("Low"),      { 0, 0, 0, 0, 0, 0 }, TEXT("Low post processing configured: every feature off, the same levels as Disabled") },
         };
         for (const FPostProcessPreset& Preset : Presets)
         {
@@ -1934,7 +1937,7 @@ TSharedPtr<FJsonObject> HandleGetRenderingSettings(const TSharedPtr<FJsonObject>
     return Report;
 }
 
-// MCP:configure_post_processing - Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have no such variable in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1 and the rest to 0; Disabled and Low set all to 0. Each variable is read back: post_processing_variables lists it, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
+// MCP:configure_post_processing - Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have none in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1, their lowest level above off, and the rest to 0; Disabled and Low set all to 0, so Low equals Disabled. Each variable is read back into post_processing_variables, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
 //   @param post_process_settings - Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'; case is ignored
 //   @returns { post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, lens_flare_enabled, screen_space_reflections_enabled, post_processing_variables: [{ variable, previous, requested, value, applied }], world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }
 TSharedPtr<FJsonObject> HandleConfigurePostProcessing(const TSharedPtr<FJsonObject>& Params)

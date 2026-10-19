@@ -963,6 +963,13 @@ static void SerializeRigControlValue(
 //   @returns { asset_path: string, control_name: string, control_type: string, value: any, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleSetRigControlValue(const TSharedPtr<FJsonObject>& Params)
 {
+    // value is needed whatever the control type (MakeRigControlValueFromParams fails without it). A raw read in a
+    // guard, so the catalog publishes it as required and of any JSON type: its type follows the control's.
+    if (!Params->TryGetField(TEXT("value")))
+    {
+        return mcp_common::MissingParameterReply(TEXT("value"));
+    }
+
     FString ControlName;
     UControlRigBlueprint* CRBP = nullptr;
     URigHierarchyController* Controller = nullptr;

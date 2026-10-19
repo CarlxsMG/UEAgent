@@ -317,10 +317,10 @@ TSharedPtr<FJsonObject> HandleSetHLODLayerSettings(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_hlod_layer_settings"), SaveError);
 }
 
-// MCP:set_hlod_layer_parent - Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent chain drives nested HLOD generation (a layer's HLOD becomes an input to its parent's HLOD). Send parent_layer_path="" to clear the parent to null; omit parent_layer_path to leave it untouched. Idempotent: if the parent is already the requested value, nothing is modified/saved (changed_parent=false). Validates against self-parent and circular parent chains (the engine's guard is editor-only and does not run headless).
+// MCP:set_hlod_layer_parent - Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent chain drives nested HLOD generation (a layer's HLOD becomes an input to its parent's HLOD). Send parent_layer_path="" to clear the parent to null; omit parent_layer_path to leave it untouched. Idempotent: if the parent is already the requested value, nothing is modified/saved (changed_parent=false, saved=false). Validates against self-parent and circular parent chains (the engine's guard is editor-only and does not run headless).
 //   @param hlod_layer_path - Full /Game path to the child HLOD layer asset
 //   @param parent_layer_path - Optional full /Game path to the parent HLOD layer; "" clears to null; absent leaves it untouched
-//   @returns { hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool }
+//   @returns { hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool, note: string? }
 
 TSharedPtr<FJsonObject> HandleSetHLODLayerParent(const TSharedPtr<FJsonObject>& Params)
 {
@@ -375,7 +375,7 @@ TSharedPtr<FJsonObject> HandleSetHLODLayerParent(const TSharedPtr<FJsonObject>& 
 
     // Idempotent: if the parent is already the requested value, do not Modify/save.
     const bool bChangedParent = (Layer->GetParentLayer() != Parent);
-    bool bSaved = true;
+    bool bSaved = false;
     if (bChangedParent)
     {
         const FScopedTransaction Transaction(FText::FromString(TEXT("MCP: Set HLOD Layer Parent")));
@@ -397,6 +397,12 @@ TSharedPtr<FJsonObject> HandleSetHLODLayerParent(const TSharedPtr<FJsonObject>& 
     ResultObj->SetBoolField(TEXT("has_parent"), ReadParent != nullptr);
     ResultObj->SetBoolField(TEXT("changed_parent"), bChangedParent);
     ResultObj->SetBoolField(TEXT("settings_set"), true);
+    if (!bChangedParent)
+    {
+        ResultObj->SetBoolField(TEXT("saved"), false);
+        ResultObj->SetStringField(TEXT("note"), TEXT("the parent already has the requested value; nothing changed, nothing saved"));
+        return mcp_common::MakeOkReply(ResultObj);
+    }
 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_hlod_layer_parent"));
 }
@@ -637,16 +643,8 @@ namespace
 
 TSharedPtr<FJsonObject> HandleGetHLODLayerActors(const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params.IsValid() || !Params->HasField(TEXT("hlod_layer_path")))
-    {
-        return mcp_common::MissingParameterReply(TEXT("hlod_layer_path"));
-    }
     FString LayerPath;
-    Params->TryGetStringField(TEXT("hlod_layer_path"), LayerPath);
-    if (LayerPath.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("hlod_layer_path is empty"));
-    }
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("hlod_layer_path"), LayerPath)) { return Missing; }
 
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }

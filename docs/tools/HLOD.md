@@ -36,7 +36,7 @@ Enumerate which LOADED actors in the current editor world are assigned to a give
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `hlod_layer_path` | string | no | Full /Game path of the UHLODLayer asset (matches against AActor::HLODLayer::GetPathName()). |
+| `hlod_layer_path` | string | yes | Full /Game path of the UHLODLayer asset (matches against AActor::HLODLayer::GetPathName()). |
 
 **Returns:** `{ hlod_layer_path, world, is_world_partition, not_applicable, note?, total: int, actors: [{actor_name, actor_path, actor_label}] }`
 
@@ -93,14 +93,14 @@ Assign a UHLODLayer to a BATCH of loaded actors in the current editor world -- o
 
 *Destructive, idempotent.*
 
-Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent chain drives nested HLOD generation (a layer's HLOD becomes an input to its parent's HLOD). Send parent_layer_path="" to clear the parent to null; omit parent_layer_path to leave it untouched. Idempotent: if the parent is already the requested value, nothing is modified/saved (changed_parent=false). Validates against self-parent and circular parent chains (the engine's guard is editor-only and does not run headless).
+Sets (or clears) the parent UHLODLayer of a UHLODLayer and saves it.  The parent chain drives nested HLOD generation (a layer's HLOD becomes an input to its parent's HLOD). Send parent_layer_path="" to clear the parent to null; omit parent_layer_path to leave it untouched. Idempotent: if the parent is already the requested value, nothing is modified/saved (changed_parent=false, saved=false). Validates against self-parent and circular parent chains (the engine's guard is editor-only and does not run headless).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `hlod_layer_path` | string | yes | Full /Game path to the child HLOD layer asset |
 | `parent_layer_path` | string | no | Optional full /Game path to the parent HLOD layer; "" clears to null; absent leaves it untouched |
 
-**Returns:** `{ hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool }`
+**Returns:** `{ hlod_layer_path: string, asset_path: string, parent_layer_path: string, has_parent: bool, changed_parent: bool, settings_set: bool, saved: bool, note: string? }`
 
 ## `set_hlod_layer_settings`
 

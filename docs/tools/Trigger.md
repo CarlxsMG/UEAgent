@@ -97,11 +97,11 @@ Read a volume actor in the editor world without changing it: its class, whether 
 
 *Destructive.*
 
-Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
+Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor is not an error: the reply has deleted false and a note; an actor of another class is refused, and that refusal or a destroy the world refuses is success false with deleted false. Returns actor_name, actor_class, deleted and already_existed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Object name of the TriggerBox actor (its editor label is not matched); the command fails without it. |
+| `actor_name` | string | yes | Object name of the TriggerBox actor (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
@@ -109,11 +109,11 @@ Delete a TriggerBox actor from the editor world after checking its class; the le
 
 *Destructive, idempotent.*
 
-Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor, or an actor of another class, is not an error: the reply has deleted=false and a note, so read deleted; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
+Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
+| `actor_name` | string | yes | Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
@@ -121,11 +121,11 @@ Delete one ATriggerSphere actor from the editor world, found by its object name 
 
 *Destructive.*
 
-Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed. This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
+Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | no | Name of the AVolume actor. |
+| `actor_name` | string | yes | Name of the AVolume actor. |
 
 **Returns:** `{ actor_name, actor_class, deleted, already_existed, note? }`
 
@@ -179,8 +179,8 @@ USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `volume_class` | string | yes | Volume class: short reflected name ('NavMeshBoundsVolume', 'PhysicsVolume', 'TriggerVolume', 'BlockingVolume', 'PCGVolume', with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must derive from AVolume (required). |
+| `extent` | array | yes | Required [x, y, z] in unreal units, each component > 0. !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. |
 | `location` | array | no | World [x, y, z] location to spawn the volume (default 0,0,0) |
-| `extent` | array | no | Required [x, y, z] in unreal units, each component > 0. !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. |
 | `actor_label` | string | no | Optional editor label for the spawned actor |
 | `is_spatially_loaded` | boolean | no | World Partition spatial-loading flag (default true; only applied when the actor allows changing it). Reported RE-READ from the actor. |
 | `normalize_scale` | boolean | no | Default TRUE: resets the actor scale to (1,1,1) after building the brush, so the world bounds equal the requested `extent`. It matters because some actor factories stamp a default scale during placement -- APCGVolume is spawned at (25, 25, 10) -- and since brush polys are authored in LOCAL space that scale MULTIPLIES your extent. Set it false only if you deliberately want the factory's scale; `spawn_scale` always reports what it was. Be aware that with normalize_scale=false and a factory scale != 1 the real bounds are NOT the requested extent, so `extent_matches_request` and therefore `success` come back FALSE -- that is the honest answer, not a bug, and `actor_scale` says why they differ. |

@@ -36,6 +36,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraph.h" // FGraphNodeCreator
 #include "Editor.h"                                    // GEditor
+#include "FileHelpers.h"                               // UEditorLoadingAndSavingUtils::SavePackages -- the editor's map save
 #include "Editor/LevelEditor/Public/LevelEditorSubsystem.h"  // IsInPlayInEditor/EditorRequestEndPlay -- same API stop_play_in_editor uses
 #include "HAL/PlatformProcess.h"                       // Sleep, while waiting for PIE teardown
 #include "HAL/FileManager.h"                           // IFileManager::IsReadOnly -- the MEASURED cause of a failed save
@@ -126,10 +127,13 @@ namespace mcp_common
             return false;
         }
 
+        // A package that holds a UWorld is a map and lives in a .umap (UWorld::CreateWorld and the world's
+        // serialization set PKG_ContainsMap); written to a .uasset it would be a second package of the same name
+        // next to the map. Same choice as the engine's own savers (PackageAutoSaver, AssetViewUtils).
         const FString PackageName = Package->GetName();
         FString FileName;
-        if (!FPackageName::TryConvertLongPackageNameToFilename(
-                PackageName, FileName, FPackageName::GetAssetPackageExtension()))
+        if (!FPackageName::TryConvertLongPackageNameToFilename(PackageName, FileName,
+                Package->ContainsMap() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension()))
         {
             OutError = FString::Printf(TEXT("Could not convert package name to filename: %s"), *PackageName);
             return false;
@@ -164,12 +168,26 @@ namespace mcp_common
 
         Package->MarkPackageDirty();
 
-        FSavePackageArgs SaveArgs;
-        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-        SaveArgs.SaveFlags = SAVE_NoError;
-        SaveArgs.Error = GError;
-
-        const bool bSaved = UPackage::SavePackage(Package, Asset, *FileName, SaveArgs);
+        bool bSaved = false;
+        if (Package->ContainsMap())
+        {
+            // A map is saved the way the editor saves one (FileHelpers.cpp SaveWorld): UEditorEngine::Save runs the
+            // world's pre-save (OnPreSaveWorld, the physics scene, UWorld::PreSaveRoot), and the world's own dirty
+            // external packages (one file per actor) and its _BuiltData package are written with it; a newly created
+            // world writes all its external packages. No other dirty package is saved. This scripting entry point
+            // passes bUseDialog=false and runs as an unattended script, so a failure is logged, never a modal dialog;
+            // with source control enabled it checks the files out, as any editor save does.
+            const TArray<UPackage*> MapPackage{ Package };
+            bSaved = UEditorLoadingAndSavingUtils::SavePackages(MapPackage, /*bOnlyDirty=*/false);
+        }
+        else
+        {
+            FSavePackageArgs SaveArgs;
+            SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+            SaveArgs.SaveFlags = SAVE_NoError;
+            SaveArgs.Error = GError;
+            bSaved = UPackage::SavePackage(Package, Asset, *FileName, SaveArgs);
+        }
         if (!bSaved)
         {
             // This is the shared save helper: hundreds of handlers derive their `saved`
@@ -813,6 +831,15 @@ namespace mcp_common
         {
             return FString::Printf(TEXT("Invalid asset path '%s': it contains '//'. Pass the folder without a trailing ")
                 TEXT("slash, and the asset name without a path."), *PackageName);
+        }
+        // The package name becomes an FName, which holds fewer than NAME_SIZE characters: a folder and a name that join
+        // to more would hit FName's checkf (UnrealNames.cpp) in CreatePackage or the load that resolves the path.
+        const int32 PackageLength = FPackageName::ObjectPathToPackageName(PackageName).Len();
+        if (PackageLength >= NAME_SIZE)
+        {
+            return FString::Printf(TEXT("Invalid asset path '%s...': its package name is %d characters long, and a package name is ")
+                TEXT("an FName, which holds at most %d characters (the engine aborts the editor on a longer one). Use a shorter ")
+                TEXT("folder or asset name."), *PackageName.Left(64), PackageLength, NAME_SIZE - 1);
         }
         return FString();
     }

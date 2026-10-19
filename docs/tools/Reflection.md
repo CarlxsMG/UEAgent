@@ -414,7 +414,7 @@ Write ONE property on ONE object instance (editor world only), through a CPF_Edi
 |---|---|---|---|
 | `object_path` | string | yes | Path or name of the object instance, resolved in the EDITOR world: full object path, asset path, CDO/archetype, or a dotted "Actor[.Component[.Subobject]]" whose first segment is the actor's internal name. |
 | `property_name` | string | yes | Name of the property to set (must be CPF_Edit and not EditConst, or the call fails with a reason) |
-| `value` | any | no | New value: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)" |
+| `value` | any | yes | New value: string, number, boolean, JSON object (struct), JSON array (array/set/tag container), or a UE-format text string like "(X=1,Y=2,Z=3)" |
 
 **Returns:** `{ success: bool, error: string, message: string }`
 

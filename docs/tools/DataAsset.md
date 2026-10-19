@@ -221,27 +221,27 @@ Creates a UStringTable asset at package_path/name with the given namespace and n
 
 *Destructive, idempotent.*
 
-Delete a named row (curve) from a UCurveTable and verify it is gone.  Idempotent: deleting a missing row reports existed=false/removed=false without error.
+Delete one named row (curve) from a UCurveTable loaded by asset path, in one undo step, then save the table and read back that the row is gone. Works in either table mode, simple or rich curves. Idempotent: a row_name the table does not have (row names compare case-insensitively) is a success with existed=false, removed=false, saved=false and a note, and nothing is touched or saved. A table that does not load is an error. A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false, saved=false and save_error, with the row already gone in memory. List rows with get_curve_table_info; drop one key but keep the row: remove_curve_table_key; rename a row: rename_curve_table_row; add one: add_curve_table_row; DataTable rows: delete_data_table_row.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `curve_table_path` | string | yes | Full asset path to the UCurveTable. |
 | `row_name` | string | yes | Name of the row (curve) to remove. |
 
-**Returns:** `{ curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool }`
+**Returns:** `{ curve_table_path: string, row_name: string, existed: bool, removed: bool, still_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }`
 
 ## `delete_data_table_row`
 
 *Destructive.*
 
-Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key". Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
+Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable |
 | `row_name` | string | yes | Name (key) of the row to remove |
 
-**Returns:** `{ table_path, row_name, existed, removed, still_exists, row_count, saved }`
+**Returns:** `{ table_path, row_name, existed, removed, still_exists, row_count, saved, note? }`
 
 ## `diff_data_tables`
 
@@ -615,7 +615,7 @@ Remove a single key from an existing UCurveTable row's rich curve by index or ti
 | `key_index` | number | no | Index of the key to remove (0 &lt;= index &lt; key_count); provide this OR time |
 | `time` | number | no | Time of the key to remove; provide this OR key_index |
 
-**Returns:** `{ curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool }`
+**Returns:** `{ curve_table_path: string, row_name: string, row_existed: bool, key_existed: bool, removed: bool, key_count: int, row_count: int, curve_table_mode: string, saved: bool, save_error: string? }`
 
 ## `remove_data_registry_source`
 
@@ -660,9 +660,9 @@ Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). I
 
 ## `rename_curve_table_row`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Rename a row (curve) in a UCurveTable.  UCurveTable::RenameRow silently no-ops if the source is missing or the target name already exists, so those cases are reported via the boolean flags (not errors).
+Rename one row (curve) of a UCurveTable loaded by asset path, in one undo step, then save it and read back both names. UCurveTable::RenameRow would silently do nothing when row_name is missing, new_row_name is already a row, or the names are equal (row names compare case-insensitively, so a case-only rename is one of these); the call checks first and answers those as a success with renamed=false, saved=false and a note, nothing touched -- source_existed and target_existed say which -- so a repeat call is an idempotent no-op. A table that does not load is an error. A failed save -- PIE running, a read-only root or file -- gives success false, saved=false and save_error, with the rename done in memory. List rows: get_curve_table_info; drop one: delete_curve_table_row; DataTable keys: rename_data_table_row.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -670,7 +670,7 @@ Rename a row (curve) in a UCurveTable.  UCurveTable::RenameRow silently no-ops i
 | `row_name` | string | yes | Current name of the row to rename. |
 | `new_row_name` | string | yes | New name for the row. |
 
-**Returns:** `{ curve_table_path: string, row_name: string, new_row_name: string, source_existed: bool, target_existed: bool, renamed: bool, old_still_exists: bool, new_exists: bool, row_count: int, curve_table_mode: string, saved: bool }`
+**Returns:** `{ curve_table_path: string, row_name: string, new_row_name: string, source_existed: bool, target_existed: bool, renamed: bool, old_still_exists: bool, new_exists: bool, row_count: int, curve_table_mode: string, saved: bool, save_error: string?, note: string? }`
 
 ## `rename_data_table_row`
 
@@ -710,7 +710,7 @@ Write ONE reflected property on a DataAsset from a text value and verify it by r
 |---|---|---|---|
 | `data_asset_path` | string | yes | Full asset path of the DataAsset. |
 | `property_name` | string | yes | Name of the UPROPERTY to set (class property name). |
-| `value` | any | no | New value as a string (numbers/bools accepted); structs use UE text form e.g. "(X=1,Y=2,Z=3)"; object refs use a full asset path. |
+| `value` | any | yes | New value as a string (numbers/bools accepted); structs use UE text form e.g. "(X=1,Y=2,Z=3)"; object refs use a full asset path. |
 
 **Returns:** `{ data_asset_path: string, property_name: string, property_type: string, old_value: string, new_value: string, applied: bool, saved: bool }`
 
@@ -772,7 +772,7 @@ Write a whole DataTable row from a native-format JSON object (the shape get_data
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable |
 | `row_name` | string | yes | Name (key) of the row to write |
-| `row_json` | any | no | A JSON object of {column:value} (as produced by get_data_table_row_as_json) |
+| `row_json` | any | yes | A JSON object of {column:value} (as produced by get_data_table_row_as_json) |
 | `merge` | boolean | no | When true and the row exists, only the caller-provided columns are overwritten |
 
 **Returns:** `success or error payload`
@@ -781,16 +781,16 @@ Write a whole DataTable row from a native-format JSON object (the shape get_data
 
 *Destructive, idempotent.*
 
-Upsert many DataTable rows with one native JSON import and one save, each deep-merged onto its current values like set_data_table_row_fields; missing rows are created from defaults. Returns per-row results and a summary. A failed row does not fail the call: check summary.failed and saved.
+Upsert many rows of a DataTable, loaded by asset path, in one call: each row's fields are deep-merged onto its current values (objects merge into struct members, scalars and arrays take their place), a new row name starts from struct defaults, all merged rows go through one native JSON import, and the table is saved once. Unnamed rows are untouched; no undo step. A bad row (a value that is not an object, or one the import drops) fails alone in results while the call succeeds: check summary.failed, unknown_columns, unchanged_despite_request and problems. save=false leaves the table dirty in memory; a failed save is success false, with saved=false and save_error, the rows kept in memory. A missing table or row struct is an error. One row: set_data_table_row_fields; native whole row: set_data_table_row_from_json; read back: get_data_table_rows.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable (data_table also accepted) |
-| `rows` | any | no | Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace) |
+| `rows` | any | yes | Object of { row_name: {column:value} }, or that object as a JSON string; each fields object is overlaid non-destructively (a value that is a JSON object deep-merges into the existing struct member, scalars/arrays replace) |
 | `save` | boolean | no | When true (default) save the package once after all rows are written; when false leave it dirty in memory |
 | `data_table` | string | no | Alias of table_path (the DataTable asset path, e.g. "/Game/Data/DT_Items"); table_path wins when both are given |
 
-**Returns:** `{ table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, row_count, problems:[..] }`
+**Returns:** `{ table_path, row_struct, results:{ row_name:{ success, created, updated_existing, changed_columns:[..], unchanged_despite_request:[..], unknown_columns?:[..], error? } }, summary:{ total, created, updated, failed }, saved, save_error?, row_count, problems:[..] }`
 
 ## `set_string_table_entry`
 

@@ -607,6 +607,13 @@ TSharedPtr<FJsonObject> HandleGetPCGGraphInfo(const TSharedPtr<FJsonObject>& Par
 
 TSharedPtr<FJsonObject> HandleSpawnPCGVolume(const TSharedPtr<FJsonObject>& Params)
 {
+    // location is required, as its @param declares: a typed read, so the catalog publishes it as the array it is.
+    const TArray<TSharedPtr<FJsonValue>>* LocationJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("location"), LocationJson))
+    {
+        return mcp_common::MissingParameterReply(TEXT("location"));
+    }
+
     UWorld* World = nullptr;
     if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
 

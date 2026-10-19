@@ -226,7 +226,7 @@ Add a transition from source_state to target_state in an existing state machine 
 
 *Additive.*
 
-Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
+Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true, saved=false, nothing saved). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -408,7 +408,7 @@ Add a feature channel of channel_type to a UPoseSearchSchema asset or, when a ch
 
 *Destructive, idempotent.*
 
-Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
+Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true, saved=false, nothing saved) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -417,7 +417,7 @@ Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable und
 | `role` | string | yes | Role name (FName) identifying the entry within a multi-character schema (required; empty = default/None role). |
 | `mirror_data_table_path` | string | no | Asset path of a UMirrorDataTable to bind under the role (optional; empty = none). |
 
-**Returns:** `{ asset_path, role, skeleton_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, saved }`
+**Returns:** `{ asset_path, role, skeleton_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, saved, note? }`
 
 ## `add_pose_to_pose_asset`
 
@@ -1743,13 +1743,13 @@ Reimport a UAnimSequence, or any reimportable asset (the class is not checked), 
 
 ## `remove_anim_blueprint`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
+Permanently delete one Animation Blueprint (UAnimBlueprint) asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_blueprint; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UAnimBlueprint (e.g. /Game/Anim/ABP_Foo). |
+| `asset_path` | string | yes | Long path of the UAnimBlueprint (e.g. /Game/Anim/ABP_Foo). |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -1768,13 +1768,13 @@ Remove the animation track of one bone from a UAnimSequence through its data con
 
 ## `remove_anim_composite`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UAnimComposite asset after verifying the asset is a UAnimComposite.
+Permanently delete one UAnimComposite asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or sequence included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_composite; montages use remove_anim_montage and sequences remove_anim_sequence; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UAnimComposite. |
+| `asset_path` | string | yes | Long path of the UAnimComposite. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -1834,13 +1834,13 @@ Remove a curve metadata entry (curve name) from a USkeleton (idempotent).
 
 ## `remove_anim_montage`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
+Permanently delete one UAnimMontage asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a sequence or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_montage; sequences use remove_anim_sequence and composites remove_anim_composite; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UAnimMontage. |
+| `asset_path` | string | yes | Long path of the UAnimMontage. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -1859,13 +1859,13 @@ Remove every notify event whose NotifyName matches notify_name from a UAnimSeque
 
 ## `remove_anim_sequence`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UAnimSequence asset after verifying the asset is a UAnimSequence.
+Permanently delete one UAnimSequence asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_sequence; montages use remove_anim_montage and composites remove_anim_composite; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UAnimSequence. |
+| `asset_path` | string | yes | Long path of the UAnimSequence. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -1952,25 +1952,25 @@ Remove a WHOLE UBlendProfile from a skeleton (idempotent). Inverse of set_blend_
 
 ## `remove_blend_space`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UBlendSpace asset after verifying the asset is a UBlendSpace.
+Permanently delete one UBlendSpace asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. Any blend space class passes the check, 1D blend spaces and aim offsets included; an asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space or scaffold_blend_space_2d; to accept only a 1D blend space use remove_blendspace_1d; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UBlendSpace. |
+| `asset_path` | string | yes | Long path of the UBlendSpace. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
 ## `remove_blendspace_1d`
 
-*Destructive.*
+*Destructive, idempotent.*
 
-Delete a UBlendSpace1D asset after verifying the asset is a UBlendSpace1D.
+Permanently delete one UBlendSpace1D asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. A 1D aim offset passes the check too; a 2D blend space or any other class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space; 2D blend spaces use remove_blend_space; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UBlendSpace1D. |
+| `asset_path` | string | yes | Long path of the UBlendSpace1D. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -2096,11 +2096,11 @@ Remove a named notify TRACK from an AnimSequence (deletes events on it + reindex
 
 *Destructive, idempotent.*
 
-Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error, and so does an asset of another class; during PIE the delete fails with deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
+Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error; an asset of another class is refused with success false and deleted=false, and during PIE the delete fails with success false and deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Long path of the UPoseAsset. |
+| `asset_path` | string | yes | Long path of the UPoseAsset. |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -2148,7 +2148,7 @@ Remove a UPoseSearchFeatureChannel_* from a UPoseSearchSchema by index or type (
 
 *Destructive, idempotent.*
 
-Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2160,7 +2160,7 @@ Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typ
 
 *Destructive, idempotent.*
 
-Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent. The schema is re-finalized after the removal, so finalized_channels changes with it.
+Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -2168,13 +2168,13 @@ Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role o
 | `role` | string | no | Role name (FName) of the FPoseSearchRoledSkeleton entry to remove (provide this OR skeleton_index; empty = default/None role). |
 | `skeleton_index` | number | no | 0-based index into the roled-skeleton list of the entry to remove (provide this OR role). |
 
-**Returns:** `{ asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved }`
+**Returns:** `{ asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, note? }`
 
 ## `remove_pose_search_schema`
 
 *Destructive, idempotent.*
 
-Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -3346,7 +3346,7 @@ Set a Control Rig control's pose value (Initial + Current), type-correct per the
 |---|---|---|---|
 | `control_rig_path` | string | yes | Path to the UControlRigBlueprint asset. |
 | `control_name` | string | yes | Name of an existing control element. |
-| `value` | string | no | The value: bool (Bool), number (Float/ScaleFloat/Integer), or [x,y(,z)] (Vector2D/Position/Scale/Rotator). |
+| `value` | any | yes | The value: bool (Bool), number (Float/ScaleFloat/Integer), or [x,y(,z)] (Vector2D/Position/Scale/Rotator). |
 
 **Returns:** `{ asset_path: string, control_name: string, control_type: string, value: any, saved: bool, save_error?: string }`
 
@@ -3503,7 +3503,7 @@ Set the minimum LOD a skeletal mesh asset (found by content path) renders, so th
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `skeletal_mesh_path` | string | yes | Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero" |
-| `min_lod` | number | no | New minimum LOD index, 0-based (must be in [0, NumLODs-1]) |
+| `min_lod` | number | yes | New minimum LOD index, 0-based (must be in [0, NumLODs-1]) |
 
 **Returns:** `{ skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }`
 

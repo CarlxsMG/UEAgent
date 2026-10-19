@@ -8,12 +8,12 @@
 
 *Destructive, idempotent.*
 
-Drop all UVs from one UV channel on a static mesh. Idempotent on already-empty channels. Resizes the UV-channel count if the cleared channel is the highest one (UE 5.8 doesn't auto-shrink channel count, so callers that want to "remove" a UV channel should follow up with set_num_uv_channels).
+Drop every UV from one UV channel of LOD 0 of a UStaticMesh asset: LOD 0 (its source model, or its render data when it has none) is copied to a transient dynamic mesh, the channel's UVs are cleared there, and the copy is written back over LOD 0 in one undo step and the package saved. The channel itself stays, so the channel count does not change, and an already-empty channel is still written and saved. A uv_channel LOD 0 lacks, a mesh with no source model, a path that does not load or a mesh under /Engine is an error and nothing changes; a failed save makes success false. Inventory first: list_uv_channels; one triangle: set_triangle_uvs; channel count of a DynamicMeshActor: set_num_uv_channels.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path to the UStaticMesh |
-| `uv_channel` | number | no | Index of the UV channel to clear (0-based; default 0) |
+| `uv_channel` | number | no | Index of the UV channel to clear (0-based; default 0); one LOD 0 does not have is an error |
 
 **Returns:** `{ static_mesh_path, uv_channel, uv_channel_count_before, uv_channel_count_after, cleared, saved }`
 
@@ -48,15 +48,15 @@ Per-LOD inventory of UV channels on a static mesh (read-only, no MarkDirty / no 
 
 *Destructive, idempotent.*
 
-Set the 3 UV corners of a single triangle in one UV channel. Use this for granular UV edits without a full repack / regeneration. The triangle becomes an isolated UV island (the engine allocates fresh UV elements per call). Triangle IDs are 0-based into the mesh's triangle list. The bIsValidTriangle out-param surfaces the engine's validity verdict (false if TriangleID is out of range, the UV channel doesn't exist, or the resulting topology would be invalid).
+Set the three UV corners of one triangle in one UV channel of LOD 0 of a UStaticMesh asset, a granular edit without a repack: LOD 0 (its source model, or its render data when it has none) is copied to a transient dynamic mesh, the triangle gets three new UV elements there, so it becomes its own UV island, and the copy is written back over LOD 0 in one undo step and the package saved. triangle_id counts the copy's triangles from 0. A negative uv_channel, a triangle or channel the copy lacks, a missing corner, a path that does not load or a mesh under /Engine is an error and nothing changes; a failed save makes success false. Whole channel: clear_uv_channel; check the result: get_uv_health_report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path to the UStaticMesh |
-| `uv_channel` | number | no | UV channel index (default 0) |
+| `uv_channel` | number | no | UV channel index (default 0); a negative one, or one LOD 0 does not have, is an error |
 | `triangle_id` | number | no | Triangle ID to update (0-based; default 0) |
-| `uv0` | array | no | First triangle corner as a [u, v] pair. Read by the local ParseUV helper, which the extractor cannot follow, so this hint is what puts the param in the schema at all -- documenting the three on one line made all three unparseable and the tool had NO way to pass UVs. |
-| `uv1` | array | no | Second corner as [u, v]. |
-| `uv2` | array | no | Third corner as [u, v]. Alternatively pass the six flat numbers u0/v0/u1/v1/u2/v2 instead of the three arrays. |
+| `uv0` | array | no | First triangle corner as a [u, v] pair of numbers (required). |
+| `uv1` | array | no | Second corner as [u, v] (required). |
+| `uv2` | array | no | Third corner as [u, v] (required). |
 
 **Returns:** `{ static_mesh_path, uv_channel, triangle_id, is_valid_triangle, modified, saved }`

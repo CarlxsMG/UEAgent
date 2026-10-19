@@ -225,15 +225,15 @@ Copy UV data from one UV channel to another on the same mesh. A dest_channel the
 
 *Destructive, idempotent.*
 
-Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh (engine-default options: build settings applied, tangents on). Destructive replace of the actor's current mesh. Idempotent-ish: re-running re-extracts the same source geometry. It reads the hi-res source model when the asset has one, else LOD 0, whatever lod_index says, and lod_index and read_hi_res_source in the reply say which was read; a mesh with no geometry to read is an error. One undo step restores the previous mesh, and a failed copy leaves it as it was.
+Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh (engine-default options: build settings applied, tangents on). Destructive replace of the actor's current mesh. Idempotent-ish: re-running re-extracts the same source geometry. It reads LOD lod_index (default 0) from its source model, or from its render data when that LOD has no source geometry, as a reduced one (read_render_data); a LOD the mesh does not have, or a mesh with no geometry to read, is an error checked before the actor is touched. One undo step restores the previous mesh, a failed copy leaves it as it was, and nothing is saved. Write back to an asset: copy_dynamic_mesh_to_static_mesh; query an asset without a copy: get_mesh_triangle_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `source_static_mesh_path` | string | yes | Content path of the source UStaticMesh (e.g. "/Engine/BasicShapes/Cube"). |
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor whose GetDynamicMesh() receives the geometry. |
-| `lod_index` | number | no | Optional source LOD index (default 0, a negative one read as 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | Optional source LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a negative one or one the mesh does not have is an error. |
 
-**Returns:** `{ source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, outcome_success: bool, triangle_count, vertex_count, copied: bool }`
+**Returns:** `{ source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, read_render_data, outcome_success: bool, triangle_count, vertex_count, copied: bool }`
 
 ## `delete_selected_triangles_from_mesh`
 
@@ -270,7 +270,7 @@ Find the nearest point on the live dynamic mesh of a DynamicMeshActor to a 3D qu
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `query_point` | array | no | [x, y, z] query point in the mesh's local space. |
+| `query_point` | array | yes | [x, y, z] query point in the mesh's local space. |
 | `max_distance` | number | no | Optional float; max search distance (0 = unlimited). |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
@@ -285,8 +285,8 @@ Cast a ray against the live dynamic mesh of a DynamicMeshActor and return the ne
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `ray_origin` | array | no | [x, y, z] origin point of the ray in mesh-local space. |
-| `ray_direction` | array | no | [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter, but a zero or non-finite direction is an error. |
+| `ray_origin` | array | yes | [x, y, z] origin point of the ray in mesh-local space. |
+| `ray_direction` | array | yes | [x, y, z] direction of the ray; the engine normalizes it, so its length does not matter, but a zero or non-finite direction is an error. |
 | `max_distance` | number | no | Optional float; max search distance (0 = unlimited). |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
 
@@ -333,14 +333,14 @@ Return true if the mesh's triangle IDs are dense (no gaps after deletions).
 
 *Read-only.*
 
-Read the axis-aligned bounding box of a UStaticMesh asset in mesh-local space (cm, no actor transform), measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied: min, max, center, and extent as the half-size on each axis. Read-only: the asset is loaded, not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. The bounds stored on the asset, with any bounds extension and a sphere radius: get_static_mesh_info; a placed actor in world space: get_actor_bounds; part of a DynamicMeshActor: get_mesh_selection_bounds.
+Read the axis-aligned bounding box of a UStaticMesh asset in mesh-local space (cm, no actor transform), measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied: min, max, center, and extent as the half-size on each axis. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. The bounds stored on the asset, with any bounds extension and a sphere radius: get_static_mesh_info; a placed actor in world space: get_actor_bounds; part of a DynamicMeshActor: get_mesh_selection_bounds.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset (e.g. "/Game/Meshes/SM_Cube") |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z }`
 
 ## `get_mesh_components_detail`
 
@@ -360,14 +360,14 @@ Enumerate the connected components (physical pieces) of a DynamicMeshActor's liv
 
 *Read-only.*
 
-Count the connected components (islands: sets of triangles joined through shared edges) of one LOD of a UStaticMesh asset, computed on a transient dynamic mesh copy with build settings applied. One solid piece gives 1 and an empty mesh 0; parts that only touch or overlap without sharing edges count separately. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. For a DynamicMeshActor in the level use get_num_connected_islands, or get_mesh_components_detail for each island's triangle count, bounds and material IDs.
+Count the connected components (islands: sets of triangles joined through shared edges) of one LOD of a UStaticMesh asset, computed on a transient dynamic mesh copy with build settings applied. One solid piece gives 1 and an empty mesh 0; parts that only touch or overlap without sharing edges count separately. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. For a DynamicMeshActor in the level use get_num_connected_islands, or get_mesh_components_detail for each island's triangle count, bounds and material IDs.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, connected_components }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, connected_components }`
 
 ## `get_mesh_has_attribute_set`
 
@@ -385,14 +385,14 @@ Return true if the mesh has at least one attribute set registered.
 
 *Read-only.*
 
-Test whether one LOD of a UStaticMesh asset is closed (watertight): is_closed is true when the mesh, copied to a transient dynamic mesh with build settings applied, has triangles and no boundary edge, that is no edge with a single adjacent triangle. An empty mesh reports false. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. To locate the holes use get_mesh_open_border_loops; area and volume (with is_closed): get_mesh_volume_area; a DynamicMeshActor in the level: get_num_open_border_edges or get_dynamic_mesh_info.
+Test whether one LOD of a UStaticMesh asset is closed (watertight): is_closed is true when the mesh, copied to a transient dynamic mesh with build settings applied, has triangles and no boundary edge, that is no edge with a single adjacent triangle. An empty mesh reports false. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. To locate the holes use get_mesh_open_border_loops; area and volume (with is_closed): get_mesh_volume_area; a DynamicMeshActor in the level: get_num_open_border_edges or get_dynamic_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, is_closed }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, is_closed }`
 
 ## `get_mesh_material_ids`
 
@@ -410,14 +410,14 @@ Read the per-triangle MaterialID distribution of a DynamicMeshActor's live dynam
 
 *Read-only.*
 
-Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
+Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, open_border_loops, ambiguous_topology }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, ambiguous_topology }`
 
 ## `get_mesh_selection_bounds`
 
@@ -447,80 +447,80 @@ Resolve a region into a selection and report its local-space BOUNDING BOX via UG
 
 *Read-only.*
 
-Count the triangles of one LOD of a UStaticMesh asset, copied to a transient dynamic mesh with build settings applied and degenerate triangles kept. triangle_count is the number of live triangles, triangle_id_count the size of the triangle ID space, and has_triangle_id_gaps is true when they differ (free ID slots, which a fresh copy does not normally have). Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Vertices: get_mesh_vertex_count; LOD count and materials: get_static_mesh_info; a DynamicMeshActor in the level: get_dynamic_mesh_info.
+Count the triangles of one LOD of a UStaticMesh asset, copied to a transient dynamic mesh with build settings applied and degenerate triangles kept. triangle_count is the number of live triangles, triangle_id_count the size of the triangle ID space, and has_triangle_id_gaps is true when they differ (free ID slots, which a fresh copy does not normally have). Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Vertices: get_mesh_vertex_count; LOD count and materials: get_static_mesh_info; a DynamicMeshActor in the level: get_dynamic_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, triangle_count, triangle_id_count, has_triangle_id_gaps }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, triangle_count, triangle_id_count, has_triangle_id_gaps }`
 
 ## `get_mesh_uv_area`
 
 *Read-only.*
 
-Sum the UV-space area of one UV channel of a UStaticMesh asset on a transient dynamic-mesh copy: each triangle with UVs set adds its unsigned area and one without UVs adds nothing, so UVs that fill the 0-1 square once sum to 1.0, and overlapping or stacked islands all count, which can push the sum past 1. uv_channel defaults to 0; a negative one is an error, but a channel the mesh lacks is a success with is_valid_uv_channel=false and uv_area 0. Read-only. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that is not a static mesh, or one with no geometry, is an error. Channel count: get_mesh_uv_channel_count; overlaps: get_uv_health_report.
+Sum the UV-space area of one UV channel of a UStaticMesh asset on a transient dynamic-mesh copy: each triangle with UVs set adds its unsigned area and one without UVs adds nothing, so UVs that fill the 0-1 square once sum to 1.0, and overlapping or stacked islands all count, which can push the sum past 1. uv_channel defaults to 0; a negative one is an error, but a channel the mesh lacks is a success with is_valid_uv_channel=false and uv_area 0. Read-only. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Channel count: get_mesh_uv_channel_count; overlaps: get_uv_health_report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
 | `uv_channel` | number | no | UV channel index (default 0) |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, uv_channel, uv_area, is_valid_uv_channel }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, uv_channel, uv_area, is_valid_uv_channel }`
 
 ## `get_mesh_uv_channel_count`
 
 *Read-only.*
 
-Count the UV channels of a UStaticMesh asset as GeometryScript reads them: the UV layers of a transient dynamic-mesh copy of its geometry, 0 when the copy carries no attributes. Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A lower LOD can carry a different number. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Use it to pick a valid uv_channel for get_mesh_uv_area; every LOD's count and the lightmap channel index: list_uv_channels; overlaps and out-of-square UVs: get_uv_health_report; empty a channel: clear_uv_channel.
+Count the UV channels of a UStaticMesh asset as GeometryScript reads them: the UV layers of a transient dynamic-mesh copy of its geometry, 0 when the copy carries no attributes. Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A lower LOD can carry a different number. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Use it to pick a valid uv_channel for get_mesh_uv_area; every LOD's count and the lightmap channel index: list_uv_channels; overlaps and out-of-square UVs: get_uv_health_report; empty a channel: clear_uv_channel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, uv_channel_count }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, uv_channel_count }`
 
 ## `get_mesh_vertex_count`
 
 *Read-only.*
 
-Count the vertices of a UStaticMesh asset on a transient dynamic-mesh copy with build settings applied and degenerate triangles kept: vertex_count is the live vertices, vertex_id_count the size of the ID space, and has_vertex_id_gaps is true when they differ. The copy shares one vertex across UV and normal seams, so the count is usually below the render vertex counts of list_uv_channels (per LOD) and get_static_mesh_info (LOD 0). Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Triangles: get_mesh_triangle_count; a DynamicMeshActor in the level: get_dynamic_mesh_info.
+Count the vertices of a UStaticMesh asset on a transient dynamic-mesh copy with build settings applied and degenerate triangles kept: vertex_count is the live vertices, vertex_id_count the size of the ID space, and has_vertex_id_gaps is true when they differ. From a source model, the copy shares one vertex across UV and normal seams, so the count is usually below the render vertex counts of list_uv_channels (per LOD) and get_static_mesh_info (LOD 0). Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry, is an error. Triangles: get_mesh_triangle_count; a DynamicMeshActor in the level: get_dynamic_mesh_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, vertex_count, vertex_id_count, has_vertex_id_gaps }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, vertex_count, vertex_id_count, has_vertex_id_gaps }`
 
 ## `get_mesh_volume_area`
 
 *Read-only.*
 
-Read the surface area (cm^2) and signed volume (cm^3) of one LOD of a UStaticMesh asset, measured on a transient copy with the asset's build settings and build scale applied, in mesh-local space (no actor transform). The volume is an enclosed volume only when is_closed is true; on an open mesh it is not one, and reversed winding makes it negative. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Center of mass too: get_mesh_volume_area_center; bounds: get_mesh_bounding_box; watertightness alone: get_mesh_is_closed.
+Read the surface area (cm^2) and signed volume (cm^3) of one LOD of a UStaticMesh asset, measured on a transient copy with the asset's build settings and build scale applied, in mesh-local space (no actor transform). The volume is an enclosed volume only when is_closed is true; on an open mesh it is not one, and reversed winding makes it negative. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Center of mass too: get_mesh_volume_area_center; bounds: get_mesh_bounding_box; watertightness alone: get_mesh_is_closed.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works). |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, surface_area, volume, is_closed }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, surface_area, volume, is_closed }`
 
 ## `get_mesh_volume_area_center`
 
 *Read-only.*
 
-Read the surface area (cm^2), signed volume (cm^3) and center of mass of a UStaticMesh asset, measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied, in mesh-local space with no actor transform. The center is the centroid of the enclosed solid at uniform density; it and the volume mean something only when is_closed is true, and reversed winding makes the volume negative. Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Area and volume alone: get_mesh_volume_area; bounds: get_mesh_bounding_box.
+Read the surface area (cm^2), signed volume (cm^3) and center of mass of a UStaticMesh asset, measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied, in mesh-local space with no actor transform. The center is the centroid of the enclosed solid at uniform density; it and the volume mean something only when is_closed is true, and reversed winding makes the volume negative. Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Area and volume alone: get_mesh_volume_area; bounds: get_mesh_bounding_box.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
-| `lod_index` | number | no | LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0. |
+| `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, surface_area, volume, center_of_mass_x, center_of_mass_y, center_of_mass_z, is_closed }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, surface_area, volume, center_of_mass_x, center_of_mass_y, center_of_mass_z, is_closed }`
 
 ## `get_num_connected_islands`
 
@@ -592,7 +592,7 @@ Test whether a 3D point is inside the live dynamic mesh of a DynamicMeshActor us
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `query_point` | array | no | [x, y, z] point in the mesh's local space. |
+| `query_point` | array | yes | [x, y, z] point in the mesh's local space. |
 | `winding_threshold` | number | no | Optional float; default 0.5 (standard parity test). Higher values shrink the "inside" region. |
 | `max_distance` | number | no | Optional float; it has no effect on this query, whose winding-number test uses no search distance. |
 | `allow_unsafe_modified` | boolean | no | Optional; maps to bAllowUnsafeModifiedQueries (default false). It has no effect: the BVH is built fresh on every call, so it always matches the mesh. |
@@ -759,7 +759,7 @@ Scale the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_Mes
 
 *Destructive.*
 
-Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors; zero factors are refused and 1, 1 changes nothing (scaled false) and adds no undo step. One undo step restores the UVs; reply actor_name is the component name, not the actor label.
+Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors around the scale origin, as one undo step that restores the UVs; nothing is saved. The factors are checked as the floats the engine uses: a zero factor, or a scale shorter than 0.0001, which the engine would silently replace with 1, 1, is an error and nothing changes. A scale of 1, 1 changes nothing: scaled is false with a note, and no undo step is added. A channel the mesh lacks or an unknown actor is an error. Reply actor_name is the component name, not the actor label. Offset UVs: translate_mesh_uvs; rotate them: rotate_mesh_uvs; copy a channel: copy_mesh_uv_channel.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -770,7 +770,7 @@ Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the ed
 | `scale_origin_u` | number | no | U coordinate of the point the scaling is centred on (default 0). |
 | `scale_origin_v` | number | no | V coordinate of the point the scaling is centred on (default 0). |
 
-**Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }`
+**Returns:** `{ actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool, note: string? }`
 
 ## `select_mesh_triangles`
 
@@ -821,7 +821,7 @@ Stamp a MaterialID onto triangles of a DynamicMeshActor's live dynamic mesh. sco
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `material_id` | number | no | MaterialID to write (>= 0). Index into the material list later passed to copy_dynamic_mesh_to_static_mesh. |
+| `material_id` | number | yes | MaterialID to write (>= 0). Index into the material list later passed to copy_dynamic_mesh_to_static_mesh. |
 | `scope` | string | no | 'all' (default) or 'triangles'. |
 | `triangle_ids` | array | no | Required when scope='triangles': array of triangle IDs to repaint (e.g. from select_mesh_triangles). |
 
@@ -836,7 +836,7 @@ Stamp a MaterialID onto every triangle inside a region, via the engine's SelectM
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `material_id` | number | no | MaterialID to write (>= 0). |
+| `material_id` | number | yes | MaterialID to write (>= 0). |
 | `region` | string | no | 'all' (default) \| 'box' \| 'sphere' \| 'plane' \| 'normal_angle' \| 'material_id' \| 'polygroup' \| 'connected_component' (one physical PIECE, by the island index that get_mesh_components_detail reports). |
 | `center` | array | no | Local [x,y,z] centre. Used by box/sphere, and as the plane origin. |
 | `extent` | array | no | Local [x,y,z] HALF-size in cm. Required by region='box'. |
@@ -908,7 +908,7 @@ Set the number of extended polygroup layers on the live dynamic mesh of a Dynami
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `num_layers` | number | no | Desired number of extended polygroup layers (>= 0). |
+| `num_layers` | number | yes | Desired number of extended polygroup layers (>= 0). |
 
 **Returns:** `{ actor_name, requested_num_layers, num_polygroup_layers, applied: bool }`
 
@@ -934,8 +934,8 @@ Stamp a MaterialID onto every triangle of one polygroup via UGeometryScriptLibra
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label or name of the target DynamicMeshActor. |
-| `polygroup_id` | number | no | Polygroup ID to repaint. |
-| `material_id` | number | no | MaterialID to write (>= 0). |
+| `polygroup_id` | number | yes | Polygroup ID to repaint. |
+| `material_id` | number | yes | MaterialID to write (>= 0). |
 | `polygroup_layer` | number | no | Optional extended polygroup layer index. Omit for the default layer. |
 
 **Returns:** `{ actor_name, polygroup_id, material_id, polygroup_id_valid: bool, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }`

@@ -198,22 +198,22 @@ Set ANY water body's spline path from world points, then synchronize the water s
 
 *Destructive, idempotent.*
 
-Set the width and/or depth of a river water body, found by actor label in the editor world, at one spline input key, reading both back; nothing is saved. The engine writes the spline point at or before input_key (point i sits at key i; past the last point, the last one), while the read-back evaluates the curve at the key, so a fractional key reads an interpolated value. A value already held is not written; otherwise the call is one undo step that dirties the actor's package, with no spline-change broadcast. applied is always true, even with neither width nor depth. A non-river body, unknown label or key before the first point is an error and nothing changes. All points at once, with a spline sync: set_river_widths_depths; point positions: get_river_spline_points.
+Set the width and/or depth of a river water body, found by actor label in the editor world, at the spline point at or before input_key (point i sits at key i; past the last point, the last one), then synchronize the spline so the river rebuilds; nothing is saved. A value below 0.0001 is stored as 0.0001, as the engine's sync does. width and depth are read back from that point, named by point_index. A value already held is not written: applied is false with a note and nothing changes; otherwise the call is one undo step that dirties the actor's package. Neither width nor depth, a non-river body, an unknown label, a spline without points or a key before the first point is an error and nothing changes. All points at once: set_river_widths_depths; point positions: get_river_spline_points.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `water_body_label` | string | yes | Label of the AWaterBodyRiver actor |
 | `input_key` | number | yes | Spline input key at which to set width/depth; a key before the first spline point (below 0) is an error and nothing is changed |
-| `width` | number | no | Optional new river width at the key |
-| `depth` | number | no | Optional new river depth at the key |
+| `width` | number | no | Optional new river width at the point at or before the key (give width, depth or both) |
+| `depth` | number | no | Optional new river depth at the point at or before the key (give width, depth or both) |
 
-**Returns:** `{ water_body_label: string, input_key: number, width: number, depth: number, applied: bool }`
+**Returns:** `{ water_body_label: string, input_key: number, point_index: int, width: number, depth: number, applied: bool, note: string? }`
 
 ## `set_river_widths_depths`
 
 *Destructive, idempotent.*
 
-Set a river's width and/or depth at EVERY spline point in one call (bulk taper authoring) with a single metadata-sync at the end — avoids one MCP round-trip per point. Arrays are indexed by spline point (point i maps to spline input key i) and, when provided, MUST have exactly point_count entries. River water bodies only. Reads back the applied per-point arrays.
+Set the width and/or depth of every spline point of a river water body, found by actor label: the arrays are indexed by point (point i at key i), each given one with point_count entries. A value below 0.0001 is stored as 0.0001, as the spline sync does. The points are written in one undo step dirtying the actor's package, then the spline is synchronized once to rebuild the river; nothing is saved. widths and depths are read back from the points; applied_widths or applied_depths is true when that array changed a point and every point holds it, and success is false when one does not. Arrays already held change nothing: both false, a note, no undo step. Neither array, a wrong length, a non-river body or an unknown label is an error. One point: set_river_width_depth_at_point.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -221,7 +221,7 @@ Set a river's width and/or depth at EVERY spline point in one call (bulk taper a
 | `widths` | array | no | Optional array of per-point river widths (length must equal point_count) |
 | `depths` | array | no | Optional array of per-point river depths (length must equal point_count) |
 
-**Returns:** `{ water_body_label: string, point_count: int, applied_widths: bool, applied_depths: bool, widths: [number], depths: [number] }`
+**Returns:** `{ water_body_label: string, point_count: int, applied_widths: bool, applied_depths: bool, widths: [number], depths: [number], note: string? }`
 
 ## `set_water_body_gerstner_waves`
 
@@ -275,7 +275,7 @@ Set the surface water material on a water body's UWaterBodyComponent (body found
 
 *Destructive, idempotent.*
 
-Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. water_velocity and audio_intensity go to the spline point at or before input_key, which only they need; other keys are component fields stored directly (no PostEditChange, so no rebuild). water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value already held is not written; otherwise the call is one undo step that dirties the actor's package. River width/depth: set_river_width_depth_at_point; type, zone, material: get_water_body_info; waves: set_water_body_gerstner_waves.
+Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. water_velocity and audio_intensity go to the spline point at or before input_key, are read back from that point and synchronize the spline. water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. Every other field that changes gets the editor's change notification, updating the water mesh and landscape. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value held exactly is not written (already_set true); otherwise the call is one undo step dirtying the actor's package. River width/depth: set_river_width_depth_at_point; waves: set_water_body_gerstner_waves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

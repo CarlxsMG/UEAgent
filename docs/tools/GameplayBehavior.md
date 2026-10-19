@@ -69,7 +69,7 @@ List the UGameplayBehaviorConfig assets under package_path, recursively, from th
 
 *Destructive, idempotent.*
 
-Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UGameplayBehaviorConfig, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Destroy a UGameplayBehaviorConfig data asset (mirror of create_behavior_config). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UGameplayBehaviorConfig, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

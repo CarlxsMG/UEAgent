@@ -68,15 +68,15 @@ Append a new UMovieSceneCameraCutSection bound to the given camera binding GUID 
 
 ## `add_camera_cut_track`
 
-*Additive.*
+*Additive, idempotent.*
 
-Adds (or returns the existing) camera cut track on a Level Sequence's movie scene.
+Add the camera cut track of a Level Sequence found by asset name under /Game (first case-insensitive match), the root track whose sections pick the camera the sequence shows, in one undo step, then save the sequence. A movie scene holds at most one: when it already has one, nothing is added, written or saved (track_added false, changed false, saved false), so a repeat call is idempotent, and a camera cut track of another class there is an error. A new track has no section. A missing sequence is an error; a failed save makes success false with saved=false and save_error. Cuts: add_camera_cut or add_camera_cut_section; a camera with its cut: create_cine_camera_in_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 
-**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_count: int, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `add_camera_focus_track`
 
@@ -138,15 +138,15 @@ Add a new root event track (UMovieSceneEventTrack) to a Level Sequence found by 
 
 ## `add_fade_track_to_sequence`
 
-*Additive.*
+*Additive, idempotent.*
 
-Adds (or returns the existing) root fade track with a fade section spanning the playback range.
+Add the root fade track of a Level Sequence found by asset name under /Game (first case-insensitive match), with a fade section spanning the playback range, in one undo step, then save the sequence. A fade track already there is reused and gets a section only when it has none, so a repeat call is idempotent: a fade track that already has a section is left as it is, with nothing written or saved (track_added and section_added false, changed false, saved false). A missing sequence is an error; a failed save makes success false with saved=false and save_error. List root tracks with get_sequence_master_tracks; inverse: remove_sequence_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 
-**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `add_keyframe_to_property_track`
 
@@ -182,7 +182,7 @@ Add a root level-visibility track (UMovieSceneLevelVisibilityTrack) to a Level S
 
 *Destructive, idempotent.*
 
-Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-resolution frame of a Level Sequence found by asset name under /Game, in an undo transaction, and saves the sequence; is_determinism_fence turns the same mark into an evaluation fence. Idempotent per frame: an existing mark at that frame is updated instead of duplicated, its label replaced when one is given and both flags overwritten with the values passed (false when omitted); already_existed says which. Read marks with get_marked_frames, delete one with remove_marked_frame.
+Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-resolution frame of a Level Sequence found by asset name under /Game, in one undo step, and saves the sequence; is_determinism_fence turns the same mark into an evaluation fence. Idempotent per frame: an existing mark at that frame is updated instead of duplicated, its label replaced when one is given and both flags overwritten with the values passed (false when omitted); already_existed says which. When the mark already has both flags and the label given (or no label is given), the call changes and saves nothing (changed false, saved false). Read marks with get_marked_frames, delete one with remove_marked_frame.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -192,7 +192,7 @@ Adds a marked frame (a labelled marker on the Sequencer timeline) at a tick-reso
 | `is_determinism_fence` | boolean | no | Optional bool (default false): treat the mark as an evaluation fence (cannot be crossed in one evaluation). |
 | `is_inclusive` | boolean | no | Optional bool (default false): when a determinism fence, how the previous/next ranges are dissected ((X,Y]->(Y,Z] vs (X,Y)->[Y,Z]). |
 
-**Returns:** `{ sequence_name: string, frame: int, mark_index: int, label: string, is_determinism_fence: bool, is_inclusive: bool, already_existed: bool, marked_frame_count: int, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, frame: int, mark_index: int, label: string, is_determinism_fence: bool, is_inclusive: bool, already_existed: bool, marked_frame_count: int, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `add_material_parameter_collection_track`
 
@@ -285,9 +285,9 @@ Adds a skeletal-animation track to a Level Sequence binding.  If anim_path loads
 
 ## `add_slomo_track`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Add (or return) the root time-dilation (slomo) track with a float section over the playback range, setting the dilation value at a frame. Asset-level/headless (NOT the PIE-only player play-rate).
+Add the root time-dilation (slomo) track of a Level Sequence found by asset name under /Game (first case-insensitive match), with a section spanning the playback range, and key dilation at frame, in one undo step, then save the sequence. A slomo track already there is reused with its first section; the key overwrites a key at that tick frame whole, interpolation included, or is added. A track whose section already holds that very key at that frame changes and saves nothing (changed false, saved false), so a repeat call is idempotent. This is asset data, not the PIE player play rate. A missing sequence is an error; a failed save makes success false with saved=false and save_error. Change the key's interpolation with set_keyframe_interpolation.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -295,7 +295,7 @@ Add (or return) the root time-dilation (slomo) track with a float section over t
 | `dilation` | number | no | Optional time-dilation multiplier (default 1.0; &lt;1 slower, >1 faster) |
 | `frame` | number | no | Optional frame number for the dilation key (default 0) |
 
-**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, dilation: number, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, track_class: string, track_added: bool, section_added: bool, section_count: int, section_class: string, dilation: number, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `add_spawnable_to_sequence`
 
@@ -389,15 +389,15 @@ Add a Visibility property track on bVisible to a Level Sequence binding.  Thin d
 
 *Additive.*
 
-Write a single key onto an existing float property track's first section (cubic / linear / constant interp).
+Insert one key on a float property track of a Level Sequence binding (its first section), in one undo step, then save the sequence. The sequence is found by asset name under /Game (first case-insensitive match); property_name, when given, picks the float track animating that property (its name or path, case ignored), and one no float track of the binding animates is an error; omitted, the first float track takes the key. interp_mode is linear, constant, or else cubic (the default) with broken arrive_tangent and leave_tangent. time_seconds is in seconds, rounded to the nearest tick frame. Each call inserts a new key, even on an occupied frame. A missing sequence or float track, or a bad GUID, is an error; a failed save gives success false, saved=false and save_error. Track: add_weighted_value_track; read keys: get_channel_keyframes; retime: move_keyframe.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 | `binding_guid` | string | yes | GUID of the binding owning the float property track. |
 | `time_seconds` | number | yes | Time (seconds, >= 0) at which to place the key. |
-| `property_name` | string | no | Name of the float property (default "Weight"; used for response only). |
-| `value` | number | no | Key value (float). |
+| `value` | number | yes | Key value (float). |
+| `property_name` | string | no | Name or path of the float property whose track gets the key, case ignored; omitted, the first float track of the binding. The reply names the property of the track used. |
 | `arrive_tangent` | number | no | Optional tangent for cubic interp (default 0). |
 | `leave_tangent` | number | no | Optional tangent for cubic interp (default 0). |
 | `interp_mode` | string | no | "cubic" (default), "linear", or "constant". |
@@ -536,20 +536,20 @@ Deletes a Level Sequence asset permanently, choosing the first sequence under /G
 
 ## `duplicate_keyframe`
 
-*Additive.*
+*Destructive, idempotent.*
 
-Clone an existing key (Float / Vector / Color / Bool channel) from source_time_seconds to dest_time_seconds, preserving the original value.
+Copy the value of one existing key to another time on a property track of a Level Sequence binding, in one undo step, then save the sequence. The sequence is found by asset name under /Game (first case-insensitive match); property_type picks the binding's first track of that type (first section) and channel_index the channel, one per component for Vector and Color. Both times are seconds rounded to tick frames, and the source key must sit exactly on its frame or the call is an error. Only the value is copied, not interpolation or tangents; a key at the destination is overwritten, one equal to the copy is a no-op (changed false, saved false), so a repeat is idempotent. A failed save gives success false, saved=false and save_error. Move instead: move_keyframe; drop: remove_keyframe; list: get_channel_keyframes; fix the copy's interpolation: set_binding_channel_keyframe_interp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 | `binding_guid` | string | yes | GUID of the binding owning the property track. |
 | `property_type` | string | yes | One of "Float", "Bool", "Vector", "Color", "Visibility". |
-| `source_time_seconds` | number | no | Time (seconds) of the source key to copy. |
-| `dest_time_seconds` | number | no | Destination time (seconds) for the cloned key. |
+| `source_time_seconds` | number | yes | Time (seconds) of the source key to copy. |
+| `dest_time_seconds` | number | yes | Destination time (seconds) for the cloned key. |
 | `channel_index` | number | no | Index of the channel to read/write (default 0). |
 
-**Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, source_time_seconds: float, dest_time_seconds: float, source_frame: int, dest_frame: int, channel_index: int, duplicated_value: string, keys_written: int, applied: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, source_time_seconds: float, dest_time_seconds: float, source_frame: int, dest_frame: int, channel_index: int, duplicated_value: string, keys_written: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `get_audio_section_properties`
 
@@ -780,7 +780,7 @@ Reads the timeline summary of a Level Sequence asset (first asset-name match und
 
 *Destructive, idempotent.*
 
-Move one keyframe (located by 'index' or 'frame') to new_frame on a binding's section channel, preserving its value/interp/tangents.  Idempotent: MoveKey(bRemoveDuplicateKeys=true) collapses a duplicate when re-moved onto an existing frame.  channel_type selects the proxy view ("double" default | "float" | "bool").
+Move one key of a channel of one section on an object-binding track of a Level Sequence to new_frame, keeping its value, interpolation and tangents, in one undo step, then save the sequence. The key is found by index, or by frame within tolerance; channel_type (double, float or bool) and channel_index pick the channel, and the section is resolved like get_section_info. Another key already at new_frame is removed, so a repeat call is idempotent. A key already alone at new_frame changes and saves nothing (changed false, saved false), with moved false. A missing key or channel is an error before anything changes. Remove a key: remove_keyframe; list keys: get_channel_keyframes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -798,7 +798,7 @@ Move one keyframe (located by 'index' or 'frame') to new_frame on a binding's se
 | `tolerance` | integer | no | Optional FindKey frame tolerance when locating by frame (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, old_frame: int, new_frame: int, key_index: int, moved: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `move_track_to_folder`
 
@@ -969,7 +969,7 @@ Delete any track from a sequence by display name OR exact class name (optionally
 
 *Destructive, idempotent.*
 
-Set the attach/detach transform rules on a Sequencer 3D-attach section (created by add_attach_track).  The 6 rules (location/rotation/scale x attach/detach) control how the attachee's transform is preserved when the attach begins/ends. Only the supplied rules change (applied_count) and all 6 are read back. The section is resolved like get_section_info (binding_guid + track_index + section_index).
+Set the attach and detach transform rules of one 3D-attach section on an object-binding track of a Level Sequence (sections add_attach_track creates), in one undo step, then save the sequence. The six rules (location, rotation and scale, on attach and on detach) say how the attachee keeps its transform when the attachment begins or ends. Only the rules you pass change; all are parsed before anything is written, so an invalid name, or no rule at all, is an error with nothing changed. applied_count counts the rules passed and all six are read back. Rules that are already set that way change and save nothing (changed false, saved false). The section is resolved like get_section_info. Inspect: get_section_info; create: add_attach_track.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -978,7 +978,7 @@ Set the attach/detach transform rules on a Sequencer 3D-attach section (created 
 | `sequence_path` | string | no | Asset path of the target Level Sequence (alias for sequence_name). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 | `track_index` | number | no | Optional index into the binding's tracks (default 0). |
-| `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"); used when track_index is omitted. |
+| `track_type` | string | no | Optional class filter to pick the track ("transform"\|"float"\|"bool"\|"vector"\|"color"\|"visibility"\|"audio"\|"event"\|"fade"\|"skeletalanimation"\|"subsequence"\|"cameracut"\|"property"): the first track of that kind on the binding; omitted or unrecognised, track_index picks the track. |
 | `section_index` | number | no | Optional index of the section on the track (default 0). |
 | `attachment_location_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
 | `attachment_rotation_rule` | string | no | Optional EAttachmentRule: KeepRelative \| KeepWorld \| SnapToTarget. |
@@ -987,13 +987,13 @@ Set the attach/detach transform rules on a Sequencer 3D-attach section (created 
 | `detachment_rotation_rule` | string | no | Optional EDetachmentRule: KeepRelative \| KeepWorld. |
 | `detachment_scale_rule` | string | no | Optional EDetachmentRule: KeepRelative \| KeepWorld. |
 
-**Returns:** `{ sequence_path: string, attach_rules: object, applied_count: int, applied: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, attach_rules: object, applied_count: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_audio_section_properties`
 
 *Destructive, idempotent.*
 
-Set playback properties on an audio section (UMovieSceneAudioSection).  Optionally swaps the sound and toggles loop/play-until-finished/subtitle/attenuation flags. SetAttenuationSettings is a no-op at eval unless override_attenuation is true, so the override flag is applied first.
+Set playback properties of one section on the first root audio track of a Level Sequence, in one undo step, then save the sequence: its sound, looping (SetRepeating), play until finished, subtitle suppression, attenuation override and attenuation asset. Only the fields you pass change; a sound or attenuation path that does not load is an error before anything changes. Setting a sound also re-derives the looping flag from it, as the engine does. Each field is read back. Whether the call changed anything is measured on the section: when it did not, nothing is saved and the call leaves no undo step (changed false, saved false). Start offset: set_audio_section_start_offset; read back: get_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1007,13 +1007,13 @@ Set playback properties on an audio section (UMovieSceneAudioSection).  Optional
 | `override_attenuation` | boolean | no | SetOverrideAttenuation; must be true for attenuation_path to take effect (omit to leave unchanged). |
 | `attenuation_path` | string | no | Optional content path of a USoundAttenuation to set (only effective when override_attenuation is true). |
 
-**Returns:** `{ sequence_path: string, section_class: string, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_class: string, section_index: int, sound: string, sound_set: bool, looping: bool, play_until_finished: bool, suppress_subtitles: bool, override_attenuation: bool, attenuation: string, attenuation_set: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_audio_section_start_offset`
 
 *Destructive, idempotent.*
 
-Set the start offset (how far into the clip playback begins) of one audio section on the first root audio track of a Level Sequence, given as a /Game path or a bare asset name, in one undo step, then save the sequence. One of the two offsets is required: start_offset_frames wins when both are given and is written as-is in tick-resolution frames, the engine's unit, fractions truncated; start_offset_seconds is converted at the tick resolution and rounded. Every call writes and saves, even an unchanged offset; old_start_offset_frames is the value before. No root audio track, an out-of-range section_index or offset, or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Add the section with add_audio_section; its other settings: set_audio_section_properties; read start_offset back with get_audio_section_properties.
+Set the start offset (how far into the clip playback begins) of one audio section on the first root audio track of a Level Sequence, given as a /Game path or a bare asset name, in one undo step, then save the sequence. One of the two offsets is required: start_offset_frames wins when both are given and is written as-is in tick-resolution frames, the engine's unit, fractions truncated; start_offset_seconds is converted at the tick resolution and rounded. An offset equal to the current one changes and saves nothing (changed false, saved false); old_start_offset_frames is the value before. No root audio track, an out-of-range section_index or offset, or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Add the section with add_audio_section; its other settings: set_audio_section_properties; read start_offset back with get_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1023,45 +1023,45 @@ Set the start offset (how far into the clip playback begins) of one audio sectio
 | `start_offset_seconds` | number | no | Optional offset into the clip in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given. |
 | `start_offset_frames` | number | no | Optional offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds. |
 
-**Returns:** `{ sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, new_start_offset_seconds: number, applied: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, new_start_offset_seconds: number, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_audio_track_pitch`
 
 *Destructive, idempotent.*
 
-Set the PitchMultiplier channel on an audio section (default value or at a specific time).
+Set the pitch multiplier (PitchMultiplier channel) of one section on a root audio track of a Level Sequence found by asset name under /Game, in one undo step, then save the sequence. Without time_seconds the channel becomes one linear key at frame 0 holding pitch, a constant; a channel that already is exactly that changes and saves nothing (changed false, saved false). With time_seconds a linear key is added at that time, converted to tick-resolution frames and rounded, even where a key already is. audio_track_index counts root audio tracks only. A missing track or an out-of-range section_index is an error. Volume: set_audio_track_volume; read back: get_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
+| `pitch` | number | yes | New pitch multiplier (1.0 = normal speed). |
 | `audio_track_index` | number | no | Index of the root audio track (default 0). |
 | `section_index` | number | no | Index of the section within the audio track (default 0). |
-| `pitch` | number | no | New pitch multiplier (1.0 = normal speed). |
 | `time_seconds` | number | no | Optional time (seconds) for the key. Omit to set the constant value. |
 
-**Returns:** `{ sequence_name: string, audio_track_index: int, section_index: int, pitch: float, channel_name: string, key_count: int, keys_written: int, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, audio_track_index: int, section_index: int, pitch: float, channel_name: string, key_count: int, keys_written: int, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_audio_track_volume`
 
 *Destructive, idempotent.*
 
-Set the SoundVolume channel on an audio section (default value or at a specific time).
+Set the volume (SoundVolume channel) of one section on a root audio track of a Level Sequence found by asset name under /Game, in one undo step, then save the sequence. Without time_seconds the channel becomes one linear key at frame 0 holding volume, a constant; a channel that already is exactly that changes and saves nothing (changed false, saved false). With time_seconds a linear key is added at that time, converted to tick-resolution frames and rounded, even where a key already is. audio_track_index counts root audio tracks only. A missing track or an out-of-range section_index is an error. Pitch: set_audio_track_pitch; offset: set_audio_section_start_offset; read back: get_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
+| `volume` | number | yes | New volume value (0..N; 1 = unity gain). |
 | `audio_track_index` | number | no | Index of the root audio track (default 0). |
 | `section_index` | number | no | Index of the section within the audio track (default 0). |
-| `volume` | number | no | New volume value (0..N; 1 = unity gain). |
 | `time_seconds` | number | no | Optional time (seconds) for the key. Omit to set the constant value. |
 
-**Returns:** `{ sequence_name: string, audio_track_index: int, section_index: int, volume: float, channel_name: string, key_count: int, keys_written: int, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, audio_track_index: int, section_index: int, volume: float, channel_name: string, key_count: int, keys_written: int, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_binding_channel_keyframe_interp`
 
 *Destructive, idempotent.*
 
-Set the interpolation mode, tangent mode, tangents and/or value of one keyframe on a binding's section channel (resolved like set_section_easing).  Like set_keyframe_interpolation but for per-binding channels: transform "double" (default) or property "float".  Bool channels have no interp/tangent and are rejected.  Idempotent (writing the same fields = same state).
+Set the value, interpolation mode, tangent mode and tangents of one key of a double (transform) or float (property) channel of one section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. The key is found by index, or by frame within tolerance; channel_type and channel_index pick the channel, the section is resolved like get_section_info, and bool channels are refused. Only the fields you pass change, and the edit is checked on a copy first: an unknown mode is an error before anything changes, and a key that would stay as it is changes and saves nothing (changed false, saved false). The key is read back. Root float tracks: set_keyframe_interpolation; list keys: get_channel_keyframes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1083,13 +1083,13 @@ Set the interpolation mode, tangent mode, tangents and/or value of one keyframe 
 | `leave_tangent` | number | no | Optional leave tangent value (Cubic). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, channel_index: int, channel_type: string, frame: int, key_index: int, value: number, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_keyframe_interpolation`
 
 *Destructive, idempotent.*
 
-Set the interpolation mode, tangent mode and tangents of an existing keyframe on a master float track's channel (asset-level, headless).
+Set the interpolation mode, tangent mode and tangents of one existing key on a float channel of a root (master) track of a Level Sequence found by asset name under /Game, in one undo step, then save the sequence. The track is the first root track whose class name contains track_class, for example Slomo or Fade; its first section is edited, channel_index picks the float channel and frame must be the key's exact tick frame. Only the fields you pass change, and an unknown mode is an error before anything changes. A key that already has those values changes and saves nothing (changed false, saved false). The key is read back. Keys of a binding's tracks: set_binding_channel_keyframe_interp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1102,7 +1102,7 @@ Set the interpolation mode, tangent mode and tangents of an existing keyframe on
 | `arrive_tangent` | number | no | Optional arrive tangent value (Cubic) |
 | `leave_tangent` | number | no | Optional leave tangent value (Cubic) |
 
-**Returns:** `{ sequence_name: string, track_class: string, frame: int, key_found: bool, channel_index: int, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, track_class: string, frame: int, key_found: bool, channel_index: int, interp_mode: string, tangent_mode: string, arrive_tangent: number, leave_tangent: number, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_level_sequence_time_runtime`
 
@@ -1121,33 +1121,33 @@ Move a runtime Level Sequence player, found by the player_key play_level_sequenc
 
 *Destructive, idempotent.*
 
-Lock or unlock the user marked frames of a Level Sequence found by asset name under /Game (first case-insensitive match), in one undo step, then save the sequence. The flag is the Sequencer editor's lock on the marks; add_marked_frame, remove_marked_frame and clear_marked_frames do not check it. Every call writes and saves, also when the flag already has that value (idempotent), and marked_frames_locked is read back from the movie scene. A missing sequence is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Read the flag and the marks with get_marked_frames; lock a section with set_section_locked or the playback range with set_playback_range_locked.
+Lock or unlock the user marked frames of a Level Sequence found by asset name under /Game (first case-insensitive match), in one undo step, then save the sequence. The flag is the Sequencer editor's lock on the marks; add_marked_frame, remove_marked_frame and clear_marked_frames do not check it. marked_frames_locked is read back from the movie scene, and a flag that already has that value changes and saves nothing (changed false, saved false). A missing sequence is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Read the flag and the marks with get_marked_frames; lock a section with set_section_locked or the playback range with set_playback_range_locked.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case. |
 | `locked` | boolean | yes | Bool, required: true locks the marked frames, false unlocks them. |
 
-**Returns:** `{ sequence_name: string, marked_frames_locked: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, marked_frames_locked: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_playback_range_locked`
 
 *Destructive, idempotent.*
 
-Sets whether a Level Sequence's playback range is locked (UMovieScene::SetPlaybackRangeLocked).  Overwrite-setter (naturally idempotent); the locked flag is read back via IsPlaybackRangeLocked().
+Lock or unlock the playback range of a Level Sequence found by asset name under /Game (first case-insensitive match), in one undo step, then save the sequence (UMovieScene::SetPlaybackRangeLocked). The flag is the Sequencer editor's guard against dragging the range; set_sequence_playback_range does not check it. locked is read back from the movie scene, and a flag that already has that value changes and saves nothing (changed false, saved false). A missing sequence is an error; a failed save (for example during PIE) makes success false with saved=false and save_error. Set the range with set_sequence_playback_range; lock the marks with set_marked_frames_locked or a section with set_section_locked.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_name` | string | yes | Name of the target Level Sequence. |
 | `locked` | boolean | yes | Bool: whether the playback range should be locked. |
 
-**Returns:** `{ sequence_name: string, locked: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, locked: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_property_track_keyframe_count`
 
 *Destructive, idempotent.*
 
-Resize a property track's first section to exactly N keys evenly spaced from the section start, all carrying the same default value.
+Replace every key of the first section of one property track on a Level Sequence binding (sequence found by asset name under /Game) with key_count keys evenly spaced from the section start to its end, all holding default_value, in one undo step, then save the sequence. Every channel of the section gets the same keys: one channel for a Float, Bool or Visibility track, one per component for a Vector or Color track. key_count 0 clears the keys and 1 keys the section start; keys that would share a frame are merged. Channels that already hold exactly those keys change and save nothing (changed false, saved false). An unsupported property_type, or a missing track or section, is an error. One key at a time: add_keyframe_to_property_track; list keys: get_channel_keyframes.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1157,13 +1157,13 @@ Resize a property track's first section to exactly N keys evenly spaced from the
 | `key_count` | number | yes | Target number of keys (>= 0). 0 clears all keys; 1 seeds at section start; >=2 evenly distributes. |
 | `default_value` | number | no | Value to use for every resampled key (default 0). |
 
-**Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, binding_guid: string, property_type: string, key_count: int, default_value: float, keys_written: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_active`
 
 *Destructive, idempotent.*
 
-Mute or unmute one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetIsActive: an inactive section is not evaluated), in one undo step, then save the sequence. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. A locked section, or one in a read-only movie scene, is refused before anything changes, since the engine ignores the change there: unlock it with set_section_locked first. is_active and set are read back from the section. Every call saves; a failed save makes success false with saved=false and save_error. Read back with get_section_info.
+Mute or unmute one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetIsActive: an inactive section is not evaluated), in one undo step, then save the sequence. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. A locked section, or one in a read-only movie scene, is refused before anything changes, since the engine ignores the change there: unlock it with set_section_locked first. is_active and set are read back from the section. A section already in that state changes and saves nothing (changed false, saved false); a failed save makes success false with saved=false and save_error. Read back with get_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1176,13 +1176,13 @@ Mute or unmute one section on an object-binding track of a Level Sequence (UMovi
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, is_active: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, is_active: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_blend_type`
 
 *Destructive, idempotent.*
 
-Set the blend type (absolute|additive|relative|additive_from_base|override, case-insensitive) of one section on an object-binding track of a Level Sequence (a /Game path or a bare asset name), in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. A type the section's track does not support is refused before anything changes, the error listing the supported types; blend_type and set are read back from the section. Every call saves. A bad GUID, a binding without tracks, an index out of range or an unknown blend_type is an error. Read back with get_section_info; siblings: set_section_easing, set_section_completion_mode.
+Set the blend type (absolute|additive|relative|additive_from_base|override, case-insensitive) of one section on an object-binding track of a Level Sequence (a /Game path or a bare asset name), in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. A type the section's track does not support is refused before anything changes, the error listing the supported types; blend_type and set are read back from the section. A section that already has that type changes and saves nothing (changed false, saved false). A bad GUID, a binding without tracks, an index out of range or an unknown blend_type is an error. Read back with get_section_info; siblings: set_section_easing, set_section_completion_mode.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1195,13 +1195,13 @@ Set the blend type (absolute|additive|relative|additive_from_base|override, case
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, blend_type: string, blend_type_valid: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_color`
 
 *Destructive, idempotent.*
 
-Set the editor color tint of a sequencer section (UMovieSceneSection::SetColorTint).  The tint is WITH_EDITORONLY_DATA (a no-op in cooked/no-editor-data builds); in the editor it persists on the asset.
+Set the editor color tint of one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetColorTint), in one undo step, then save the sequence. r, g, b and a are 0-255 integers, clamped, defaulting to 0, 0, 0 and 255: every call writes all four, so an omitted one is not kept. The tint is editor-only data saved with the asset; it changes how the Sequencer draws the section, not playback. The section is resolved like get_section_info. The color is read back, and a section that already has that tint changes and saves nothing (changed false, saved false). A bad GUID or an index out of range is an error. Siblings: set_section_row_index, set_section_easing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1217,13 +1217,13 @@ Set the editor color tint of a sequencer section (UMovieSceneSection::SetColorTi
 | `a` | number | no | Alpha component 0-255 (int; default 255). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, color: { r: int, g: int, b: int, a: int }, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_completion_mode`
 
 *Destructive, idempotent.*
 
-Set how a sequencer section handles state when no longer evaluated (keep_state|restore_state|project_default).
+Set what one section on an object-binding track of a Level Sequence leaves behind once it is no longer evaluated, in one undo step, then save the sequence: keep_state keeps the values it animated, restore_state puts back the previous ones, project_default follows the project setting. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. The mode is read back, and a section that already has it changes and saves nothing (changed false, saved false). An unknown completion_mode, a bad GUID or an index out of range is an error; a failed save makes success false with saved=false and save_error. Siblings: set_section_easing, set_section_blend_type.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1236,13 +1236,13 @@ Set how a sequencer section handles state when no longer evaluated (keep_state|r
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, completion_mode: string, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, completion_mode: string, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_easing`
 
 *Destructive, idempotent.*
 
-Set the ease-in and ease-out durations of one section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. With use_manual (default true) each duration given turns manual easing on for its side and sets the manual duration; false turns it off and writes the auto duration. An omitted or negative value leaves that side as it is; values are rounded raw frames. Every call saves, even with no duration. The reply reads the effective durations back, with the section_index edited. A bad GUID, a binding without tracks or an index out of range is an error. Read back with get_section_info; blending: set_section_blend_type; range: set_section_range.
+Set the ease-in and ease-out durations of one section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised (root tracks are out of reach). With use_manual (default true) each duration given turns manual easing on for its side and sets the manual duration; false turns it off and writes the auto one. An omitted or negative value keeps that side; values are rounded raw frames. A call that leaves the easing as it was, one without durations too, changes and saves nothing (changed false, saved false). The effective durations are read back. A bad GUID, a binding without tracks or a bad index is an error. Read back: get_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1257,13 +1257,13 @@ Set the ease-in and ease-out durations of one section on an object-binding track
 | `ease_out_frames` | number | no | Ease-out duration in frames, rounded and written unconverted; omit it (or pass a negative value) to leave the ease-out unchanged. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, ease_in_frames: int, ease_out_frames: int, manual_ease_in: bool, manual_ease_out: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_locked`
 
 *Destructive, idempotent.*
 
-Lock or unlock a sequencer section.  Maps to UMovieSceneSection::SetIsLocked; a locked section cannot be modified by other edit ops, so lock LAST in an edit chain.
+Lock or unlock one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetIsLocked), in one undo step, then save the sequence. The Sequencer editor does not let a locked section be edited, and set_section_active refuses to mute or unmute one, so lock last in an edit chain. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. is_locked is read back, and a section already in that state changes and saves nothing (changed false, saved false). A bad GUID or an index out of range is an error; a failed save makes success false with saved=false and save_error. Read back with get_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1276,33 +1276,33 @@ Lock or unlock a sequencer section.  Maps to UMovieSceneSection::SetIsLocked; a 
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, is_locked: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, is_locked: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_pre_post_rollout`
 
 *Destructive, idempotent.*
 
-Set pre-roll and/or post-roll frames on a sequencer section.  Pre-roll = frames the section evaluates BEFORE its visible range. Post-roll = frames the section evaluates AFTER its visible range. Both are stored as FFrameNumber on UMovieSceneSection.  Pass at least one of pre_roll_frames or post_roll_frames (a non-None value). A 0 value means "no roll" (clears the roll window). The values are written via the inline SetPreRollFrames / SetPostRollFrames setters and read back through the section's public FFrameNumber fields.
+Set the pre-roll and/or post-roll of one section on an object-binding track of a Level Sequence, in frames, in one undo step, then save the sequence. Pre-roll is how many frames the section evaluates before its range, post-roll how many after; 0 clears it. At least one of pre_roll_frames and post_roll_frames is required; a value not given keeps its own, and values are rounded. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. Both are read back. Values equal to the current ones change and save nothing (changed false, saved false). A bad GUID or an index out of range is an error. Easing: set_section_easing; range: set_section_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Asset path of the Level Sequence. |
 | `binding_guid` | string | yes | GUID string of the binding the section lives under. |
 | `sequence_name` | string | no | Alias for sequence_path. |
-| `track_type` | string | no | Optional class filter ("transform"\|"audio"\|"event"\|"fade"\|etc.). Default "transform". |
+| `track_type` | string | no | Optional class filter ("transform"\|"audio"\|"event"\|"fade"\|etc.): picks the first track of that kind on the binding; omitted, track_index picks the track. |
 | `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0; used when track_type is omitted). |
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `pre_roll_frames` | number | no | Optional pre-roll frames (omit to leave unchanged). |
 | `post_roll_frames` | number | no | Optional post-roll frames (omit to leave unchanged). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, pre_roll_frames: int, post_roll_frames: int, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_range`
 
 *Destructive, idempotent.*
 
-Sets the frame range of the FIRST section of one track on a Level Sequence binding (sequence found by asset name under /Game), in an undo transaction, and saves the sequence. track_index picks the track in the binding's track order; no other section can be targeted, and an unknown binding reads as zero tracks. Frames are tick-resolution frames, rounded; keys are not moved or rescaled. range_set is false when the stored range differs from the request. Read a section's range with get_section_info; for the whole sequence use set_sequence_playback_range.
+Sets the frame range of the FIRST section of one track on a Level Sequence binding (sequence found by asset name under /Game), in one undo step, and saves the sequence. track_index picks the track in the binding's track order; no other section can be targeted, and an unknown binding reads as zero tracks. Frames are tick-resolution frames, rounded; keys are not moved or rescaled. range_set is false when the stored range differs from the request, and a range the section already has changes and saves nothing (changed false, saved false). Read a section's range with get_section_info; for the whole sequence use set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1312,13 +1312,13 @@ Sets the frame range of the FIRST section of one track on a Level Sequence bindi
 | `end_frame` | number | yes | Exclusive end frame (must be > start_frame). |
 | `track_index` | number | no | Index into the binding's tracks (0 = first track, default 0). |
 
-**Returns:** `{ sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, binding_guid: string, track_index: int, track_class: string, requested_start_frame: int, requested_end_frame: int, applied_start_frame: int, applied_end_frame: int, range_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_section_row_index`
 
 *Destructive, idempotent.*
 
-Set the row index of a sequencer section (UMovieSceneSection::SetRowIndex).  Only meaningful when the owning track supports multiple rows (reported as supports_multiple_rows); the owning track is also Modify()'d.
+Set the row index of one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetRowIndex, the row the Sequencer draws it on), in one undo step that records the owning track too, then save the sequence. The row only matters when the track supports several rows, reported as supports_multiple_rows. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. row_index is read back. A negative row_index, a bad GUID or an index out of range is an error, and a section already on that row changes and saves nothing (changed false, saved false). Siblings: set_section_color, set_section_easing.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1331,13 +1331,13 @@ Set the row index of a sequencer section (UMovieSceneSection::SetRowIndex).  Onl
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, row_index: int, supports_multiple_rows: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_sequence_display_rate`
 
 *Destructive, idempotent.*
 
-Set the display frame rate of a Level Sequence.  The display rate is the asset-level "play rate" (frames per second of the timeline). Changing it rescales how existing frame numbers map to time. Backed by UMovieScene::SetDisplayRate(FFrameRate).  Note: The numerator/denominator are integers (FFrameRate), so the fps argument is rounded to the nearest whole-number fps. For non-integer rates (e.g. 23.976) the caller should still pass the closest whole number; the engine does not support fractional FFrameRate numerators without a custom non-integer tick resolution.
+Set the display rate of a Level Sequence (a /Game path or a bare asset name), the frames per second its Sequencer timeline shows, in one undo step, then save the sequence. fps is rounded to a whole number (FFrameRate numerator over 1), so 23.976 becomes 24 and verified, which compares the read-back with fps within 0.01, is false. Keys and sections are stored in tick-resolution frames and stay where they are. A sequence that already has that rate changes and saves nothing (changed false, saved false). fps of 0 or less, or a missing sequence, is an error; a failed save makes success false with saved=false and save_error. Tick resolution and display rate together: set_sequence_frame_rate; playback range: set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1345,7 +1345,7 @@ Set the display frame rate of a Level Sequence.  The display rate is the asset-l
 | `fps` | number | yes | New display rate in frames per second. Must be > 0. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
-**Returns:** `{ sequence_path: string, fps: float, numerator: int, denominator: int, verified: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, fps: float, numerator: int, denominator: int, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_sequence_duration`
 
@@ -1377,7 +1377,7 @@ Change the frame rate of a Level Sequence: its tick resolution AND its display r
 
 *Destructive, idempotent.*
 
-Sets the playback range of a Level Sequence found by asset name under /Game, in tick-resolution frames (start inclusive, end exclusive, rounded), in an undo transaction, and saves the sequence. Tracks, sections and keys are not moved or clipped, and the Sequencer's playback-range lock does not block it. range_set compares the stored range with the request. To set a length in seconds from 0 use set_sequence_duration; the editor-only timeline windows are set_sequence_view_range and set_sequence_working_range.
+Sets the playback range of a Level Sequence found by asset name under /Game, in tick-resolution frames (start inclusive, end exclusive, rounded), in one undo step, and saves the sequence. Tracks, sections and keys are not moved or clipped, and the Sequencer's playback-range lock does not block it. range_set compares the stored range with the request; a range the sequence already has changes and saves nothing (changed false, saved false). To set a length in seconds from 0 use set_sequence_duration; the editor-only timeline windows are set_sequence_view_range and set_sequence_working_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1385,13 +1385,13 @@ Sets the playback range of a Level Sequence found by asset name under /Game, in 
 | `start_frame` | number | yes | Inclusive lower bound of the playback range, in tick frames. |
 | `end_frame` | number | yes | Exclusive upper bound of the playback range (must be > start_frame). |
 
-**Returns:** `{ sequence_name: string, requested_start_frame: int, requested_end_frame: int, start_frame: int, end_frame: int, range_set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, requested_start_frame: int, requested_end_frame: int, start_frame: int, end_frame: int, range_set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_sequence_view_range`
 
 *Destructive, idempotent.*
 
-Sets the editor view range of a Level Sequence (path or bare asset name), in seconds: the visible window of the Sequencer timeline. Editor UI state only, it changes neither playback nor the playback range. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false); a Sequencer showing the sequence follows it on its next tick. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the scrollable bounds use set_sequence_working_range; for what plays use set_sequence_playback_range.
+Sets the editor view range of a Level Sequence (path or bare asset name), in seconds: the visible window of the Sequencer timeline. Editor UI state only, it changes neither playback nor the playback range. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false); a Sequencer showing the sequence follows it on its next tick. Undoable, and the package is not marked dirty. verified compares the stored range with the request; a range equal to the stored one touches nothing and has no undo step (changed false). For the scrollable bounds use set_sequence_working_range; for what plays use set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1400,13 +1400,13 @@ Sets the editor view range of a Level Sequence (path or bare asset name), in sec
 | `end_seconds` | number | yes | End of the view range, in seconds. Must be > start_seconds. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
-**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }`
+**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient), changed: bool, note?: string }`
 
 ## `set_sequence_working_range`
 
 *Destructive, idempotent.*
 
-Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false): after a reload the working range is recomputed from the playback range. Undoable, and the package is not marked dirty. verified compares the stored range with the request. For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
+Sets the working range of a Level Sequence (path or bare asset name): the scrollable bounds of the Sequencer timeline, in seconds. Editor UI state only, it changes neither playback nor evaluation. The engine keeps it in a transient field, so it lasts for this editor session and is not saved (persisted is always false): after a reload the working range is recomputed from the playback range. Undoable, and the package is not marked dirty. verified compares the stored range with the request; a range equal to the stored one touches nothing and has no undo step (changed false). For the visible window use set_sequence_view_range; for what plays use set_sequence_playback_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1415,13 +1415,13 @@ Sets the working range of a Level Sequence (path or bare asset name): the scroll
 | `end_seconds` | number | yes | End of the working range, in seconds. Must be > start_seconds. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 
-**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient) }`
+**Returns:** `{ sequence_path: string, start_seconds: float, end_seconds: float, verified: bool, persisted: bool (always false: the field is transient), changed: bool, note?: string }`
 
 ## `set_skeletal_animation_section_params`
 
 *Destructive, idempotent.*
 
-Set the playback parameters (FMovieSceneSkeletalAnimationParams) of one skeletal-animation section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. Only the fields you pass are written; the rest keep their values, and every call saves. The section is section_index on the binding's first track of track_type ("skeletalanimation" picks the skeletal-animation track), or on its track_index-th track when track_type is omitted or unrecognised; a section of another class, a bad GUID or an index out of range is an error. A near-zero play_rate is refused before anything changes; frame offsets are rounded tick-resolution frames. Every field is read back, play_rate null for a non-constant time warp. Add the section with add_skeletal_animation_track; easing: set_section_easing; inspect: get_section_info.
+Set the playback parameters (FMovieSceneSkeletalAnimationParams) of one skeletal-animation section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. Only the fields you pass are written and the rest keep their values; a call that changes none of them changes and saves nothing (changed false, saved false). The section is section_index on the binding's first track of track_type ("skeletalanimation" picks the skeletal-animation track), or on its track_index-th track when track_type is omitted or unrecognised; a section of another class, a bad GUID or an index out of range is an error. A near-zero play_rate is refused before anything changes; frame offsets are rounded tick-resolution frames. Every field is read back, play_rate null for a non-constant time warp. Add the section with add_skeletal_animation_track; easing: set_section_easing; inspect: get_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1440,13 +1440,13 @@ Set the playback parameters (FMovieSceneSkeletalAnimationParams) of one skeletal
 | `play_rate` | number | no | Constant playback rate (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, reverse: bool, slot_name: string, start_frame_offset: int, end_frame_offset: int, skip_anim_notifiers: bool, force_custom_mode: bool, play_rate: double|null, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_spawn_ownership`
 
 *Destructive, idempotent.*
 
-Set the spawn ownership (ESpawnOwnership) of a spawnable custom binding in a Level Sequence given as a /Game path or a bare asset name: whether the spawned actor's lifetime is managed by the sequence that spawned it (InnerSequence), by the outermost sequence (RootSequence) or externally once spawned (External). MasterSequence is accepted for RootSequence, and the ESpawnOwnership:: prefix is allowed. Done in one undo step, then the sequence is saved; every call writes and saves, also when the value is unchanged, and ownership is read back. A binding that is not a spawnable custom binding (a possessable, an unknown GUID), an invalid ownership or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Find GUIDs and current ownership with get_sequence_spawnables; add a spawnable with add_spawnable_to_sequence.
+Set the spawn ownership (ESpawnOwnership) of a spawnable custom binding in a Level Sequence given as a /Game path or a bare asset name: whether the spawned actor's lifetime is managed by the sequence that spawned it (InnerSequence), by the outermost sequence (RootSequence) or externally once spawned (External). MasterSequence is accepted for RootSequence, and the ESpawnOwnership:: prefix is allowed. Done in one undo step, then the sequence is saved; ownership is read back, and a binding that already has it changes and saves nothing (changed false, saved false). A binding that is not a spawnable custom binding (a possessable, an unknown GUID), an invalid ownership or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Find GUIDs and current ownership with get_sequence_spawnables; add a spawnable with add_spawnable_to_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1455,13 +1455,13 @@ Set the spawn ownership (ESpawnOwnership) of a spawnable custom binding in a Lev
 | `ownership` | string | yes | One of: InnerSequence \| RootSequence \| External. MasterSequence is accepted as RootSequence. |
 | `sequence_path` | string | no | Alias for sequence_name, read only when sequence_name is absent or empty; it takes the same /Game path or bare asset name. |
 
-**Returns:** `{ sequence_name: string, binding_guid: string, ownership: string, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_name: string, binding_guid: string, ownership: string, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_sub_section_parameters`
 
 *Destructive, idempotent.*
 
-Set the playback parameters on a subsequence OR cinematic-shot section (both are UMovieSceneSubSection).  Writes the public FMovieSceneSectionParameters fields directly; bCanLoop gates the loop offsets so it is applied first.
+Set the playback parameters of one subsequence or cinematic shot section (a UMovieSceneSubSection on a root track) of a Level Sequence, in one undo step, then save the sequence. track_type shot picks the first cinematic shot track, anything else the first subsequence track, and section_index the section. Only the fields you pass change: the frame offsets in tick frames, rounded, the hierarchical bias, can_loop and a constant time scale; a near-zero time_scale is refused before anything changes. Every field is read back, time_scale null for a non-constant time warp. A request that leaves the parameters as they were changes and saves nothing (changed false, saved false). Add sections with add_subsequence_track or add_shot_section.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1476,7 +1476,7 @@ Set the playback parameters on a subsequence OR cinematic-shot section (both are
 | `can_loop` | boolean | no | bCanLoop; gates the loop offsets (omit to leave unchanged). |
 | `time_scale` | number | no | Constant playback time scale (double; must be non-zero -- ~0 is a FixedTime warp, not a play rate; omit to leave unchanged). |
 
-**Returns:** `{ sequence_path: string, section_class: string, section_index: int, start_frame_offset: int, end_frame_offset: int, first_loop_start_frame_offset: int, hierarchical_bias: int, can_loop: bool, time_scale: double|null, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_class: string, section_index: int, start_frame_offset: int, end_frame_offset: int, first_loop_start_frame_offset: int, hierarchical_bias: int, can_loop: bool, time_scale: double|null, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_timeline_time`
 
@@ -1495,26 +1495,26 @@ Set the playhead time of the open Sequencer editor on a target sequence
 
 *Destructive, idempotent.*
 
-Set the evaluation channel mask on a 3D transform section (UMovieScene3DTransformSection::SetMask).  The mask is a visibility/eval filter built from EMovieSceneTransformChannel; it nulls the channel proxy (intended rebuild) and does NOT delete existing keys.
+Set which channels of one 3D transform section on an object-binding track of a Level Sequence are animated (UMovieScene3DTransformSection::SetMask), in one undo step, then save the sequence. channels names the channels to enable, as an array or a comma-separated string; every other channel is masked off, and an unknown token is an error before anything changes. Existing keys are kept: the mask only filters evaluation and display. The section is resolved like get_section_info; one that is not a 3D transform section is an error. The mask is read back as channels and channel_mask, and a section that already has that mask changes and saves nothing (changed false, saved false). Quaternion rotation: set_transform_section_quaternion_interp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the target Level Sequence. |
 | `binding_guid` | string | yes | GUID of the binding whose transform section to edit. |
+| `channels` | any | yes | Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `track_type` | string | no | Optional class filter (default resolves the transform track; see set_section_easing). |
 | `track_index` | number | no | Index into the binding's tracks (default 0). |
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
-| `channels` | any | no | Channels to ENABLE: a JSON array (e.g. ["TranslationX","Rotation"]) OR a comma-separated string. Tokens: TranslationX/Y/Z, Translation, RotationX/Y/Z (Roll/Pitch/Yaw), Rotation, ScaleX/Y/Z, Scale, Weight, AllTransform, All, None. |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, saved: bool, note: string, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, channels: string[], channel_mask: int, set: bool, changed: bool, saved: bool, note: string, save_error?: string }`
 
 ## `set_transform_section_quaternion_interp`
 
 *Destructive, idempotent.*
 
-Turns quaternion (slerp) rotation interpolation on or off for one 3D transform section of a Level Sequence binding, in an undo transaction, and saves the sequence; keys are kept. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; a section that is not a 3D transform section is an error. For the section's blend type use set_transform_track_interp_mode; to enable or disable channels use set_transform_section_mask.
+Turns quaternion (slerp) rotation interpolation on or off for one 3D transform section of a Level Sequence binding, in one undo step, and saves the sequence; keys are kept. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; a section that is not a 3D transform section is an error, and one already in the requested state changes and saves nothing (changed false, saved false). For the section's blend type use set_transform_track_interp_mode; to enable or disable channels use set_transform_section_mask.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1527,13 +1527,13 @@ Turns quaternion (slerp) rotation interpolation on or off for one 3D transform s
 | `section_index` | number | no | Index of the section on the resolved track (default 0). |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, use_quaternion_interpolation: bool, set: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `set_transform_track_interp_mode`
 
 *Destructive, idempotent.*
 
-Sets the blend type of one section on a Level Sequence binding (how it layers with other sections, e.g. additive adds a delta, override replaces), in an undo transaction, and saves the sequence. Despite the name it changes no key interpolation and accepts any track kind. The section is section_index on the binding's first track of track_type, else its track_index-th track; a blend type the track does not support is refused. set_section_blend_type does the same without that check; for slerp rotation use set_transform_section_quaternion_interp.
+Sets the blend type of one section on a Level Sequence binding (how it layers with other sections, e.g. additive adds a delta, override replaces), in one undo step, and saves the sequence. Despite the name it changes no key interpolation and accepts any track kind. The section is section_index on the binding's first track of track_type, else its track_index-th track; a blend type the track does not support is refused, and a section that already has that type changes and saves nothing (changed false, saved false). set_section_blend_type does the same without that check; for slerp rotation use set_transform_section_quaternion_interp.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1547,7 +1547,7 @@ Sets the blend type of one section on a Level Sequence binding (how it layers wi
 | `blend_type` | string | no | Alias for interp_mode (absolute\|additive\|relative\|additive_from_base\|override) |
 | `binding_name_or_guid` | string | no | Alias for binding_guid, read only when binding_guid is absent; it must also be a GUID string, a bound object's name is not resolved. |
 
-**Returns:** `{ sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, interp_mode: string, blend_type: string, blend_type_valid: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `stop_level_sequence_runtime`
 

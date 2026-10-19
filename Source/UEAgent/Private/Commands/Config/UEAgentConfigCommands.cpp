@@ -385,12 +385,13 @@ TSharedPtr<FJsonObject> HandleSetComponentProperty(const TSharedPtr<FJsonObject>
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_name"), TargetProperty, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     // property_value is taken as a RAW JsonValue (not a pre-stringified string) so numbers, bools,
     // arrays and objects reach the canonical importer intact. A bare JSON string still works
-    // (ImportText_Direct handles object paths, enum names and struct text).
-    TSharedPtr<FJsonValue> ValJson = Params->TryGetField(TEXT("property_value"));
-    if (!ValJson.IsValid())
+    // (ImportText_Direct handles object paths, enum names and struct text). The guard on the
+    // field itself makes the catalog publish it as required (of any JSON type).
+    if (!Params->HasField(TEXT("property_value")))
     {
         return mcp_common::MakeErrorReply(TEXT("Missing 'property_value' parameter"));
     }
+    TSharedPtr<FJsonValue> ValJson = Params->TryGetField(TEXT("property_value"));
 
     // WORLD SELECTOR. The DEFAULT is the editor world, ON PURPOSE: it is the only route to a
     // CPF_DisableEditOnInstance property (Python's set_editor_property rejects those), and because

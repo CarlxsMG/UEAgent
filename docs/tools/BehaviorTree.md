@@ -6,9 +6,9 @@
 
 ## `add_blackboard_key`
 
-*Additive.*
+*Additive, idempotent.*
 
-Append a key to a UBlackboardData asset and save it.
+Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_keys_asset; create the asset: create_blackboard_data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Append a key to a UBlackboardData asset and save it.
 | `key_type` | string | yes | One of Bool\|Int\|Float\|Vector\|Rotator\|String\|Name\|Object\|Class\|Enum. |
 | `instance_synced` | boolean | no | Whether the key is instance-synced (optional, default false) |
 
-**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, keys: [{ name, type, instance_synced }] }`
+**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, note: string?, keys: [{ name, type, instance_synced }] }`
 
 ## `add_bt_composite_child`
 
@@ -82,9 +82,9 @@ Add a leaf task node (Wait/MoveTo/PlaySound/RunBehavior/...) under a BehaviorTre
 
 ## `create_behavior_tree`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create and save a new UBehaviorTree asset, optionally binding a blackboard.
+Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_bt_composite_child and add_bt_task_child.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -92,20 +92,20 @@ Create and save a new UBehaviorTree asset, optionally binding a blackboard.
 | `package_path` | string | no | Target /Game package path (optional, default "/Game/AI") |
 | `blackboard_path` | string | no | Path to a UBlackboardData asset to bind to the new BT (optional) |
 
-**Returns:** `{ name: string, package_path: string, behavior_tree_path: string, asset_path: string, blackboard_asset: string?, already_exists: bool, saved: bool, save_error: string? }`
+**Returns:** `{ name: string, package_path: string, behavior_tree_path: string, asset_path: string, blackboard_asset: string?, already_exists: bool, blackboard_rebound: bool?, saved: bool, save_error: string?, message: string? }`
 
 ## `create_blackboard_data`
 
 *Additive, idempotent.*
 
-Create an empty UBlackboardData asset at package_path/name and save it; success requires the save. Idempotent: an existing blackboard there is returned with already_exists=true and is not re-saved. Returns blackboard_path and key_count; add keys with add_blackboard_key.
+Create an empty UBlackboardData asset, with no keys and no parent, at package_path/name (default folder /Game/AI), register it and save it; no undo step. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_keys_asset; bind it to a tree with create_behavior_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name (e.g. "BB_Enemy"). |
 | `package_path` | string | no | Target /Game package path (optional, default "/Game/AI") |
 
-**Returns:** `{ name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string? }`
+**Returns:** `{ name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string?, message: string? }`
 
 ## `get_behavior_tree_info`
 
@@ -331,7 +331,7 @@ Set a BehaviorTree's RootNode to a new composite (Selector or Sequence) and save
 
 *Destructive, idempotent.*
 
-Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type.
+Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type. A value already in place is a no-op: already_set=true and saved=false, nothing saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -340,7 +340,7 @@ Constrain an existing blackboard key's subsettings on a UBlackboardData asset an
 | `base_class` | string | no | Class path/name (e.g. "/Script/Engine.Actor" or "Actor") for an Object/Class key (optional). |
 | `enum_type` | string | no | Enum path/name (e.g. "/Script/Engine.ECollisionChannel") for an Enum key (optional). |
 
-**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, base_class: string?, enum_type: string?, enum_name: string?, already_set: bool, saved: bool, save_error: string?, keys: [...] }`
+**Returns:** `{ blackboard_path: string, key_name: string, key_type: string, base_class: string?, enum_type: string?, enum_name: string?, already_set: bool, saved: bool, save_error: string?, note: string?, keys: [...] }`
 
 ## `set_blackboard_value`
 

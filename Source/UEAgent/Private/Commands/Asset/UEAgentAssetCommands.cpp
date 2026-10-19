@@ -982,12 +982,15 @@ TSharedPtr<FJsonObject> HandleGetAssetsMetadataBatch(const TSharedPtr<FJsonObjec
 // ===========================================================================
 // Typed remove commands: each deletes an asset only after verifying it is of the
 // expected class, which is what sets them apart from the generic delete_asset. A
-// path that does not load, or an asset of another class, answers deleted:false
-// with a `note` instead of an error, so they are idempotent.
+// path that does not load answers deleted:false with a `note` and success, so they
+// are idempotent; an asset of another class is refused, and a delete the engine
+// does not carry out fails the call (AssetCommandHelpers::DeleteTypedAsset). The
+// class is a parameter rather than a template argument so the catalog generator
+// follows each command into this body.
 // ===========================================================================
 
-template <typename T>
-static TSharedPtr<FJsonObject> HandleRemoveTypedAssetCmd(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName)
+static TSharedPtr<FJsonObject> HandleRemoveTypedAssetCmd(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
+    const UClass* ExpectedClass)
 {
     FString AssetPath;
     if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) || AssetPath.IsEmpty())
@@ -996,53 +999,47 @@ static TSharedPtr<FJsonObject> HandleRemoveTypedAssetCmd(const TSharedPtr<FJsonO
             FString::Printf(TEXT("[%s] Missing 'asset_path' parameter"), CmdName));
     }
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    const FString Refusal = AssetCommandHelpers::DeleteTypedAsset(AssetPath, T::StaticClass(), Resp);
-    if (!Refusal.IsEmpty())
-    {
-        Resp->SetStringField(TEXT("note"), Refusal);
-    }
-    return mcp_common::MakeOkReply(Resp);
+    return AssetCommandHelpers::DeleteTypedAsset(CmdName, AssetPath, ExpectedClass);
 }
 
-// MCP:remove_render_target_2d - Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with a `note` explaining which, never an exception, so it is idempotent and safe to re-run. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
+// MCP:remove_render_target_2d - Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent and safe to re-run; an asset of another type is refused with success false and deleted:false, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false too. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
 //   @param asset_path - Full object/package path of the render target (e.g. /Game/MyGame/RT/RT_Foo.RT_Foo); a bare name is not resolved here
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveRenderTarget2D(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAssetCmd<UTextureRenderTarget2D>(Params, TEXT("remove_render_target_2d"));
+    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_2d"), UTextureRenderTarget2D::StaticClass());
 }
 
-// MCP:remove_render_target_2d_array - Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
+// MCP:remove_render_target_2d_array - Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
 //   @param asset_path - Full object/package path of the 2D-array render target; a bare name is not resolved here
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveRenderTarget2DArray(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAssetCmd<UTextureRenderTarget2DArray>(Params, TEXT("remove_render_target_2d_array"));
+    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_2d_array"), UTextureRenderTarget2DArray::StaticClass());
 }
 
-// MCP:remove_render_target_cube - Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
+// MCP:remove_render_target_cube - Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
 //   @param asset_path - Full object/package path of the cube render target; a bare name is not resolved here
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveRenderTargetCube(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAssetCmd<UTextureRenderTargetCube>(Params, TEXT("remove_render_target_cube"));
+    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_render_target_cube"), UTextureRenderTargetCube::StaticClass());
 }
 
-// MCP:remove_texture_2d_array - Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
+// MCP:remove_texture_2d_array - Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
 //   @param asset_path - Full object/package path of the 2D-array texture; a bare name is not resolved here
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveTexture2DArray(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAssetCmd<UTexture2DArray>(Params, TEXT("remove_texture_2d_array"));
+    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_texture_2d_array"), UTexture2DArray::StaticClass());
 }
 
-// MCP:remove_static_texture_from_render_target - Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent.
+// MCP:remove_static_texture_from_render_target - Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; a missing path returns deleted:false with a `note` and success, so it is idempotent, while a wrong type, or a delete the engine refuses, is success false with deleted:false.
 //   @param asset_path - Full object/package path of the baked static texture; a bare name is not resolved here
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveStaticTextureFromRenderTarget(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAssetCmd<UTexture2D>(Params, TEXT("remove_static_texture_from_render_target"));
+    return HandleRemoveTypedAssetCmd(Params, TEXT("remove_static_texture_from_render_target"), UTexture2D::StaticClass());
 }
 
 const McpCommandFamilies::FRegistrar Registration =

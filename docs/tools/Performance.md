@@ -173,7 +173,7 @@ Begin tracking an in-process named region. Region start time is stored in this b
 
 *Destructive, idempotent.*
 
-Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
+Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

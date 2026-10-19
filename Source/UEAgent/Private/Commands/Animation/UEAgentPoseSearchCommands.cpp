@@ -112,11 +112,11 @@ namespace
         return ChannelsJson;
     }
 
-    // Deletes the asset at AssetPath only when it is a T: the payload of the outcome, or nullptr with
-    // OutError set to the reply when the asset exists but does not load.
+    // The reply of deleting the asset at AssetPath only when it is a T. A path with no asset is a no-op; an asset that
+    // does not load, one of another class, and a delete the engine refuses are errors, and nothing is deleted on a refusal.
     template <typename T>
     TSharedPtr<FJsonObject> PoseSearch_DeleteTypedAsset(const FString& AssetPath, const TCHAR* PathField,
-        const TCHAR* Command, const TCHAR* TypeLabel, TSharedPtr<FJsonObject>& OutError)
+        const TCHAR* Command, const TCHAR* TypeLabel)
     {
         TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
         Resp->SetStringField(PathField, AssetPath);
@@ -125,27 +125,31 @@ namespace
             Resp->SetBoolField(TEXT("deleted"), false);
             Resp->SetBoolField(TEXT("already_existed"), false);
             Resp->SetStringField(TEXT("note"), FString::Printf(TEXT("%s does not exist; nothing to remove"), PathField));
-            return Resp;
+            return mcp_common::MakeOkReply(Resp);
         }
         UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
         if (!Asset)
         {
-            OutError = mcp_common::MakeErrorReply(
+            return mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("%s: could not load asset at %s"), Command, *AssetPath));
-            return nullptr;
         }
         const FString AssetClassName = Asset->GetClass()->GetName();
         Resp->SetStringField(TEXT("asset_class"), AssetClassName);
         if (!Cast<T>(Asset))
         {
+            const FString Refusal = FString::Printf(TEXT("asset is not a %s (got %s) - wrong type, refusing to delete"),
+                TypeLabel, *AssetClassName);
             Resp->SetBoolField(TEXT("deleted"), false);
-            Resp->SetStringField(TEXT("note"),
-                FString::Printf(TEXT("asset is not a %s (got %s) - wrong type, refusing to delete"), TypeLabel, *AssetClassName));
-            return Resp;
+            Resp->SetStringField(TEXT("note"), Refusal);
+            return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(TEXT("%s: %s at %s"), Command, *Refusal, *AssetPath));
         }
-        Resp->SetBoolField(TEXT("deleted"), UEditorAssetLibrary::DeleteAsset(AssetPath));
+        const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
+        Resp->SetBoolField(TEXT("deleted"), bDeleted);
         Resp->SetBoolField(TEXT("already_existed"), true);
-        return Resp;
+        return mcp_common::MakeOutcomeReply(Resp, bDeleted, bDeleted ? FString() : FString::Printf(
+            TEXT("%s: the %s at %s was not deleted (UEditorAssetLibrary::DeleteAsset returned false: a Play-in-Editor ")
+            TEXT("session running, an asset the Asset Registry does not list, or a file that cannot be deleted; the ")
+            TEXT("Output Log names which)"), Command, TypeLabel, *AssetPath));
     }
 }
 
@@ -590,10 +594,10 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr
     if (RemoveIndex == INDEX_NONE)
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(/*bRemoved=*/false);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
         Obj->SetStringField(TEXT("message"), bHasIndex
-            ? FString::Printf(TEXT("channel_index %d out of range [0, %d); nothing removed"), ChannelIndex, PreviousCount)
-            : FString::Printf(TEXT("No channel of type '%s' on schema; nothing removed"), *ChannelType));
+            ? FString::Printf(TEXT("channel_index %d out of range [0, %d); nothing removed, nothing saved"), ChannelIndex, PreviousCount)
+            : FString::Printf(TEXT("No channel of type '%s' on schema; nothing removed, nothing saved"), *ChannelType));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -621,7 +625,7 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchChannelFromSchema(const TSharedPtr
 // ---------------------------------------------------------------------------
 // add_animation_asset_to_pose_search_database
 // ---------------------------------------------------------------------------
-// MCP:add_animation_asset_to_pose_search_database - Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
+// MCP:add_animation_asset_to_pose_search_database - Append an animation asset to a UPoseSearchDatabase as an enabled entry over its full range, then save the database; an asset already in it is left alone (already_existed=true, saved=false, nothing saved). The asset type is not checked, and the search index is not rebuilt: run build_pose_search_database_index afterwards.
 //   @param database_path - Asset path of the UPoseSearchDatabase (required).
 //   @param animation_asset_path - Asset path of a UAnimSequenceBase / UAnimComposite / UAnimMontage / UBlendSpace (required).
 //   @returns { database_path, animation_asset_path, animation_asset_count, added, already_existed, saved, message }
@@ -652,8 +656,8 @@ TSharedPtr<FJsonObject> HandleAddAnimationAssetToPoseSearchDatabase(const TShare
         Obj->SetNumberField(TEXT("animation_asset_count"), Database->GetNumAnimationAssets());
         Obj->SetBoolField(TEXT("added"), false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
-        Obj->SetStringField(TEXT("message"), TEXT("Animation asset already in database"));
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("message"), TEXT("Animation asset already in database; nothing added, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -877,7 +881,7 @@ TSharedPtr<FJsonObject> HandleInspectPoseSearchDatabase(const TSharedPtr<FJsonOb
 // Typed delete inverses for schema/database/anim.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_pose_search_schema - Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_pose_search_schema - Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 //   @param schema_path - Full /Game/... asset path of the schema.
 //   @returns { schema_path, deleted, already_existed, asset_class?, note? }
 //   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
@@ -886,14 +890,11 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchSchema(const TSharedPtr<FJsonObjec
 {
     FString SchemaPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("schema_path"), SchemaPath)) { return Missing; }
-    TSharedPtr<FJsonObject> Err;
-    TSharedPtr<FJsonObject> Resp = PoseSearch_DeleteTypedAsset<UPoseSearchSchema>(
-        SchemaPath, TEXT("schema_path"), TEXT("remove_pose_search_schema"), TEXT("UPoseSearchSchema"), Err);
-    if (!Resp) { return Err; }
-    return mcp_common::MakeOkReply(Resp);
+    return PoseSearch_DeleteTypedAsset<UPoseSearchSchema>(
+        SchemaPath, TEXT("schema_path"), TEXT("remove_pose_search_schema"), TEXT("UPoseSearchSchema"));
 }
 
-// MCP:remove_pose_search_database - Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_pose_search_database - Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 //   @param database_path - Full /Game/... asset path of the database.
 //   @returns { database_path, deleted, already_existed, asset_class?, note? }
 //   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
@@ -902,11 +903,8 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchDatabase(const TSharedPtr<FJsonObj
 {
     FString DatabasePath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("database_path"), DatabasePath)) { return Missing; }
-    TSharedPtr<FJsonObject> Err;
-    TSharedPtr<FJsonObject> Resp = PoseSearch_DeleteTypedAsset<UPoseSearchDatabase>(
-        DatabasePath, TEXT("database_path"), TEXT("remove_pose_search_database"), TEXT("UPoseSearchDatabase"), Err);
-    if (!Resp) { return Err; }
-    return mcp_common::MakeOkReply(Resp);
+    return PoseSearch_DeleteTypedAsset<UPoseSearchDatabase>(
+        DatabasePath, TEXT("database_path"), TEXT("remove_pose_search_database"), TEXT("UPoseSearchDatabase"));
 }
 
 // MCP:remove_animation_asset_from_pose_search_database - Remove one FPoseSearchDatabaseAnimationAsset entry from a UPoseSearchDatabase by 0-based index (inverse of add_animation_asset_to_pose_search_database). Idempotent: an out-of-range index returns removed:false + note, not an error. The database index is NOT rebuilt here -- run build_pose_search_database_index afterwards.
@@ -1301,12 +1299,12 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaRole(const TSharedPtr<FJsonObje
 //   the roled-skeleton set) and are WITH_EDITOR-gated (Finalize is editor-only).
 // ---------------------------------------------------------------------------
 
-// MCP:add_pose_search_roled_skeleton - Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
+// MCP:add_pose_search_roled_skeleton - Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true, saved=false, nothing saved) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
 //   @param asset_path - Asset path of the target UPoseSearchSchema (required).
 //   @param skeleton_path - Asset path of the USkeleton to bind under the role (required).
 //   @param role - Role name (FName) identifying the entry within a multi-character schema (required; empty = default/None role).
 //   @param mirror_data_table_path - Asset path of a UMirrorDataTable to bind under the role (optional; empty = none).
-//   @returns { asset_path, role, skeleton_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, saved }
+//   @returns { asset_path, role, skeleton_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, saved, note? }
 //   NOTE (impl): the guard exists because UPoseSearchSchema::AddSkeleton does NOT dedupe -- it is a pure append.
 TSharedPtr<FJsonObject> HandleAddPoseSearchRoledSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1340,7 +1338,8 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchRoledSkeleton(const TSharedPtr<FJsonO
         Obj->SetNumberField(TEXT("roled_skeleton_count"), Schema->GetRoledSkeletons().Num());
         Obj->SetBoolField(TEXT("added"), false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("note"), TEXT("the role already has an entry; nothing added, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
@@ -1378,11 +1377,11 @@ TSharedPtr<FJsonObject> HandleAddPoseSearchRoledSkeleton(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_search_roled_skeleton"), SaveError);
 }
 
-// MCP:remove_pose_search_roled_skeleton - Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent. The schema is re-finalized after the removal, so finalized_channels changes with it.
+// MCP:remove_pose_search_roled_skeleton - Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
 //   @param asset_path - Asset path of the target UPoseSearchSchema (required).
 //   @param role - Role name (FName) of the FPoseSearchRoledSkeleton entry to remove (provide this OR skeleton_index; empty = default/None role).
 //   @param skeleton_index - 0-based index into the roled-skeleton list of the entry to remove (provide this OR role).
-//   @returns { asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved }
+//   @returns { asset_path, role, skeleton_index, removed_skeleton_path, roled_skeleton_count, previous_count, removed, already_absent, saved, note? }
 //   NOTE (impl): UPoseSearchSchema exposes no public RemoveSkeleton, so the private Skeletons TArray is resized by
 //   reflection (FScriptArrayHelper::RemoveValues) — the same idiom as remove_pose_search_channel_from_schema —
 //   then re-Finalized via PostEditChange.
@@ -1455,7 +1454,8 @@ TSharedPtr<FJsonObject> HandleRemovePoseSearchRoledSkeleton(const TSharedPtr<FJs
         Obj->SetNumberField(TEXT("previous_count"), PreviousCount);
         Obj->SetBoolField(TEXT("removed"), false);
         Obj->SetBoolField(TEXT("already_absent"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
+        Obj->SetStringField(TEXT("note"), TEXT("no roled skeleton matches; nothing removed, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
 
