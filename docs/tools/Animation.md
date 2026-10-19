@@ -1112,12 +1112,12 @@ List the notify events of a UAnimSequence without changing it: name, trigger tim
 
 *Read-only.*
 
-Read a UAnimSequence without changing it: skeleton, play_length, frame_rate, num_frames, the bone track, float curve and transform curve counts and NAMES from its data model, num_sync_markers, enable_root_motion, retarget_source and ref_pose_seq.
+Summarise one animation sequence (a UAnimSequence asset) from its data model: the skeleton it plays on, its length, frame rate and frame count, the names of its bone tracks, float curves and transform curves with their counts, how many sync markers it has, whether root motion is enabled, and its retarget source and reference-pose sequence. Read-only: it changes nothing and needs no PIE. A path that does not load as an AnimSequence is refused, a montage or blend space included -- get_anim_asset_info reads any animation asset. The keys of one curve come from get_anim_curve_data and the notify events from get_anim_notifies.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `anim_sequence_path` | string | yes | Asset path of the UAnimSequence. |
-| `sequence_path` | string | no | Alias of anim_sequence_path. |
+| `anim_sequence_path` | string | yes | Asset path of the sequence, e.g. "/Game/Anims/Run_Fwd" (package or object path). |
+| `sequence_path` | string | no | Alias of anim_sequence_path; read only when anim_sequence_path is absent. |
 
 **Returns:** `{ anim_sequence_path, skeleton, play_length, frame_rate, num_frames, num_bone_tracks, num_float_curves, transform_curve_count, bone_tracks: [string], float_curves: [string], transform_curves: [string], num_sync_markers, enable_root_motion, retarget_source, ref_pose_seq, success }`
 
