@@ -4,6 +4,67 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 2.0.0 - 2026-10-20
+
+A consolidation release: 1742 tools instead of 2097, with one tool per job and every name verb-first. Old names are
+not kept as aliases. [Migrating to 2.0](docs/migrating-to-2.0.md) lists every removed and renamed tool with the call
+that replaces it.
+
+### Breaking changes
+
+- **342 tools are folded into a canonical tool.** Each canonical tool gained the parameters and reply fields of the
+  tools folded into it, so no capability is lost. Some examples:
+  - `delete_asset` takes `expected_class` and replaces the 22 typed deleters (`remove_anim_sequence`,
+    `delete_state_tree`, `remove_render_target_2d`…).
+  - `add_graph_node` replaces the 11 `add_*_node` tools.
+  - `get_undo_state` replaces `can_undo` and `can_redo`; `undo` and `redo` take a count.
+  - `call_function` replaces `call_object_method`, `call_library_function` and `call_component_function`.
+  - `set_world_gravity` takes the gravity presets of `configure_gravity`.
+  - `get_data_table_row` replaces the other row readers.
+- **13 tools that could never do what their name said are removed.** Examples: `set_preserve_scale_ratio`,
+  `list_mass_signals`, and `build_hlod` and `convert_map_to_world_partition`, which reported a build they never
+  started. Two others are now fixed instead:
+  `get_ability_tasks` lists the tasks, and `get_component_state_tree_path` returns the path.
+- **160 tools are renamed** so each name starts with its verb and spells its words out:
+  - domain-first names now lead with the verb (`interchange_import_asset` → `import_interchange_asset`,
+    `metasound_add_interface` → `add_metasound_interface`);
+  - bare names gain a verb (`batch` → `execute_batch`, `bookmark` → `add_trace_bookmark`, `editor_status` →
+    `get_editor_status`);
+  - abbreviations are spelled out (`set_bp_variable_default` → `set_blueprint_variable_default`, `add_bt_service` →
+    `add_behavior_tree_service`, `get_rvt_info` → `get_runtime_virtual_texture_info`).
+- **Calls that used to succeed and now behave differently:**
+  - `duplicate_asset` refuses a destination name that is already taken, and a destination outside writable project
+    content.
+  - `configure_replication` applies only the settings it is given, and refuses a call with none.
+  - `undo` and `redo` refuse a count below 1.
+  - `remove_behavior_tree_child` without `kind` matches either kind of child.
+  - `spawn_box_volume` sets the spatial-loading flag only when it is passed.
+  - `list_derived_classes` no longer lists the base class itself.
+  - `add_graph_node` with `custom_event` returns an event that already has that name instead of adding a duplicate.
+  - `get_graph_nodes` with `node_id` returns the node at `nodes[0]`.
+  - `set_skeletal_mesh_section_flags` refuses a call that sets no flag.
+  - `create_modulation_generator` refuses an unknown waveform instead of falling back to Sine.
+  - Several tools that used to accept bad values silently now refuse them: an out-of-range `mass_scale`, a blend-space
+    axis whose minimum is not below its maximum, and an unknown collision shape.
+
+### Fixed
+
+- `list_cvars` with an empty filter lists every console variable instead of none.
+- `find_free_input_key` returns the key's name in `name`, with its display name in `display_name`.
+- `get_material_parameters` reports each parameter's effective value with an `overridden` flag; it used to report only
+  overrides.
+- `list_input_types` returns the value types it promised.
+- `create_blend_space` writes every axis setting it accepts.
+- `import_texture_file` honours `replace_existing: false`.
+- `create_gameplay_effect_asset` creates the asset at `package_path/name`; it used to save the package at the folder
+  itself, so the path it reported did not exist.
+- `create_material_variant` and `create_material_instance` report the overrides they apply, and no longer write an
+  override for a parameter the parent material does not have.
+- Mass entity counts read 0 instead of -1 on a world that has not created an entity yet, and the spawn and despawn
+  deltas are no longer one too high there.
+- `add_blueprint_function` with `override=true` on an event returns the existing event node when called again, instead
+  of adding a duplicate at 0,0.
+
 ## 1.2.10 - 2026-10-19
 
 - Compiling a Widget Blueprint no longer raises the engine's "widget was added but did not get a GUID" ensure: before
