@@ -1,7 +1,7 @@
 {
   "name": "ueagent",
   "displayName": "UEAgent",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "description": "A skill that turns any Unreal Editor workflow into a reusable skill built on UEAgent's MCP tools, and three skills made with it.",
   "author": {
     "name": "CarlxsMG",
