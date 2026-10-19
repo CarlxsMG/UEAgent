@@ -135,20 +135,31 @@ public:
 	static constexpr int32 NameAffixMargin = 64;
 	static constexpr int32 NameLengthLimit = NAME_SIZE - NameAffixMargin;
 
+	/** Characters the path of an object a tool creates inside an asset may take past the asset's object path and the
+	 *  name the call gives it: "_C:" + "_GEN_VARIABLE" around a component template (16), ":WidgetTree." before a
+	 *  widget (12, "_C:WidgetTree." in the compiled class), a slot after a named panel (33), the nodes of a named
+	 *  graph (47), and the graphs and nodes around a named anim state machine, the longest (126 with "_0" indices).
+	 *  The same as mcp_common::ObjectPathSubobjectMargin, which keeps an asset's own subobjects in the limit. */
+	static constexpr int32 SubobjectPathMargin = 160;
+
 	/**
 	 * The first name argument of NameLengthLimit characters or more, as an error message naming where it sits, its
 	 * length and the limit: a name-like parameter (FParam::bNameLike) that is a string or holds one as an array
 	 * element, or a string at any depth inside an argument under an object key IsNameLikeKey passes, or a string
-	 * element of an array under such a key ("renames[0].new_name"). A batch's items are left to their own dispatch.
-	 * Empty when every one fits or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
+	 * element of an array under such a key ("renames[0].new_name"). Then the pair a subobject is named after: the
+	 * longest name-like string argument that is a content path (it starts with "/"; an object path counts up to its
+	 * asset, a package path as given) plus the longest other name-like string (or string element) plus
+	 * SubobjectPathMargin, which must stay under NAME_SIZE. A batch's items are left to their own dispatch. Empty when
+	 * every one fits or the catalog does not know CommandType. Game thread (McpPreconditions::Check).
 	 */
 	static FString CheckNameLengths(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
 	/**
 	 * Whether a key of an object inside an argument names a name, by the rule the catalog generator marks name-like
-	 * params with (`nameLikeRule` in the catalog): the key in lower case, split at "_", without a trailing number or
-	 * single letter, ends in a name word and holds no disk word; in a domain whose paths are not names (USD) only an
-	 * actor key passes. False when the catalog carries no rule.
+	 * params with (`nameLikeRule` in the catalog): the key split at "_" and at each camelCase hump ("newName",
+	 * "AssetPath", "HTTPServer" is http + server), in lower case, without a trailing number or single letter, ends in
+	 * a name word and holds no disk word; in a domain whose paths are not names (USD) only an actor key passes. False
+	 * when the catalog carries no rule.
 	 */
 	bool IsNameLikeKey(const FString& Key, const FString& Domain) const;
 

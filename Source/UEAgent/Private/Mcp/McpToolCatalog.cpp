@@ -295,6 +295,55 @@ namespace McpToolCatalogPrivate
 		}
 	}
 
+	/** The words of a key, in lower case: split at each '_' (keeping empty words, as the generator's split does) and at
+	 *  each camelCase hump, before an upper-case letter that follows a lower-case letter or digit, or that starts a
+	 *  word after a run of capitals ("newName" -> new, name; "HTTPServer" -> http, server). */
+	static void SplitKeyWords(const FString& Key, TArray<FString>& OutWords)
+	{
+		OutWords.Reset();
+		FString Word;
+		for (int32 Index = 0; Index < Key.Len(); ++Index)
+		{
+			const TCHAR C = Key[Index];
+			if (C == TEXT('_'))
+			{
+				OutWords.Add(Word.ToLower());
+				Word.Reset();
+				continue;
+			}
+			if (FChar::IsUpper(C) && !Word.IsEmpty())
+			{
+				const TCHAR Previous = Key[Index - 1];
+				const bool bNextIsLower = Index + 1 < Key.Len() && FChar::IsLower(Key[Index + 1]);
+				if (FChar::IsLower(Previous) || FChar::IsDigit(Previous) || (FChar::IsUpper(Previous) && bNextIsLower))
+				{
+					OutWords.Add(Word.ToLower());
+					Word.Reset();
+				}
+			}
+			Word.AppendChar(C);
+		}
+		OutWords.Add(Word.ToLower());
+	}
+
+	/** The length of the asset object path a content path names, as far as the call says: an object path
+	 *  ("/Game/F/BP.BP", "/Game/F/BP.BP_C:Sub") up to the end of its asset, any other path as given (a package path,
+	 *  or the folder a create tool makes the asset in, whose join with the name InvalidPackageName measures). */
+	static int32 AssetObjectPathLength(const FString& Path)
+	{
+		int32 Dot = INDEX_NONE;
+		if (!Path.FindChar(TEXT('.'), Dot))
+		{
+			return Path.Len();
+		}
+		int32 End = Dot + 1;
+		while (End < Path.Len() && Path[End] != TEXT(':') && Path[End] != TEXT('.'))
+		{
+			++End;
+		}
+		return End;
+	}
+
 	/**
 	 * The first string of NameLengthLimit characters or more inside Value whose nearest object key is a name
 	 * (bNameKey, FMcpToolCatalog::IsNameLikeKey), and where it sits: the walk of the double_slash_path precondition,
@@ -398,7 +447,7 @@ bool FMcpToolCatalog::IsNameLikeKey(const FString& Key, const FString& Domain) c
 	// The generator's _is_name_like on a param name, without the description half (a nested key has none).
 	const FString Low = Key.ToLower();
 	TArray<FString> Words;
-	Low.ParseIntoArray(Words, TEXT("_"), /*InCullEmpty=*/false);
+	McpToolCatalogPrivate::SplitKeyWords(Key, Words);
 	auto IsNumber = [](const FString& Word) { return !Word.IsEmpty() && Algo::AllOf(Word, [](TCHAR C) { return FChar::IsDigit(C); }); };
 	while (Words.Num() > 1 && (IsNumber(Words.Last()) || Words.Last().Len() == 1))
 	{
@@ -821,6 +870,77 @@ FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSha
 			TEXT("name before it builds one, so a name or path of %d characters or more is refused. Refused before the tool ran: ")
 			TEXT("nothing was changed. WHAT WORKS: a name or path of at most %d characters."),
 			*CommandType, *Where, Length, NAME_SIZE - 1, NameAffixMargin, NameLengthLimit, NameLengthLimit - 1);
+	}
+	if (CommandType == TEXT("batch"))
+	{
+		return FString();
+	}
+	// A name the call gives to an object it creates inside an asset (a component, a widget, a graph, a state machine)
+	// becomes part of that object's path, "<asset object path>_C:<name>_GEN_VARIABLE", and the transaction that records
+	// the creation makes an FName of the whole path (FTransactionObjectId::SetObject): the asset's path and the name
+	// can each fit and still join past NAME_SIZE.
+	const FParam* PathParam = nullptr;
+	int32 PathLength = 0;
+	for (const FParam& Param : Tool->Params)
+	{
+		FString Text;
+		if (Param.bNameLike && Params->TryGetStringField(Param.Name, Text) && Text.StartsWith(TEXT("/")))
+		{
+			const int32 ObjectPathLength = AssetObjectPathLength(Text);
+			if (!PathParam || ObjectPathLength > PathLength)
+			{
+				PathParam = &Param;
+				PathLength = ObjectPathLength;
+			}
+		}
+	}
+	const FParam* NameParam = nullptr;
+	int32 NameLength = 0;
+	for (const FParam& Param : Tool->Params)
+	{
+		const TSharedPtr<FJsonValue> Value = (PathParam && &Param != PathParam && Param.bNameLike) ? Params->TryGetField(Param.Name) : nullptr;
+		if (!Value.IsValid())
+		{
+			continue;
+		}
+		int32 Longest = -1;
+		if (Value->Type == EJson::String)
+		{
+			Longest = Value->AsString().Len();
+		}
+		else if (Value->Type == EJson::Array)
+		{
+			for (const TSharedPtr<FJsonValue>& Item : Value->AsArray())
+			{
+				if (Item.IsValid() && Item->Type == EJson::String)
+				{
+					Longest = FMath::Max(Longest, Item->AsString().Len());
+				}
+			}
+		}
+		if (Longest > NameLength || (!NameParam && Longest >= 0))
+		{
+			NameParam = &Param;
+			NameLength = Longest;
+		}
+	}
+	if (PathParam && NameParam && PathLength + NameLength + SubobjectPathMargin >= NAME_SIZE)
+	{
+		const int32 Together = NAME_SIZE - SubobjectPathMargin;
+		const int32 LongestName = Together - 1 - PathLength;
+		const FString WhatWorks = LongestName > 0
+			? FString::Printf(TEXT("a %s of at most %d characters with this %s, or a shorter %s"), *NameParam->Name, LongestName,
+				*PathParam->Name, *PathParam->Name)
+			: FString::Printf(TEXT("a shorter %s"), *PathParam->Name);
+		return FString::Printf(
+			TEXT("%s: %s (an asset path of %d characters) and %s (%d characters) are %d characters together. An object the tool creates ")
+			TEXT("inside that asset is named after both, and its path takes up to %d characters more (a component template ")
+			TEXT("'<asset>_C:<name>_GEN_VARIABLE', a widget '<asset>:WidgetTree.<name>', the graphs and nodes under a named state ")
+			TEXT("machine); the engine makes an FName of that path when it records the creation, an FName holds at most %d characters, ")
+			TEXT("and a longer one aborts the editor (UnrealNames.cpp, NAME_SIZE). The two must stay under %d characters together. ")
+			TEXT("Refused before the tool ran: nothing was changed. WHAT WORKS: %s."),
+			*CommandType, *PathParam->Name, PathLength, *NameParam->Name, NameLength, PathLength + NameLength, SubobjectPathMargin,
+			NAME_SIZE - 1, Together, *WhatWorks);
 	}
 	return FString();
 }

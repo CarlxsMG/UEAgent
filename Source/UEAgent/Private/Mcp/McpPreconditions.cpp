@@ -412,9 +412,14 @@ namespace McpPreconditionsPrivate
 		return Refuse(Message, TEXT("integer_range"));
 	}
 
+	// A name given to an object inside an asset is measured with the margin InvalidPackageName keeps for the asset's own.
+	static_assert(FMcpToolCatalog::SubobjectPathMargin == mcp_common::ObjectPathSubobjectMargin,
+		"FMcpToolCatalog::SubobjectPathMargin and mcp_common::ObjectPathSubobjectMargin measure the same paths");
+
 	/** A name or path argument (`nameLike` in the catalog, or a string under a name key inside an object of an argument)
 	 *  of FMcpToolCatalog::NameLengthLimit characters or more: the FName the tool builds from it, with the prefix or
-	 *  suffix it may add, reaches NAME_SIZE, a checkf in UnrealNames.cpp that aborts the editor. */
+	 *  suffix it may add, reaches NAME_SIZE, a checkf in UnrealNames.cpp that aborts the editor. Or an asset path and a
+	 *  name that join, in the path of an object created inside the asset, past NAME_SIZE. */
 	static TOptional<FRefusal> RefuseNameTooLong(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 	{
 		const FString Message = FMcpToolCatalog::CheckNameLengths(CommandType, Params);

@@ -4,6 +4,14 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.8 - 2026-10-19
+
+- A name created inside an asset no longer kills the editor when the asset's path and the name are long together: a
+  component, widget, graph or state takes the asset's object path plus the name as its own object path, and the
+  editor builds an Unreal name from it. A call whose asset path plus its longest other name argument passes 863
+  characters is refused before it runs, naming both.
+- Nested name fields written in camelCase (`newName`, `assetPath`) are checked like the snake_case ones.
+
 ## 1.2.7 - 2026-10-19
 
 - A malformed vector is refused instead of read as zeros: 123 location, rotation, scale, center and color-style
