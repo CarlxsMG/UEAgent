@@ -855,7 +855,7 @@ namespace
     }
 }
 
-// MCP:add_foliage_instances - Place foliage instances of a UFoliageType at explicit transforms in the level's InstancedFoliageActor. DANGER: measured CRASHING the editor process (access violation inside UnrealEditor-FoliageEdit.dll) -- reproducibly, and a single instance crashes just like a thousand, so trimming the count does not help. The reply you see is a "Connection reset", which reads like a network hiccup and is not. Use add_instanced_static_mesh_component + add_ism_instance instead: an InstancedFoliageActor is itself an actor holding instanced-static-mesh components, so it is the same code path minus the crash. Save your work before calling this at all.
+// MCP:add_foliage_instances - Place foliage instances of a UFoliageType at explicit transforms in the level's InstancedFoliageActor. DANGER: measured CRASHING the editor process (access violation inside UnrealEditor-FoliageEdit.dll) -- reproducibly, and a single instance crashes just like a thousand, so trimming the count does not help. The reply you see is a "Connection reset", which reads like a network hiccup and is not. Use add_instanced_static_mesh_component + add_instanced_static_mesh_instance instead: an InstancedFoliageActor is itself an actor holding instanced-static-mesh components, so it is the same code path minus the crash. Save your work before calling this at all.
 //   @param foliage_type_path - Full path of the UFoliageType asset
 //   @param transforms - List of [x,y,z] locations or objects with location, rotation, scale
 //   @returns { foliage_type_path: string, foliage_type: string, requested: int, instances_added: int, instance_count_before: int, instance_count: int, placed_instance_count: int, instances_added_ok: bool, foliage_actor: string }
@@ -1038,7 +1038,7 @@ TSharedPtr<FJsonObject> HandleGetFoliageTypes(const TSharedPtr<FJsonObject>& Par
 // Foliage scatter
 // ========================================================================== //
 
-// MCP:scatter_foliage_in_box - Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_ism_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
+// MCP:scatter_foliage_in_box - Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_instanced_static_mesh_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
 //   @param foliage_type_path - Full path of the UFoliageType asset
 //   @param count [integer] - Optional number of instances to scatter, default 8 when omitted; a negative count is taken as 0
 //   @param seed - Seed for the random stream, default 1337
@@ -1128,20 +1128,43 @@ TSharedPtr<FJsonObject> HandleScatterFoliageInBox(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:remove_all_foliage_for_type - Delete EVERY placed instance of one FoliageType from all InstancedFoliageActors in the level -- the bulk undo for a scatter that went wrong. Destructive and not per-region; use remove_foliage_in_radius to clear only around a point. The FoliageType asset itself is untouched. Check remaining=0 in the reply, not just removed_all.
+// MCP:remove_foliage_instances - Delete the placed instances of one FoliageType from all InstancedFoliageActors in the level: EVERY instance by default -- the bulk undo for a scatter that went wrong -- or, with a radius, only those inside a world-space sphere, the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Preview a sphere with get_foliage_in_radius first. The FoliageType asset itself is untouched. Undoable. Check remaining (and remaining_in_radius for a sphere) in the reply, not just removed_count.
 //   @param foliage_type_path - Full path of the UFoliageType asset
-//   @returns { foliage_type_path: string, foliage_type: string, removed_count: int, remaining: int, foliage_actors_affected: int, removed_all: bool }
+//   @param center_x - Optional X of the world-space center of the removal sphere (default 0); needs radius.
+//   @param center_y - Optional Y of the world-space center of the removal sphere (default 0); needs radius.
+//   @param center_z - Optional Z of the world-space center of the removal sphere (default 0); needs radius.
+//   @param radius - Optional radius of the removal sphere in world units, > 0. When given only instances inside the sphere are removed; when omitted every instance of the type is.
+//   @returns { foliage_type_path: string, foliage_type: string, removed_count: int, remaining: int (instances of the type left anywhere), foliage_actors_affected: int, removed_all: bool (remaining == 0), requested_radius?: number (sphere mode), remaining_in_radius?: int (sphere mode: instances left inside the sphere, 0 when it worked) }
 TSharedPtr<FJsonObject> HandleRemoveAllFoliageForType(const TSharedPtr<FJsonObject>& Params)
 {
+    // The optional sphere: a radius turns it on; a center without a radius is a mistake, not a wipe.
+    double CenterX = 0.0, CenterY = 0.0, CenterZ = 0.0, RadiusNum = 0.0;
+    const bool bHasCenterX = Params->TryGetNumberField(TEXT("center_x"), CenterX);
+    const bool bHasCenterY = Params->TryGetNumberField(TEXT("center_y"), CenterY);
+    const bool bHasCenterZ = Params->TryGetNumberField(TEXT("center_z"), CenterZ);
+    const bool bHasCenter = bHasCenterX || bHasCenterY || bHasCenterZ;
+    const bool bInSphere = Params->TryGetNumberField(TEXT("radius"), RadiusNum);
+    if (bHasCenter && !bInSphere)
+    {
+        return mcp_common::MakeErrorReply(TEXT("remove_foliage_instances: a center was given without radius; send radius (> 0) to remove inside a sphere, or no center to remove every instance. Nothing was removed."));
+    }
+    if (bInSphere && RadiusNum <= 0.0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("remove_foliage_instances: radius must be > 0 (got %g); nothing was removed"), RadiusNum));
+    }
+    const FVector Center(CenterX, CenterY, CenterZ);
+    const double RadiusSq = RadiusNum * RadiusNum;
+    auto InSphere = [&](const FVector& Location) { return !bInSphere || FVector::DistSquared(Location, Center) <= RadiusSq; };
+
     FLandscapeFoliageTarget Foliage;
     if (TSharedPtr<FJsonObject> Error = Landscape_ResolveFoliageType(Params, Foliage))
     {
         return Error;
     }
 
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveAllFoliageForType", "Remove All Foliage For Type (MCP)"));
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveAllFoliageForType", "Remove Foliage Instances (MCP)"));
 
-    // Remove instances of this type from EVERY IFA in the editor world. ---- //
+    // Remove instances of this type (inside the sphere, when one is given) from EVERY IFA in the editor world.
     int32 RemovedCount = 0;
     int32 IFACount = 0;
     for (TActorIterator<AInstancedFoliageActor> It(Foliage.World); It; ++It)
@@ -1158,29 +1181,31 @@ TSharedPtr<FJsonObject> HandleRemoveAllFoliageForType(const TSharedPtr<FJsonObje
             continue;
         }
 
-        const int32 Num = Info->Instances.Num();
-        if (Num == 0)
+        // The index list to remove in one call: all of them, or those inside the sphere.
+        // FFoliageInfo::RemoveInstances(TArrayView<const int32>, bool RebuildFoliageTree).
+        TArray<int32> ToRemove;
+        ToRemove.Reserve(Info->Instances.Num());
+        for (int32 i = 0; i < Info->Instances.Num(); ++i)
+        {
+            if (InSphere(Info->Instances[i].Location))
+            {
+                ToRemove.Add(i);
+            }
+        }
+        if (ToRemove.Num() == 0)
         {
             continue;
         }
 
         ++IFACount;
         IFA->Modify();
-
-        // Build the full index list [0 .. Num-1] and remove in one call.
-        // FFoliageInfo::RemoveInstances(TArrayView<const int32>, bool RebuildFoliageTree).
-        TArray<int32> AllIndices;
-        AllIndices.Reserve(Num);
-        for (int32 i = 0; i < Num; ++i)
-        {
-            AllIndices.Add(i);
-        }
-        Info->RemoveInstances(AllIndices, /*RebuildFoliageTree*/ true);
-        RemovedCount += Num;
+        Info->RemoveInstances(ToRemove, /*RebuildFoliageTree*/ true);
+        RemovedCount += ToRemove.Num();
     }
 
-    // Verify by readback: count remaining instances across all IFAs. ------- //
+    // Verify by readback: count remaining instances across all IFAs, and inside the sphere.
     int32 Remaining = 0;
+    int32 RemainingInSphere = 0;
     for (TActorIterator<AInstancedFoliageActor> It(Foliage.World); It; ++It)
     {
         AInstancedFoliageActor* IFA = *It;
@@ -1191,6 +1216,13 @@ TSharedPtr<FJsonObject> HandleRemoveAllFoliageForType(const TSharedPtr<FJsonObje
         if (FFoliageInfo* Info = IFA->FindInfo(Foliage.Type))
         {
             Remaining += Info->Instances.Num();
+            if (bInSphere)
+            {
+                for (const FFoliageInstance& Instance : Info->Instances)
+                {
+                    RemainingInSphere += InSphere(Instance.Location) ? 1 : 0;
+                }
+            }
         }
     }
 
@@ -1199,13 +1231,18 @@ TSharedPtr<FJsonObject> HandleRemoveAllFoliageForType(const TSharedPtr<FJsonObje
     ResultObj->SetNumberField(TEXT("remaining"), Remaining);
     ResultObj->SetNumberField(TEXT("foliage_actors_affected"), IFACount);
     ResultObj->SetBoolField(TEXT("removed_all"), Remaining == 0);
+    if (bInSphere)
+    {
+        ResultObj->SetNumberField(TEXT("requested_radius"), RadiusNum);
+        ResultObj->SetNumberField(TEXT("remaining_in_radius"), RemainingInSphere);
+    }
 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_foliage_instance_count - Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. Use get_foliage_in_radius when you need WHERE they are, has_foliage_instances for a plain yes/no.
+// MCP:get_foliage_instance_count - Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. has_instances is the plain yes/no. Use get_foliage_in_radius when you need WHERE they are.
 //   @param foliage_type_path - Full path of the UFoliageType asset
-//   @returns { foliage_type_path: string, foliage_type: string, instance_count: int, placed_instance_count: int, foliage_actor_count: int }
+//   @returns { foliage_type_path: string, foliage_type: string, has_instances: bool (instance_count > 0), instance_count: int, placed_instance_count: int, foliage_actor_count: int }
 TSharedPtr<FJsonObject> HandleGetFoliageInstanceCount(const TSharedPtr<FJsonObject>& Params)
 {
     FLandscapeFoliageTarget Foliage;
@@ -1234,6 +1271,7 @@ TSharedPtr<FJsonObject> HandleGetFoliageInstanceCount(const TSharedPtr<FJsonObje
     }
 
     TSharedPtr<FJsonObject> ResultObj = Landscape_NewFoliageData(Foliage);
+    ResultObj->SetBoolField(TEXT("has_instances"), InstanceCount > 0);
     ResultObj->SetNumberField(TEXT("instance_count"), InstanceCount);
     ResultObj->SetNumberField(TEXT("placed_instance_count"), PlacedCount);
     ResultObj->SetNumberField(TEXT("foliage_actor_count"), IFACount);
@@ -3370,7 +3408,7 @@ TSharedPtr<FJsonObject> HandleGetLandscapeGrassTypeProperties(const TSharedPtr<F
 // scatter_foliage_on_layer
 // ---------------------------------------------------------------------------
 
-// MCP:scatter_foliage_on_layer - Scatter foliage only where a landscape PAINT LAYER is strong enough: samples seeded candidates in a box, keeps those whose layer weight clears layer_weight_threshold, and rejects the rest -- so trees land on the forest layer and not on rock. The rule-driven sibling of scatter_foliage_in_box. DANGER: it reaches the same FFoliageInfo::AddInstance path that can crash the editor from its two sibling tools, so treat it as unsafe and prefer add_instanced_static_mesh_component + add_ism_instance (query the layer weight yourself) or a PCG graph. Save your work before calling it.
+// MCP:scatter_foliage_on_layer - Scatter foliage only where a landscape PAINT LAYER is strong enough: samples seeded candidates in a box, keeps those whose layer weight clears layer_weight_threshold, and rejects the rest -- so trees land on the forest layer and not on rock. The rule-driven sibling of scatter_foliage_in_box. DANGER: it reaches the same FFoliageInfo::AddInstance path that can crash the editor from its two sibling tools, so treat it as unsafe and prefer add_instanced_static_mesh_component + add_instanced_static_mesh_instance (query the layer weight yourself) or a PCG graph. Save your work before calling it.
 //   @param foliage_type_path - Asset path of the UFoliageType (e.g. /Game/Foliage/BP_Tree)
 //   @param landscape_name_or_label - Actor label (or name) of the target ALandscape
 //   @param layer_name - FName of the landscape paint layer (e.g. "Grass", "Forest")
@@ -3518,76 +3556,10 @@ TSharedPtr<FJsonObject> HandleScatterFoliageOnLayer(const TSharedPtr<FJsonObject
 }
 
 // ---------------------------------------------------------------------------
-// remove_foliage_in_radius
-// ---------------------------------------------------------------------------
-
-// MCP:remove_foliage_in_radius - Clear foliage around a point: delete every instance of one FoliageType inside a world-space sphere -- the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Use remove_all_foliage_for_type to remove it everywhere instead. Preview what would go with get_foliage_in_radius first; the oracle is instances_removed plus a re-count.
-//   @param foliage_type_path - Asset path of the UFoliageType to remove (matches against mesh on the type)
-//   @param center_x - X component of the world-space center of the removal sphere
-//   @param center_y - Y component of the world-space center of the removal sphere
-//   @param center_z - Z component of the world-space center of the removal sphere
-//   @param radius - Radius in world units
-//   @returns { applied, instances_removed, requested_radius }
-TSharedPtr<FJsonObject> HandleRemoveFoliageInRadius(const TSharedPtr<FJsonObject>& Params)
-{
-    FLandscapeFoliageTarget Foliage;
-    if (TSharedPtr<FJsonObject> Error = Landscape_ResolveFoliageType(Params, Foliage))
-    {
-        return Error;
-    }
-
-    FVector Center = FVector::ZeroVector;
-    double RadiusNum = 0.0;
-    if (TSharedPtr<FJsonObject> SphereError = Landscape_ReadFoliageSphere(Params, Center, RadiusNum))
-    {
-        return SphereError;
-    }
-    const float Radius = (float)RadiusNum;
-    const float RadiusSq = Radius * Radius;
-
-    AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(Foliage.World, /*bCreateIfNone*/ false, Foliage.World->PersistentLevel);
-    FFoliageInfo* Info = IFA ? IFA->FindInfo(Foliage.Type) : nullptr;
-    if (!Info || Info->Instances.Num() == 0)
-    {
-        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-        Data->SetBoolField(TEXT("applied"), true);
-        Data->SetNumberField(TEXT("instances_removed"), 0);
-        Data->SetNumberField(TEXT("requested_radius"), Radius);
-        return mcp_common::MakeOkReply(Data);
-    }
-
-    // Collect indices to remove (descending order so RemoveAtSwap is stable).
-    TArray<int32> ToRemove;
-    ToRemove.Reserve(Info->Instances.Num());
-    for (int32 i = 0; i < Info->Instances.Num(); ++i)
-    {
-        const FVector InstanceLoc = Info->Instances[i].Location;
-        if (FVector::DistSquared(InstanceLoc, Center) <= RadiusSq)
-        {
-            ToRemove.Add(i);
-        }
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveFoliageInRadius", "Remove Foliage In Radius (MCP)"));
-    IFA->Modify();
-    if (ToRemove.Num() > 0)
-    {
-        // UE 5.8 FFoliageInfo::RemoveInstances takes TArrayView<const int32>.
-        Info->RemoveInstances(ToRemove, /*RebuildFoliageTree=*/true);
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), true);
-    Data->SetNumberField(TEXT("instances_removed"), ToRemove.Num());
-    Data->SetNumberField(TEXT("requested_radius"), Radius);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // get_foliage_in_radius
 // ---------------------------------------------------------------------------
 
-// MCP:get_foliage_in_radius - List the actual foliage instances of one FoliageType inside a world-space sphere, with each one's location, rotation, scale and instance_index. Use it to check what is standing on a spot before building there, or as a dry run before remove_foliage_in_radius. Capped by max_results (default 100, hard cap 1000), so a full count must come from get_foliage_instance_count, not from len(instances).
+// MCP:get_foliage_in_radius - List the actual foliage instances of one FoliageType inside a world-space sphere, with each one's location, rotation, scale and instance_index. Use it to check what is standing on a spot before building there, or as a dry run before remove_foliage_instances with the same center and radius. Capped by max_results (default 100, hard cap 1000), so a full count must come from get_foliage_instance_count, not from len(instances).
 //   @param foliage_type_path - Asset path of the UFoliageType to query
 //   @param center_x - X component of the world-space center of the query sphere
 //   @param center_y - Y component of the world-space center of the query sphere
@@ -3652,10 +3624,10 @@ TSharedPtr<FJsonObject> HandleGetFoliageInRadius(const TSharedPtr<FJsonObject>& 
 }
 
 // ---------------------------------------------------------------------------
-// foliage_type_exists
+// does_foliage_type_exist
 // ---------------------------------------------------------------------------
 
-// MCP:foliage_type_exists - Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- has_foliage_instances answers whether anything of it is placed in the level.
+// MCP:does_foliage_type_exist - Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
 //   @param foliage_type_path - Asset path (e.g. /Game/Foliage/BP_Tree)
 //   @returns { exists: bool, asset_path: string }
 //   @hints read-only
@@ -3670,31 +3642,6 @@ TSharedPtr<FJsonObject> HandleFoliageTypeExists(const TSharedPtr<FJsonObject>& P
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("exists"), FoliageType != nullptr);
     Data->SetStringField(TEXT("asset_path"), FoliageTypePath);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// has_foliage_instances
-// ---------------------------------------------------------------------------
-
-// MCP:has_foliage_instances - Yes/no: does this FoliageType have any instances placed in the current level (with the count alongside)? The one-line gate for "is this vegetation actually in the map"; foliage_type_exists answers the different question of whether the asset exists at all, and get_foliage_in_radius says where the instances are.
-//   @param foliage_type_path - Asset path of the UFoliageType to query
-//   @returns { has_instances: bool, instance_count: int, foliage_type_path: string }
-TSharedPtr<FJsonObject> HandleHasFoliageInstances(const TSharedPtr<FJsonObject>& Params)
-{
-    FLandscapeFoliageTarget Foliage;
-    if (TSharedPtr<FJsonObject> Error = Landscape_ResolveFoliageType(Params, Foliage))
-    {
-        return Error;
-    }
-
-    AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(Foliage.World, /*bCreateIfNone*/ false, Foliage.World->PersistentLevel);
-    const int32 Count = Landscape_FoliageInstanceCount(IFA, Foliage.Type);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("has_instances"), Count > 0);
-    Data->SetNumberField(TEXT("instance_count"), Count);
-    Data->SetStringField(TEXT("foliage_type_path"), Foliage.Path);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -3963,7 +3910,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_landscape_layer_info"), &HandleCreateLandscapeLayerInfo },
     { TEXT("export_landscape_heightmap"), &HandleExportLandscapeHeightmap },
     { TEXT("flatten_landscape_in_box"), &HandleFlattenLandscapeInBox },
-    { TEXT("foliage_type_exists"), &HandleFoliageTypeExists },
+    { TEXT("does_foliage_type_exist"), &HandleFoliageTypeExists },
     { TEXT("get_foliage_in_radius"), &HandleGetFoliageInRadius },
     { TEXT("get_foliage_instance_count"), &HandleGetFoliageInstanceCount },
     { TEXT("get_foliage_type_properties"), &HandleGetFoliageTypeProperties },
@@ -3976,11 +3923,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_landscape_nanite_status"), &HandleGetLandscapeNaniteStatus },
     { TEXT("get_landscape_spline_control_point"), &HandleGetLandscapeSplineControlPoint },
     { TEXT("get_landscape_splines"), &HandleGetLandscapeSplines },
-    { TEXT("has_foliage_instances"), &HandleHasFoliageInstances },
     { TEXT("import_landscape_heightmap"), &HandleImportLandscapeHeightmap },
     { TEXT("paint_landscape_layer"), &HandlePaintLandscapeLayer },
-    { TEXT("remove_all_foliage_for_type"), &HandleRemoveAllFoliageForType },
-    { TEXT("remove_foliage_in_radius"), &HandleRemoveFoliageInRadius },
+    { TEXT("remove_foliage_instances"), &HandleRemoveAllFoliageForType },
     { TEXT("remove_landscape_layer"), &HandleRemoveLandscapeLayer },
     { TEXT("remove_landscape_spline_control_point"), &HandleRemoveLandscapeSplineControlPoint },
     { TEXT("remove_landscape_spline_segment"), &HandleRemoveLandscapeSplineSegment },

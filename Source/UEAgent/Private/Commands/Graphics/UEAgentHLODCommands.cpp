@@ -5,7 +5,7 @@
 #include "WorldPartition/HLOD/HLODLayer.h"          // UHLODLayer, EHLODLayerType, Get/SetLayerType
 
 #include "Editor.h"                                  // GEditor
-#include "Engine/World.h"                            // UWorld::IsPartitionedWorld (inline; build gating)
+#include "Engine/World.h"                            // UWorld::IsPartitionedWorld (inline)
 #include "EngineUtils.h"                             // TActorIterator<AActor>
 
 #include "UObject/Package.h"
@@ -14,22 +14,17 @@
 #include "UObject/UnrealType.h"                       // FIntProperty / FDoubleProperty / FBoolProperty
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "EditorAssetLibrary.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 
 /**
  * World Partition HLOD commands.
  *
- * Covers UHLODLayer asset authoring (a plain /Game UObject asset in the Engine module), actor <-> layer
- * assignment, and an honest world HLOD build trigger. Create/get/set are real create->read->verify operations.
+ * Covers UHLODLayer asset authoring (a plain /Game UObject asset in the Engine module) and actor <-> layer
+ * assignment. Create/get/set are real create->read->verify operations; delete a layer with delete_asset.
  * UHLODLayer is MinimalAPI: LayerType has usable inline GetLayerType/SetLayerType accessors, but
  * CellSize/LoadingRange/bIsSpatiallyLoaded are private and UE_DEPRECATED(5.7) (moved to partition settings),
  * so they are read/written through the reflection system (FProperty) rather than the deprecated accessors.
- *
- * build_hlod is HEAVY/async and requires a World Partition world plus the HLOD builder commandlet/PIE path;
- * it detects World Partition and returns an honest result (build_started=false + note) rather than faking a
- * build.
  */
 namespace UEAgentHLODCommands
 {
@@ -497,105 +492,6 @@ TSharedPtr<FJsonObject> HandleGetHLODLayerInfo(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:build_hlod - Triggers a world HLOD build for the current editor world.  This is a HEAVY/async operation that requires a World Partition world plus the WorldPartitionHLODsBuilder commandlet / a long-running editor build job, so it cannot be driven synchronously from a single request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition) and returns an honest result: build_started is false with a note explaining why (not a World Partition map, or async/commandlet-only).
-//   @returns { world: string, is_world_partition: bool, build_started: bool, note?: string }
-
-TSharedPtr<FJsonObject> HandleBuildHLOD(const TSharedPtr<FJsonObject>& Params)
-{
-    // HONEST gate: a real world HLOD build requires a World Partition world and the
-    // heavy/async HLOD builder commandlet (BuildHLODs commandlet / async PIE-style
-    // generation), which cannot run synchronously inside this single request.
-    //
-    // We do the headless-safe part for real: resolve the editor world and detect
-    // World Partition. If there is no WP, the build is genuinely not applicable and
-    // we return an honest result (build_started=false + note) rather than faking it.
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
-
-    const bool bIsPartitioned = World->IsPartitionedWorld();
-
-    // Honest, non-fatal either way: success=true with a clear note.
-    TSharedPtr<FJsonObject> ResultObj = DataAuthoringUtils::WorldPartitionGateReply(*World, TEXT("build_started"));
-
-    if (!bIsPartitioned)
-    {
-        // The cov test classifies this via allow_errors / the explicit note (it is the correct
-        // behavior on a non-WP map, which is the default level).
-        ResultObj->SetStringField(TEXT("note"),
-            TEXT("World HLOD build requires a World Partition world; current editor world is not partitioned, so no build was started"));
-        ResultObj->SetStringField(TEXT("message"),
-            TEXT("HLOD build not applicable: editor world is not a World Partition map"));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    // World Partition is present. A real build still requires the async HLOD builder
-    // commandlet (WorldPartitionHLODsBuilder) or a long-running editor build job,
-    // which is out of scope for a single synchronous request and would block /
-    // potentially crash the editor. Report honestly that the build cannot be driven
-    // synchronously here, while having verified the WP precondition for real.
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("World Partition detected; the world HLOD build is a heavy async/commandlet operation (WorldPartitionHLODsBuilder) and cannot be driven synchronously from a single request, so no build was started here"));
-    ResultObj->SetStringField(TEXT("message"),
-        TEXT("HLOD build is async/commandlet-only; run the WorldPartitionHLODsBuilder commandlet or Build > Build HLODs to generate"));
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:remove_hlod_layer - Delete a UHLODLayer asset at a /Game path, the mirror of create_hlod_layer. Typed delete: it loads the asset first and refuses one that is not a UHLODLayer with success false, its asset_class and a note, deleting nothing, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent: a path with no asset is a no-op, success true with deleted=false and already_existed=false. The delete removes the asset and its file and cannot be undone; when the engine refuses it (Play-in-Editor running, an asset the Asset Registry does not list, a file it cannot delete) success is false with deleted=false. List layers with get_hlod_layers; inspect one with get_hlod_layer_info.
-//   @param asset_path - Full /Game/.../LayerName asset path.
-//   @returns { asset_path, deleted, already_existed?, layer_type?, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteLoadedAsset once the type check passes.
-
-TSharedPtr<FJsonObject> HandleRemoveHLODLayer(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
-
-    // Resolve via direct load (registry-independent). UEditorAssetLibrary::DoesAssetExist is
-    // unreliable for an asset just created + saved in this session (asset registry not synced),
-    // so it must NOT gate existence — LoadHLODLayerAt (StaticLoadObject) is the source of truth.
-    UHLODLayer* Layer = LoadHLODLayerAt(AssetPath);
-    if (!Layer)
-    {
-        UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-        Resp->SetStringField(TEXT("asset_path"), AssetPath);
-        Resp->SetBoolField(TEXT("deleted"), false);
-        if (!Asset)
-        {
-            Resp->SetBoolField(TEXT("already_existed"), false);
-            Resp->SetStringField(TEXT("note"), TEXT("asset_path does not exist; nothing to remove"));
-        }
-        else
-        {
-            // Asset exists but is not a UHLODLayer: the typed-delete guard fails the call and deletes nothing.
-            const FString Refusal = FString::Printf(TEXT("asset is not a UHLODLayer (got %s) - wrong type, refusing to delete"),
-                *Asset->GetClass()->GetName());
-            Resp->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
-            Resp->SetStringField(TEXT("note"), Refusal);
-            return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(TEXT("remove_hlod_layer: %s at %s"), *Refusal, *AssetPath));
-        }
-        return mcp_common::MakeOkReply(Resp);
-    }
-
-    // Capture metadata BEFORE delete (the Layer pointer is invalidated below).
-    const EHLODLayerType LayerType = Layer->GetLayerType();
-    const FString LayerTypeStr = HLODLayerTypeToString(LayerType);
-
-    // DeleteAsset(path) is unreliable for an asset created + saved this session; delete the
-    // loaded object directly (registry-independent).
-    const bool bDeleted = UEditorAssetLibrary::DeleteLoadedAsset(Layer);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), AssetPath);
-    Resp->SetStringField(TEXT("layer_type"), LayerTypeStr);
-    Resp->SetBoolField(TEXT("deleted"), bDeleted);
-    Resp->SetBoolField(TEXT("already_existed"), true);
-    return mcp_common::MakeOutcomeReply(Resp, bDeleted, FString::Printf(
-        TEXT("remove_hlod_layer: the HLOD layer at %s was not deleted (UEditorAssetLibrary::DeleteLoadedAsset returned false: ")
-        TEXT("a Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
-        TEXT("the Output Log names which)"), *AssetPath));
-}
-
 // ---------------------------------------------------------------------------
 // Actor <-> HLOD layer assignment.
 //
@@ -794,12 +690,10 @@ TSharedPtr<FJsonObject> HandleSetHLODLayerActors(const TSharedPtr<FJsonObject>& 
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("build_hlod"), &HandleBuildHLOD },
     { TEXT("create_hlod_layer"), &HandleCreateHLODLayer },
     { TEXT("get_hlod_layer_actors"), &HandleGetHLODLayerActors },
     { TEXT("get_hlod_layer_info"), &HandleGetHLODLayerInfo },
     { TEXT("get_hlod_layers"), &HandleGetHLODLayers },
-    { TEXT("remove_hlod_layer"), &HandleRemoveHLODLayer },
     { TEXT("set_hlod_layer_actors"), &HandleSetHLODLayerActors },
     { TEXT("set_hlod_layer_parent"), &HandleSetHLODLayerParent },
     { TEXT("set_hlod_layer_settings"), &HandleSetHLODLayerSettings },

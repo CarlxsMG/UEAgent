@@ -157,7 +157,7 @@ namespace UEAgentUICommandsImpl
         return Panel ? Panel->GetChildrenCount() : 0;
     }
 
-    /** The per-node fields of get_widget_hierarchy (name, class, depth, flags, visibility). */
+    /** The per-child fields of get_level_widget_properties (name, class, depth, flags, visibility). */
     TSharedPtr<FJsonObject> DescribeHierarchyNode(UWidget* Node, int32 Depth)
     {
         TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -353,9 +353,9 @@ namespace UEAgentUICommandsImpl
 
 // Widgets placed in the level
 
-// MCP:get_widget_properties - Retrieve detailed properties and state information for a widget by name.
+// MCP:get_level_widget_properties - Retrieve detailed properties and state information for a UUserWidget hosted on a UWidgetComponent in the current editor level, by name: class, validity, visibility, placement of the hosting component, parent, focus, and the direct children of its root panel (one level, each with name, class, depth, valid, enabled and visibility). list_level_widget_components gives the names.
 //   @param widget_name - Name of the widget to query
-//   @returns { widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, is_enabled: bool, has_focus: bool }
+//   @returns { widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, children: [{ name: string, class: string, depth: number (1), valid: bool, enabled: bool, visibility: string }], is_enabled: bool, has_focus: bool }
 
 TSharedPtr<FJsonObject> HandleGetWidgetProperties(const TSharedPtr<FJsonObject>& Params)
 {
@@ -392,12 +392,27 @@ TSharedPtr<FJsonObject> HandleGetWidgetProperties(const TSharedPtr<FJsonObject>&
     Facts->SetStringField(TEXT("parent_widget"), Parent ? Parent->GetName() : FString(TEXT("None")));
     Facts->SetStringField(TEXT("parent_class"), Parent ? Parent->GetClass()->GetName() : FString(TEXT("None")));
     Facts->SetNumberField(TEXT("child_count"), Impl::RootPanelChildCount(Widget));
+    // Exactly one level below the root panel: its valid direct children, not walked further.
+    TArray<TSharedPtr<FJsonValue>> Children;
+    if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget->GetRootWidget()))
+    {
+        const int32 ChildTotal = Panel->GetChildrenCount();
+        for (int32 ChildIndex = 0; ChildIndex < ChildTotal; ++ChildIndex)
+        {
+            UWidget* Child = Panel->GetChildAt(ChildIndex);
+            if (IsValid(Child))
+            {
+                Children.Add(MakeShared<FJsonValueObject>(Impl::DescribeHierarchyNode(Child, 1)));
+            }
+        }
+    }
+    Facts->SetArrayField(TEXT("children"), Children);
     Facts->SetBoolField(TEXT("is_enabled"), Widget->GetIsEnabled());
     Facts->SetBoolField(TEXT("has_focus"), Widget->HasAnyUserFocus());
     return mcp_common::MakeOkReply(Facts);
 }
 
-// MCP:set_widget_visibility - Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
+// MCP:set_level_widget_visibility - Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_level_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
 //   @param widget_name - Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name
 //   @param visibility - Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case)
 //   @returns { widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }
@@ -443,61 +458,7 @@ TSharedPtr<FJsonObject> HandleSetWidgetVisibility(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Outcome);
 }
 
-// MCP:get_widget_hierarchy - Retrieve the widget hierarchy tree including parent, children, and nested structure information.
-//   @param widget_name - Name of the widget to query
-//   @returns { widget_name: string, hierarchy: { name: string, class: string, depth: number, valid: bool, enabled: bool, visibility: string, size?: { width, height }, position?: { x, y, z }, children: [object], child_count: number }, widget_valid: bool }
-
-TSharedPtr<FJsonObject> HandleGetWidgetHierarchy(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentUICommandsImpl;
-
-    FString TargetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_name"), TargetName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UWidgetComponent* Host = nullptr;
-    UUserWidget* Widget = nullptr;
-    if (TSharedPtr<FJsonObject> Refusal = Impl::ResolveLevelWidget(TargetName, Host, Widget))
-    {
-        return Refusal;
-    }
-
-    TSharedPtr<FJsonObject> Root = Impl::DescribeHierarchyNode(Widget, 0);
-    if (Host)
-    {
-        Root->SetObjectField(TEXT("size"), Impl::DrawSizeObject(Host->GetDrawSize()));
-        Root->SetObjectField(TEXT("position"), mcp_common::VectorToJsonObject(Host->GetRelativeLocation()));
-    }
-
-    // Exactly one level below the root panel: its valid direct children. They are not walked
-    // further, so each reports child_count 0 and an empty children list.
-    TArray<TSharedPtr<FJsonValue>> Children;
-    if (const UPanelWidget* Panel = Cast<UPanelWidget>(Widget->GetRootWidget()))
-    {
-        const int32 ChildTotal = Panel->GetChildrenCount();
-        for (int32 ChildIndex = 0; ChildIndex < ChildTotal; ++ChildIndex)
-        {
-            UWidget* Child = Panel->GetChildAt(ChildIndex);
-            if (!IsValid(Child))
-            {
-                continue;
-            }
-            TSharedPtr<FJsonObject> Node = Impl::DescribeHierarchyNode(Child, 1);
-            Node->SetNumberField(TEXT("child_count"), 0);
-            Node->SetArrayField(TEXT("children"), TArray<TSharedPtr<FJsonValue>>());
-            Children.Add(MakeShared<FJsonValueObject>(Node));
-        }
-    }
-    Root->SetNumberField(TEXT("child_count"), Children.Num());
-    Root->SetArrayField(TEXT("children"), Children);
-
-    TSharedPtr<FJsonObject> Tree = MakeShared<FJsonObject>();
-    Tree->SetStringField(TEXT("widget_name"), TargetName);
-    Tree->SetObjectField(TEXT("hierarchy"), Root);
-    Tree->SetBoolField(TEXT("widget_valid"), IsValid(Widget));
-    return mcp_common::MakeOkReply(Tree);
-}
-
-// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
+// MCP:list_level_widget_components - CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_level_widget_properties / set_level_widget_visibility search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 //   @param actor_name_filter - Optional substring filter on the owning actor's name (Contains match)
 //   @returns { components: [{ actor_name: string, widget_component_name: string, widget_name: string|null, widget_class: string|null }], component_count: number, actor_name_filter: string|null }
 
@@ -723,10 +684,9 @@ TSharedPtr<FJsonObject> HandleRemoveWidget(const TSharedPtr<FJsonObject>& Params
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_widget"), &HandleCreateWidget },
-    { TEXT("get_widget_hierarchy"), &HandleGetWidgetHierarchy },
-    { TEXT("get_widget_properties"), &HandleGetWidgetProperties },
+    { TEXT("get_level_widget_properties"), &HandleGetWidgetProperties },
     { TEXT("list_level_widget_components"), &HandleListLevelWidgetComponents },
     { TEXT("remove_widget"), &HandleRemoveWidget },
-    { TEXT("set_widget_visibility"), &HandleSetWidgetVisibility },
+    { TEXT("set_level_widget_visibility"), &HandleSetWidgetVisibility },
 };
 } // namespace UEAgentUICommands

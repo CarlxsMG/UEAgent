@@ -119,7 +119,7 @@ namespace
 
 // Data Layer asset authoring.
 
-// MCP:create_data_layer_asset - Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
+// MCP:create_data_layer_asset - Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_assets with data_layer_asset_path; list them: get_data_layer_assets.
 //   @param name - Name of the new data layer asset, also its package name under package_path.
 //   @param package_path - Target /Game package path (optional, default "/Game/DataLayers")
 //   @param data_layer_type - Data layer type: "Editor" or "Runtime" (optional, default "Editor"); matched without case, any other value gives Editor
@@ -284,35 +284,10 @@ TSharedPtr<FJsonObject> HandleSetDataLayerType(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_data_layer_type"), SaveError);
 }
 
-// MCP:get_data_layer_asset_info - Reads type, debug color and runtime flags of a UDataLayerAsset.
-//   @param data_layer_asset_path - Full /Game path to the data layer asset.
-//   @returns { data_layer_asset_path: string, asset_path: string, name: string, data_layer_type: string, is_runtime: bool, is_private: bool, supports_actor_filters: bool, debug_color: [number, number, number, number] }
-
-TSharedPtr<FJsonObject> HandleGetDataLayerAssetInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("data_layer_asset_path"), AssetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UDataLayerAsset* Asset = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = DataAuthoringUtils::OpenDataLayerAsset(AssetPath, Asset))
-    {
-        return Failure;
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = DataLayer_AssetReply(AssetPath, Asset);
-    ResultObj->SetStringField(TEXT("name"), Asset->GetName());
-    ResultObj->SetStringField(TEXT("data_layer_type"), DataAuthoringUtils::DataLayerTypeToString(Asset->GetType()));
-    ResultObj->SetBoolField(TEXT("is_runtime"), Asset->IsRuntime());
-    ResultObj->SetBoolField(TEXT("is_private"), Asset->IsPrivate());
-    ResultObj->SetBoolField(TEXT("supports_actor_filters"), Asset->SupportsActorFilters());
-    ResultObj->SetArrayField(TEXT("debug_color"), mcp_common::ColorToJsonArray(Asset->GetDebugColor()));
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:get_data_layer_assets - Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, each with name, object path and type (Editor, Runtime or Unknown). Every match is loaded to read its type; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances. For one asset's runtime flags and debug color use get_data_layer_asset_info.
-//   @param path - Content path to search (optional, default "/Game", recursive)
-//   @returns { path: string, data_layer_assets: [{ name: string, path: string, type: string }], count: number }
+// MCP:get_data_layer_assets - Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, or reads exactly one with data_layer_asset_path; each entry carries name, object path, type (Editor, Runtime or Unknown), the runtime flags and the debug color. Every match is loaded to read them; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances.
+//   @param path - Content path to search (optional, default "/Game", recursive). Ignored when data_layer_asset_path is given.
+//   @param data_layer_asset_path - Optional full path of ONE data layer asset to read instead of searching; an asset that does not load as a UDataLayerAsset is an error.
+//   @returns { path: string, data_layer_asset_path?: string (echo, single-asset mode), data_layer_assets: [{ name: string, path: string, type: string, is_runtime?: bool, is_private?: bool, supports_actor_filters?: bool, debug_color?: [number, number, number, number] }], count: number }
 
 TSharedPtr<FJsonObject> HandleGetDataLayerAssets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -322,34 +297,65 @@ TSharedPtr<FJsonObject> HandleGetDataLayerAssets(const TSharedPtr<FJsonObject>& 
     {
         Root = TEXT("/Game");
     }
+    // Or exactly one asset, read by its path.
+    FString SinglePath;
+    const bool bSingle = Params->TryGetStringField(TEXT("data_layer_asset_path"), SinglePath);
 
-    // Every UDataLayerAsset, subclasses included, under that folder tree.
-    FARFilter Query;
-    Query.ClassPaths.Add(UDataLayerAsset::StaticClass()->GetClassPathName());
-    Query.PackagePaths.Add(FName(*Root));
-    Query.bRecursivePaths = true;
-    Query.bRecursiveClasses = true;
-
-    TArray<FAssetData> Found;
-    mcp_common::AssetRegistry().GetAssets(Query, Found);
+    // One entry: its name, path and type, and, when the asset loads, its flags and debug color.
+    auto DescribeLayer = [](const FString& Name, const FString& Path, const UDataLayerAsset* Layer)
+    {
+        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+        Row->SetStringField(TEXT("name"), Name);
+        Row->SetStringField(TEXT("path"), Path);
+        Row->SetStringField(TEXT("type"), Layer != nullptr ? DataAuthoringUtils::DataLayerTypeToString(Layer->GetType()) : TEXT("Unknown"));
+        if (Layer != nullptr)
+        {
+            Row->SetBoolField(TEXT("is_runtime"), Layer->IsRuntime());
+            Row->SetBoolField(TEXT("is_private"), Layer->IsPrivate());
+            Row->SetBoolField(TEXT("supports_actor_filters"), Layer->SupportsActorFilters());
+            Row->SetArrayField(TEXT("debug_color"), mcp_common::ColorToJsonArray(Layer->GetDebugColor()));
+        }
+        return MakeShared<FJsonValueObject>(Row);
+    };
 
     TArray<TSharedPtr<FJsonValue>> Rows;
-    Rows.Reserve(Found.Num());
-    for (const FAssetData& Entry : Found)
+    if (bSingle)
     {
-        // The registry does not expose the layer type as a tag (it is a plain UPROPERTY),
-        // so the asset is loaded to read it.
-        const UDataLayerAsset* Layer = Cast<UDataLayerAsset>(Entry.GetAsset());
+        UDataLayerAsset* Asset = nullptr;
+        if (TSharedPtr<FJsonObject> Failure = DataAuthoringUtils::OpenDataLayerAsset(SinglePath, Asset))
+        {
+            return Failure;
+        }
+        Root = SinglePath;
+        Rows.Add(DescribeLayer(Asset->GetName(), Asset->GetPathName(), Asset));
+    }
+    else
+    {
+        // Every UDataLayerAsset, subclasses included, under that folder tree.
+        FARFilter Query;
+        Query.ClassPaths.Add(UDataLayerAsset::StaticClass()->GetClassPathName());
+        Query.PackagePaths.Add(FName(*Root));
+        Query.bRecursivePaths = true;
+        Query.bRecursiveClasses = true;
 
-        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-        Row->SetStringField(TEXT("name"), Entry.AssetName.ToString());
-        Row->SetStringField(TEXT("path"), Entry.GetObjectPathString());
-        Row->SetStringField(TEXT("type"), Layer != nullptr ? DataAuthoringUtils::DataLayerTypeToString(Layer->GetType()) : TEXT("Unknown"));
-        Rows.Add(MakeShared<FJsonValueObject>(Row));
+        TArray<FAssetData> Found;
+        mcp_common::AssetRegistry().GetAssets(Query, Found);
+
+        Rows.Reserve(Found.Num());
+        for (const FAssetData& Entry : Found)
+        {
+            // The registry does not expose the layer type as a tag (it is a plain UPROPERTY),
+            // so the asset is loaded to read it.
+            Rows.Add(DescribeLayer(Entry.AssetName.ToString(), Entry.GetObjectPathString(), Cast<UDataLayerAsset>(Entry.GetAsset())));
+        }
     }
 
     TSharedPtr<FJsonObject> Listing = MakeShared<FJsonObject>();
     Listing->SetStringField(TEXT("path"), Root);
+    if (bSingle)
+    {
+        Listing->SetStringField(TEXT("data_layer_asset_path"), SinglePath);
+    }
     Listing->SetArrayField(TEXT("data_layer_assets"), Rows);
     Listing->SetNumberField(TEXT("count"), Rows.Num());
     return mcp_common::MakeOkReply(Listing);
@@ -530,7 +536,6 @@ TSharedPtr<FJsonObject> HandleSetDataLayerRuntimeState(const TSharedPtr<FJsonObj
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_data_layer_asset"), &HandleCreateDataLayerAsset },
-    { TEXT("get_data_layer_asset_info"), &HandleGetDataLayerAssetInfo },
     { TEXT("get_data_layer_assets"), &HandleGetDataLayerAssets },
     { TEXT("set_data_layer_debug_color"), &HandleSetDataLayerDebugColor },
     { TEXT("set_data_layer_initial_runtime_state"), &HandleSetDataLayerInitialRuntimeState },

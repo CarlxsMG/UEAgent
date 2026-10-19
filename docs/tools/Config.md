@@ -2,7 +2,7 @@
 
 # Config
 
-15 tools. Back to the [index](README.md).
+14 tools. Back to the [index](README.md).
 
 ## `add_collision_channel`
 
@@ -175,19 +175,6 @@ Set UGameMapsSettings EditorStartupMap / GameDefaultMap, persist them to the VER
 | `verify_disk` | boolean | no | Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig, which is the in-memory cache) and report disk_value per map. |
 
 **Returns:** `{ editor_startup_map: string, game_default_map: string, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, disk_value: { editor_startup_map: string, game_default_map: string }, disk_checks: [object], verification: object, verification_checks: [object] }`
-
-## `set_physics_gravity`
-
-*Destructive, idempotent.*
-
-Set UPhysicsSettings DefaultGravityZ, persist it to the VERSIONED Config/DefaultEngine.ini (TryUpdateDefaultConfigFile) and re-read that .ini FROM DISK to prove it landed.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `gravity_z` | number | yes | World Z component of gravity |
-| `verify_disk` | boolean | no | Optional bool, default true. Re-read Config/DefaultEngine.ini with FConfigFile::Read (never GConfig) and report disk_value / disk_matches_memory. |
-
-**Returns:** `{ gravity_z: number, ini_path: string, is_default_config_class: bool, versioned_ini: bool, write_reported: bool, persist_method: string, ini_section: string, ini_key: string, disk_present: bool, disk_value: string, disk_matches_memory: bool, verification: object, verification_checks: [object] }`
 
 ## `set_project_settings_value`
 

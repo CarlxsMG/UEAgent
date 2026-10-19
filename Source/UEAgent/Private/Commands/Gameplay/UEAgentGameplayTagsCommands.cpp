@@ -246,77 +246,9 @@ namespace UEAgentGameplayTagsImpl
     }
 }
 
-// --- The registry as a whole ------------------------------------------------------
-
-// MCP:get_gameplay_tags_manager - One-line health check of the gameplay tag system: the manager singleton's validity and the TOTAL number of registered tags. Cheap sanity probe before a tag frontier -- a plausible total confirms the registry loaded, and comparing the count before and after create_gameplay_tag shows the registration took. Counts only; for the tags themselves use get_all_gameplay_tags or query_gameplay_tags.
-//   @returns { manager_name: string, is_valid: bool, total_tags: int }
-TSharedPtr<FJsonObject> HandleGetGameplayTagsManager(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentGameplayTagsImpl;
-
-    const UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("manager_name"), Manager.GetName());
-    Data->SetBoolField(TEXT("is_valid"), IsValid(&Manager));
-    // Only the size of the registry; get_all_gameplay_tags lists the tags themselves.
-    Data->SetNumberField(TEXT("total_tags"), Impl::AllRegisteredTags().Num());
-
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_all_gameplay_tags - Dump EVERY gameplay tag registered in the project, with a count -- the full vocabulary the game can reason about, including tags contributed by plugins and vendor content. Large by nature (projects run to thousands), so use query_gameplay_tags to search a branch and find_gameplay_tag to test one string; keep this for a full inventory or a naming audit.
-//   @returns { tags: [object], count: int }
-TSharedPtr<FJsonObject> HandleGetAllGameplayTags(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentGameplayTagsImpl;
-
-    // tag_name is the tag's string form, tag_string the underlying FName as text.
-    TArray<TSharedPtr<FJsonValue>> Listed;
-    for (const FGameplayTag& Tag : Impl::AllRegisteredTags())
-    {
-        if (!Tag.IsValid())
-        {
-            continue;
-        }
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("tag_name"), Tag.ToString());
-        Entry->SetStringField(TEXT("tag_string"), Tag.GetTagName().ToString());
-        Listed.Add(MakeShared<FJsonValueObject>(Entry));
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetArrayField(TEXT("tags"), Listed);
-    Data->SetNumberField(TEXT("count"), Listed.Num());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:find_gameplay_tag - Does this exact tag string exist and resolve right now? Returns found plus the resolved tag string. The precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match -- so the control case and the case under test become indistinguishable. Also the confirmation that create_gameplay_tag registered live even if you restored the ini. Exact lookup: use query_gameplay_tags for prefix/pattern search, get_gameplay_tag_source to see where it is defined.
-//   @param tag_name - Name of the gameplay tag to find
-//   @returns { tag_name: string, found: bool, tag_string: string }
-TSharedPtr<FJsonObject> HandleFindGameplayTag(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentGameplayTagsImpl;
-
-    FString TagName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tag_name"), TagName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // A miss is a normal answer here (found=false), not an error.
-    const FGameplayTag Resolved = Impl::FindRegisteredTag(TagName);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("tag_name"), TagName);
-    Data->SetBoolField(TEXT("found"), Resolved.IsValid());
-    if (Resolved.IsValid())
-    {
-        Data->SetStringField(TEXT("tag_string"), Resolved.ToString());
-    }
-    return mcp_common::MakeOkReply(Data);
-}
-
 // --- Single tags: create in the ini, inspect, search -------------------------------
 
-// MCP:create_gameplay_tag - Add a new gameplay tag to the project's DefaultGameplayTags.ini AND register it LIVE in this editor session -- that live half is why you must call this before writing the tag into a DataTable row or a property, since an unregistered tag string is silently reset to None by the importers. But it REWRITES THE WHOLE INI: the list comes back alphabetised, every comment block is deleted, and other tags' DevComments are re-serialised and normalised, so adding one tag can produce a diff full of unrelated insertions and deletions. Copy the ini first; the oracle is `git diff --stat` showing your N insertions and ZERO deletions, and if not, git checkout the ini and re-insert only your line (the tag stays registered live either way -- confirm with find_gameplay_tag).
+// MCP:create_gameplay_tag - Add a new gameplay tag to the project's DefaultGameplayTags.ini AND register it LIVE in this editor session -- that live half is why you must call this before writing the tag into a DataTable row or a property, since an unregistered tag string is silently reset to None by the importers. But it REWRITES THE WHOLE INI: the list comes back alphabetised, every comment block is deleted, and other tags' DevComments are re-serialised and normalised, so adding one tag can produce a diff full of unrelated insertions and deletions. Copy the ini first; the oracle is `git diff --stat` showing your N insertions and ZERO deletions, and if not, git checkout the ini and re-insert only your line (the tag stays registered live either way -- confirm with get_gameplay_tag_info).
 //   @param tag_name - Name of the gameplay tag to create or check
 //   @param dev_comment - Optional developer comment for the tag
 //   @param source_name - Optional explicit source INI name
@@ -369,7 +301,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayTag(const TSharedPtr<FJsonObject>& P
     }
 
     // The path of the editor's "Add New Gameplay Tag" widget: the tag joins the project's list in the .ini and the
-    // tag tree is refreshed, so get_all_gameplay_tags lists it.
+    // tag tree is refreshed, so query_gameplay_tags lists it.
     const FName SourceFName = SourceName.IsEmpty() ? NAME_None : FName(*SourceName);
     if (!IGameplayTagsEditorModule::Get().AddNewGameplayTagToINI(TagName, DevComment, SourceFName))
     {
@@ -380,9 +312,9 @@ TSharedPtr<FJsonObject> HandleCreateGameplayTag(const TSharedPtr<FJsonObject>& P
     return Registered(Created.IsValid() ? Created.ToString() : TagName, TEXT("Gameplay tag created and registered in INI"));
 }
 
-// MCP:get_gameplay_tag_info - Read one gameplay tag's detail, including its PARENT tag -- how you walk the hierarchy that makes tags useful (Material.Wood.Oak answers to Material.Wood). Worth knowing before writing a match: hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. get_gameplay_tag_source says where the tag is defined; find_gameplay_tag just tests existence.
-//   @param tag_name - Name of the gameplay tag to get info for
-//   @returns { tag_name: string, tag_string: string, tag_name_string: string, parent_tag: string }
+// MCP:get_gameplay_tag_info - Does this exact tag string exist and resolve right now, and if so its detail: its PARENT tag and where it is defined. found=false is a normal answer, not an error -- the precondition to check BEFORE using a tag anywhere: an unregistered tag is not an error in UE, it silently becomes an empty/None tag, and a query made with an empty tag fails exactly like a valid tag that does not match. The parent is how you walk the hierarchy (Material.Wood.Oak answers to Material.Wood); hierarchy matching is ASYMMETRIC, HasAny(A, B) only succeeds when a tag of A is B or a DESCENDANT of B, so putting a family where a leaf is expected quietly fails. The source says where the tag comes from -- native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- with its comment and native / restricted / explicit flags: whether a tag survives an editor restart, which file to edit to change it, and whether it is YOURS or a vendor's or the engine's before you rename or remove it. Exact lookup: use query_gameplay_tags for a branch.
+//   @param tag_name - Name of the gameplay tag to look up
+//   @returns { tag_name: string, found: bool, tag_string?: string, tag_name_string?: string, parent_tag?: string, source?: string, comment?: string, is_native?: bool, is_restricted?: bool, is_explicit?: bool, allow_non_restricted_children?: bool }
 TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayTagsImpl;
@@ -390,14 +322,16 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& 
     FString TagName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tag_name"), TagName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // A miss is a normal answer here (found=false), not an error.
     const FGameplayTag Resolved = Impl::FindRegisteredTag(TagName);
-    if (!Resolved.IsValid())
-    {
-        return Impl::TagNotFound(TagName);
-    }
-
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("tag_name"), TagName);
+    Data->SetBoolField(TEXT("found"), Resolved.IsValid());
+    if (!Resolved.IsValid())
+    {
+        return mcp_common::MakeOkReply(Data);
+    }
+
     Data->SetStringField(TEXT("tag_string"), Resolved.ToString());
     Data->SetStringField(TEXT("tag_name_string"), Resolved.GetTagName().ToString());
 
@@ -407,47 +341,86 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagInfo(const TSharedPtr<FJsonObject>& 
     {
         Data->SetStringField(TEXT("parent_tag"), Parent.ToString());
     }
+
+    // Where the tag is defined, from the manager's editor data.
+    FString Comment;
+    FName Source;
+    bool bIsExplicit = false;
+    bool bIsRestricted = false;
+    bool bAllowNonRestrictedChildren = false;
+    UGameplayTagsManager::Get().GetTagEditorData(Resolved.GetTagName(), Comment, Source, bIsExplicit, bIsRestricted, bAllowNonRestrictedChildren);
+
+    Data->SetStringField(TEXT("comment"), Comment);
+    Data->SetStringField(TEXT("source"), Source.ToString());
+    // "Native" tag detection -- engine convention: source = "Native" or starts with "NativeGameplayTags".
+    const FString SrcStr = Source.ToString();
+    Data->SetBoolField(TEXT("is_native"), SrcStr.Equals(TEXT("Native"), ESearchCase::IgnoreCase)
+                                       || SrcStr.StartsWith(TEXT("NativeGameplayTags")));
+    Data->SetBoolField(TEXT("is_restricted"), bIsRestricted);
+    Data->SetBoolField(TEXT("is_explicit"), bIsExplicit);
+    Data->SetBoolField(TEXT("allow_non_restricted_children"), bAllowNonRestrictedChildren);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:query_gameplay_tags - Search the registered gameplay tags for everything matching a pattern -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this". Pick it over get_all_gameplay_tags, which dumps the entire project registry, and over find_gameplay_tag, which only answers about one exact string. Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not.
-//   @param query_tag - The query tag pattern to match against all tags
-//   @returns { query_tag: string, matching_tags: [object], count: int }
+// MCP:query_gameplay_tags - Search the registered gameplay tags for everything under a tag -- the discovery call for "what tags exist under Material.Wood" or "is there already a tag for this" -- or, with no query_tag, list EVERY registered tag (the full vocabulary, plugins and vendor content included; projects run to thousands, so prefer a branch). count_only returns just the count: the cheap health probe that the registry loaded, or that create_gameplay_tag registered (compare before and after). Sees the LIVE registry, so a tag added this session by create_gameplay_tag shows up even if the ini was restored, and one that only exists as text in a file does not. A query_tag that is not registered is an error; to test one exact string use get_gameplay_tag_info.
+//   @param query_tag - Optional tag whose branch to list (the tag itself and all of its descendants); omitted or empty lists every registered tag
+//   @param count_only - Optional bool, default false: return count (and manager_valid) without the matching_tags list
+//   @returns { query_tag: string, count: int, manager_valid: bool, matching_tags?: [{ tag_name: string, tag_string: string }] }
 TSharedPtr<FJsonObject> HandleQueryGameplayTags(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayTagsImpl;
 
     FString QueryTagName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("query_tag"), QueryTagName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    Params->TryGetStringField(TEXT("query_tag"), QueryTagName);
+    QueryTagName.TrimStartAndEndInline();
+    bool bCountOnly = false;
+    Params->TryGetBoolField(TEXT("count_only"), bCountOnly);
 
-    const FGameplayTag Query = Impl::FindRegisteredTag(QueryTagName);
-    if (!Query.IsValid())
+    // No query tag: every registered tag matches.
+    FGameplayTag Query;
+    if (!QueryTagName.IsEmpty())
     {
-        return mcp_common::MakeErrorReply(TEXT("Query tag not found: ") + QueryTagName);
+        Query = Impl::FindRegisteredTag(QueryTagName);
+        if (!Query.IsValid())
+        {
+            return mcp_common::MakeErrorReply(TEXT("Query tag not found: ") + QueryTagName);
+        }
     }
 
     // MatchesTag is hierarchical: the query tag itself and all of its descendants match.
+    // tag_name is the tag's string form, tag_string the underlying FName as text.
     TArray<TSharedPtr<FJsonValue>> Matches;
+    int32 MatchCount = 0;
     for (const FGameplayTag& Candidate : Impl::AllRegisteredTags())
     {
-        if (Candidate.IsValid() && Candidate.MatchesTag(Query))
+        if (!Candidate.IsValid() || (Query.IsValid() && !Candidate.MatchesTag(Query)))
+        {
+            continue;
+        }
+        ++MatchCount;
+        if (!bCountOnly)
         {
             TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
             Entry->SetStringField(TEXT("tag_name"), Candidate.ToString());
+            Entry->SetStringField(TEXT("tag_string"), Candidate.GetTagName().ToString());
             Matches.Add(MakeShared<FJsonValueObject>(Entry));
         }
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("query_tag"), QueryTagName);
-    Data->SetArrayField(TEXT("matching_tags"), Matches);
-    Data->SetNumberField(TEXT("count"), Matches.Num());
+    if (!bCountOnly)
+    {
+        Data->SetArrayField(TEXT("matching_tags"), Matches);
+    }
+    Data->SetNumberField(TEXT("count"), MatchCount);
+    Data->SetBoolField(TEXT("manager_valid"), IsValid(&UGameplayTagsManager::Get()));
     return mcp_common::MakeOkReply(Data);
 }
 
 // --- Tags owned by one object -------------------------------------------------------
 
-// MCP:get_object_tags - Read the gameplay tags an object currently owns -- what the game believes this actor or asset IS (states, factions, damage types, item categories). Requires the object to implement IGameplayTagAssetInterface; anything else returns nothing, which is a fact about the interface, not about the object's data. Reads the LIVE container, so during PIE tags added at runtime appear here. has_tag / has_any_gameplay_tags answer a specific question instead of listing everything.
+// MCP:get_object_tags - Read the gameplay tags an object currently owns -- what the game believes this actor or asset IS (states, factions, damage types, item categories). Requires the object to implement IGameplayTagAssetInterface; anything else returns nothing, which is a fact about the interface, not about the object's data. Reads the LIVE container, so during PIE tags added at runtime appear here. has_gameplay_tags answers a specific question instead of listing everything.
 //   @param object_path - Path or name of the object to get tags from
 //   @returns { object_path: string, tags: [string], tag_count: int }
 TSharedPtr<FJsonObject> HandleGetObjectTags(const TSharedPtr<FJsonObject>& Params)
@@ -477,7 +450,7 @@ TSharedPtr<FJsonObject> HandleGetObjectTags(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:add_tag_to_object - Grant a gameplay tag to an object that implements IGameplayTagAssetInterface -- the way to put an actor into a state (stunned, wet, on fire, alerted) so that tag-driven systems react without any of them knowing about each other. Reports already_present and echoes the resulting tag list, so the reply is its own oracle. Register the tag first (find_gameplay_tag / create_gameplay_tag): an unregistered string resolves to an empty tag and is added as nothing.
+// MCP:add_tag_to_object - Grant a gameplay tag to an object that implements IGameplayTagAssetInterface -- the way to put an actor into a state (stunned, wet, on fire, alerted) so that tag-driven systems react without any of them knowing about each other. Reports already_present and echoes the resulting tag list, so the reply is its own oracle. Register the tag first (get_gameplay_tag_info / create_gameplay_tag): an unregistered string resolves to an empty tag and is added as nothing.
 //   @param object_path - Path or name of the object to add the tag to
 //   @param tag_name - Name of the tag to add
 //   @returns { object_path: string, tag_name: string, success: bool, already_present: bool, message: string, tags: [string] }
@@ -543,51 +516,11 @@ TSharedPtr<FJsonObject> HandleRemoveTagFromObject(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:has_tag - Does this object own this gameplay tag: the single-tag state check (is it stunned, is it alerted, is it a valid target) as a plain bool. The cheapest of the tag predicates -- has_any_gameplay_tags / has_all_gameplay_tags / has_none_gameplay_tags take a list, get_object_tags returns everything. Verify the tag exists first (find_gameplay_tag): an unregistered string becomes an empty tag and returns false exactly like a genuine miss.
-//   @param object_path - Path or name of the object to check
-//   @param tag_name - Name of the tag to check for
-//   @returns { object_path: string, tag_name: string, has_tag: bool }
-TSharedPtr<FJsonObject> HandleHasTag(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentGameplayTagsImpl;
-
-    FString ObjectPath, TagName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("object_path"), ObjectPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tag_name"), TagName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // Unlike add/remove, the tag-interface check comes before the tag lookup here.
-    UObject* Holder = Impl::ResolveTagHolder(ObjectPath);
-    if (Holder == nullptr)
-    {
-        return Impl::ObjectNotFound(ObjectPath);
-    }
-    const IGameplayTagAssetInterface* TagSource = Cast<IGameplayTagAssetInterface>(Holder);
-    if (TagSource == nullptr)
-    {
-        return Impl::LacksTagInterface(ObjectPath);
-    }
-    const FGameplayTag Tag = Impl::FindRegisteredTag(TagName);
-    if (!Tag.IsValid())
-    {
-        return Impl::TagNotFound(TagName);
-    }
-
-    // HasTag is hierarchical: an owned child of the requested tag also counts.
-    FGameplayTagContainer Owned;
-    TagSource->GetOwnedGameplayTags(Owned);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("object_path"), ObjectPath);
-    Data->SetStringField(TEXT("tag_name"), TagName);
-    Data->SetBoolField(TEXT("has_tag"), Owned.HasTag(Tag));
-    return mcp_common::MakeOkReply(Data);
-}
-
 // ---------------------------------------------------------------------------
 // GameplayTag table/source authoring
 // ---------------------------------------------------------------------------
 
-// MCP:create_gameplay_tag_table - Create a DataTable of gameplay tags (row struct FGameplayTagTableRow) -- the alternative to declaring tags in DefaultGameplayTags.ini, and the better choice for a large or team-owned tag set: rows merge and diff like data instead of fighting over one ini that the create_gameplay_tag path rewrites end to end. The table must be registered in the project's gameplay tag settings to be loaded. Fill it with add_gameplay_tag_to_table and check it with validate_gameplay_tag_table.
+// MCP:create_gameplay_tag_table - Create a DataTable of gameplay tags (row struct FGameplayTagTableRow) -- the alternative to declaring tags in DefaultGameplayTags.ini, and the better choice for a large or team-owned tag set: rows merge and diff like data instead of fighting over one ini that the create_gameplay_tag path rewrites end to end. The table must be registered in the project's gameplay tag settings to be loaded. Fill it with add_gameplay_tag_to_table and check it with get_gameplay_tag_table_rows (valid, missing_tags).
 //   @param name - Asset name for the new data table, e.g. GT_MyTags
 //   @param package_path - Target content path, defaults to /Game/GameplayTags
 //   @returns { name: string, package_path: string, table_path: string, row_struct: string, success: bool, already_exists: bool, saved: bool, message: string }
@@ -666,7 +599,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayTagTable(const TSharedPtr<FJsonObjec
         bSaved ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_gameplay_tag_table"), TEXT("bSaved")));
 }
 
-// MCP:add_gameplay_tag_to_table - Add one tag (with an optional developer comment) as a row in a gameplay tag DataTable, verifying the write by read-back. The team-friendly way to declare tags: it touches only this asset instead of rewriting the shared DefaultGameplayTags.ini the way create_gameplay_tag does. The trade-off is that a tag added here is not registered LIVE, so it may not resolve until the table is reloaded -- if you must use it in the same session, check with find_gameplay_tag first.
+// MCP:add_gameplay_tag_to_table - Add one tag (with an optional developer comment) as a row in a gameplay tag DataTable, verifying the write by read-back. The team-friendly way to declare tags: it touches only this asset instead of rewriting the shared DefaultGameplayTags.ini the way create_gameplay_tag does. The trade-off is that a tag added here is not registered LIVE, so it may not resolve until the table is reloaded -- if you must use it in the same session, check with get_gameplay_tag_info first.
 //   @param table_path - Full asset path of the gameplay tag data table
 //   @param tag - The gameplay tag string used as both row Tag and row name
 //   @param dev_comment - Optional developer comment for the row
@@ -775,9 +708,9 @@ TSharedPtr<FJsonObject> HandleRemoveGameplayTagFromTable(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_gameplay_tag_from_table"));
 }
 
-// MCP:get_gameplay_tag_table_rows - List every tag declared in a gameplay tag DataTable, with its developer comment -- what this table contributes to the project vocabulary, as opposed to get_all_gameplay_tags which returns the merged live registry from all sources. Use it to audit one team's or one module's tags, and validate_gameplay_tag_table to catch malformed or duplicated rows.
+// MCP:get_gameplay_tag_table_rows - List every tag declared in a gameplay tag DataTable (FGameplayTagTableRow), with its developer comment and whether the live tag manager has it registered -- what this table contributes to the project vocabulary, as opposed to query_gameplay_tags which returns the merged live registry from all sources. valid is false when any row's tag is not registered, and missing_tags names each such tag with its row key, so the table can be fixed or the tags registered. Read-only.
 //   @param table_path - Full asset path of the gameplay tag data table
-//   @returns { table_path: string, row_struct: string, rows: [object], row_count: int }
+//   @returns { table_path: string, row_struct: string, rows: [{ row_name: string, tag: string, dev_comment: string, registered: bool }], row_count: int, valid: bool, missing_count: int, missing_tags: [{ tag_name: string, row_name: string }] }
 TSharedPtr<FJsonObject> HandleGetGameplayTagTableRows(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentGameplayTagsImpl;
@@ -794,6 +727,7 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagTableRows(const TSharedPtr<FJsonObje
 
     // Row memory is laid out as FGameplayTagTableRow (LoadTagTable checked the row struct).
     TArray<TSharedPtr<FJsonValue>> Rows;
+    TArray<TSharedPtr<FJsonValue>> MissingTags;
     for (const TPair<FName, uint8*>& Entry : Table->GetRowMap())
     {
         if (Entry.Value == nullptr)
@@ -806,6 +740,17 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagTableRows(const TSharedPtr<FJsonObje
         RowJson->SetStringField(TEXT("row_name"), Entry.Key.ToString());
         RowJson->SetStringField(TEXT("tag"), TagRow.Tag.ToString());
         RowJson->SetStringField(TEXT("dev_comment"), TagRow.DevComment);
+        // Registered in the live manager? A row whose tag is not is reported in missing_tags under its row key.
+        const FString TagName = TagRow.Tag.ToString();
+        const bool bRegistered = !TagName.IsEmpty() && Impl::FindRegisteredTag(TagName).IsValid();
+        RowJson->SetBoolField(TEXT("registered"), bRegistered);
+        if (!TagName.IsEmpty() && !bRegistered)
+        {
+            TSharedPtr<FJsonObject> MissingEntry = MakeShared<FJsonObject>();
+            MissingEntry->SetStringField(TEXT("tag_name"), TagName);
+            MissingEntry->SetStringField(TEXT("row_name"), Entry.Key.ToString());
+            MissingTags.Add(MakeShared<FJsonValueObject>(MissingEntry));
+        }
         Rows.Add(MakeShared<FJsonValueObject>(RowJson));
     }
 
@@ -814,10 +759,13 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagTableRows(const TSharedPtr<FJsonObje
     Data->SetStringField(TEXT("row_struct"), Table->RowStruct->GetName());
     Data->SetArrayField(TEXT("rows"), Rows);
     Data->SetNumberField(TEXT("row_count"), Rows.Num());
+    Data->SetBoolField(TEXT("valid"), MissingTags.Num() == 0);
+    Data->SetNumberField(TEXT("missing_count"), MissingTags.Num());
+    Data->SetArrayField(TEXT("missing_tags"), MissingTags);
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_gameplay_tag - Delete a gameplay tag from its ini source list. Two cautions. Nothing tells you who was using it -- count_gameplay_tag_references always answers 0 by construction, so audit with find_blueprint_node_references and a binary grep of Content/ first, and add_gameplay_tag_redirect if anything still points at it. And like create_gameplay_tag this rewrites DefaultGameplayTags.ini wholesale, reordering it and dropping comments, so the oracle is `git diff` on the ini, not the success flag.
+// MCP:remove_gameplay_tag - Delete a gameplay tag from its ini source list. Two cautions. Nothing tells you who was using it -- the engine exposes no tag reference count, so audit with find_blueprint_node_references and a binary grep of Content/ first, and add_gameplay_tag_redirect if anything still points at it. And like create_gameplay_tag this rewrites DefaultGameplayTags.ini wholesale, reordering it and dropping comments, so the oracle is `git diff` on the ini, not the success flag.
 //   @param tag - Gameplay tag string to remove, e.g. MyGame.Temp
 //   @returns { tag: string, success: bool, was_present: bool, delete_returned: bool, removed: bool, message: string }
 TSharedPtr<FJsonObject> HandleRemoveGameplayTag(const TSharedPtr<FJsonObject>& Params)
@@ -988,122 +936,60 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// has_all_gameplay_tags  / has_any_gameplay_tags  / has_none_gameplay_tags
+// has_gameplay_tags (match any / all / none)
 // ---------------------------------------------------------------------------
-// MCP:has_all_gameplay_tags - Does the object own EVERY tag in the list (AND) -- the multi-condition gate: alive AND armed AND not restrained. Hierarchy-aware, and the direction is asymmetric: a requested tag matches when an owned tag IS it or DESCENDS from it, so asking for a family accepts its children but asking for a leaf does not accept the family. It also returns owned_tags, so a false answer is diagnosable in the same call. has_any_gameplay_tags is the OR, has_none_gameplay_tags the negation.
-//   @param object_path - Path of the UObject to inspect.
-//   @param tags [array!] - Non-empty array of tag-name strings (e.g. ["Combat.Hit","Character.State.Alive"]).
-//   @returns { object_path, requested: [string], has_all: bool, owned_tags: [string] }
-TSharedPtr<FJsonObject> HandleHasAllGameplayTags(const TSharedPtr<FJsonObject>& Params)
-{
-    FGameplayTagsHasRequest Request;
-    if (TSharedPtr<FJsonObject> Error = GameplayTags_ReadHasRequest(Params, Request))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("object_path"), Request.ObjectPath);
-    Data->SetBoolField(TEXT("has_all"), Request.Owned.HasAll(Request.Requested));
-    Data->SetArrayField(TEXT("requested"), mcp_common::GameplayTagsToJson(Request.Requested));
-    Data->SetArrayField(TEXT("owned_tags"), mcp_common::GameplayTagsToJson(Request.Owned));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:has_any_gameplay_tags - Does the object own AT LEAST ONE of these tags (OR) -- the "is it any kind of X" gate: any Damage.*, any Status.*, any Team.*. Hierarchy matching is ASYMMETRIC and this is where it bites: a requested FAMILY accepts its descendants, a requested LEAF does not accept the family, so swapping the two silently turns an always-true gate into an always-false one. When in doubt request leaf tags, which match either way. Unlike has_all_gameplay_tags it does not echo the owned tags, so pair a false with get_object_tags.
+// MCP:has_gameplay_tags - Test the tags an object owns (through IGameplayTagAssetInterface, else its first FGameplayTagContainer property) against a list: match "any" (default, OR) -- the "is it any kind of X" gate: any Damage.*, any Status.*; "all" (AND) -- the multi-condition gate: alive AND armed AND not restrained; "none" -- the blocker/immunity check: not stunned, not already burning (computed as !HasAny, so a true means "clear to proceed", not "has them"). A single tag is a one-element list. Hierarchy matching is ASYMMETRIC and this is where it bites: a requested FAMILY accepts its descendants, a requested LEAF does not accept the family, so swapping the two silently turns an always-true gate into an always-false one. When in doubt request leaf tags, which match either way. owned_tags comes back every time, so a surprising answer is diagnosable in the same call. An unregistered tag name is an error (check it with get_gameplay_tag_info).
 //   @param object_path - Path of the UObject to inspect
 //   @param tags [array!] - Non-empty array of tag-name strings (e.g. ["Combat.Hit","Character.State.Alive"])
-//   @returns { object_path, requested: [string], has_any: bool }
+//   @param match - Optional "any" (default) | "all" | "none": OR, AND, or the negation of OR
+//   @returns { object_path: string, match: string, result: bool, has_any?: bool, has_all?: bool, has_none?: bool, requested: [string], owned_tags: [string] }
 TSharedPtr<FJsonObject> HandleHasAnyGameplayTags(const TSharedPtr<FJsonObject>& Params)
 {
+    // The predicate is checked before the object is resolved: a bad match changes nothing and needs no object.
+    FString Match = TEXT("any");
+    Params->TryGetStringField(TEXT("match"), Match);
+    Match.TrimStartAndEndInline();
+    Match.ToLowerInline();
+    if (Match.IsEmpty())
+    {
+        Match = TEXT("any");
+    }
+    if (Match != TEXT("any") && Match != TEXT("all") && Match != TEXT("none"))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("match must be \"any\", \"all\" or \"none\", got \"%s\""), *Match));
+    }
+
     FGameplayTagsHasRequest Request;
     if (TSharedPtr<FJsonObject> Error = GameplayTags_ReadHasRequest(Params, Request))
     {
         return Error;
     }
 
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("object_path"), Request.ObjectPath);
-    Data->SetBoolField(TEXT("has_any"), Request.Owned.HasAny(Request.Requested));
-    Data->SetArrayField(TEXT("requested"), mcp_common::GameplayTagsToJson(Request.Requested));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:has_none_gameplay_tags - Does the object own NONE of these tags -- the blocker/immunity check: not stunned, not already burning, not on the excluded-faction list. Computed as !HasAny (there is no public HasNone), so it inherits the same asymmetric hierarchy matching: listing a FAMILY blocks all of its descendants, listing a LEAF blocks only that leaf. Beware the double negative -- a true here means "clear to proceed", not "has them".
-//   @param object_path - Path of the UObject to inspect
-//   @param tags [array!] - Non-empty array of tag-name strings to test for absence
-//   @returns { object_path, requested: [string], has_none: bool }
-TSharedPtr<FJsonObject> HandleHasNoneGameplayTags(const TSharedPtr<FJsonObject>& Params)
-{
-    FGameplayTagsHasRequest Request;
-    if (TSharedPtr<FJsonObject> Error = GameplayTags_ReadHasRequest(Params, Request))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("object_path"), Request.ObjectPath);
     // FGameplayTagContainer has no HasNone: owning none of the tags is !HasAny.
-    Data->SetBoolField(TEXT("has_none"), !Request.Owned.HasAny(Request.Requested));
+    bool bResult = false;
+    const TCHAR* ResultField = TEXT("has_any");
+    if (Match == TEXT("all"))
+    {
+        bResult = Request.Owned.HasAll(Request.Requested);
+        ResultField = TEXT("has_all");
+    }
+    else if (Match == TEXT("none"))
+    {
+        bResult = !Request.Owned.HasAny(Request.Requested);
+        ResultField = TEXT("has_none");
+    }
+    else
+    {
+        bResult = Request.Owned.HasAny(Request.Requested);
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("object_path"), Request.ObjectPath);
+    Data->SetStringField(TEXT("match"), Match);
+    Data->SetBoolField(TEXT("result"), bResult);
+    Data->SetBoolField(ResultField, bResult);
     Data->SetArrayField(TEXT("requested"), mcp_common::GameplayTagsToJson(Request.Requested));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// count_gameplay_tag_references
-// ---------------------------------------------------------------------------
-// MCP:count_gameplay_tag_references - DOES NOT COUNT ANYTHING: reference_count is ALWAYS 0, plus a note saying why. Declared engine gap -- there is no public GetTagReferenceCount API (the manager tracks refcounts internally, for debug tooling only), so all this returns honestly is whether the tag is valid. Never read the 0 as "nobody uses this tag" and never delete a tag on its evidence. To actually find users: find_blueprint_node_references with include_pin_defaults, plus a binary grep of Content/ and Config/ for the tag string.
-//   @param tag_name - Single tag name (only its validity is really evaluated).
-//   @returns { tag_name, valid: bool, reference_count: 0, note: "..." }
-TSharedPtr<FJsonObject> HandleCountGameplayTagReferences(const TSharedPtr<FJsonObject>& Params)
-{
-    FString TagName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tag_name"), TagName)) { return Missing; }
-    const FGameplayTag T = UEAgentGameplayTagsImpl::FindRegisteredTag(TagName);
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("tag_name"), TagName);
-    Data->SetBoolField(TEXT("valid"), T.IsValid());
-    Data->SetNumberField(TEXT("reference_count"), 0);
-    Data->SetStringField(TEXT("note"),
-        TEXT("UE 5.8 UGameplayTagsManager has no public GetTagReferenceCount API; refcount tracking is internal. "
-             "Use get_object_tags / asset inspection for tag usage audits."));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// get_gameplay_tag_source
-// ---------------------------------------------------------------------------
-// MCP:get_gameplay_tag_source - Where does this tag come from: native C++, DefaultGameplayTags.ini, a tag DataTable, or transient (registered live this session and NOT on disk) -- plus its comment and its native / restricted / explicit flags. The call that tells you whether a tag will survive an editor restart and which file to edit to change it, and the one that distinguishes YOUR tags from a vendor's or the engine's before you rename or remove anything.
-//   @param tag_name - Single tag name.
-//   @returns { tag_name, valid, source, comment, is_native: bool, is_restricted: bool, is_explicit: bool, allow_non_restricted_children: bool }
-TSharedPtr<FJsonObject> HandleGetGameplayTagSource(const TSharedPtr<FJsonObject>& Params)
-{
-    FString TagName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("tag_name"), TagName)) { return Missing; }
-    const FGameplayTag T = UEAgentGameplayTagsImpl::FindRegisteredTag(TagName);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("tag_name"), TagName);
-    const bool bValid = T.IsValid();
-    Data->SetBoolField(TEXT("valid"), bValid);
-    if (!bValid) { return mcp_common::MakeOkReply(Data); }
-
-    FString Comment;
-    FName Source;
-    bool bIsExplicit = false;
-    bool bIsRestricted = false;
-    bool bAllowNonRestrictedChildren = false;
-    UGameplayTagsManager::Get().GetTagEditorData(FName(*TagName), Comment, Source, bIsExplicit, bIsRestricted, bAllowNonRestrictedChildren);
-
-    Data->SetStringField(TEXT("comment"), Comment);
-    Data->SetStringField(TEXT("source"), Source.ToString());
-    // "Native" tag detection — engine convention: source = "Native" or starts with "NativeGameplayTags".
-    const FString SrcStr = Source.ToString();
-    Data->SetBoolField(TEXT("is_native"), SrcStr.Equals(TEXT("Native"), ESearchCase::IgnoreCase)
-                                       || SrcStr.StartsWith(TEXT("NativeGameplayTags")));
-    Data->SetBoolField(TEXT("is_restricted"), bIsRestricted);
-    Data->SetBoolField(TEXT("is_explicit"), bIsExplicit);
-    Data->SetBoolField(TEXT("allow_non_restricted_children"), bAllowNonRestrictedChildren);
+    Data->SetArrayField(TEXT("owned_tags"), mcp_common::GameplayTagsToJson(Request.Owned));
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -1230,85 +1116,23 @@ TSharedPtr<FJsonObject> HandleGetGameplayTagRedirects(const TSharedPtr<FJsonObje
     return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// validate_gameplay_tag_table
-// ---------------------------------------------------------------------------
-// MCP:validate_gameplay_tag_table - Walk every row of a UDataTable (whose RowStruct is FGameplayTagTableRow). For each tag name, verify the tag is actually registered in the manager. Returns the list of missing tags so the user can fix the table or register the missing tags. Does NOT mutate anything.
-//   @param table_path - Asset path to the UDataTable.
-//   @returns { table_path, valid: bool, row_count: int, missing_tags: [{ tag_name, row_name }] }
-TSharedPtr<FJsonObject> HandleValidateGameplayTagTable(const TSharedPtr<FJsonObject>& Params)
-{
-    FString TablePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("table_path"), TablePath)) { return Missing; }
-
-    UDataTable* Table = LoadObject<UDataTable>(nullptr, *TablePath);
-    if (!Table)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Cannot load DataTable: %s"), *TablePath));
-    }
-    if (Table->GetRowStruct() != FGameplayTagTableRow::StaticStruct())
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("DataTable row struct is %s (expected FGameplayTagTableRow)"),
-                Table->GetRowStruct() ? *Table->GetRowStruct()->GetName() : TEXT("None")));
-    }
-
-    TArray<TSharedPtr<FJsonValue>> MissingJson;
-    int32 RowCount = 0;
-    TArray<FGameplayTagTableRow*> Rows;
-    Table->GetAllRows<FGameplayTagTableRow>(TEXT("UEAgent::validate"), Rows);
-    RowCount = Rows.Num();
-    for (const FGameplayTagTableRow* Row : Rows)
-    {
-        if (!Row) { continue; }
-        const FString TagName = Row->Tag.ToString();
-        if (TagName.IsEmpty()) { continue; }
-        const FGameplayTag T = UEAgentGameplayTagsImpl::FindRegisteredTag(TagName);
-        if (!T.IsValid())
-        {
-            TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-            E->SetStringField(TEXT("tag_name"), TagName);
-            E->SetStringField(TEXT("row_name"), Row->DevComment);  // use DevComment as soft row id; falls back if user supplied one
-            MissingJson.Add(MakeShared<FJsonValueObject>(E));
-        }
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("table_path"), TablePath);
-    Data->SetBoolField(TEXT("valid"), MissingJson.Num() == 0);
-    Data->SetNumberField(TEXT("row_count"), RowCount);
-    Data->SetNumberField(TEXT("missing_count"), MissingJson.Num());
-    Data->SetArrayField(TEXT("missing_tags"), MissingJson);
-    return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_gameplay_tag_redirect"), &HandleAddGameplayTagRedirect },
     { TEXT("add_gameplay_tag_to_table"), &HandleAddGameplayTagToTable },
     { TEXT("add_tag_to_object"), &HandleAddTagToObject },
-    { TEXT("count_gameplay_tag_references"), &HandleCountGameplayTagReferences },
     { TEXT("create_gameplay_tag"), &HandleCreateGameplayTag },
     { TEXT("create_gameplay_tag_table"), &HandleCreateGameplayTagTable },
-    { TEXT("find_gameplay_tag"), &HandleFindGameplayTag },
-    { TEXT("get_all_gameplay_tags"), &HandleGetAllGameplayTags },
     { TEXT("get_gameplay_tag_info"), &HandleGetGameplayTagInfo },
     { TEXT("get_gameplay_tag_redirects"), &HandleGetGameplayTagRedirects },
-    { TEXT("get_gameplay_tag_source"), &HandleGetGameplayTagSource },
     { TEXT("get_gameplay_tag_table_rows"), &HandleGetGameplayTagTableRows },
-    { TEXT("get_gameplay_tags_manager"), &HandleGetGameplayTagsManager },
     { TEXT("get_object_tags"), &HandleGetObjectTags },
-    { TEXT("has_all_gameplay_tags"), &HandleHasAllGameplayTags },
-    { TEXT("has_any_gameplay_tags"), &HandleHasAnyGameplayTags },
-    { TEXT("has_none_gameplay_tags"), &HandleHasNoneGameplayTags },
-    { TEXT("has_tag"), &HandleHasTag },
+    { TEXT("has_gameplay_tags"), &HandleHasAnyGameplayTags },
     { TEXT("query_gameplay_tags"), &HandleQueryGameplayTags },
     { TEXT("remove_gameplay_tag"), &HandleRemoveGameplayTag },
     { TEXT("remove_gameplay_tag_from_table"), &HandleRemoveGameplayTagFromTable },
     { TEXT("remove_gameplay_tag_redirect"), &HandleRemoveGameplayTagRedirect },
     { TEXT("remove_tag_from_object"), &HandleRemoveTagFromObject },
-    { TEXT("validate_gameplay_tag_table"), &HandleValidateGameplayTagTable },
 };
 } // namespace UEAgentGameplayTagsCommands
 

@@ -23,7 +23,7 @@
 // does not read it and the dispatcher REPORTS it in data.unknown_params. This table turns
 // the most common miss (the "logical" spelling of a sibling tool) into the canonical name.
 //
-// Coverage: 226 commands / 257 alias->canonical pairs.
+// Coverage: 191 commands / 214 alias->canonical pairs.
 #pragma once
 
 #include "CoreMinimal.h"

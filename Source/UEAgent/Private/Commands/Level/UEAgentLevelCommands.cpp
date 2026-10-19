@@ -334,7 +334,7 @@ namespace UEAgentLevelCommandsImpl
         return 0;
     }
 
-    /** A named gravity setting of configure_gravity. */
+    /** A named gravity setting of set_world_gravity's `preset`. */
     struct FGravityPreset
     {
         const TCHAR* Name;
@@ -395,7 +395,7 @@ namespace UEAgentLevelCommandsImpl
         return Score >= 0.3f ? TEXT("Low") : TEXT("Minimal");
     }
 
-    /** The advisory notes configure_gravity attaches, in their fixed order. */
+    /** The advisory notes set_world_gravity attaches, in their fixed order. */
     TArray<TSharedPtr<FJsonValue>> GravityAdvice(bool bGravityOn, double GravityZ, int32 SimulatingCount, int32 MovableCount)
     {
         struct FNote
@@ -499,50 +499,6 @@ TSharedPtr<FJsonObject> HandleGetActorBlueprint(const TSharedPtr<FJsonObject>& P
             Payload->SetStringField(TEXT("blueprint_asset"), GeneratedClass->ClassGeneratedBy->GetName());
         }
     }
-    return Payload;
-}
-
-// MCP:get_actor_references - Despite the name this does NOT find who references the actor: it lists that actor's own COMPONENTS (type/name/class), i.e. a thinner get_actor_components with no mesh/light detail. For real reference graphs use the Asset Registry tools (get_asset_referencers / get_asset_dependencies). World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', which also makes it see components ADDED AT RUNTIME (AddComponent in BeginPlay) that the editor world does not have; the reply stamps world_name/world_package/net_mode/pie_instance.
-//   @param actor_name - Actor's internal name (GetName) or editor label (GetActorLabel); exact match.
-//   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence.
-//   @returns { actor_name: string, actor_class: string, world: string, references: [{ type: string, name: string, class: string }], references_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleGetActorReferences(const TSharedPtr<FJsonObject>& Params)
-{
-    // 'world' chooses the editor world (default) or a live PIE world, where runtime-added components live.
-    FString TargetName;
-    FString WorldLabel;
-    UWorld* World = nullptr;
-    TSharedPtr<FJsonObject> Failure;
-    AActor* Target = UEAgentLevelCommandsImpl::ResolveActorForQuery(Params, TargetName, World, WorldLabel, Failure);
-    if (Target == nullptr)
-    {
-        return Failure;
-    }
-
-    // The "references" listed are the actor's own components.
-    TArray<TSharedPtr<FJsonValue>> Rows;
-    for (UActorComponent* Component : Target->GetComponents())
-    {
-        if (Component == nullptr)
-        {
-            continue;
-        }
-        TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-        Row->SetStringField(TEXT("type"), TEXT("Component"));
-        Row->SetStringField(TEXT("name"), Component->GetName());
-        Row->SetStringField(TEXT("class"), Component->GetClass()->GetName());
-        Rows.Add(MakeShared<FJsonValueObject>(Row));
-    }
-
-    TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-    Payload->SetStringField(TEXT("actor_name"), TargetName);
-    Payload->SetStringField(TEXT("actor_class"), Target->GetClass()->GetName());
-    Payload->SetStringField(TEXT("world"), WorldLabel);
-    Payload->SetArrayField(TEXT("references"), Rows);
-    Payload->SetNumberField(TEXT("references_count"), Rows.Num());
-    // The editor archetype and the running instance can have different components -- stamp the world.
-    mcp_common::AddWorldEvidence(Payload, World);
     return Payload;
 }
 
@@ -690,9 +646,9 @@ TSharedPtr<FJsonObject> HandleGetLightingInArea(const TSharedPtr<FJsonObject>& P
 
 // World settings and game mode
 
-// MCP:get_world_settings - Read a world's framework wiring: default GameMode plus the pawn / PlayerController / HUD / spectator classes it hands out, and gravity, time dilation and paused state. Use this to check WHICH GameMode+PC a map will spawn; use get_world_settings_detail for the physics/KillZ/world-bounds side. World-aware: with the default world='editor' there is no live GameMode, so the classes come from the DefaultGameMode CDO -- i.e. what the map INTENDS; ask for world='server' and GetAuthGameMode() returns the GameMode a running PIE ACTUALLY instantiated, which is the read that settles a set_player_controller_class that looks applied and is not. WARNING: world_type is stamped by the canonical world evidence, so it can read 'PIE', not only Game/Editor/Other.
+// MCP:get_world_settings - Read a world's framework wiring: default GameMode plus the pawn / PlayerController / HUD / spectator classes it hands out, and gravity, time dilation and paused state. Use this to check WHICH GameMode+PC a map will spawn. It also reads the physics/bounds side: the authored GlobalGravityZ, its override switch and the effective gravity, KillZ and its damage type, whether world-bounds checks are on (KillZ does nothing without them), WorldToMeters and bForceNoPrecomputedLighting -- the read-back of set_world_gravity and set_kill_z, which write the editor world. World-aware: with the default world='editor' there is no live GameMode, so the classes come from the DefaultGameMode CDO -- i.e. what the map INTENDS; ask for world='server' and GetAuthGameMode() returns the GameMode a running PIE ACTUALLY instantiated, which is the read that settles a set_player_controller_class that looks applied and is not. WARNING: world_type is stamped by the canonical world evidence, so it can read 'PIE', not only Game/Editor/Other.
 //   @param world - Optional world selector: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'server' (the PIE world with authority -- the only one with a live AuthGameMode) | 'client' | 'pie:N' | 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence.
-//   @returns { world: string, world_name: string, world_type: string, default_game_mode: string, default_pawn_class: string, player_controller_class: string, hud_class: string, spectator_class: string, world_gravity_enabled: bool (the effective gravity Z is non-zero), world_gravity_overridden: bool (Override World Gravity), world_gravity_z: number, time_dilation: number, paused: number, world_package: string|null, net_mode: string|null, pie_instance: number }
+//   @returns { world: string, world_name: string, world_type: string, default_game_mode: string, default_pawn_class: string, player_controller_class: string, hud_class: string, spectator_class: string, world_gravity_enabled: bool (the effective gravity Z is non-zero), world_gravity_overridden: bool (Override World Gravity), world_gravity_z: number, global_gravity_z: number (the authored override value), global_gravity_set: bool (Override World Gravity), effective_gravity_z: number (WorldSettings GetGravityZ), kill_z: number, kill_z_damage_type: string, enable_world_bounds_checks: bool, world_to_meters: number, force_no_precomputed_lighting: bool, time_dilation: number, paused: number, world_package: string|null, net_mode: string|null, pie_instance: number }
 
 TSharedPtr<FJsonObject> HandleGetWorldSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -737,6 +693,17 @@ TSharedPtr<FJsonObject> HandleGetWorldSettings(const TSharedPtr<FJsonObject>& Pa
     Payload->SetBoolField(TEXT("world_gravity_enabled"), GravityZ != 0.0f);
     Payload->SetBoolField(TEXT("world_gravity_overridden"), Settings->bGlobalGravitySet);
     Payload->SetNumberField(TEXT("world_gravity_z"), GravityZ);
+    // The authored override value, its switch, and the gravity the settings really hand out.
+    Payload->SetNumberField(TEXT("global_gravity_z"), Settings->GlobalGravityZ);
+    Payload->SetBoolField(TEXT("global_gravity_set"), Settings->bGlobalGravitySet != 0);
+    Payload->SetNumberField(TEXT("effective_gravity_z"), Settings->GetGravityZ());
+    // Death plane and world bounds: KillZ only acts while the bounds checks are on.
+    Payload->SetNumberField(TEXT("kill_z"), Settings->KillZ);
+    Payload->SetStringField(TEXT("kill_z_damage_type"), UEAgentLevelCommandsImpl::ClassNameOrNone(Settings->KillZDamageType.Get()));
+    Payload->SetBoolField(TEXT("enable_world_bounds_checks"), Settings->bEnableWorldBoundsChecks != 0);
+    // Scale and lighting.
+    Payload->SetNumberField(TEXT("world_to_meters"), Settings->WorldToMeters);
+    Payload->SetBoolField(TEXT("force_no_precomputed_lighting"), Settings->bForceNoPrecomputedLighting);
     Payload->SetNumberField(TEXT("time_dilation"), Settings->TimeDilation);
     Payload->SetNumberField(TEXT("paused"), Settings->GetPauserPlayerState() != nullptr ? 1.0 : 0.0);
 
@@ -1925,17 +1892,38 @@ static AWorldSettings* GetEditorWorldSettings(FString& OutError)
     return WorldSettings;
 }
 
-// MCP:set_world_gravity - Set an exact global gravity on the EDITOR world's WorldSettings: writes GlobalGravityZ and the "Override World Gravity" flag, then RE-READS GetGravityZ() into the reply so gravity_z is a measurement rather than an echo. Earth is about -980 with the default centimetre unit. Use this when you want a number; use configure_gravity for named presets (Earth/Moon/Mars/Zero). Undoable (wrapped in a transaction) but it dirties the MAP -- save_level to keep it, and check the .umap is not read-only or the save writes nothing.
-//   @param gravity_z - Custom gravity along Z in cm/s^2 (negative = downward; Earth is about -980).
-//   @param enable_override - Optional bool (default true). True makes the world use gravity_z; false disables the override so the project default applies again.
-//   @returns { applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), success: bool (hardcoded) }
+// MCP:set_world_gravity - Set an exact global gravity on the EDITOR world's WorldSettings, or one from a named preset (Earth -980, Moon -163, Mars -371, Zero, Low -490, High -1960, Enabled -980, Disabled 0): writes GlobalGravityZ and the "Override World Gravity" flag, then RE-READS GetGravityZ() into the reply so gravity_z is a measurement rather than an echo, next to the previous values and a census of the world's physics components with an impact rating. Earth is about -980 with the default centimetre unit. Undoable (wrapped in a transaction) but it dirties the MAP -- save_level to keep it, and check the .umap is not read-only or the save writes nothing. Read it back with get_world_settings.
+//   @param gravity_z - Custom gravity along Z in cm/s^2 (negative = downward; Earth is about -980). Required unless preset is given; sending both is refused.
+//   @param preset - Optional preset NAME instead of gravity_z, in any capitalisation: 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero' (0), 'Low' (-490), 'High' (-1960), 'Enabled' (-980), 'Disabled' (an override of 0). An unknown name is refused and nothing is written.
+//   @param enable_override - Optional bool (default true). True makes the world use the gravity; false disables the override so the project default applies again.
+//   @returns { applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (hardcoded) }
 
 TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Params)
 {
+    // gravity_z or a named preset: exactly one of them.
     double GravityZ = 0.0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("gravity_z"), GravityZ)) { return Missing; }
+    const bool bHasGravityZ = Params->TryGetNumberField(TEXT("gravity_z"), GravityZ);
+    FString PresetName;
+    const bool bHasPreset = Params->TryGetStringField(TEXT("preset"), PresetName);
     bool bEnableOverride = true;
     Params->TryGetBoolField(TEXT("enable_override"), bEnableOverride);
+    if (bHasGravityZ == bHasPreset)
+    {
+        return mcp_common::MakeErrorReply(bHasPreset
+            ? TEXT("set_world_gravity: send gravity_z OR preset, not both; nothing was written")
+            : TEXT("Missing required parameter 'gravity_z' (or send 'preset' with a preset name)"));
+    }
+    if (bHasPreset)
+    {
+        const UEAgentLevelCommandsImpl::FGravityPreset* Preset = UEAgentLevelCommandsImpl::FindGravityPreset(PresetName);
+        if (Preset == nullptr)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("set_world_gravity: unknown preset '%s'; use Earth, Moon, Mars, Zero, Low, High, Enabled or Disabled. Nothing was written."),
+                *PresetName));
+        }
+        GravityZ = Preset->GravityZ;
+    }
 
     FString Error;
     AWorldSettings* WorldSettings = GetEditorWorldSettings(Error);
@@ -1943,6 +1931,11 @@ TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Par
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    UWorld* World = WorldSettings->GetWorld();
+
+    // State before the write.
+    const float PreviousGravity = WorldSettings->GetGravityZ();
+    const bool bPreviousOverride = WorldSettings->bGlobalGravitySet != 0;
 
     FScopedTransaction Transaction(FText::FromString(TEXT("Set World Gravity")));
     WorldSettings->Modify();
@@ -1955,115 +1948,57 @@ TSharedPtr<FJsonObject> HandleSetWorldGravity(const TSharedPtr<FJsonObject>& Par
 
     const float ReadBackGravity = WorldSettings->GetGravityZ();
 
+    // Physics census for context: the first primitive component of every actor.
+    int32 PrimitiveCount = 0;
+    int32 SimulatingCount = 0;
+    int32 MovableCount = 0;
+    if (World != nullptr)
+    {
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            const UPrimitiveComponent* FirstPrimitive = It->FindComponentByClass<UPrimitiveComponent>();
+            if (FirstPrimitive == nullptr)
+            {
+                continue;
+            }
+            ++PrimitiveCount;
+            if (FirstPrimitive->IsSimulatingPhysics())
+            {
+                ++SimulatingCount;
+            }
+            if (FirstPrimitive->Mobility == EComponentMobility::Movable)
+            {
+                ++MovableCount;
+            }
+        }
+    }
+    const bool bGravityOn = ReadBackGravity != 0.0f;
+    const float Impact = UEAgentLevelCommandsImpl::GravityImpactScore(bGravityOn, ReadBackGravity, SimulatingCount, MovableCount);
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetNumberField(TEXT("applied_gravity_z"), WorldSettings->GlobalGravityZ);
     ResultObj->SetBoolField(TEXT("enable_override"), WorldSettings->bGlobalGravitySet ? true : false);
     ResultObj->SetNumberField(TEXT("gravity_z"), ReadBackGravity);
+    ResultObj->SetNumberField(TEXT("previous_gravity_z"), PreviousGravity);
+    ResultObj->SetBoolField(TEXT("previous_override"), bPreviousOverride);
+    if (bHasPreset)
+    {
+        ResultObj->SetStringField(TEXT("preset"), PresetName);
+    }
+    ResultObj->SetStringField(TEXT("world_name"), World ? World->GetName() : FString());
+    ResultObj->SetNumberField(TEXT("world_physics_component_count"), PrimitiveCount);
+    ResultObj->SetNumberField(TEXT("world_simulate_physics_component_count"), SimulatingCount);
+    ResultObj->SetNumberField(TEXT("world_dynamic_physics_component_count"), MovableCount);
+    ResultObj->SetNumberField(TEXT("gravity_impact"), Impact);
+    ResultObj->SetStringField(TEXT("gravity_impact_rating"), UEAgentLevelCommandsImpl::GravityImpactRating(Impact));
+    ResultObj->SetArrayField(TEXT("gravity_recommendations"),
+        UEAgentLevelCommandsImpl::GravityAdvice(bGravityOn, ReadBackGravity, SimulatingCount, MovableCount));
     ResultObj->SetBoolField(TEXT("success"), true);
 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:configure_gravity - Set world gravity from a named preset (Earth -980, Moon -163, Mars -371, Zero, Low, High -1960, Enabled, Disabled), writing the same WorldSettings fields as set_world_gravity and returning old/new/requested triplets plus a physics-component census of the world. Prefer set_world_gravity when you have an exact number. WARNING: gravity_configured is a real re-read (it compares GlobalGravityZ against what was asked), but an UNRECOGNISED preset name is NOT an error: it comes back gravity_configured:false with the reason in gravity_message and nothing written -- read that field, not the envelope.
-//   @param gravity_settings - Preset NAME, one of 'Enabled'/'Disabled', 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero', 'Low', 'High', in any capitalisation ('EARTH' works too). For an arbitrary number use set_world_gravity.
-//   @returns { gravity_settings: string, gravity_configured: bool, gravity_message: string, old_gravity_x: float, old_gravity_y: float, old_gravity_z: float, old_gravity_enabled: bool, new_gravity_x: float, new_gravity_y: float, new_gravity_z: float, new_gravity_enabled: bool, requested_gravity_x: float, requested_gravity_y: float, requested_gravity_z: float, requested_gravity_enabled: bool, world_name: string, world_physics_enabled: bool, world_physics_delta_time: float, world_physics_time_seconds: float, world_physics_real_time_seconds: float, world_physics_component_count: int, world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int, gravity_impact: float, gravity_impact_rating: string, gravity_recommendations: [string] }
-
-TSharedPtr<FJsonObject> HandleConfigureGravity(const TSharedPtr<FJsonObject>& Params)
-{
-    FString PresetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("gravity_settings"), PresetName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UWorld* World = mcp_common::GetFirstContextWorld();
-    if (World == nullptr)
-    {
-        return mcp_common::MakeErrorReply(TEXT("No world found"));
-    }
-
-    // State before any write.
-    const double GravityBeforeZ = World->GetGravityZ();
-    AWorldSettings* Settings = World->GetWorldSettings();
-    const bool bOverrideBefore = Settings != nullptr && Settings->bGlobalGravitySet;
-
-    // An unknown preset writes nothing; it then stands for "zero gravity, gravity on", and that is
-    // also what the read-back below is compared with.
-    const UEAgentLevelCommandsImpl::FGravityPreset* Preset = UEAgentLevelCommandsImpl::FindGravityPreset(PresetName);
-    const double RequestedZ = Preset != nullptr ? Preset->GravityZ : 0.0;
-    const bool bGravityOn = Preset == nullptr || Preset->bEnabled;
-
-    // Write the AUTHORED override -- GlobalGravityZ + bGlobalGravitySet, the fields set_world_gravity
-    // writes -- and never the transient WorldGravityZ cache. Clearing bWorldGravitySet makes the next
-    // GetGravityZ() recompute from the new override. "Disabled" writes an override of 0 as well.
-    if (Preset != nullptr && Settings != nullptr)
-    {
-        Settings->Modify();
-        Settings->bGlobalGravitySet = true;
-        Settings->GlobalGravityZ = static_cast<float>(RequestedZ);
-        Settings->bWorldGravitySet = false;
-    }
-
-    // Read back what the world now reports.
-    const double GravityAfterZ = World->GetGravityZ();
-    const bool bOverrideAfter = Settings != nullptr && Settings->bGlobalGravitySet;
-    const bool bLanded = Settings != nullptr
-        && Settings->bGlobalGravitySet
-        && FMath::IsNearlyEqual(Settings->GlobalGravityZ, RequestedZ);
-    const TCHAR* LandedMessage = Preset != nullptr
-        ? TEXT("Gravity configured successfully")
-        : TEXT("Invalid gravity settings. Use 'Enabled', 'Disabled', 'Earth', 'Moon', 'Mars', 'Zero', 'Low', or 'High'");
-
-    // Physics census for context: the first primitive component of every actor.
-    int32 PrimitiveCount = 0;
-    int32 SimulatingCount = 0;
-    int32 MovableCount = 0;
-    for (TActorIterator<AActor> It(World); It; ++It)
-    {
-        const UPrimitiveComponent* FirstPrimitive = It->FindComponentByClass<UPrimitiveComponent>();
-        if (FirstPrimitive == nullptr)
-        {
-            continue;
-        }
-        ++PrimitiveCount;
-        if (FirstPrimitive->IsSimulatingPhysics())
-        {
-            ++SimulatingCount;
-        }
-        if (FirstPrimitive->Mobility == EComponentMobility::Movable)
-        {
-            ++MovableCount;
-        }
-    }
-    const float Impact = UEAgentLevelCommandsImpl::GravityImpactScore(bGravityOn, RequestedZ, SimulatingCount, MovableCount);
-
-    TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-    Payload->SetStringField(TEXT("gravity_settings"), PresetName);
-    Payload->SetBoolField(TEXT("gravity_configured"), bLanded);
-    Payload->SetStringField(TEXT("gravity_message"), bLanded ? LandedMessage : TEXT("Failed to configure gravity"));
-    UEAgentLevelCommandsImpl::WriteFlatXYZ(Payload, TEXT("old_gravity_"), FVector(0.0, 0.0, GravityBeforeZ));
-    Payload->SetBoolField(TEXT("old_gravity_enabled"), bOverrideBefore);
-    UEAgentLevelCommandsImpl::WriteFlatXYZ(Payload, TEXT("new_gravity_"), FVector(0.0, 0.0, GravityAfterZ));
-    Payload->SetBoolField(TEXT("new_gravity_enabled"), bOverrideAfter);
-    UEAgentLevelCommandsImpl::WriteFlatXYZ(Payload, TEXT("requested_gravity_"), FVector(0.0, 0.0, RequestedZ));
-    Payload->SetBoolField(TEXT("requested_gravity_enabled"), bGravityOn);
-
-    // World timing for context. There is no per-world switch that turns physics off to read, so
-    // world_physics_enabled is always true.
-    Payload->SetStringField(TEXT("world_name"), World->GetName());
-    Payload->SetBoolField(TEXT("world_physics_enabled"), true);
-    Payload->SetNumberField(TEXT("world_physics_delta_time"), World->GetDeltaSeconds());
-    Payload->SetNumberField(TEXT("world_physics_time_seconds"), World->GetTimeSeconds());
-    Payload->SetNumberField(TEXT("world_physics_real_time_seconds"), World->GetRealTimeSeconds());
-    Payload->SetNumberField(TEXT("world_physics_component_count"), PrimitiveCount);
-    Payload->SetNumberField(TEXT("world_simulate_physics_component_count"), SimulatingCount);
-    Payload->SetNumberField(TEXT("world_dynamic_physics_component_count"), MovableCount);
-
-    Payload->SetNumberField(TEXT("gravity_impact"), Impact);
-    Payload->SetStringField(TEXT("gravity_impact_rating"), UEAgentLevelCommandsImpl::GravityImpactRating(Impact));
-    Payload->SetArrayField(TEXT("gravity_recommendations"),
-        UEAgentLevelCommandsImpl::GravityAdvice(bGravityOn, RequestedZ, SimulatingCount, MovableCount));
-    return Payload;
-}
-
-// MCP:set_kill_z - Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings_detail -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
+// MCP:set_kill_z - Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings, enable_world_bounds_checks -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
 //   @param kill_z - World-space Z height (cm) below which actors get destroyed. Put it under the lowest playable geometry, not at 0.
 //   @param kill_z_damage_type - Optional UDamageType class name or full path (e.g. 'DamageType' or '/Script/Engine.DamageType'). Resolved BEFORE anything is written, so a bad name is a clean error and KillZ is left untouched.
 //   @returns { applied_kill_z: number, kill_z: number (both re-read off WorldSettings), kill_z_damage_type: string ('None' if unset), success: bool (hardcoded) }
@@ -2120,52 +2055,8 @@ TSharedPtr<FJsonObject> HandleSetKillZ(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:get_world_settings_detail - Read a world's physics/bounds side of WorldSettings: GlobalGravityZ plus the override flag AND the effective GetGravityZ, KillZ and its damage type, enable_world_bounds_checks, world_to_meters, time dilation, default GameMode and force_no_precomputed_lighting. This is the read-back for set_world_gravity / set_kill_z, and the place that tells you whether world-bounds checks are even on; use get_world_settings instead for the GameMode/pawn/PlayerController/HUD wiring. World-aware: world='editor' (default -- and it is the EDITOR world that set_world_gravity/set_kill_z actually write) | 'server' | 'client' | 'pie:N' | 'pie' read the RUNNING duplicate instead, which is how you tell "the map is authored with this gravity" apart from "the session is running with it".
-//   @param world - Optional world selector: absent/'editor' (default -- the world set_world_gravity and set_kill_z write, so this is their read-back) | 'server' | 'client' | 'pie:N' | 'pie' (ambiguous) | 'game' (alias of 'pie') read the live PIE duplicate. An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence.
-//   @returns { world: string, world_name: string, global_gravity_z: number, global_gravity_set: bool, effective_gravity_z: number, kill_z: number, kill_z_damage_type: string, enable_world_bounds_checks: bool, world_to_meters: number, time_dilation: number, default_game_mode: string, force_no_precomputed_lighting: bool, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }
-
-TSharedPtr<FJsonObject> HandleGetWorldSettingsDetail(const TSharedPtr<FJsonObject>& Params)
-{
-    // The default world ('editor') is the one set_world_gravity / set_kill_z write, so this stays
-    // their read-back; a PIE selector reads the running duplicate instead.
-    FString WorldLabel;
-    TSharedPtr<FJsonObject> Failure;
-    UWorld* World = UEAgentLevelCommandsImpl::ResolveWorldForQuery(Params, WorldLabel, Failure, TEXT("No valid editor world found"), /*bRequireValidLowLevel=*/true);
-    if (World == nullptr)
-    {
-        return Failure;
-    }
-    AWorldSettings* Settings = World->GetWorldSettings();
-    if (Settings == nullptr)
-    {
-        return mcp_common::MakeErrorReply(TEXT("WorldSettings not found"));
-    }
-
-    TSharedPtr<FJsonObject> Detail = MakeShared<FJsonObject>();
-    Detail->SetStringField(TEXT("world_name"), World->GetName());
-    // Gravity: the authored override value, its switch, and the gravity the world really uses.
-    Detail->SetNumberField(TEXT("global_gravity_z"), Settings->GlobalGravityZ);
-    Detail->SetBoolField(TEXT("global_gravity_set"), Settings->bGlobalGravitySet != 0);
-    Detail->SetNumberField(TEXT("effective_gravity_z"), Settings->GetGravityZ());
-    // Death plane and world bounds.
-    Detail->SetNumberField(TEXT("kill_z"), Settings->KillZ);
-    Detail->SetStringField(TEXT("kill_z_damage_type"), UEAgentLevelCommandsImpl::ClassNameOrNone(Settings->KillZDamageType.Get()));
-    Detail->SetBoolField(TEXT("enable_world_bounds_checks"), Settings->bEnableWorldBoundsChecks != 0);
-    // Scale, time, framework and lighting.
-    Detail->SetNumberField(TEXT("world_to_meters"), Settings->WorldToMeters);
-    Detail->SetNumberField(TEXT("time_dilation"), Settings->TimeDilation);
-    Detail->SetStringField(TEXT("default_game_mode"), UEAgentLevelCommandsImpl::ClassNameOrNone(Settings->DefaultGameMode.Get()));
-    Detail->SetBoolField(TEXT("force_no_precomputed_lighting"), Settings->bForceNoPrecomputedLighting);
-
-    // Which world these came from -- the authored map and its running PIE duplicate can
-    // disagree on every value above, and world_package tells them apart.
-    Detail->SetStringField(TEXT("world"), WorldLabel);
-    mcp_common::AddWorldEvidence(Detail, World);
-    return mcp_common::MakeOkReply(Detail);
-}
-
 // ===========================================================================
-// Actor lock + absolute transform + preserve scale ratio.
+// Actor lock + absolute transform.
 // All headless-friendly (no Slate).
 // ===========================================================================
 
@@ -2302,28 +2193,6 @@ TSharedPtr<FJsonObject> HandleGetAbsoluteTransform(const TSharedPtr<FJsonObject>
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_preserve_scale_ratio - DOES NOTHING and says so: the editor's preserve-scale-ratio preference (UEditorPerProjectUserSettings::bPreserveScaleRatio) is not in the public UPROPERTY set, so this tool writes nothing and always answers applied:false with a note pointing at Editor Preferences > Level Editor > Viewports. Kept only so the call fails loudly instead of silently; it does not affect set_actor_transform, whose scale is always taken literally.
-//   @param preserve - Required bool, accepted and echoed back but never applied to anything.
-//   @returns { applied: false (always), preserve: bool (your input, echoed), note: string explaining the gap }
-TSharedPtr<FJsonObject> HandleSetPreserveScaleRatio(const TSharedPtr<FJsonObject>& Params)
-{
-    bool bPreserve = true;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredBool(Params, TEXT("preserve"), bPreserve)) { return Missing; }
-
-    // Honest gap: UEditorPerProjectUserSettings::bPreserveScaleRatio is not in the public UPROPERTY set.
-    // Setting this via reflection is possible but undocumented; the safe path is to log the intent and
-    // return a clean "applied:false" + note so the call doesn't crash. Users wanting the behavior should
-    // toggle it via the Editor Preferences UI (Edit -> Editor Preferences -> Level Editor -> Viewports ->
-    // "Preserve Non-Uniform Scale").
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("applied"), false);
-    Data->SetBoolField(TEXT("preserve"), bPreserve);
-    Data->SetStringField(TEXT("note"),
-        TEXT("UE 5.8 removed UEditorPerProjectUserSettings::bPreserveScaleRatio from the public UPROPERTY set. "
-             "Set the preference manually via Edit > Editor Preferences > Level Editor > Viewports."));
-    return mcp_common::MakeOkReply(Data);
-}
-
 // MCP:set_actor_lifetime - Schedules an actor in the active world (a running PIE/game world if one exists, otherwise the editor world) for automatic destruction after N seconds via FTimerManager::SetTimer. Idempotent: re-running cancels the previous timer and resets the countdown. Used for transient effects (damage numbers, FX) that should auto-cleanup. Runtime/cooked-build safe: resolves the world via GEngine's world contexts, not GEditor, so it also works in packaged builds.
 //   @param actor_name - Display label or internal name of the target actor (required)
 //   @param seconds - Seconds until the actor is destroyed (required, >0)
@@ -2428,18 +2297,15 @@ TSharedPtr<FJsonObject> HandleSetPieWindowSize(const TSharedPtr<FJsonObject>& Pa
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("capture_pie_screenshot"), &HandleCapturePieScreenshot },
-    { TEXT("configure_gravity"), &HandleConfigureGravity },
     { TEXT("get_absolute_transform"), &HandleGetAbsoluteTransform },
     { TEXT("get_actor_blueprint"), &HandleGetActorBlueprint },
     { TEXT("get_actor_components"), &HandleGetActorComponents },
     { TEXT("get_actor_lock_location"), &HandleGetActorLockLocation },
-    { TEXT("get_actor_references"), &HandleGetActorReferences },
     { TEXT("get_actors_by_class"), &HandleGetActorsByClass },
     { TEXT("get_actors_in_radius"), &HandleGetActorsInRadius },
     { TEXT("get_lighting_in_area"), &HandleGetLightingInArea },
     { TEXT("get_navigation_data"), &HandleGetNavigationData },
     { TEXT("get_world_settings"), &HandleGetWorldSettings },
-    { TEXT("get_world_settings_detail"), &HandleGetWorldSettingsDetail },
     { TEXT("inject_analog_input"), &HandleInjectAnalogInput },
     { TEXT("inject_key_input"), &HandleInjectKeyInput },
     { TEXT("inject_mouse_button"), &HandleInjectMouseButton },
@@ -2452,7 +2318,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_kill_z"), &HandleSetKillZ },
     { TEXT("set_pie_window_size"), &HandleSetPieWindowSize },
     { TEXT("set_player_controller_class"), &HandleSetPlayerControllerClass },
-    { TEXT("set_preserve_scale_ratio"), &HandleSetPreserveScaleRatio },
     { TEXT("set_view_target"), &HandleSetViewTarget },
     { TEXT("set_world_gravity"), &HandleSetWorldGravity },
     { TEXT("spawn_navmesh_bounds_volume"), &HandleSpawnNavMeshBoundsVolume },

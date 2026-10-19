@@ -6,6 +6,8 @@
 #include "Engine/TriggerVolume.h"
 #include "Engine/TriggerBox.h"
 #include "Engine/TriggerSphere.h"
+// remove_trigger checks for ATriggerBase: TriggerBox, TriggerSphere and TriggerCapsule.
+#include "Engine/TriggerBase.h"
 #include "GameFramework/Volume.h"
 // ABlockingVolume lives under Engine/, not GameFramework/.
 #include "Engine/BlockingVolume.h"
@@ -24,9 +26,6 @@
 #include "Editor.h"
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Kismet/GameplayStatics.h"
-// Editor-only helpers used to build a valid brush for spawned volume actors.
-#include "ActorFactories/ActorFactory.h"
-#include "Builders/CubeBuilder.h"
 #include "ScopedTransaction.h"
 // spawn_box_volume: needs UModel/UPolys to report real brush geometry, and dynamic class
 // resolution (StaticLoadClass / FindFirstObject) to accept short names or /Script/ paths.
@@ -68,29 +67,6 @@ namespace UEAgentTriggerImpl
     bool IsTriggerActor(const AActor& Actor)
     {
         return Actor.IsA<ATriggerBox>() || Actor.IsA<ATriggerSphere>() || Actor.IsA<ATriggerVolume>();
-    }
-
-    // Concrete class for create_volume's volume_type. AVolume itself is abstract and can never be
-    // spawned, so unknown names (and "BlockingVolume") resolve to ABlockingVolume.
-    UClass* ConcreteVolumeClass(const FString& Kind)
-    {
-        if (Kind == TEXT("KillZVolume"))
-        {
-            return AKillZVolume::StaticClass();
-        }
-        if (Kind == TEXT("PainCausingVolume"))
-        {
-            return APainCausingVolume::StaticClass();
-        }
-        if (Kind == TEXT("PostProcessVolume"))
-        {
-            return APostProcessVolume::StaticClass();
-        }
-        if (Kind == TEXT("TriggerVolume"))
-        {
-            return ATriggerVolume::StaticClass();
-        }
-        return ABlockingVolume::StaticClass();
     }
 
     // The component whose overlaps matter: the root when it is a primitive (the brush of a
@@ -169,9 +145,9 @@ AActor* FindActorByName(const FString& Name)
 
 // Shape triggers: creation, inspection, overlap set-up and overlap queries.
 
-// MCP:create_trigger - Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use create_volume(volume_type="TriggerVolume") or spawn_box_volume instead.
+// MCP:create_trigger - Creates a trigger actor (TriggerBox or TriggerSphere) at a specified location. These two shapes only -- for a brush-based ATriggerVolume use spawn_box_volume(volume_class="TriggerVolume") instead.
 //   @param trigger_name - Name label for the trigger actor
-//   @param trigger_type - Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use create_volume(volume_type="TriggerVolume"), which builds that brush.
+//   @param trigger_type - Trigger class: "TriggerBox" (default) or "TriggerSphere". "TriggerVolume" is deliberately REJECTED here -- ATriggerVolume derives from AVolume/ABrush and needs a real UModel brush built for it, so spawning it through this path would hand you a success-shaped actor with no real collision; use spawn_box_volume(volume_class="TriggerVolume"), which builds that brush.
 //   @param location - World [x, y, z] location to spawn the trigger (default 0,0,0)
 //   @returns { trigger_name, trigger_type, actor_name, actor_path, success }
 TSharedPtr<FJsonObject> HandleCreateTrigger(const TSharedPtr<FJsonObject>& Params)
@@ -195,7 +171,7 @@ TSharedPtr<FJsonObject> HandleCreateTrigger(const TSharedPtr<FJsonObject>& Param
         return mcp_common::MakeErrorReply(
             TEXT("trigger_type=TriggerVolume is not supported by create_trigger (ATriggerVolume needs a real ")
             TEXT("Brush/UModel built via UActorFactory::CreateBrushForVolumeActor, which this command does not ")
-            TEXT("build, leaving no working collision); use create_volume(volume_type=\"TriggerVolume\") instead."));
+            TEXT("build, leaving no working collision); use spawn_box_volume(volume_class=\"TriggerVolume\") instead."));
     }
     UClass* const ShapeClass = (Shape == TEXT("TriggerSphere"))
         ? ATriggerSphere::StaticClass()
@@ -251,15 +227,19 @@ TSharedPtr<FJsonObject> HandleGetTriggerInfo(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_actors_in_trigger - List the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}]; get_trigger_overlap_count returns only the count.
-//   @param trigger_name - Object name of the trigger actor, such as the actor_name returned by create_trigger; its editor label is not matched.
-//   @returns { trigger_name, actor_name, actor_class, actors, actor_count }
+// MCP:get_actors_in_trigger - List and count the actors that a TriggerBox, TriggerSphere or TriggerVolume in the editor world (not PIE) currently reports as overlapping (AActor::GetOverlappingActors), without changing anything. Returns actor_count and actors [{actor_name, actor_class}], plus the trigger's own object name and class. The first actor whose object name or editor label matches is used; when it is not a trigger the call fails.
+//   @param trigger_name - Object name or editor label of the trigger actor, such as the actor_name returned by create_trigger.
+//   @returns { trigger_name, actor_name (the trigger's object name), actor_class (the trigger's class), actors: [{actor_name, actor_class}], actor_count }
 TSharedPtr<FJsonObject> HandleGetActorsInTrigger(const TSharedPtr<FJsonObject>& Params)
 {
     FString Wanted;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("trigger_name"), Wanted, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    AActor* const Trigger = FindActorByName(Wanted);
+    UWorld* EditorWorld = nullptr;
+    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(EditorWorld, TEXT("Editor world unavailable"))) { return NoWorld; }
+
+    // The object name or the editor label; the first actor answering to either decides the outcome.
+    AActor* const Trigger = mcp_common::FindActorByName(EditorWorld, Wanted);
     if (Trigger == nullptr)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Trigger not found: %s"), *Wanted));
@@ -288,6 +268,8 @@ TSharedPtr<FJsonObject> HandleGetActorsInTrigger(const TSharedPtr<FJsonObject>& 
 
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
     Report->SetStringField(TEXT("trigger_name"), Wanted);
+    Report->SetStringField(TEXT("actor_name"), Trigger->GetName());
+    Report->SetStringField(TEXT("actor_class"), Trigger->GetClass()->GetName());
     Report->SetNumberField(TEXT("actor_count"), Entries.Num());
     Report->SetArrayField(TEXT("actors"), Entries);
     return mcp_common::MakeOkReply(Report);
@@ -350,77 +332,6 @@ TSharedPtr<FJsonObject> HandleSetTriggerEvents(const TSharedPtr<FJsonObject>& Pa
 
 // Brush volumes.
 
-// MCP:create_volume - Spawn a BlockingVolume, KillZVolume, PainCausingVolume, PostProcessVolume or TriggerVolume in the editor world with a real cube brush, labelled volume_name, as one undo step; the level is not saved. Returns actor_name, actor_path, actor_class and brush_built. For other AVolume classes or box extents use spawn_box_volume.
-//   @param volume_name - Editor label for the new actor; its object name is generated and returned as actor_name.
-//   @param volume_type - Volume class, case-insensitive: "BlockingVolume" (default), "KillZVolume", "PainCausingVolume", "PostProcessVolume" or "TriggerVolume"; any other value spawns a BlockingVolume.
-//   @param location - World location [x, y, z] in cm of the volume center (default [0, 0, 0]).
-//   @param size - Edge length in cm of the cube brush (the full side, not a half-extent); omitted or not positive gives 200.
-//   @returns { volume_name, volume_type, actor_name, actor_path, actor_class, brush_built, success }
-TSharedPtr<FJsonObject> HandleCreateVolume(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Label;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("volume_name"), Label, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString Kind = TEXT("BlockingVolume");
-    Params->TryGetStringField(TEXT("volume_type"), Kind);
-
-    FString Problem;
-    UEditorActorSubsystem* const Spawner = UEAgentTriggerImpl::ActorSpawnerOrError(Problem);
-    if (Spawner == nullptr)
-    {
-        return mcp_common::MakeErrorReply(Problem);
-    }
-
-    UClass* const KindClass = UEAgentTriggerImpl::ConcreteVolumeClass(Kind);
-
-    // location is an [x, y, z] array; without it the volume lands at the origin.
-    const FVector SpawnAt = mcp_common::ReadJsonVector(Params, TEXT("location"));
-
-    const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "CreateVolume", "Create Volume"));
-
-    AActor* const Spawned = Spawner->SpawnActorFromClass(KindClass, SpawnAt, FRotator::ZeroRotator);
-    if (Spawned == nullptr)
-    {
-        const FString Why = FString::Printf(TEXT("Failed to spawn volume actor of type '%s' (class %s)"),
-            *Kind, *KindClass->GetName());
-        return mcp_common::MakeErrorReply(Why);
-    }
-
-    // A brush volume comes out of the spawn with no geometry at all (zero bounds, nothing to
-    // collide with). It gets the cube the editor's own volume factories build: 200 uu per side
-    // by default (the UCubeBuilder defaults), or "size" when a positive one is given.
-    bool bBrushBuilt = false;
-    AVolume* const AsVolume = Cast<AVolume>(Spawned);
-    UCubeBuilder* const Cube = (AsVolume != nullptr) ? NewObject<UCubeBuilder>() : nullptr;
-    if (Cube != nullptr)
-    {
-        double Edge = 0.0;
-        if (Params->TryGetNumberField(TEXT("size"), Edge) && Edge > 0.0)
-        {
-            const float EdgeLength = static_cast<float>(Edge);
-            Cube->X = EdgeLength;
-            Cube->Y = EdgeLength;
-            Cube->Z = EdgeLength;
-        }
-        UActorFactory::CreateBrushForVolumeActor(AsVolume, Cube);
-        bBrushBuilt = true;
-    }
-
-    // The brush build goes through Pre/PostEditChange, so the requested location is applied
-    // once more to be sure it is the one that sticks.
-    Spawned->SetActorLocation(SpawnAt);
-    Spawned->SetActorLabel(Label);
-
-    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
-    Report->SetBoolField(TEXT("success"), true);
-    Report->SetBoolField(TEXT("brush_built"), bBrushBuilt);
-    Report->SetStringField(TEXT("volume_name"), Label);
-    Report->SetStringField(TEXT("volume_type"), Kind);
-    Report->SetStringField(TEXT("actor_name"), Spawned->GetName());
-    Report->SetStringField(TEXT("actor_path"), Spawned->GetPathName());
-    Report->SetStringField(TEXT("actor_class"), Spawned->GetClass()->GetName());
-    return mcp_common::MakeOkReply(Report);
-}
-
 // MCP:get_volume_info - Read a volume actor in the editor world without changing it: its class, whether it is a BlockingVolume, KillZVolume, PainCausingVolume or PostProcessVolume and, when it has a brush component, bounds_origin and bounds_extent as text plus has_brush. Fails if the actor is not an AVolume.
 //   @param actor_name - Object name of the volume actor in the editor world; its editor label is not matched.
 //   @returns { actor_name, actor_class, is_blocking_volume, is_killz_volume, is_pain_causing_volume, is_post_process_volume, bounds_origin, bounds_extent, has_brush }
@@ -457,15 +368,15 @@ TSharedPtr<FJsonObject> HandleGetVolumeInfo(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:spawn_box_volume - USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means "the volume you got matches the volume you asked for", not "the call returned".
-//   @param volume_class [string!] - Volume class: short reflected name ('NavMeshBoundsVolume', 'PhysicsVolume', 'TriggerVolume', 'BlockingVolume', 'PCGVolume', with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must derive from AVolume (required).
+// MCP:spawn_box_volume - USE THIS, NOT the plain actor spawners, for ANY AVolume-derived actor: it spawns the actor AND builds a real cube brush for it from a half-extent, so the volume actually encloses space. The generic spawners leave an EMPTY UModel brush -- zero bounds, which means 0 nav tiles and no overlap, an actor that looks spawned and does nothing. It then normalizes the residual scale some actor factories stamp on placement and RE-READS the resulting world bounds, so `success` means "the volume you got matches the volume you asked for", not "the call returned". Called with no class and no extent it gives a 200 cm BlockingVolume cube. One undo step; the level is not saved.
+//   @param volume_class [string] - Optional volume class (default "BlockingVolume"): short reflected name ('BlockingVolume', 'KillZVolume', 'PainCausingVolume', 'PostProcessVolume', 'TriggerVolume', 'NavMeshBoundsVolume', 'PhysicsVolume', 'PCGVolume', case-insensitive, with or without a leading 'A') or a full object path ('/Script/Engine.TriggerVolume'). Must be a concrete AVolume subclass; anything else is an error.
 //   @param location - World [x, y, z] location to spawn the volume (default 0,0,0)
-//   @param extent [array!] - Required [x, y, z] in unreal units, each component > 0. !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for.
+//   @param extent [array] - Optional [x, y, z] in unreal units, each component > 0; default [100, 100, 100] (a 200 cm cube). !!! THIS IS THE SEMI-AXIS (HALF-size), NOT the full edge length !!! extent=[500,500,200] builds a 1000 x 1000 x 400 cube and, with the scale normalized, gives world bounds of +/-500 / +/-200 around `location`. Check `bounds_extent_actual` against what you asked for. A value that is not an array is an error.
 //   @param actor_label [string] - Optional editor label for the spawned actor
-//   @param is_spatially_loaded [bool] - World Partition spatial-loading flag (default true; only applied when the actor allows changing it). Reported RE-READ from the actor.
+//   @param is_spatially_loaded [bool] - Optional World Partition spatial-loading flag. Applied only when passed and the actor allows changing it (spatial_flag_applied); omitted, the actor keeps its class default. Reported RE-READ from the actor.
 //   @param normalize_scale [bool] - Default TRUE: resets the actor scale to (1,1,1) after building the brush, so the world bounds equal the requested `extent`. It matters because some actor factories stamp a default scale during placement -- APCGVolume is spawned at (25, 25, 10) -- and since brush polys are authored in LOCAL space that scale MULTIPLIES your extent. Set it false only if you deliberately want the factory's scale; `spawn_scale` always reports what it was. Be aware that with normalize_scale=false and a factory scale != 1 the real bounds are NOT the requested extent, so `extent_matches_request` and therefore `success` come back FALSE -- that is the honest answer, not a bug, and `actor_scale` says why they differ.
 //   @returns { actor_name, actor_path, actor_class, volume_class, world_bounds_extent: [x,y,z] (RE-READ, GetActorBounds -- kept for compatibility), bounds_extent_actual: [x,y,z] (RE-READ from the BRUSH component's world bounds; this is the volume itself, with no stray editor sprite in the box), bounds_origin_actual: [x,y,z], actor_scale: [x,y,z] (RE-READ, after normalization), spawn_scale: [x,y,z] (RE-READ, as the actor factory left it), scale_normalized: bool (true only when a correction was actually needed), extent_matches_request: bool, bounds_tolerance_uu: number, has_brush_geometry, brush_built, is_spatially_loaded (RE-READ), spatial_flag_applied, success, requested: { volume_class, location, extent, actor_label, is_spatially_loaded, normalize_scale } }
-//   NOTE (impl): the brush is built with UCubeBuilder in C++. The `extent` hint is written `[array!]`
+//   NOTE (impl): the brush is built with UCubeBuilder in C++. The `extent` hint is written `[array]`
 //   because the catalog's annotation regex cannot parse `[x, y, z]` as a type hint, and that line is
 //   where a caller looks for the half-vs-full answer. The factory scale comes from
 //   UPCGEngineSettings::VolumeScale (PCGEngineSettings.h), applied by UPCGVolumeFactory::PreSpawnActor.
@@ -484,16 +395,22 @@ TSharedPtr<FJsonObject> HandleGetVolumeInfo(const TSharedPtr<FJsonObject>& Param
 // normalization is a no-op. `success` is derived from the bounds actually matching `extent`.
 TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Params)
 {
-    FString VolumeClassName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("volume_class"), VolumeClassName)) { return Missing; }
+    // Both optional: a bare call gives a BlockingVolume, the most common brush volume.
+    FString VolumeClassName = TEXT("BlockingVolume");
+    Params->TryGetStringField(TEXT("volume_class"), VolumeClassName);
 
-    // A typed read, so the catalog publishes extent as the required array it is.
+    // Omitted, the half-extent is 100 uu per axis: the 200 uu cube of the UCubeBuilder defaults, which is
+    // what the editor's own volume factories build. A typed read, so the catalog publishes extent as an array.
+    FVector Extent(100.0, 100.0, 100.0);
     const TArray<TSharedPtr<FJsonValue>>* ExtentJson = nullptr;
-    if (!Params->TryGetArrayField(TEXT("extent"), ExtentJson))
+    if (Params->TryGetArrayField(TEXT("extent"), ExtentJson))
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: extent (cube half-size [x,y,z], each > 0)"));
+        Extent = mcp_common::ReadJsonVector(Params, TEXT("extent"));
     }
-    const FVector Extent = mcp_common::ReadJsonVector(Params, TEXT("extent"));
+    else if (Params->HasField(TEXT("extent")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("extent must be an array [x, y, z] of cube half-sizes, each > 0"));
+    }
     if (Extent.X <= 0.0 || Extent.Y <= 0.0 || Extent.Z <= 0.0)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
@@ -517,8 +434,9 @@ TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Para
 
     const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
 
+    // Written only when the caller asks: omitted, the actor keeps the flag its class gives it.
     bool bIsSpatiallyLoaded = true;
-    Params->TryGetBoolField(TEXT("is_spatially_loaded"), bIsSpatiallyLoaded);
+    const bool bSpatialRequested = Params->TryGetBoolField(TEXT("is_spatially_loaded"), bIsSpatiallyLoaded);
 
     FString ActorLabel;
     Params->TryGetStringField(TEXT("actor_label"), ActorLabel);
@@ -569,10 +487,10 @@ TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Para
         bScaleNormalized = true;
     }
 
-    // Apply the World Partition spatial-loading flag only when the actor permits it; the setter
-    // asserts (check()) if the flag cannot be changed for this actor, so guard against a crash.
+    // Apply the World Partition spatial-loading flag only when it was passed and the actor permits it;
+    // the setter asserts (check()) if the flag cannot be changed for this actor, so guard against a crash.
     bool bSpatialApplied = false;
-    if (VolumeActor->CanChangeIsSpatiallyLoadedFlag())
+    if (bSpatialRequested && VolumeActor->CanChangeIsSpatiallyLoadedFlag())
     {
         VolumeActor->SetIsSpatiallyLoaded(bIsSpatiallyLoaded);
         bSpatialApplied = true;
@@ -664,8 +582,7 @@ TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Para
 
 // ===========================================================================
 // Typed remove commands + get_trigger_events:
-//   remove_trigger_box     (typed: ATriggerBox)
-//   remove_trigger_sphere  (typed: ATriggerSphere)
+//   remove_trigger         (typed: ATriggerBase — TriggerBox, TriggerSphere, TriggerCapsule)
 //   remove_volume          (typed: AVolume — covers BlockingVolume, PainCausingVolume, etc.)
 //   get_trigger_events     (reads overlap-event config; inverse of set_trigger_events)
 // Each remove_X uses a typed-template pattern (load + Cast<T> + World->DestroyActor)
@@ -727,23 +644,15 @@ static TSharedPtr<FJsonObject> HandleRemoveTypedTrigger(const TSharedPtr<FJsonOb
         CmdName, *Target));
 }
 
-// MCP:remove_trigger_box - Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor is not an error: the reply has deleted false and a note; an actor of another class is refused, and that refusal or a destroy the world refuses is success false with deleted false. Returns actor_name, actor_class, deleted and already_existed.
-//   @param actor_name - Object name of the TriggerBox actor (its editor label is not matched); the command fails without it.
+// MCP:remove_trigger - Delete one shape trigger (ATriggerBase: TriggerBox, TriggerSphere or TriggerCapsule) from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class, a TriggerVolume included, is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A brush volume (TriggerVolume too): remove_volume; any actor, undoably: delete_actor; create one: create_trigger.
+//   @param actor_name - Object name of the trigger actor, e.g. TriggerBox_0 or TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveTriggerBox(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> HandleRemoveTrigger(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedTrigger(Params, TEXT("remove_trigger_box"), ATriggerBox::StaticClass());
+    return HandleRemoveTypedTrigger(Params, TEXT("remove_trigger"), ATriggerBase::StaticClass());
 }
 
-// MCP:remove_trigger_sphere - Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
-//   @param actor_name - Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it.
-//   @returns { actor_name, actor_class, deleted, already_existed, note? }
-TSharedPtr<FJsonObject> HandleRemoveTriggerSphere(const TSharedPtr<FJsonObject>& Params)
-{
-    return HandleRemoveTypedTrigger(Params, TEXT("remove_trigger_sphere"), ATriggerSphere::StaticClass());
-}
-
-// MCP:remove_volume - Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
+// MCP:remove_volume - Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume; for a TriggerBox, TriggerSphere or TriggerCapsule use remove_trigger instead.
 //   @param actor_name - Name of the AVolume actor.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveVolume(const TSharedPtr<FJsonObject>& Params)
@@ -907,43 +816,6 @@ TSharedPtr<FJsonObject> HandleSetTriggerSphereRadius(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_trigger_overlap_count - Count the actors currently overlapping a TriggerBox, TriggerSphere or TriggerVolume in the editor world, without changing anything; the cheap form of get_actors_in_trigger. Returns actor_name and overlap_count. Fails if the first actor matching the name is not a trigger.
-//   @param actor_name [string!] - Object name or editor label of the trigger actor; the first actor matching either is used.
-//   @returns { actor_name, overlap_count }
-//   Read-only, headless-safe. Cheap variant of get_actors_in_trigger that skips the array payload.
-TSharedPtr<FJsonObject> HandleGetTriggerOverlapCount(const TSharedPtr<FJsonObject>& Params)
-{
-    if (GEditor == nullptr)
-    {
-        return mcp_common::MakeErrorReply(TEXT("GEditor unavailable"));
-    }
-    UWorld* EditorWorld = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(EditorWorld, TEXT("Editor world unavailable"))) { return NoWorld; }
-
-    FString Wanted;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), Wanted)) { return Missing; }
-
-    // This lookup also accepts the editor label. The first actor answering to the name decides
-    // the outcome: when it is not a trigger the command fails right there, without looking on.
-    AActor* const Trigger = mcp_common::FindActorByName(EditorWorld, Wanted);
-    if (Trigger == nullptr)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Trigger actor '%s' not found in editor world"), *Wanted));
-    }
-    if (!UEAgentTriggerImpl::IsTriggerActor(*Trigger))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' is not a TriggerBox/TriggerSphere/TriggerVolume"), *Wanted));
-    }
-
-    TArray<AActor*> Inside;
-    Trigger->GetOverlappingActors(Inside);
-
-    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
-    Report->SetStringField(TEXT("actor_name"), Trigger->GetName());
-    Report->SetNumberField(TEXT("overlap_count"), Inside.Num());
-    return mcp_common::MakeOkReply(Report);
-}
-
 // UBrushBuilder has no Bounds UPROPERTY (bounds are derived from Vertices/Polys, and a
 // resize needs a Build() re-call), so there is no typed setter for an AVolume brush size: only
 // the trigger shapes have one (box extent, sphere radius).
@@ -951,14 +823,11 @@ TSharedPtr<FJsonObject> HandleGetTriggerOverlapCount(const TSharedPtr<FJsonObjec
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_trigger"), &HandleCreateTrigger },
-    { TEXT("create_volume"), &HandleCreateVolume },
     { TEXT("get_actors_in_trigger"), &HandleGetActorsInTrigger },
     { TEXT("get_trigger_events"), &HandleGetTriggerEvents },
     { TEXT("get_trigger_info"), &HandleGetTriggerInfo },
-    { TEXT("get_trigger_overlap_count"), &HandleGetTriggerOverlapCount },
     { TEXT("get_volume_info"), &HandleGetVolumeInfo },
-    { TEXT("remove_trigger_box"), &HandleRemoveTriggerBox },
-    { TEXT("remove_trigger_sphere"), &HandleRemoveTriggerSphere },
+    { TEXT("remove_trigger"), &HandleRemoveTrigger },
     { TEXT("remove_volume"), &HandleRemoveVolume },
     { TEXT("set_trigger_box_extent"), &HandleSetTriggerBoxExtent },
     { TEXT("set_trigger_events"), &HandleSetTriggerEvents },

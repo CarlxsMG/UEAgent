@@ -26,7 +26,7 @@ refuses both, so that no website can drive your editor. Connect to `127.0.0.1` o
 
 ## The client warns about too many tools, or slows down
 
-Some clients cap how many tools a server may list, and the full list has more than 2,000. Give them
+Some clients cap how many tools a server may list, and the full list has more than 1,700. Give them
 the [compact tool list](clients.md#compact-tool-list): `?tools=compact` at the end of the URL.
 
 ## A call is refused while Play-in-Editor runs

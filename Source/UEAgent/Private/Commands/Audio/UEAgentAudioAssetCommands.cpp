@@ -628,47 +628,6 @@ TSharedPtr<FJsonObject> HandleSetSoundClassParent(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// ---------------------------------------------------------------------------- //
-// get_sound_class_hierarchy  (REAL read)
-// ---------------------------------------------------------------------------- //
-// MCP:get_sound_class_hierarchy - Read one level of the hierarchy of a USoundClass asset: its parent and parent_path (parent "None" for a root), the names of its direct children and child_count. Call it again on a parent or child to walk further. Read-only.
-//   @param sound_class_path - Asset path of the USoundClass, e.g. "/Game/Audio/SC_SFX.SC_SFX".
-//   @returns { name: string, sound_class_path: string, parent: string, parent_path: string, children: [string], child_count: int }
-TSharedPtr<FJsonObject> HandleGetSoundClassHierarchy(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ClassPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sound_class_path"), ClassPath)) { return Missing; }
-
-    USoundClass* SoundClass = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AudioAsset_Load(ClassPath, TEXT("USoundClass"), SoundClass)) { return Error; }
-
-    TArray<TSharedPtr<FJsonValue>> Children;
-    for (const TObjectPtr<USoundClass>& ChildPtr : SoundClass->ChildClasses)
-    {
-        if (USoundClass* ChildClass = ChildPtr.Get())
-        {
-            Children.Add(MakeShared<FJsonValueString>(ChildClass->GetName()));
-        }
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("name"), SoundClass->GetName());
-    ResultObj->SetStringField(TEXT("sound_class_path"), SoundClass->GetPathName());
-    if (USoundClass* ParentClass = SoundClass->ParentClass.Get())
-    {
-        ResultObj->SetStringField(TEXT("parent"), ParentClass->GetName());
-        ResultObj->SetStringField(TEXT("parent_path"), ParentClass->GetPathName());
-    }
-    else
-    {
-        ResultObj->SetStringField(TEXT("parent"), TEXT("None"));
-    }
-    ResultObj->SetArrayField(TEXT("children"), Children);
-    ResultObj->SetNumberField(TEXT("child_count"), SoundClass->ChildClasses.Num());
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
 // <generated:property-handlers> -- DO NOT EDIT BY HAND. Source of truth:
 // Tools/property_descriptors/{sound_concurrency,sound_attenuation}.json
 // Regenerate: python Tools/integrate_property_handlers.py
@@ -1145,7 +1104,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_sound_mix"), &HandleCreateSoundMix },
     { TEXT("create_sound_submix"), &HandleCreateSoundSubmix },
     { TEXT("get_sound_attenuation_properties"), &HandleGetSoundAttenuationProperties },
-    { TEXT("get_sound_class_hierarchy"), &HandleGetSoundClassHierarchy },
     { TEXT("get_sound_concurrency_properties"), &HandleGetSoundConcurrencyProperties },
     { TEXT("get_sound_wave_properties"), &HandleGetSoundWaveProperties },
     { TEXT("get_submix_effect_chain"), &HandleGetSubmixEffectChain },

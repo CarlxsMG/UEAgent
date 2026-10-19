@@ -42,8 +42,7 @@ namespace UEAgentExportCommands
 
 // ---------------------------------------------------------------------------
 // Plumbing shared by the commands that write a file under Saved/ and answer with
-// where it went (export_asset_data, export_blueprint_data, export_level_section,
-// generate_asset_report).
+// where it went (export_blueprint_data, export_level_section, generate_asset_report).
 // ---------------------------------------------------------------------------
 namespace UEAgentExportImpl
 {
@@ -384,90 +383,6 @@ namespace UEAgentExportImpl
     }
 }
 
-// MCP:export_asset_data - Load an asset and write its class, package and every editable or Blueprint-visible property, as details-panel text, to a new file Saved/Exports/Assets/Name_YYYYMMDD_HHMMSS.json or .txt in the project. Returns export_file_path, export_success and file sizes; an unsupported format writes nothing (export_success=false).
-//   @param asset_path - Package or object path of the asset (e.g., '/Game/MyAsset'); the file is named after its last segment.
-//   @param export_format - Export format: 'json' or 'txt'.
-//   @returns { asset_path: string, export_format: string, export_success: bool, export_message: string, export_file_path: string, export_file_name: string, export_file_size_bytes: int, export_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, export_timestamp: string, export_status: string, export_directory: string }
-
-TSharedPtr<FJsonObject> HandleExportAssetData(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentExportImpl;
-
-    FString RequestedAsset;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), RequestedAsset, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString FormatToken;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("export_format"), FormatToken, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    FAssetData Entry;
-    UObject* Subject = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Impl::LoadAssetEntry(RequestedAsset, Entry, Subject)) { return Error; }
-
-    // The file name always uses the lower-cased token as extension, supported or not.
-    IPlatformFile& Disk = FPlatformFileManager::Get().GetPlatformFile();
-    const FString LowerToken = FormatToken.ToLower();
-    const FString AssetName = FPaths::GetBaseFilename(RequestedAsset);
-    Impl::FDumpFile File = Impl::PlanDumpFile(Disk, TEXT("Exports"), TEXT("Assets"), AssetName, LowerToken, TEXT("Export failed"));
-
-    const FString ClassPath = Entry.AssetClassPath.ToString();
-    const FString PackagePath = Entry.PackageName.ToString();
-    switch (Impl::DumpFormatFromToken(LowerToken))
-    {
-    case Impl::EDumpFormat::Json:
-    {
-        TSharedPtr<FJsonObject> Document = MakeShared<FJsonObject>();
-        Document->SetStringField(TEXT("asset_path"), RequestedAsset);
-        Document->SetStringField(TEXT("asset_class"), ClassPath);
-        Document->SetStringField(TEXT("package_name"), PackagePath);
-        Document->SetStringField(TEXT("asset_name"), AssetName);
-        Document->SetStringField(TEXT("export_timestamp"), FDateTime::Now().ToString());
-
-        TSharedPtr<FJsonObject> ValueMap = MakeShared<FJsonObject>();
-        for (const TPair<FString, FString>& Item : Impl::VisiblePropertyTexts(Subject))
-        {
-            ValueMap->SetStringField(Item.Key, Item.Value);
-        }
-        Document->SetObjectField(TEXT("properties"), ValueMap);
-        Impl::CommitJson(File, Document, TEXT("Asset data exported to JSON successfully"));
-        break;
-    }
-    case Impl::EDumpFormat::Text:
-    {
-        FString Body;
-        Body += TEXT("Asset Export Report\n");
-        Body += TEXT("==================\n");
-        Body.Appendf(TEXT("Asset Path: %s\n"), *RequestedAsset);
-        Body.Appendf(TEXT("Asset Class: %s\n"), *ClassPath);
-        Body.Appendf(TEXT("Package Name: %s\n"), *PackagePath);
-        Body.Appendf(TEXT("Asset Name: %s\n"), *AssetName);
-        Body.Appendf(TEXT("Export Time: %s\n"), *FDateTime::Now().ToString());
-        Body += TEXT("\nProperties:\n");
-        for (const TPair<FString, FString>& Item : Impl::VisiblePropertyTexts(Subject))
-        {
-            Body.Appendf(TEXT("  %s: %s\n"), *Item.Key, *Item.Value);
-        }
-        Impl::CommitText(File, Body, TEXT("Asset data exported to text successfully"));
-        break;
-    }
-    default:
-        File.Status = TEXT("Unsupported export format");
-        break;
-    }
-
-    const int64 PackageBytes = Impl::SourcePackageBytes(Disk, Entry);
-    Impl::MeasureDumpFile(Disk, File);
-
-    TSharedPtr<FJsonObject> Answer = MakeShared<FJsonObject>();
-    Answer->SetStringField(TEXT("asset_path"), RequestedAsset);
-    Answer->SetStringField(TEXT("export_format"), FormatToken);
-    Impl::PutExportFileFields(Answer, File);
-    Answer->SetStringField(TEXT("asset_class"), ClassPath);
-    Answer->SetStringField(TEXT("package_name"), PackagePath);
-    Answer->SetNumberField(TEXT("original_file_size_bytes"), PackageBytes);
-    Answer->SetNumberField(TEXT("original_file_size_mb"), Impl::InMegabytes(PackageBytes));
-    Impl::PutExportTrailer(Answer, File);
-    return Answer;
-}
-
 // MCP:export_blueprint_data - Load a Blueprint asset and write a summary of it to a new file Saved/Exports/Blueprints/<Name>_<YYYYMMDD_HHMMSS>.json or .txt in the project: parent class, compile status, counts of function graphs, event graphs and variables, function graph names, and member variables (name, pin type, category; JSON adds public and editable flags). No graph nodes; the Blueprint is not modified or compiled. Errors if the asset is missing or not a Blueprint; an unsupported format writes nothing (export_success=false). For an inline reply use get_blueprint_info; for a full dump, export_asset_as_text.
 //   @param blueprint_path - Full path to the blueprint asset (e.g., '/Game/MyBlueprint').
 //   @param export_format - Export format: 'json' or 'txt'.
@@ -721,10 +636,11 @@ TSharedPtr<FJsonObject> HandleExportLevelSection(const TSharedPtr<FJsonObject>& 
     return Answer;
 }
 
-// MCP:generate_asset_report - Load an asset and write a property report to a new file Saved/Reports/Assets/<Name>_Report_<YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size. Those statistics go only into the file; the reply carries its path, size and status. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_data writes only editable or Blueprint-visible properties; export_asset_as_text returns a canonical dump inline.
+// MCP:generate_asset_report - Load an asset and write a property report to a new file Saved/Reports/Assets/<Name>_Report_<YYYYMMDD_HHMMSS>.json or .txt in the project: every reflected property of its class (editable or not) with its type and value text, counts of editable and Blueprint-visible properties, and the package file size -- or, with visible_only, just the editable or Blueprint-visible properties as details-panel text. Those statistics go only into the file; the reply carries its path, size and status, and the package file size. The asset is not modified. A missing asset is an error; an unsupported format writes nothing (report_success=false). export_asset_as_text returns a canonical dump inline.
 //   @param asset_path - Full path to the asset to analyze (e.g., '/Game/MyAsset').
 //   @param report_format - Report format: 'json' or 'txt'.
-//   @returns { asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, report_timestamp: string, report_status: string, report_type: string, report_directory: string }
+//   @param visible_only - Optional bool (default false): write only the editable or Blueprint-visible properties, each as its details-panel text (a JSON `properties` object of name -> text), with report_type "Visible Properties", instead of the full census.
+//   @returns { asset_path: string, report_format: string, report_success: bool, report_message: string, report_file_path: string, report_file_name: string, report_file_size_bytes: int, report_file_size_mb: number, asset_class: string, package_name: string, original_file_size_bytes: int, original_file_size_mb: number, report_timestamp: string, report_status: string, report_type: string, report_directory: string }
 
 TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>& Params)
 {
@@ -734,6 +650,8 @@ TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>&
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), RequestedAsset, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     FString FormatToken;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("report_format"), FormatToken, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bVisibleOnly = false;
+    Params->TryGetBoolField(TEXT("visible_only"), bVisibleOnly);
 
     FAssetData Entry;
     UObject* Subject = nullptr;
@@ -747,10 +665,47 @@ TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>&
 
     const FString ClassPath = Entry.AssetClassPath.ToString();
     const FString PackagePath = Entry.PackageName.ToString();
-    const TCHAR* ReportKind = TEXT("Asset Analysis");
+    const int64 PackageBytes = Impl::SourcePackageBytes(Disk, Entry);
+    const TCHAR* ReportKind = bVisibleOnly ? TEXT("Visible Properties") : TEXT("Asset Analysis");
 
     // The property statistics only go into the written file; the answer carries the file facts.
-    switch (Impl::DumpFormatFromToken(LowerToken))
+    const Impl::EDumpFormat Format = Impl::DumpFormatFromToken(LowerToken);
+    if (bVisibleOnly && Format == Impl::EDumpFormat::Json)
+    {
+        // The editable or Blueprint-visible subset, each property as its details-panel text.
+        TSharedPtr<FJsonObject> Document = MakeShared<FJsonObject>();
+        Document->SetStringField(TEXT("asset_path"), RequestedAsset);
+        Document->SetStringField(TEXT("asset_class"), ClassPath);
+        Document->SetStringField(TEXT("package_name"), PackagePath);
+        Document->SetStringField(TEXT("asset_name"), AssetName);
+        Document->SetStringField(TEXT("report_timestamp"), FDateTime::Now().ToString());
+        Document->SetStringField(TEXT("report_type"), ReportKind);
+        TSharedPtr<FJsonObject> ValueMap = MakeShared<FJsonObject>();
+        for (const TPair<FString, FString>& Item : Impl::VisiblePropertyTexts(Subject))
+        {
+            ValueMap->SetStringField(Item.Key, Item.Value);
+        }
+        Document->SetObjectField(TEXT("properties"), ValueMap);
+        Impl::CommitJson(File, Document, TEXT("Visible properties written to JSON successfully"));
+    }
+    else if (bVisibleOnly && Format == Impl::EDumpFormat::Text)
+    {
+        FString Body;
+        Body += TEXT("Asset Visible Properties Report\n");
+        Body += TEXT("===============================\n");
+        Body.Appendf(TEXT("Asset Path: %s\n"), *RequestedAsset);
+        Body.Appendf(TEXT("Asset Class: %s\n"), *ClassPath);
+        Body.Appendf(TEXT("Package Name: %s\n"), *PackagePath);
+        Body.Appendf(TEXT("Asset Name: %s\n"), *AssetName);
+        Body.Appendf(TEXT("Report Time: %s\n"), *FDateTime::Now().ToString());
+        Body += TEXT("\nProperties:\n");
+        for (const TPair<FString, FString>& Item : Impl::VisiblePropertyTexts(Subject))
+        {
+            Body.Appendf(TEXT("  %s: %s\n"), *Item.Key, *Item.Value);
+        }
+        Impl::CommitText(File, Body, TEXT("Visible properties written to text successfully"));
+    }
+    else switch (Format)
     {
     case Impl::EDumpFormat::Json:
     {
@@ -772,7 +727,6 @@ TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>&
         Statistics->SetArrayField(TEXT("property_values"), mcp_common::StringsToJson(Census.Texts));
         Document->SetObjectField(TEXT("properties"), Statistics);
 
-        const int64 PackageBytes = Impl::SourcePackageBytes(Disk, Entry);
         Document->SetNumberField(TEXT("file_size_bytes"), PackageBytes);
         Document->SetNumberField(TEXT("file_size_mb"), Impl::InMegabytes(PackageBytes));
         Impl::CommitJson(File, Document, TEXT("Asset report generated to JSON successfully"));
@@ -790,7 +744,6 @@ TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>&
         Body.Appendf(TEXT("Report Time: %s\n"), *FDateTime::Now().ToString());
         Body += TEXT("Report Type: Asset Analysis\n");
 
-        const int64 PackageBytes = Impl::SourcePackageBytes(Disk, Entry);
         Body.Appendf(TEXT("File Size: %lld bytes (%.2f MB)\n"), PackageBytes, Impl::InMegabytes(PackageBytes));
 
         Body += TEXT("\nProperties Analysis:\n");
@@ -825,6 +778,8 @@ TSharedPtr<FJsonObject> HandleGenerateAssetReport(const TSharedPtr<FJsonObject>&
     Answer->SetNumberField(TEXT("report_file_size_mb"), Impl::InMegabytes(File.Bytes));
     Answer->SetStringField(TEXT("asset_class"), ClassPath);
     Answer->SetStringField(TEXT("package_name"), PackagePath);
+    Answer->SetNumberField(TEXT("original_file_size_bytes"), PackageBytes);
+    Answer->SetNumberField(TEXT("original_file_size_mb"), Impl::InMegabytes(PackageBytes));
     Answer->SetStringField(TEXT("report_timestamp"), FDateTime::Now().ToString());
     Answer->SetStringField(TEXT("report_status"), File.bWritten ? TEXT("Completed") : TEXT("Failed"));
     Answer->SetStringField(TEXT("report_type"), ReportKind);
@@ -985,7 +940,6 @@ TSharedPtr<FJsonObject> HandleExportAssetAsText(const TSharedPtr<FJsonObject>& P
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("export_asset_as_text"), &HandleExportAssetAsText },
-    { TEXT("export_asset_data"), &HandleExportAssetData },
     { TEXT("export_blueprint_data"), &HandleExportBlueprintData },
     { TEXT("export_level_section"), &HandleExportLevelSection },
     { TEXT("generate_asset_report"), &HandleGenerateAssetReport },

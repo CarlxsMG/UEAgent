@@ -879,14 +879,17 @@ TSharedPtr<FJsonObject> HandleAddIKRetargetChain(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_ik_rig_info
 // ---------------------------------------------------------------------------
-// MCP:get_ik_rig_info - Read an IK Rig asset: its skeletal mesh, the number of solvers, and every goal and retarget chain. Read-only; solvers are counted, not listed: get_ik_solver_details reads one by index.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
-//   @returns { asset_path: string, solver_count: int, goal_count: int, retarget_chain_count: int, skeletal_mesh: string, goals: [{ goal_name, bone_name }], chains: [{ chain_name, start_bone, end_bone, goal_name }] }
+// MCP:get_ik_rig_info - Read an IK Rig asset: its skeletal mesh, the number of solvers, and every goal and retarget chain, or with chain_name just that retarget chain (start_bone, end_bone and the IK goal it drives) plus whether the rig has it. Read-only; a chain_name the rig does not have is not an error but found=false and an empty chains list. Solvers are counted, not listed: get_ik_solver_details reads one by index.
+//   @param ik_rig_path - Path to the UIKRigDefinition asset (an IK Rig, not an IK Retargeter)
+//   @param chain_name - Optional. Name of one retarget chain, matched without case: chains then lists only that chain and found says whether the rig has it. retarget_chain_count still counts every chain.
+//   @returns { asset_path: string, solver_count: int, goal_count: int, retarget_chain_count: int, skeletal_mesh: string, goals: [{ goal_name, bone_name }], chains: [{ chain_name, start_bone, end_bone, goal_name }], chain_name?: string, found?: bool }
 
 TSharedPtr<FJsonObject> HandleGetIKRigInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ik_rig_path"), RigPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    FString ChainFilter;
+    const bool bFilterChain = Params->TryGetStringField(TEXT("chain_name"), ChainFilter);
 
     UIKRigDefinition* Rig = nullptr;
     UIKRigController* Controller = nullptr;
@@ -895,6 +898,29 @@ TSharedPtr<FJsonObject> HandleGetIKRigInfo(const TSharedPtr<FJsonObject>& Params
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
     FillRigInfo(Controller, Rig, Resp, /*bIncludeLists*/ true);
+
+    if (bFilterChain)
+    {
+        // One chain: FName comparison ignores case, the way the controller looks chain names up.
+        const FName WantedChain(*ChainFilter);
+        TArray<TSharedPtr<FJsonValue>> ChainArr;
+        for (const FBoneChain& Chain : Controller->GetRetargetChains())
+        {
+            if (Chain.ChainName != WantedChain)
+            {
+                continue;
+            }
+            TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
+            C->SetStringField(TEXT("chain_name"), Chain.ChainName.ToString());
+            C->SetStringField(TEXT("start_bone"), Chain.StartBone.BoneName.ToString());
+            C->SetStringField(TEXT("end_bone"), Chain.EndBone.BoneName.ToString());
+            C->SetStringField(TEXT("goal_name"), Chain.IKGoalName.ToString());
+            ChainArr.Add(MakeShared<FJsonValueObject>(C));
+        }
+        Resp->SetStringField(TEXT("chain_name"), ChainFilter);
+        Resp->SetBoolField(TEXT("found"), ChainArr.Num() > 0);
+        Resp->SetArrayField(TEXT("chains"), ChainArr);
+    }
     return mcp_common::MakeOkReply(Resp);
 }
 
@@ -1144,41 +1170,9 @@ TSharedPtr<FJsonObject> HandleSetIKSolverEnabled(const TSharedPtr<FJsonObject>& 
 }
 
 // ---------------------------------------------------------------------------
-// get_ik_solver_bones
-// ---------------------------------------------------------------------------
-// MCP:get_ik_solver_bones - Read the start and end bone of one solver in an IK Rig asset, chosen by its 0-based position in the solver stack. Read-only; an out-of-range solver_index or a rig that does not load is an error. A solver type without an end bone returns "None" as end_bone. get_ik_solver_details adds the type, enabled state and connected goals; set_ik_solver_bones writes the bones.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset
-//   @param solver_index - 0-based solver index
-//   @returns { asset_path: string, solver_index: int, start_bone: string, end_bone: string }
-
-TSharedPtr<FJsonObject> HandleGetIKSolverBones(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RigPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ik_rig_path"), RigPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    int32 SolverIndex = 0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("solver_index"), SolverIndex)) { return Missing; }
-
-    UIKRigDefinition* Rig = nullptr;
-    UIKRigController* Controller = nullptr;
-    if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
-
-    if (TSharedPtr<FJsonObject> Error = IKRig_CheckSolverIndex(Controller, SolverIndex, /*bShowRange=*/false)) { return Error; }
-
-    const FName StartBone = Controller->GetStartBone(SolverIndex);
-    const FName EndBone = Controller->GetEndBone(SolverIndex);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
-    Resp->SetStringField(TEXT("start_bone"), StartBone.ToString());
-    Resp->SetStringField(TEXT("end_bone"), EndBone.ToString());
-    return mcp_common::MakeOkReply(Resp);
-}
-
-// ---------------------------------------------------------------------------
 // set_ik_solver_bones
 // ---------------------------------------------------------------------------
-// MCP:set_ik_solver_bones - Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton, or a start or end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back, and nothing is stored for it. A bone the solver already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_solver_bones reads them.
+// MCP:set_ik_solver_bones - Set the start bone and/or end bone of one solver in an IK Rig asset (0-based stack index) through the IK Rig controller, which records each change as an undo transaction, then save the asset. Pass at least one bone, else an error. An out-of-range index, a bone missing from the rig skeleton, or a start or end bone on a solver type without one is not an error: start_bone_set or end_bone_set comes back false, next to the bones read back, and nothing is stored for it. A bone the solver already has is left alone; when nothing changes, changed is false, saved is false, a note says why and nothing is saved. A failed save makes success false, with saved=false and save_error. get_ik_solver_details reads them back.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
 //   @param start_bone - Optional start bone name
@@ -1261,10 +1255,10 @@ TSharedPtr<FJsonObject> HandleSetIKSolverBones(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // get_ik_solver_details
 // ---------------------------------------------------------------------------
-// MCP:get_ik_solver_details - Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the solver struct name, e.g. "IKRigFullBodyIKSolver"), unique_name ("<index+1> - <display name>"), enabled, start and end bone, and the names of the goals connected to it. Read-only; an out-of-range solver_index or a rig that does not load is an error. Use get_ik_solver_bones for just the bones, get_ik_solver_settings for its tunables, get_ik_rig_info for the goals and chains of the whole rig.
+// MCP:get_ik_solver_details - Read one solver of an IK Rig asset by its 0-based stack index: solver_type (the solver struct name, e.g. "IKRigFullBodyIKSolver") and solver_type_canonical (FullBodyIK, Limb, ...), unique_name ("<index+1> - <display name>"), enabled, start and end bone (end_bone "None" for a solver type without one), the names of the goals connected to it, and its solver-specific settings -- FullBodyIK with the curated snake_case keys set_ik_solver_settings takes, every other solver type serialized generically from its live settings struct (camelCase property names). Read-only; an out-of-range solver_index or a rig that does not load is an error. get_ik_rig_info reads the goals and chains of the whole rig.
 //   @param ik_rig_path - Path to the UIKRigDefinition asset
 //   @param solver_index - 0-based solver index
-//   @returns { asset_path: string, solver_index: int, solver_type: string, unique_name: string, enabled: bool, start_bone: string, end_bone: string, connected_goal_count: int, connected_goals: [string] }
+//   @returns { asset_path: string, solver_index: int, solver_type: string, solver_type_canonical: string, unique_name: string, enabled: bool, start_bone: string, end_bone: string, connected_goal_count: int, connected_goals: [string], settings: object }
 
 TSharedPtr<FJsonObject> HandleGetIKSolverDetails(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1315,6 +1309,40 @@ TSharedPtr<FJsonObject> HandleGetIKSolverDetails(const TSharedPtr<FJsonObject>& 
     Resp->SetStringField(TEXT("end_bone"), EndBone.ToString());
     Resp->SetNumberField(TEXT("connected_goal_count"), ConnectedGoals);
     Resp->SetArrayField(TEXT("connected_goals"), mcp_common::StringsToJson(ConnectedGoalNames));
+
+    // The solver's tunables: FBIK through its curated snake_case keys (the ones set_ik_solver_settings
+    // takes), every other solver type serialized generically from its live settings struct.
+    const FString SolverTypeCanonical = DetectSolverTypeCanonical(SolverStruct);
+    TSharedPtr<FJsonObject> SettingsObj;
+    if (SolverStruct && SolverStruct->IsValid() &&
+        SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct())
+    {
+        SettingsObj = SerializeFBIKSolver(SolverStruct->GetMutable<FIKRigFullBodyIKSolver>());
+    }
+    else if (SolverStruct && SolverStruct->IsValid())
+    {
+        // Gate on the settings type first: the base GetSolverSettings() is checkNoEntry(), but any solver
+        // that returns a non-null type also overrides GetSolverSettings().
+        FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
+        const UScriptStruct* SettingsType = Base.GetSolverSettingsType();
+        if (SettingsType)
+        {
+            SettingsObj = SerializeStructGeneric(SettingsType, Base.GetSolverSettings());
+        }
+        else
+        {
+            SettingsObj = MakeShared<FJsonObject>();
+            SettingsObj->SetStringField(TEXT("note"),
+                FString::Printf(TEXT("Solver type '%s' exposes no editable settings struct."), *SolverTypeCanonical));
+        }
+    }
+    else
+    {
+        SettingsObj = MakeShared<FJsonObject>();
+        SettingsObj->SetStringField(TEXT("note"), TEXT("Solver struct is invalid."));
+    }
+    Resp->SetStringField(TEXT("solver_type_canonical"), SolverTypeCanonical);
+    Resp->SetObjectField(TEXT("settings"), SettingsObj);
 
     return mcp_common::MakeOkReply(Resp);
 }
@@ -1497,50 +1525,6 @@ TSharedPtr<FJsonObject> HandleSetIKRetargetChainBones(const TSharedPtr<FJsonObje
     FString SaveErr;
     const bool bSaved = mcp_common::SaveAssetPackage(Rig->GetOutermost(), Rig, SaveErr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_ik_retarget_chain_bones"), SaveErr);
-}
-
-// ---------------------------------------------------------------------------
-// get_ik_retarget_chain_details
-// ---------------------------------------------------------------------------
-// MCP:get_ik_retarget_chain_details - Read one retarget chain of an IK Rig asset (UIKRigDefinition) without changing it: its start_bone, end_bone and the IK goal it drives (goal_name, None when the chain has no goal). The chain is matched by name without case; a name the rig does not have is not an error: found=false, and the bone and goal fields read None. An IK Rig that does not load is an error. Every goal and chain of the rig at once: get_ik_rig_info; edit the chain: set_ik_retarget_chain_bones or rename_ik_retarget_chain; add or drop one: add_ik_retarget_chain or remove_ik_retarget_chain; how a retargeter maps it: get_ik_retargeter_info.
-//   @param ik_rig_path - Path to the UIKRigDefinition asset (an IK Rig, not an IK Retargeter)
-//   @param chain_name - Name of the retarget chain as get_ik_rig_info lists it, matched without case
-//   @returns { asset_path: string, chain_name: string, found: bool, start_bone: string, end_bone: string, goal_name: string }
-
-TSharedPtr<FJsonObject> HandleGetIKRetargetChainDetails(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RigPath, ChainName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ik_rig_path"), RigPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("chain_name"), ChainName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UIKRigDefinition* Rig = nullptr;
-    UIKRigController* Controller = nullptr;
-    if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
-
-    const FName StartBone = Controller->GetRetargetChainStartBone(FName(*ChainName));
-    const FName EndBone = Controller->GetRetargetChainEndBone(FName(*ChainName));
-    const FName GoalName = Controller->GetRetargetChainGoal(FName(*ChainName));
-
-    // Check if chain exists (all NAME_None could mean chain doesn't exist, or bones are legitimately empty)
-    const TArray<FBoneChain>& Chains = Controller->GetRetargetChains();
-    bool bFound = false;
-    for (const FBoneChain& Chain : Chains)
-    {
-        if (Chain.ChainName == FName(*ChainName))
-        {
-            bFound = true;
-            break;
-        }
-    }
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), Rig->GetPathName());
-    Resp->SetStringField(TEXT("chain_name"), ChainName);
-    Resp->SetBoolField(TEXT("found"), bFound);
-    Resp->SetStringField(TEXT("start_bone"), StartBone.ToString());
-    Resp->SetStringField(TEXT("end_bone"), EndBone.ToString());
-    Resp->SetStringField(TEXT("goal_name"), GoalName.ToString());
-    return mcp_common::MakeOkReply(Resp);
 }
 
 // ===========================================================================
@@ -1857,70 +1841,6 @@ TSharedPtr<FJsonObject> HandleSetRetargetPoseBoneRotation(const TSharedPtr<FJson
 
 // ===========================================================================
 // IK Rig solver settings (detailed per-solver-type get/set)
-
-// ---------------------------------------------------------------------------
-// get_ik_solver_settings
-// ---------------------------------------------------------------------------
-// MCP:get_ik_solver_settings - Get detailed solver-specific settings for a solver in an IK Rig.  Returns all solver-level parameters for the specified solver. FullBodyIK uses curated snake_case keys; every other solver type (Limb/Pole/BodyMover/SetTransform/StretchLimb) is serialized generically from its live settings struct (camelCase property names).
-//   @param ik_rig_path - Content path to the IK Rig asset.
-//   @param solver_index - Index of the solver in the rig's solver stack.
-//   @returns { ik_rig_path: string, solver_index: int, solver_type: string, settings: object }
-
-TSharedPtr<FJsonObject> HandleGetIKSolverSettings(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RigPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("ik_rig_path"), RigPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    int32 SolverIndex = 0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("solver_index"), SolverIndex)) { return Missing; }
-
-    UIKRigDefinition* Rig = nullptr;
-    UIKRigController* Controller = nullptr;
-    if (TSharedPtr<FJsonObject> Error = IKRig_LoadRigController(RigPath, Rig, Controller)) { return Error; }
-
-    if (TSharedPtr<FJsonObject> Error = IKRig_CheckSolverIndex(Controller, SolverIndex, /*bShowRange=*/true)) { return Error; }
-
-    FInstancedStruct* SolverStruct = Controller->GetSolverStructAtIndex(SolverIndex);
-    const FString SolverType = DetectSolverTypeCanonical(SolverStruct);
-
-    TSharedPtr<FJsonObject> SettingsObj;
-    if (SolverStruct && SolverStruct->IsValid() &&
-        SolverStruct->GetScriptStruct() == FIKRigFullBodyIKSolver::StaticStruct())
-    {
-        const FIKRigFullBodyIKSolver& Solver = SolverStruct->GetMutable<FIKRigFullBodyIKSolver>();
-        SettingsObj = SerializeFBIKSolver(Solver);
-    }
-    else if (SolverStruct && SolverStruct->IsValid())
-    {
-        // Non-FBIK: serialize the solver's live settings struct generically via its
-        // GetSolverSettingsType()/GetSolverSettings() virtuals. Gate on the
-        // type first — the base GetSolverSettings() is checkNoEntry(), but any solver
-        // that returns a non-null type also overrides GetSolverSettings().
-        FIKRigSolverBase& Base = SolverStruct->GetMutable<FIKRigSolverBase>();
-        const UScriptStruct* SettingsType = Base.GetSolverSettingsType();
-        if (SettingsType)
-        {
-            SettingsObj = SerializeStructGeneric(SettingsType, Base.GetSolverSettings());
-        }
-        else
-        {
-            SettingsObj = MakeShared<FJsonObject>();
-            SettingsObj->SetStringField(TEXT("note"),
-                FString::Printf(TEXT("Solver type '%s' exposes no editable settings struct."), *SolverType));
-        }
-    }
-    else
-    {
-        SettingsObj = MakeShared<FJsonObject>();
-        SettingsObj->SetStringField(TEXT("note"), TEXT("Solver struct is invalid."));
-    }
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("ik_rig_path"), Rig->GetPathName());
-    Resp->SetNumberField(TEXT("solver_index"), SolverIndex);
-    Resp->SetStringField(TEXT("solver_type"), SolverType);
-    Resp->SetObjectField(TEXT("settings"), SettingsObj);
-    return mcp_common::MakeOkReply(Resp);
-}
 
 // ---------------------------------------------------------------------------
 // set_ik_solver_settings
@@ -2777,12 +2697,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("disconnect_ik_goal_from_solver"), &HandleDisconnectIKGoalFromSolver },
     { TEXT("get_ik_bone_settings"), &HandleGetIKBoneSettings },
     { TEXT("get_ik_goal_settings"), &HandleGetIKGoalSettings },
-    { TEXT("get_ik_retarget_chain_details"), &HandleGetIKRetargetChainDetails },
     { TEXT("get_ik_retargeter_info"), &HandleGetIKRetargeterInfo },
     { TEXT("get_ik_rig_info"), &HandleGetIKRigInfo },
-    { TEXT("get_ik_solver_bones"), &HandleGetIKSolverBones },
     { TEXT("get_ik_solver_details"), &HandleGetIKSolverDetails },
-    { TEXT("get_ik_solver_settings"), &HandleGetIKSolverSettings },
     { TEXT("get_retarget_poses"), &HandleGetRetargetPoses },
     { TEXT("get_retargeter_op_info"), &HandleGetRetargeterOpInfo },
     { TEXT("move_ik_solver_in_stack"), &HandleMoveIKSolverInStack },

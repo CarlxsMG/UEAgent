@@ -14,7 +14,6 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Blueprint/BlueprintSupport.h"
 #include "Kismet2/BlueprintEditorUtils.h"
-#include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/KismetDebugUtilities.h"
 #include "Engine/Selection.h"
 #include "HAL/PlatformFilemanager.h"
@@ -81,8 +80,8 @@ namespace UEAgentTestingCommands
 
 // MCP-DOMAIN: Testing
 
-// Building blocks shared by the static-analysis reports below (validate / test / check / profile /
-// debug info / trace). They hold the exact wording and arithmetic the reports use.
+// Building blocks shared by the static-analysis reports below (check_blueprint_errors and
+// get_blueprint_debug_info). They hold the exact wording and arithmetic the reports use.
 namespace UEAgentTestingCommandsImpl
 {
 
@@ -154,7 +153,7 @@ FBlueprintShape MeasureBlueprintShape(UBlueprint* Blueprint)
     return Shape;
 }
 
-// The heuristic weighting the reports call "complexity" (and profile reports as "cpu_usage").
+// The heuristic weighting the reports call "complexity".
 double HeuristicComplexity(const FBlueprintShape& Shape)
 {
     return Shape.Nodes * 0.1 + Shape.Functions * 0.5 + Shape.Events * 0.3 + Shape.Variables * 0.2;
@@ -284,14 +283,6 @@ static TSharedPtr<FJsonObject> TestingStartBlueprintReport(
     return Report;
 }
 
-// Recompiles the Blueprint and returns how long the compile took, in milliseconds.
-static double TestingTimedCompileMs(UBlueprint* Blueprint)
-{
-    const double CompileStart = FPlatformTime::Seconds();
-    FKismetEditorUtilities::CompileBlueprint(Blueprint);
-    return (FPlatformTime::Seconds() - CompileStart) * 1000.0;
-}
-
 // A node WITHOUT pins is not necessarily "orphaned". Comments
 // (UEdGraphNode_Comment) have no pins BY DESIGN, so the heuristic
 // `!Node->Pins.Num()` would flag EVERY comment in the graph as a warning -- pure noise
@@ -311,163 +302,6 @@ static bool TestingIsPinlessByDesign(const UEdGraphNode* Node)
         return true;   // event
     }
     return false;
-}
-
-// MCP:validate_blueprint - Validate a blueprint asset by checking its structure, file size, and validity. Static (asset-registry + on-disk) check only: it does NOT compile the Blueprint.
-//   @param blueprint_path - Object path, package path, or bare short name of the asset (resolved via mcp_common::ResolveAssetFlexible; an ambiguous short name errors out listing every candidate instead of picking one silently)
-//   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, validation_status: string, validation_message: string, is_static_analysis: bool, file_size_bytes?: int, file_size_mb?: number }
-
-TSharedPtr<FJsonObject> HandleValidateBlueprint(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    // No class filter ON PURPOSE -- this command honestly declares
-    // is_blueprint=false for an asset that is not one, and filtering by UBlueprint would
-    // turn that into a lying "not found".
-    FAssetData AssetData;
-    FString ResolveError;
-    if (!TestingResolveAssetFlexibleSingle(BlueprintPath, nullptr, AssetData, ResolveError))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Blueprint not found: %s (%s)"), *BlueprintPath, *ResolveError));
-    }
-
-    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
-    UEAgentTestingCommandsImpl::WriteAssetIdentity(Report, BlueprintPath, AssetData);
-    Report->SetBoolField(TEXT("is_static_analysis"), true);
-
-    // The verdict rests on the registry class name alone: nothing is loaded, compiled or
-    // structurally inspected, and the message says so (check_blueprint_errors does the real check).
-    const bool bBlueprintClass = AssetData.AssetClassPath.ToString().Contains(TEXT("Blueprint"));
-    Report->SetBoolField(TEXT("is_blueprint"), bBlueprintClass);
-    Report->SetStringField(TEXT("validation_status"), bBlueprintClass ? TEXT("Valid") : TEXT("Invalid"));
-    Report->SetStringField(TEXT("validation_message"), bBlueprintClass
-        ? TEXT("Asset resolves in the Asset Registry and its class is a Blueprint. No structural or compile validation was performed -- use check_blueprint_errors for that.")
-        : TEXT("Asset is not a Blueprint"));
-
-    // The on-disk size is reported for Blueprints only, and only when the package file is found.
-    int64 DiskBytes = 0;
-    if (bBlueprintClass && UEAgentTestingCommandsImpl::TryGetPackageFileSize(AssetData, DiskBytes))
-    {
-        Report->SetNumberField(TEXT("file_size_bytes"), DiskBytes);
-        Report->SetNumberField(TEXT("file_size_mb"), UEAgentTestingCommandsImpl::BytesToMegabytes(DiskBytes));
-    }
-    return Report;
-}
-
-// MCP:test_blueprint_function - Static analysis of one function graph of a blueprint (node/pin counts + heuristics). WARNING: it does NOT execute the function; it RECOMPILES the Blueprint (FKismetEditorUtilities::CompileBlueprint) and reports the COMPILE time as `execution_time`.
-//   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
-//   @param function_name - Name of the function graph to analyze within the blueprint
-//   @param compile_for_timing [bool] - Optional (default true): recompile the Blueprint to measure compile time. Pass false to skip the recompile side effect (execution_time then reports 0).
-//   @returns { blueprint_path: string, resolved_object_path: string, function_name: string, test_success: bool, test_result: string, execution_time: number, memory_usage: int, node_count: int, connection_count: int, performance_rating: string, function_exists: bool, blueprint_compiled: bool, is_static_analysis: bool, function_was_executed: bool, recompiled_blueprint: bool, execution_time_is_compile_time_ms: bool, memory_usage_is_disk_file_size_bytes: bool, connection_count_is_pin_count: bool, under_readonly_root: bool, issues?: [string] }
-
-TSharedPtr<FJsonObject> HandleTestBlueprintFunction(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintPath, FunctionName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("function_name"), FunctionName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    FAssetData AssetData;
-    TSharedPtr<FJsonObject> ResolveFailure;
-    UBlueprint* Blueprint = TestingResolveBlueprintFlexible(BlueprintPath, AssetData, ResolveFailure);
-    if (!Blueprint)
-    {
-        return ResolveFailure;
-    }
-
-    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
-    Report->SetStringField(TEXT("blueprint_path"), BlueprintPath);
-    Report->SetStringField(TEXT("resolved_object_path"), AssetData.GetObjectPathString());
-    Report->SetStringField(TEXT("function_name"), FunctionName);
-
-    // Only the Blueprint's own function graphs are searched.
-    UEdGraph* FunctionGraph = UEAgentTestingCommandsImpl::FindOwnFunctionGraph(Blueprint, FunctionName);
-    if (!FunctionGraph)
-    {
-        // Nothing is compiled on this early exit; the flags say so, so a caller does not assume
-        // the side effect of the normal path.
-        Report->SetBoolField(TEXT("test_success"), false);
-        Report->SetBoolField(TEXT("function_exists"), false);
-        Report->SetBoolField(TEXT("recompiled_blueprint"), false);
-        Report->SetBoolField(TEXT("function_was_executed"), false);
-        Report->SetBoolField(TEXT("is_static_analysis"), true);
-        Report->SetStringField(TEXT("test_result"), TEXT("Function not found among the blueprint's FunctionGraphs"));
-        Report->SetStringField(TEXT("execution_time"), TEXT("N/A"));
-        Report->SetStringField(TEXT("memory_usage"), TEXT("N/A"));
-        return Report;
-    }
-
-    // "connections" are really pins: the pin total of every node stands in for the link count.
-    const int32 NodeCount = FunctionGraph->Nodes.Num();
-    int32 PinTotal = 0;
-    for (const UEdGraphNode* GraphNode : FunctionGraph->Nodes)
-    {
-        PinTotal += GraphNode ? GraphNode->Pins.Num() : 0;
-    }
-
-    // SIDE EFFECT. This does NOT execute the
-    // function: it RECOMPILES the whole Blueprint and times the COMPILE. Recompiling is
-    // the default; it is declared in the response and can be turned off with
-    // compile_for_timing=false.
-    bool bCompileForTiming = true;
-    Params->TryGetBoolField(TEXT("compile_for_timing"), bCompileForTiming);
-
-    // Policy signal (not a guard: the default does NOT change). Recompiling dirties
-    // an asset under a read-only root (a vendored library); the caller must know.
-    const bool bUnderReadOnlyRoot = mcp_common::IsUnderReadOnlyRoot(AssetData.PackageName.ToString());
-    Report->SetBoolField(TEXT("under_readonly_root"), bUnderReadOnlyRoot);
-
-    const double CompileMs = bCompileForTiming ? TestingTimedCompileMs(Blueprint) : 0.0;
-
-    // Reported as "memory_usage" for compatibility, but it is the package size on disk.
-    int64 DiskBytes = 0;
-    UEAgentTestingCommandsImpl::TryGetPackageFileSize(AssetData, DiskBytes);
-
-    const TCHAR* Rating = TEXT("Good");
-    if (NodeCount > 50)
-    {
-        Rating = TEXT("Complex");
-    }
-    else if (NodeCount > 20)
-    {
-        Rating = TEXT("Moderate");
-    }
-
-    TArray<FString> Findings;
-    if (NodeCount > 100)
-    {
-        Findings.Add(TEXT("Function has high node count - consider breaking into smaller functions"));
-    }
-    if (PinTotal > 200)
-    {
-        Findings.Add(TEXT("Function has many connections - may impact performance"));
-    }
-    if (CompileMs > 100.0)
-    {
-        Findings.Add(TEXT("Function compilation takes longer than expected"));
-    }
-
-    Report->SetBoolField(TEXT("test_success"), true);
-    Report->SetStringField(TEXT("test_result"), TEXT("Static analysis of the function graph completed. The function was NOT executed."));
-    // What each number really is, spelled out next to it.
-    Report->SetBoolField(TEXT("is_static_analysis"), true);
-    Report->SetBoolField(TEXT("function_was_executed"), false);
-    Report->SetBoolField(TEXT("recompiled_blueprint"), bCompileForTiming);
-    Report->SetBoolField(TEXT("execution_time_is_compile_time_ms"), true);
-    Report->SetBoolField(TEXT("memory_usage_is_disk_file_size_bytes"), true);
-    Report->SetBoolField(TEXT("connection_count_is_pin_count"), true);
-    Report->SetNumberField(TEXT("execution_time"), CompileMs);
-    Report->SetNumberField(TEXT("memory_usage"), DiskBytes);
-    Report->SetNumberField(TEXT("node_count"), NodeCount);
-    Report->SetNumberField(TEXT("connection_count"), PinTotal);
-    Report->SetStringField(TEXT("performance_rating"), Rating);
-    Report->SetBoolField(TEXT("function_exists"), true);
-    Report->SetBoolField(TEXT("blueprint_compiled"), Blueprint->Status == BS_UpToDate);
-    if (Findings.Num() > 0)
-    {
-        Report->SetArrayField(TEXT("issues"), mcp_common::StringsToJson(Findings));
-    }
-    return Report;
 }
 
 // MCP:check_blueprint_errors - Check a blueprint for compilation errors, warnings, structural issues, and orphaned nodes. Read-only: it does NOT recompile the Blueprint (it reports the cached Status).
@@ -638,149 +472,211 @@ TSharedPtr<FJsonObject> HandleCheckBlueprintErrors(const TSharedPtr<FJsonObject>
     return Report;
 }
 
-// MCP:profile_blueprint_execution - STATIC complexity analysis of a blueprint (node/function/variable counts + heuristic score). It does NOT profile any runtime execution. WARNING, SIDE EFFECT: by default it RECOMPILES the Blueprint purely to time the compile, which marks the asset dirty and can surface new compile errors on an asset you only meant to READ -- pass compile_for_timing=false for a genuinely read-only analysis. Three response fields are misnamed and each is flagged as such in the payload: `execution_time` is the COMPILE time in ms, `cpu_usage` is the heuristic complexity score (not CPU), and `memory_usage` is the .uasset size on disk (not memory).
-//   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
-//   @param compile_for_timing [bool] - Optional (default true): recompile the Blueprint to measure compile time. Pass false for a pure read-only analysis (execution_time/compilation_score_ms then report 0).
-//   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, execution_time: number, memory_usage: int, cpu_usage: number, performance_rating: string, profile_status: string, total_nodes: int, function_count: int, event_count: int, variable_count: int, component_count: int, complexity_score: number, memory_score_mb: number, compilation_score_ms: number, blueprint_compiled: bool, is_static_analysis: bool, runtime_profiled: bool, recompiled_blueprint: bool, execution_time_is_compile_time_ms: bool, cpu_usage_is_complexity_score: bool, memory_usage_is_disk_file_size_bytes: bool, under_readonly_root: bool, side_effects: [string], recommendations?: [string] }
-// WARNING: SIDE EFFECT: this command RECOMPILES the Blueprint
-//      (FKismetEditorUtilities::CompileBlueprint) purely to time the compile, and reports that
-//      compile time as `execution_time`. Recompiling marks the asset dirty and can surface new
-//      compile errors on an asset the caller only meant to READ. It is the default, declared in
-//      the response, and compile_for_timing opts out.
-//      `cpu_usage` is NOT CPU usage (it is the heuristic complexity score) and `memory_usage` is
-//      NOT memory (it is the .uasset size on disk); both are flagged in the response.
-
-TSharedPtr<FJsonObject> HandleProfileBlueprintExecution(const TSharedPtr<FJsonObject>& Params)
+// Collects Graph and, if bIncludeComposites, its collapsed subgraphs (recursive,
+// with a visited set in case a graph is referenced twice). ONLY UEdGraph::SubGraphs:
+// following macro-instance graphs would drag in the engine's whole macro libraries.
+static void TestingCollectGraphAndSubGraphs(UEdGraph* Graph, bool bIncludeComposites, TSet<UEdGraph*>& Visited, TArray<UEdGraph*>& Out)
 {
-    UBlueprint* Blueprint = nullptr;
-    FAssetData AssetData;
-    TSharedPtr<FJsonObject> ResolveFailure;
-    TSharedPtr<FJsonObject> Report = TestingStartBlueprintReport(Params, Blueprint, AssetData, ResolveFailure);
-    if (!Report)
+    if (!Graph || Visited.Contains(Graph))
     {
-        return ResolveFailure;
+        return;
     }
-
-    // The side effect: on by default, declared in the response, and it can be turned off.
-    bool bCompileForTiming = true;
-    Params->TryGetBoolField(TEXT("compile_for_timing"), bCompileForTiming);
-
-    // Policy signal (not a guard: the default does NOT change). Recompiling dirties
-    // an asset under a read-only root (a vendored library); the caller must know.
-    const bool bUnderReadOnlyRoot = mcp_common::IsUnderReadOnlyRoot(AssetData.PackageName.ToString());
-    Report->SetBoolField(TEXT("under_readonly_root"), bUnderReadOnlyRoot);
-
-    const double CompileMs = bCompileForTiming ? TestingTimedCompileMs(Blueprint) : 0.0;
-
-    // Everything below is measured after the (optional) compile.
-    const UEAgentTestingCommandsImpl::FBlueprintShape Shape = UEAgentTestingCommandsImpl::MeasureBlueprintShape(Blueprint);
-    int64 DiskBytes = 0;
-    UEAgentTestingCommandsImpl::TryGetPackageFileSize(AssetData, DiskBytes);
-    const double Complexity = UEAgentTestingCommandsImpl::HeuristicComplexity(Shape);
-    const double DiskMegabytes = UEAgentTestingCommandsImpl::BytesToMegabytes(DiskBytes);
-
-    // The worst band any single metric reaches decides the rating.
-    const TCHAR* Rating = TEXT("Excellent");
-    if (Complexity > 50.0 || DiskMegabytes > 10.0 || CompileMs > 1000.0)
+    Visited.Add(Graph);
+    Out.Add(Graph);
+    if (!bIncludeComposites)
     {
-        Rating = TEXT("Poor");
+        return;
     }
-    else if (Complexity > 25.0 || DiskMegabytes > 5.0 || CompileMs > 500.0)
+    for (UEdGraph* Sub : Graph->SubGraphs)
     {
-        Rating = TEXT("Fair");
+        TestingCollectGraphAndSubGraphs(Sub, bIncludeComposites, Visited, Out);
     }
-    else if (Complexity > 10.0 || DiskMegabytes > 2.0 || CompileMs > 100.0)
-    {
-        Rating = TEXT("Good");
-    }
-
-    // Advice, in a fixed order; only the entries whose threshold is exceeded are reported.
-    struct FProfileAdvice
-    {
-        bool bApplies;
-        const TCHAR* Text;
-    };
-    const FProfileAdvice AdviceTable[] =
-    {
-        { Shape.Nodes > 100,          TEXT("Consider breaking down complex functions into smaller ones") },
-        { Shape.Functions > 20,       TEXT("Blueprint has many functions - consider organizing into parent classes") },
-        { Shape.Events > 10,          TEXT("Consider consolidating event graphs") },
-        { Shape.Variables > 50,       TEXT("High variable count - consider using structures or data assets") },
-        { Shape.Components > 20,      TEXT("Many components - consider using child actor components") },
-        { CompileMs > 1000.0,         TEXT("Slow compilation - check for circular dependencies or complex logic") },
-        { DiskBytes > 5 * 1024 * 1024, TEXT("Large file size - consider optimizing assets and reducing complexity") },
-    };
-    TArray<TSharedPtr<FJsonValue>> AdviceJson;
-    for (const FProfileAdvice& Advice : AdviceTable)
-    {
-        if (Advice.bApplies)
-        {
-            AdviceJson.Add(MakeShared<FJsonValueString>(Advice.Text));
-        }
-    }
-
-    Report->SetNumberField(TEXT("execution_time"), CompileMs);
-    Report->SetNumberField(TEXT("memory_usage"), DiskBytes);
-    Report->SetNumberField(TEXT("cpu_usage"), Complexity);
-    Report->SetStringField(TEXT("performance_rating"), Rating);
-    Report->SetStringField(TEXT("profile_status"),
-        bCompileForTiming ? TEXT("StaticAnalysisWithRecompile") : TEXT("StaticAnalysisOnly"));
-
-    // The three names lie about what they measure. Renaming them would break
-    // every caller, so each one is declared explicitly.
-    Report->SetBoolField(TEXT("is_static_analysis"), true);
-    Report->SetBoolField(TEXT("runtime_profiled"), false);
-    Report->SetBoolField(TEXT("recompiled_blueprint"), bCompileForTiming);
-    Report->SetBoolField(TEXT("execution_time_is_compile_time_ms"), true);
-    Report->SetBoolField(TEXT("cpu_usage_is_complexity_score"), true);
-    Report->SetBoolField(TEXT("memory_usage_is_disk_file_size_bytes"), true);
-
-    TArray<TSharedPtr<FJsonValue>> SideEffects;
-    if (bCompileForTiming)
-    {
-        SideEffects.Add(MakeShared<FJsonValueString>(
-            TEXT("Recompiled the Blueprint via FKismetEditorUtilities::CompileBlueprint (marks the asset dirty and may surface new compile errors). Pass compile_for_timing=false to skip it.")));
-        if (bUnderReadOnlyRoot)
-        {
-            SideEffects.Add(MakeShared<FJsonValueString>(
-                TEXT("The recompiled asset lives under a READ-ONLY root (mcp_common::GetDefaultReadonlyRoots(), e.g. /Game/VendorPack). Nothing was saved, but the package is now dirty.")));
-        }
-    }
-    Report->SetArrayField(TEXT("side_effects"), SideEffects);
-
-    Report->SetNumberField(TEXT("total_nodes"), Shape.Nodes);
-    Report->SetNumberField(TEXT("function_count"), Shape.Functions);
-    Report->SetNumberField(TEXT("event_count"), Shape.Events);
-    Report->SetNumberField(TEXT("variable_count"), Shape.Variables);
-    Report->SetNumberField(TEXT("component_count"), Shape.Components);
-    Report->SetNumberField(TEXT("complexity_score"), Complexity);
-    Report->SetNumberField(TEXT("memory_score_mb"), DiskMegabytes);
-    // Named a "score", but it is the compile time itself.
-    Report->SetNumberField(TEXT("compilation_score_ms"), CompileMs);
-    Report->SetBoolField(TEXT("blueprint_compiled"), Blueprint->Status == BS_UpToDate);
-    if (AdviceJson.Num() > 0)
-    {
-        Report->SetArrayField(TEXT("recommendations"), AdviceJson);
-    }
-    return Report;
 }
 
-// MCP:get_blueprint_debug_info - Retrieve comprehensive debug information about a blueprint including structure, metadata, and complexity analysis. Read-only: it does NOT recompile the Blueprint.
+// Classification of a node, IDENTICAL for function graphs and event graphs.
+static void TestingAppendNodeClassification(UEdGraphNode* Node, const FString& NodeTitle, TArray<FString>& ExecutionFlow)
+{
+    if (!Node)
+    {
+        return;
+    }
+    // At most one indented "<kind>: <title>" line: the kinds are tried in table order and the
+    // first class the node derives from names it. Any other node adds nothing.
+    struct FListedNodeKind
+    {
+        UClass* BaseClass;
+        const TCHAR* Label;
+    };
+    const FListedNodeKind ListedKinds[] =
+    {
+        { UK2Node_CallFunction::StaticClass(), TEXT("Function Call") },
+        { UK2Node_Event::StaticClass(),        TEXT("Event") },
+        { UK2Node_VariableGet::StaticClass(),  TEXT("Variable Get") },
+        { UK2Node_VariableSet::StaticClass(),  TEXT("Variable Set") },
+    };
+    for (const FListedNodeKind& Kind : ListedKinds)
+    {
+        if (Node->IsA(Kind.BaseClass))
+        {
+            ExecutionFlow.Add(FString::Printf(TEXT("    %s: %s"), Kind.Label, *NodeTitle));
+            return;
+        }
+    }
+}
+
+// The static graph listing of get_blueprint_debug_info (include_graph_listing): one family of graphs at a time
+// (function graphs first, then event graphs), each with its own visited set. Every graph contributes a header
+// line, then per node a "Node:" line and, for the kinds TestingAppendNodeClassification knows, one more line.
+// Nothing is traced: nodes come in array order, not execution order.
+static void TestingWriteGraphListing(UBlueprint* Blueprint, bool bIncludeComposites, const TSharedPtr<FJsonObject>& Report)
+{
+    TArray<FString> FlowLines;
+    TArray<FString> FunctionGraphNames;
+    TArray<FString> EventGraphNames;
+    auto ListFamily = [&FlowLines, bIncludeComposites](const TArray<TObjectPtr<UEdGraph>>& Roots, const TCHAR* HeaderLabel, TArray<FString>& NamesOut)
+    {
+        TSet<UEdGraph*> Seen;
+        TArray<UEdGraph*> InWalkOrder;
+        for (UEdGraph* Root : Roots)
+        {
+            TestingCollectGraphAndSubGraphs(Root, bIncludeComposites, Seen, InWalkOrder);
+        }
+        for (UEdGraph* Walked : InWalkOrder)
+        {
+            if (!Walked)
+            {
+                continue;
+            }
+            const FString WalkedName = Walked->GetName();
+            FlowLines.Add(FString::Printf(TEXT("%s: %s"), HeaderLabel, *WalkedName));
+            NamesOut.Add(WalkedName);
+            for (UEdGraphNode* GraphNode : Walked->Nodes)
+            {
+                if (!GraphNode)
+                {
+                    continue;
+                }
+                const FString Title = GraphNode->GetNodeTitle(ENodeTitleType::ListView).ToString();
+                FlowLines.Add(FString::Printf(TEXT("  Node: %s"), *Title));
+                TestingAppendNodeClassification(GraphNode, Title, FlowLines);
+            }
+        }
+    };
+    ListFamily(Blueprint->FunctionGraphs, TEXT("Function"), FunctionGraphNames);
+    ListFamily(Blueprint->EventGraphs, TEXT("Event Graph"), EventGraphNames);
+
+    TArray<FString> Caveats;
+    Caveats.Add(TEXT("No runtime tracing: this is a static walk of the asset's graphs in the editor."));
+    Caveats.Add(TEXT("Nodes are listed in array order, NOT in execution order: exec-pin wiring is not followed."));
+    if (!bIncludeComposites)
+    {
+        Caveats.Add(TEXT("Collapsed composite subgraphs are NOT included; pass include_composites=true to descend into them."));
+    }
+    Caveats.Add(TEXT("Macro-instance graphs are never followed (they usually belong to another Blueprint or an engine macro library)."));
+    Caveats.Add(TEXT("Only FunctionGraphs + EventGraphs are walked; MacroGraphs / DelegateSignatureGraphs / interface-override graphs are not."));
+
+    Report->SetArrayField(TEXT("execution_flow"), mcp_common::StringsToJson(FlowLines));
+    Report->SetArrayField(TEXT("function_calls"), mcp_common::StringsToJson(FunctionGraphNames));
+    Report->SetArrayField(TEXT("event_calls"), mcp_common::StringsToJson(EventGraphNames));
+    Report->SetNumberField(TEXT("graphs_analyzed"), FunctionGraphNames.Num() + EventGraphNames.Num());
+    Report->SetBoolField(TEXT("includes_composite_subgraphs"), bIncludeComposites);
+    Report->SetArrayField(TEXT("limitations"), mcp_common::StringsToJson(Caveats));
+}
+
+// The function_name block of get_blueprint_debug_info: whether the Blueprint has that function graph of its own and,
+// when it does, its node and pin counts with their rating and findings. The function is never executed.
+static void TestingWriteFunctionAnalysis(UBlueprint* Blueprint, const FString& FunctionName,
+    const TSharedPtr<FJsonObject>& Report)
+{
+    Report->SetStringField(TEXT("function_name"), FunctionName);
+    // Only the Blueprint's own function graphs are searched.
+    const UEdGraph* FunctionGraph = UEAgentTestingCommandsImpl::FindOwnFunctionGraph(Blueprint, FunctionName);
+    Report->SetBoolField(TEXT("function_exists"), FunctionGraph != nullptr);
+    if (!FunctionGraph)
+    {
+        return;
+    }
+
+    const int32 NodeCount = FunctionGraph->Nodes.Num();
+    int32 PinTotal = 0;
+    for (const UEdGraphNode* GraphNode : FunctionGraph->Nodes)
+    {
+        PinTotal += GraphNode ? GraphNode->Pins.Num() : 0;
+    }
+
+    const TCHAR* Rating = TEXT("Good");
+    if (NodeCount > 50)
+    {
+        Rating = TEXT("Complex");
+    }
+    else if (NodeCount > 20)
+    {
+        Rating = TEXT("Moderate");
+    }
+
+    TArray<FString> Findings;
+    if (NodeCount > 100)
+    {
+        Findings.Add(TEXT("Function has high node count - consider breaking into smaller functions"));
+    }
+    if (PinTotal > 200)
+    {
+        Findings.Add(TEXT("Function has many pins - may impact performance"));
+    }
+
+    Report->SetNumberField(TEXT("function_node_count"), NodeCount);
+    Report->SetNumberField(TEXT("function_pin_count"), PinTotal);
+    Report->SetStringField(TEXT("function_rating"), Rating);
+    Report->SetArrayField(TEXT("function_issues"), mcp_common::StringsToJson(Findings));
+}
+
+// MCP:get_blueprint_debug_info - Read a Blueprint's structure, metadata and complexity in one static report: cached compile status, file size, function/event/variable/component/node counts, function names, variables, components, a heuristic complexity score with its level, a performance rating and advice; with function_name, one function graph's node and pin counts; with include_graph_listing, every graph's nodes listed. An asset that resolves but is not a Blueprint is not an error: the reply is its identity with is_blueprint false. Read-only: nothing is compiled (compile_blueprint compiles), and nothing is executed or traced at runtime: observe runtime with set_blueprint_breakpoint (+ PIE) or watch_pie_property; the cached compile errors and structural problems are check_blueprint_errors.
 //   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
-//   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, debug_status: string, debug_level: string, debug_message: string, file_size_bytes: int, file_size_mb: number, function_count: int, event_count: int, variable_count: int, component_count: int, total_nodes: int, parent_class: string, blueprint_compiled: bool, compilation_status: string, function_names: [string], variable_info: [{ name, type, category, is_public, is_editable }], component_info: [{ name, class, is_root }], complexity_score: number, complexity_level: string }
+//   @param function_name - Optional name of one of the Blueprint's own function graphs (case-insensitive) to analyze statically: adds function_name and function_exists and, when it exists, function_node_count, function_pin_count, function_rating (Good, Moderate over 20 nodes, Complex over 50) and function_issues. The function is never executed; an unknown name is function_exists false, not an error.
+//   @param include_graph_listing [bool] - Optional (default false): add a static listing of every function and event graph with its nodes, in array order rather than execution order: execution_flow, function_calls (function graph names), event_calls (event graph names), graphs_analyzed, includes_composite_subgraphs and limitations.
+//   @param include_composites [bool] - Optional (default false), used with include_graph_listing: also descend into collapsed composite subgraphs (UEdGraph::SubGraphs). Macro-instance graphs are never followed.
+//   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, debug_status: string, debug_level: string, debug_message: string, file_size_bytes: int, file_size_mb: number, function_count: int, event_count: int, variable_count: int, component_count: int, total_nodes: int, parent_class: string, blueprint_compiled: bool, compilation_status: string, function_names: [string], variable_info: [{ name, type, category, is_public, is_editable }], component_info: [{ name, class, is_root }], complexity_score: number, complexity_level: string, performance_rating: string, recommendations: [string], function_name?: string, function_exists?: bool, function_node_count?: int, function_pin_count?: int, function_rating?: string, function_issues?: [string], execution_flow?: [string], function_calls?: [string], event_calls?: [string], graphs_analyzed?: int, includes_composite_subgraphs?: bool, limitations?: [string] }
 
 TSharedPtr<FJsonObject> HandleGetBlueprintDebugInfo(const TSharedPtr<FJsonObject>& Params)
 {
-    UBlueprint* Blueprint = nullptr;
+    // The optional parts of the report, read up front.
+    FString FunctionName;
+    Params->TryGetStringField(TEXT("function_name"), FunctionName);
+    bool bIncludeGraphListing = false;
+    Params->TryGetBoolField(TEXT("include_graph_listing"), bIncludeGraphListing);
+    bool bIncludeComposites = false;
+    Params->TryGetBoolField(TEXT("include_composites"), bIncludeComposites);
+
+    FString BlueprintPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+
     FAssetData AssetData;
     TSharedPtr<FJsonObject> ResolveFailure;
-    TSharedPtr<FJsonObject> Report = TestingStartBlueprintReport(Params, Blueprint, AssetData, ResolveFailure);
-    if (!Report)
+    UBlueprint* Blueprint = TestingResolveBlueprintFlexible(BlueprintPath, AssetData, ResolveFailure);
+    if (!Blueprint)
     {
+        // An asset that resolves on its own but is not a Blueprint is an answer, not an error: its identity
+        // with is_blueprint false. A path that resolves to nothing (or to several assets) stays the error.
+        FAssetData AnyAsset;
+        FString AnyError;
+        if (TestingResolveAssetFlexibleSingle(BlueprintPath, nullptr, AnyAsset, AnyError)
+            && !AnyAsset.IsInstanceOf(UBlueprint::StaticClass()))
+        {
+            TSharedPtr<FJsonObject> NotBlueprint = MakeShared<FJsonObject>();
+            UEAgentTestingCommandsImpl::WriteAssetIdentity(NotBlueprint, BlueprintPath, AnyAsset);
+            NotBlueprint->SetBoolField(TEXT("is_blueprint"), false);
+            NotBlueprint->SetStringField(TEXT("debug_message"), FString::Printf(
+                TEXT("Asset is not a Blueprint (class %s): nothing to analyze"), *AnyAsset.AssetClassPath.ToString()));
+            return NotBlueprint;
+        }
         return ResolveFailure;
     }
 
-    // Status / level pair derived from the cached compile state (nothing is compiled here).
+    TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+    UEAgentTestingCommandsImpl::WriteAssetIdentity(Report, BlueprintPath, AssetData);
+    Report->SetBoolField(TEXT("is_blueprint"), true);
+
+    // Status / level pair derived from the cached compile state.
     const TCHAR* DebugStatus = TEXT("Available");
     const TCHAR* DebugLevel = TEXT("Basic");
     switch (Blueprint->Status.GetValue())
@@ -796,8 +692,9 @@ TSharedPtr<FJsonObject> HandleGetBlueprintDebugInfo(const TSharedPtr<FJsonObject
 
     int64 DiskBytes = 0;
     UEAgentTestingCommandsImpl::TryGetPackageFileSize(AssetData, DiskBytes);
+    const double DiskMegabytes = UEAgentTestingCommandsImpl::BytesToMegabytes(DiskBytes);
     Report->SetNumberField(TEXT("file_size_bytes"), DiskBytes);
-    Report->SetNumberField(TEXT("file_size_mb"), UEAgentTestingCommandsImpl::BytesToMegabytes(DiskBytes));
+    Report->SetNumberField(TEXT("file_size_mb"), DiskMegabytes);
 
     const UEAgentTestingCommandsImpl::FBlueprintShape Shape = UEAgentTestingCommandsImpl::MeasureBlueprintShape(Blueprint);
     Report->SetNumberField(TEXT("function_count"), Shape.Functions);
@@ -867,6 +764,57 @@ TSharedPtr<FJsonObject> HandleGetBlueprintDebugInfo(const TSharedPtr<FJsonObject
     }
     Report->SetNumberField(TEXT("complexity_score"), Complexity);
     Report->SetStringField(TEXT("complexity_level"), ComplexityBand);
+
+    // Performance rating: the worst band any single metric reaches decides it.
+    const TCHAR* Rating = TEXT("Excellent");
+    if (Complexity > 50.0 || DiskMegabytes > 10.0)
+    {
+        Rating = TEXT("Poor");
+    }
+    else if (Complexity > 25.0 || DiskMegabytes > 5.0)
+    {
+        Rating = TEXT("Fair");
+    }
+    else if (Complexity > 10.0 || DiskMegabytes > 2.0)
+    {
+        Rating = TEXT("Good");
+    }
+    Report->SetStringField(TEXT("performance_rating"), Rating);
+
+    // Advice, in a fixed order; only the entries whose threshold is exceeded are reported.
+    struct FDebugAdvice
+    {
+        bool bApplies;
+        const TCHAR* Text;
+    };
+    const FDebugAdvice AdviceTable[] =
+    {
+        { Shape.Nodes > 100,           TEXT("Consider breaking down complex functions into smaller ones") },
+        { Shape.Functions > 20,        TEXT("Blueprint has many functions - consider organizing into parent classes") },
+        { Shape.Events > 10,           TEXT("Consider consolidating event graphs") },
+        { Shape.Variables > 50,        TEXT("High variable count - consider using structures or data assets") },
+        { Shape.Components > 20,       TEXT("Many components - consider using child actor components") },
+        { DiskBytes > 5 * 1024 * 1024, TEXT("Large file size - consider optimizing assets and reducing complexity") },
+    };
+    TArray<FString> Advice;
+    for (const FDebugAdvice& Entry : AdviceTable)
+    {
+        if (Entry.bApplies)
+        {
+            Advice.Add(Entry.Text);
+        }
+    }
+    Report->SetArrayField(TEXT("recommendations"), mcp_common::StringsToJson(Advice));
+
+
+    if (!FunctionName.IsEmpty())
+    {
+        TestingWriteFunctionAnalysis(Blueprint, FunctionName, Report);
+    }
+    if (bIncludeGraphListing)
+    {
+        TestingWriteGraphListing(Blueprint, bIncludeComposites, Report);
+    }
     return Report;
 }
 
@@ -1052,168 +1000,6 @@ TSharedPtr<FJsonObject> HandleRemoveBlueprintBreakpoint(const TSharedPtr<FJsonOb
     ResultObj->SetBoolField(TEXT("removed"), bRemoved);
     ResultObj->SetBoolField(TEXT("already_absent"), false);
     return ResultObj;
-}
-
-// MCP:trace_blueprint_execution - STATIC listing of a blueprint's graphs and their nodes. It does NOT trace anything at runtime, despite the name: `trace_status` reports "StaticAnalysisOnly", and `total_execution_paths` does NOT count execution paths -- it counts GRAPHS, kept under that name only for compatibility, alongside the honest alias `graphs_analyzed` and the flag `total_execution_paths_is_graph_count`. Collapsed composite subgraphs are invisible unless you pass include_composites=true. TO ACTUALLY OBSERVE RUNTIME use set_blueprint_breakpoint (+ PIE) or watch_pie_property instead.
-//   @param blueprint_path - Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates)
-//   @param include_composites [bool] - Optional (default false): also descend into collapsed composite subgraphs (UEdGraph::SubGraphs). Macro-instance graphs are NOT followed (they usually live in another Blueprint / an engine macro library).
-//   @returns { blueprint_path: string, resolved_object_path: string, blueprint_class: string, trace_status: string, trace_level: string, trace_message: string, file_size_bytes: int, file_size_mb: number, total_execution_paths: int, graphs_analyzed: int, total_execution_paths_is_graph_count: bool, is_static_analysis: bool, traced_runtime: bool, includes_composite_subgraphs: bool, limitations: [string], function_count: int, event_count: int, execution_flow: [string], function_calls: [string], event_calls: [string], blueprint_compiled: bool, compilation_status: string }
-// WARNING: HONESTY. This tool does not trace execution: it walks the asset's graphs in the
-//      editor and lists the nodes. Specifically:
-//        - `trace_status` is "StaticAnalysisOnly".
-//        - `total_execution_paths` does NOT count execution paths: it counts GRAPHS. The field
-//          is kept for compatibility, with `total_execution_paths_is_graph_count` and the honest
-//          alias `graphs_analyzed`.
-//        - Collapsed subgraphs (composites) are listed only with include_composites=true.
-//        - `Variable Get`/`Variable Set` are classified the same way in every graph kind.
-//      To really observe runtime: set_blueprint_breakpoint (+ PIE) or watch_pie_property.
-
-// Collects Graph and, if bIncludeComposites, its collapsed subgraphs (recursive,
-// with a visited set in case a graph is referenced twice). ONLY UEdGraph::SubGraphs:
-// following macro-instance graphs would drag in the engine's whole macro libraries.
-static void TestingCollectGraphAndSubGraphs(UEdGraph* Graph, bool bIncludeComposites, TSet<UEdGraph*>& Visited, TArray<UEdGraph*>& Out)
-{
-    if (!Graph || Visited.Contains(Graph))
-    {
-        return;
-    }
-    Visited.Add(Graph);
-    Out.Add(Graph);
-    if (!bIncludeComposites)
-    {
-        return;
-    }
-    for (UEdGraph* Sub : Graph->SubGraphs)
-    {
-        TestingCollectGraphAndSubGraphs(Sub, bIncludeComposites, Visited, Out);
-    }
-}
-
-// Classification of a node, IDENTICAL for function graphs and event graphs.
-static void TestingAppendNodeClassification(UEdGraphNode* Node, const FString& NodeTitle, TArray<FString>& ExecutionFlow)
-{
-    if (!Node)
-    {
-        return;
-    }
-    // At most one indented "<kind>: <title>" line: the kinds are tried in table order and the
-    // first class the node derives from names it. Any other node adds nothing.
-    struct FListedNodeKind
-    {
-        UClass* BaseClass;
-        const TCHAR* Label;
-    };
-    const FListedNodeKind ListedKinds[] =
-    {
-        { UK2Node_CallFunction::StaticClass(), TEXT("Function Call") },
-        { UK2Node_Event::StaticClass(),        TEXT("Event") },
-        { UK2Node_VariableGet::StaticClass(),  TEXT("Variable Get") },
-        { UK2Node_VariableSet::StaticClass(),  TEXT("Variable Set") },
-    };
-    for (const FListedNodeKind& Kind : ListedKinds)
-    {
-        if (Node->IsA(Kind.BaseClass))
-        {
-            ExecutionFlow.Add(FString::Printf(TEXT("    %s: %s"), Kind.Label, *NodeTitle));
-            return;
-        }
-    }
-}
-
-TSharedPtr<FJsonObject> HandleTraceBlueprintExecution(const TSharedPtr<FJsonObject>& Params)
-{
-    UBlueprint* Blueprint = nullptr;
-    FAssetData AssetData;
-    TSharedPtr<FJsonObject> ResolveFailure;
-    TSharedPtr<FJsonObject> Report = TestingStartBlueprintReport(Params, Blueprint, AssetData, ResolveFailure);
-    if (!Report)
-    {
-        return ResolveFailure;
-    }
-
-    // Default false: collapsed composites stay unvisited.
-    bool bIncludeComposites = false;
-    Params->TryGetBoolField(TEXT("include_composites"), bIncludeComposites);
-
-    // A static listing, one family of graphs at a time (function graphs first, then event graphs),
-    // each family with its own visited set. Every graph contributes a header line, then per node a
-    // "Node:" line and, for the kinds TestingAppendNodeClassification knows, one more line.
-    TArray<FString> FlowLines;
-    TArray<FString> FunctionGraphNames;
-    TArray<FString> EventGraphNames;
-    auto ListFamily = [&FlowLines, bIncludeComposites](const TArray<TObjectPtr<UEdGraph>>& Roots, const TCHAR* HeaderLabel, TArray<FString>& NamesOut)
-    {
-        TSet<UEdGraph*> Seen;
-        TArray<UEdGraph*> InWalkOrder;
-        for (UEdGraph* Root : Roots)
-        {
-            TestingCollectGraphAndSubGraphs(Root, bIncludeComposites, Seen, InWalkOrder);
-        }
-        for (UEdGraph* Walked : InWalkOrder)
-        {
-            if (!Walked)
-            {
-                continue;
-            }
-            const FString WalkedName = Walked->GetName();
-            FlowLines.Add(FString::Printf(TEXT("%s: %s"), HeaderLabel, *WalkedName));
-            NamesOut.Add(WalkedName);
-            for (UEdGraphNode* GraphNode : Walked->Nodes)
-            {
-                if (!GraphNode)
-                {
-                    continue;
-                }
-                const FString Title = GraphNode->GetNodeTitle(ENodeTitleType::ListView).ToString();
-                FlowLines.Add(FString::Printf(TEXT("  Node: %s"), *Title));
-                TestingAppendNodeClassification(GraphNode, Title, FlowLines);
-            }
-        }
-    };
-    ListFamily(Blueprint->FunctionGraphs, TEXT("Function"), FunctionGraphNames);
-    ListFamily(Blueprint->EventGraphs, TEXT("Event Graph"), EventGraphNames);
-    const int32 GraphsWalked = FunctionGraphNames.Num() + EventGraphNames.Num();
-
-    int64 DiskBytes = 0;
-    UEAgentTestingCommandsImpl::TryGetPackageFileSize(AssetData, DiskBytes);
-
-    // Honest status and message -- nothing is "Active", nothing was traced.
-    Report->SetStringField(TEXT("trace_status"), TEXT("StaticAnalysisOnly"));
-    Report->SetStringField(TEXT("trace_level"), TEXT("Detailed"));
-    Report->SetStringField(TEXT("trace_message"), FString::Printf(
-        TEXT("Static graph listing: %d graphs walked (%d function, %d event). No runtime execution was traced."),
-        GraphsWalked, FunctionGraphNames.Num(), EventGraphNames.Num()));
-    Report->SetNumberField(TEXT("file_size_bytes"), DiskBytes);
-    Report->SetNumberField(TEXT("file_size_mb"), UEAgentTestingCommandsImpl::BytesToMegabytes(DiskBytes));
-    // Compatibility: the field keeps its usual value (= number of graphs),
-    // together with the flag saying its NAME is misleading, and the correct alias.
-    Report->SetNumberField(TEXT("total_execution_paths"), GraphsWalked);
-    Report->SetNumberField(TEXT("graphs_analyzed"), GraphsWalked);
-    Report->SetBoolField(TEXT("total_execution_paths_is_graph_count"), true);
-    Report->SetBoolField(TEXT("is_static_analysis"), true);
-    Report->SetBoolField(TEXT("traced_runtime"), false);
-    Report->SetBoolField(TEXT("includes_composite_subgraphs"), bIncludeComposites);
-
-    TArray<FString> Caveats;
-    Caveats.Add(TEXT("No runtime tracing: this is a static walk of the asset's graphs in the editor."));
-    Caveats.Add(TEXT("'total_execution_paths' counts GRAPHS, not execution paths (kept under that name for backwards compatibility; see graphs_analyzed)."));
-    Caveats.Add(TEXT("Nodes are listed in array order, NOT in execution order: exec-pin wiring is not followed."));
-    if (!bIncludeComposites)
-    {
-        Caveats.Add(TEXT("Collapsed composite subgraphs are NOT included; pass include_composites=true to descend into them."));
-    }
-    Caveats.Add(TEXT("Macro-instance graphs are never followed (they usually belong to another Blueprint or an engine macro library)."));
-    Caveats.Add(TEXT("Only FunctionGraphs + EventGraphs are walked; MacroGraphs / DelegateSignatureGraphs / interface-override graphs are not."));
-    Report->SetArrayField(TEXT("limitations"), mcp_common::StringsToJson(Caveats));
-
-    Report->SetNumberField(TEXT("function_count"), FunctionGraphNames.Num());
-    Report->SetNumberField(TEXT("event_count"), EventGraphNames.Num());
-    Report->SetArrayField(TEXT("execution_flow"), mcp_common::StringsToJson(FlowLines));
-    Report->SetArrayField(TEXT("function_calls"), mcp_common::StringsToJson(FunctionGraphNames));
-    Report->SetArrayField(TEXT("event_calls"), mcp_common::StringsToJson(EventGraphNames));
-    Report->SetBoolField(TEXT("blueprint_compiled"), Blueprint->Status == BS_UpToDate);
-    Report->SetStringField(TEXT("compilation_status"), UEAgentTestingCommandsImpl::CompileStatusLabel(Blueprint));
-    return Report;
 }
 
 // =====================================================================
@@ -1965,12 +1751,8 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("check_blueprint_errors"), &HandleCheckBlueprintErrors },
     { TEXT("get_blueprint_debug_info"), &HandleGetBlueprintDebugInfo },
-    { TEXT("profile_blueprint_execution"), &HandleProfileBlueprintExecution },
     { TEXT("remove_blueprint_breakpoint"), &HandleRemoveBlueprintBreakpoint },
     { TEXT("set_blueprint_breakpoint"), &HandleSetBlueprintBreakpoint },
-    { TEXT("test_blueprint_function"), &HandleTestBlueprintFunction },
-    { TEXT("trace_blueprint_execution"), &HandleTraceBlueprintExecution },
-    { TEXT("validate_blueprint"), &HandleValidateBlueprint },
     { TEXT("watch_pie_property"), &HandleWatchPieProperty },
 };
 } // namespace UEAgentTestingCommands

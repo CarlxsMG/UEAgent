@@ -6,7 +6,7 @@ body:
     id: tool
     attributes:
       label: Tool
-      description: The tool that misbehaved, e.g. `set_blueprint_component_property`.
+      description: The tool that misbehaved, e.g. `set_blueprint_component_properties`.
     validations:
       required: true
   - type: textarea

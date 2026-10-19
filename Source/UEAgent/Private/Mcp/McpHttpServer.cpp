@@ -49,7 +49,7 @@ namespace McpHttpServerPrivate
 		TEXT("- A refusal (isError) comes before the call runs: the call is known to crash or freeze the editor, or is unreliable ")
 		TEXT("while Play-in-Editor runs. The message says what to do instead; stop PIE before compiling Blueprints or saving.\n")
 		TEXT("- Look assets and actors up instead of guessing their names, and name assets by their full path (/Game/...).\n")
-		TEXT("- For many small edits, use `batch`: one call, one pass on the game thread.\n")
+		TEXT("- For many small edits, use `execute_batch`: one call, one pass on the game thread.\n")
 		TEXT("- After editing a Blueprint graph, compile it and read the compiler's messages.\n")
 		TEXT("- When no tool fits, `execute_python` runs Unreal's Python API in the editor.");
 

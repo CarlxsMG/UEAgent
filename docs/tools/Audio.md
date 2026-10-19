@@ -2,7 +2,7 @@
 
 # Audio
 
-105 tools. Back to the [index](README.md).
+93 tools. Back to the [index](README.md).
 
 ## `add_bus_to_mix`
 
@@ -22,7 +22,7 @@ Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose targ
 
 *Additive.*
 
-Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error, and so is a default of the wrong JSON type or one data_type takes no literal of, with nothing written. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
+Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error, and so is a default of the wrong JSON type or one data_type takes no literal of, with nothing written. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use set_metasound_graph_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -49,6 +49,35 @@ Add a graph output of data_type (default Audio; others include Float, Int32, Boo
 | `data_type` | string | no | Frontend data type for the output node (optional, default "Audio") |
 
 **Returns:** `{ asset_path: string, output_name: string, data_type: string, added: bool, already_exists?: bool, saved: bool, save_error: string? }`
+
+## `add_metasound_interface`
+
+*Additive.*
+
+Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example"). |
+| `interface_name` | string | yes | Name of a registered MetaSound interface to add (required) |
+
+**Returns:** `{ asset_path: string, node_kind: string, interface_name: string, added: bool, saved: bool }`
+
+## `add_metasound_node`
+
+*Destructive.*
+
+Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `class_namespace` | string | yes | Registered node class namespace, e.g. "UE". |
+| `class_name` | string | yes | Registered node class name, e.g. "Sine". |
+| `class_variant` | string | no | Optional class variant, e.g. "Audio" (omit for the default/no-variant class). |
+| `major_version` | number | no | Optional major version (default 1). |
+
+**Returns:** `{ asset_path: string, node_id: string, class_namespace: string, class_name: string, class_variant: string, inputs: [{name,data_type}], outputs: [{name,data_type}], added: bool, saved: bool }`
 
 ## `add_modulation_input_to_patch`
 
@@ -109,7 +138,7 @@ Append one effect preset to the end of a USoundSubmix's effect chain and save th
 
 *Additive, idempotent.*
 
-Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue with set_subtitle_cue_text or set_subtitle_cue_timing and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
+Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue (text or timing) with set_subtitle_cue and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -137,7 +166,7 @@ Applies a 3D audio preset to an audio component of the editor world: spatializat
 
 **Returns:** `{ audio_component_name: string, audio_3d_settings: string, audio_3d_configured: bool, audio_3d_message: string, old_3d_enabled: bool, new_3d_enabled: bool, attenuation_override: bool, applied_attenuation_radius?: number, applied_falloff_distance?: number, 3d_enabled: bool, spatialization_enabled: bool, attenuation_distance: number, attenuation_radius: number, attenuation_falloff: number, attenuation_cone_angle: number, attenuation_cone_feather: number, audio_3d_recommendations: [string] }`
 
-## `connect_metasound_nodes`
+## `connect_metasound_graph_input_to_output`
 
 *Destructive.*
 
@@ -150,6 +179,21 @@ Connects a graph input node's output to a graph output node's input.  Resolves t
 | `to_node_input_name` | string | yes | Name of the graph OUTPUT to use as the connection target. |
 
 **Returns:** `{ asset_path: string, from_node_output_name: string, to_node_input_name: string, from_data_type: string, to_data_type: string, connected: bool, result: string, verified: bool, saved: bool, save_error: string? }`
+
+## `connect_metasound_node_to_graph_output`
+
+*Destructive, idempotent.*
+
+Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `node_id` | string | yes | GUID of the source node (from add_metasound_node). |
+| `node_output_name` | string | yes | Name of the node's output pin (e.g. "Audio"). |
+| `graph_output_name` | string | yes | Name of the target graph output (discover via get_metasound_info). |
+
+**Returns:** `{ asset_path: string, node_id: string, node_output_name: string, graph_output_name: string, connected: bool, result: string, saved: bool }`
 
 ## `connect_sound_cue_nodes`
 
@@ -252,7 +296,7 @@ Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSo
 
 *Additive, idempotent.*
 
-Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: metasound_add_node_by_classname, metasound_add_interface; inspect: get_metasound_info; inverse: delete_meta_sound.
+Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: add_metasound_node, add_metasound_interface; inspect: get_metasound_info; inverse: delete_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -264,33 +308,23 @@ Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaS
 
 ## `create_modulation_generator`
 
-*Additive.*
-
-Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path, with engine default settings, and saves it. An existing generator there is returned untouched with its own class (not saved). Returns generator_path, generator_name, generator_class, created, already_existed, saved. Configure it with set_modulation_generator_settings.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `generator_path` | string | yes | Full asset path (e.g. /Game/MyGame/Gen_LFO) |
-| `generator_class` | string | yes | Concrete class name (case-insensitive). One of: LFO, ADEnvelope, EnvelopeFollower |
-
-**Returns:** `{ generator_path, generator_name, generator_class, created, already_existed, saved }`
-
-## `create_modulation_generator_lfo`
-
 *Destructive.*
 
-Creates a USoundModulationGeneratorLFO asset at package_path/generator_name (or loads the one there), writes waveform, frequency, amplitude and offset, enables looping and saves it, overwriting an existing LFO. An unknown waveform silently becomes Sine but is echoed as sent. Returns generator_path, the written values, created, saved.
+Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path (or package_path/generator_name), with engine default settings, and saves it; for an LFO it also writes the given waveform, frequency, amplitude, offset and phase (looping on), on a new LFO or overwriting those fields of an existing one. An existing generator with no LFO field given is returned untouched with its own class (not saved). LFO fields with another generator_class or on an existing generator of another class, and an unknown waveform, are errors. Returns generator_path, generator_name, generator_class, settings as stored, created, already_existed, updated, saved. Configure the other classes with set_modulation_generator_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `generator_name` | string | yes | Name of the modulation generator asset |
-| `package_path` | string | no | Target content package path where the asset is created (default /Game/MCP) |
-| `frequency` | number | no | LFO frequency in Hz (default 1.0) |
-| `amplitude` | number | no | LFO amplitude (default 1.0) |
-| `offset` | number | no | LFO output offset (default 0.0) |
-| `waveform` | string | no | LFO shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine; any other value also gives Sine) |
+| `generator_class` | string | yes | Concrete class name (case-insensitive). One of: LFO, ADEnvelope, EnvelopeFollower |
+| `generator_path` | string | no | Full asset path (e.g. /Game/MyGame/Gen_LFO). Optional when generator_name is given. |
+| `generator_name` | string | no | Optional asset name, used with package_path when generator_path is absent. |
+| `package_path` | string | no | Optional folder for generator_name (default /Game/MCP); ignored when generator_path is given. |
+| `waveform` | string | no | Optional, LFO only: shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (RandomSampleHold). Any other value is an error. |
+| `frequency` | number | no | Optional, LFO only: frequency in Hz (engine default 1.0). |
+| `amplitude` | number | no | Optional, LFO only: amplitude (engine default 1.0). |
+| `offset` | number | no | Optional, LFO only: output offset (engine default 0.0). |
+| `phase` | number | no | Optional, LFO only: starting phase (engine default 0.0). |
 
-**Returns:** `{ generator_path, generator_name, waveform, frequency, amplitude, offset, created, saved }`
+**Returns:** `{ generator_path, generator_name, generator_class, settings: {...}, created, already_existed, updated, saved }`
 
 ## `create_modulation_parameter`
 
@@ -433,9 +467,9 @@ Create a USoundfieldSubmix asset at submix_path and save it, with its default en
 
 ## `create_subtitles_asset`
 
-*Additive, idempotent.*
+*Destructive, idempotent.*
 
-Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; the inverse is remove_subtitles_asset.
+Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; delete it with delete_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -444,37 +478,11 @@ Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, 
 
 **Returns:** `{ asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }`
 
-## `delete_meta_sound`
+## `disconnect_metasound_graph_input_from_output`
 
 *Destructive, idempotent.*
 
-Delete a MetaSound asset from the project: a MetaSound Source or Patch, or any other class the MetaSound UObject registry serves as an asset. Idempotent -- deleting a non-existent asset is a no-op. Destructive -- requires confirm=true. An asset of any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source or Patch. |
-| `confirm` | boolean | yes | Must be true to actually delete. |
-
-**Returns:** `{ metasound_path, asset_class?, deleted, already_existed?, note }`
-
-## `disconnect_metasound_node_from_graph_output`
-
-*Destructive, idempotent.*
-
-Disconnects whatever node output currently drives a named graph output, clearing the edge (inverse of metasound_connect_node_to_graph_output).  Resolves the graph output node's input handle by name (FindGraphOutputNode) and queries NodeInputIsConnected first: if the input is already unconnected it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodeInput and reports the result. Saves the asset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `graph_output_name` | string | yes | Name of the target graph output to disconnect (discover via get_metasound_graph_info). |
-
-**Returns:** `{ asset_path: string, graph_output_name: string, data_type: string, disconnected: bool, already_disconnected: bool, result: string, saved: bool, save_error: string? }`
-
-## `disconnect_metasound_nodes`
-
-*Destructive, idempotent.*
-
-Disconnects a graph input node's output from a graph output node's input (inverse of connect_metasound_nodes).  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then queries NodesAreConnected first: if the edge is already absent it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodes and reports the result. Saves the asset.
+Disconnects a graph input node's output from a graph output node's input (inverse of connect_metasound_graph_input_to_output).  Resolves the source handle from a graph INPUT node by name (FindGraphInputNode -> the input node's output handle) and the destination handle from a graph OUTPUT node by name (FindGraphOutputNode -> the output node's input handle), then queries NodesAreConnected first: if the edge is already absent it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodes and reports the result. Saves the asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -483,6 +491,19 @@ Disconnects a graph input node's output from a graph output node's input (invers
 | `to_node_input_name` | string | yes | Name of the graph OUTPUT whose input is the connection target. |
 
 **Returns:** `{ asset_path: string, from_node_output_name: string, to_node_input_name: string, from_data_type: string, to_data_type: string, disconnected: bool, already_disconnected: bool, result: string, saved: bool, save_error: string?, note: string? }`
+
+## `disconnect_metasound_node_from_graph_output`
+
+*Destructive, idempotent.*
+
+Disconnects whatever node output currently drives a named graph output, clearing the edge (inverse of connect_metasound_node_to_graph_output).  Resolves the graph output node's input handle by name (FindGraphOutputNode) and queries NodeInputIsConnected first: if the input is already unconnected it returns already_disconnected without error (idempotent), otherwise it calls UMetaSoundBuilderBase::DisconnectNodeInput and reports the result. Saves the asset.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `graph_output_name` | string | yes | Name of the target graph output to disconnect (discover via get_metasound_info). |
+
+**Returns:** `{ asset_path: string, graph_output_name: string, data_type: string, disconnected: bool, already_disconnected: bool, result: string, saved: bool, save_error: string? }`
 
 ## `disconnect_sound_cue_nodes`
 
@@ -533,6 +554,18 @@ No parameters.
 
 **Returns:** `{ audio_settings_found: bool, audio_quality: string, audio_api: string, audio_enabled: bool, audio_mode: string, world_name?: string, audio_component_count: int, active_audio_component_count: int, spatialized_audio_component_count: int, average_volume: number, max_volume: number, max_pitch: number, engine_version: string, platform_name: string, audio_max_channels: int, audio_3d_enabled: bool, audio_reverb_enabled: bool, audio_occlusion_enabled: bool, audio_recommendations: [string], audio_complexity_score: number, audio_complexity_rating: string }`
 
+## `get_control_bus_info`
+
+*Read-only.*
+
+Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `bus_path` | string | yes | Asset path to the USoundControlBus, e.g. "/Game/Audio/Bus_Music.Bus_Music" |
+
+**Returns:** `{ bus_path, default_value, current_value, subsystem_active }`
+
 ## `get_control_bus_mix_info`
 
 *Read-only.*
@@ -545,82 +578,46 @@ Reads the stages of a USoundControlBusMix asset without changing it. Returns mix
 
 **Returns:** `{ mix_path, stage_count, stages: [{ bus_path, target_value, attack_time, release_time }] }`
 
-## `get_meta_sound_node_info`
-
-*Read-only.*
-
-Read one node of the default graph of a MetaSound Source by GUID: its name, class name, input/output/environment vertices (name, type_name, vertex_id), input literal defaults and Configuration struct class. Read-only; get node ids from list_meta_sound_nodes.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
-| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
-
-**Returns:** `{ metasound_path, node_id, name, class_name, inputs: [{name, type_name}], outputs: [...], environment: [...], input_defaults: [{vertex_id, value, type}], configuration_class }`
-
-## `get_meta_sound_node_input_default`
-
-*Read-only.*
-
-Read the default literal stored on one input of a MetaSound Source node: vertex type, has_value, literal_type and value; has_value false means no literal is set. An unknown input name fails and lists the valid ones. Write it with metasound_set_node_input_default.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
-| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
-| `input_name` | string | yes | Name of the input vertex (matches FMetasoundFrontendVertex::Name). |
-
-**Returns:** `{ metasound_path, node_id, input_name, type, has_value, literal_type?, value? }`
-
-## `get_meta_sound_node_property`
-
-*Read-only.*
-
-Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_meta_sound_node_property.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
-| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
-| `property` | string | yes | FProperty name on the Configuration struct. |
-
-**Returns:** `{ metasound_path, node_id, property, type, has_value, value? }`
-
-## `get_metasound_graph_info`
-
-*Read-only.*
-
-Read the graph summary of a MetaSound Source asset, loading it if needed: the node, connection (edge) and variable counts of the document's root graph default page, and the root graph's declared interface inputs and outputs with name and type, plus the root graph class name. Read-only. metasound_path is a package path or a full object path; one that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. For the document's interfaces and metadata use get_metasound_info; to list the nodes themselves with their ids use list_meta_sound_nodes, then get_meta_sound_node_info; find sources with list_meta_sounds.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path ("/Game/MetaSounds/MS_Example") or an object path ("/Game/MetaSounds/MS_Example.MS_Example"). |
-
-**Returns:** `{ asset_path: string, graph_class_name: string, node_count: number, connection_count: number, variable_count: number, input_count: number, output_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }`
-
 ## `get_metasound_info`
 
 *Read-only.*
 
-Read the top-level metadata of a MetaSound Source asset, loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, and interface_count, the number of interfaces the document declares. Read-only; a path that does not resolve to a UMetaSoundSource is an error. For node and connection counts use get_metasound_graph_info; list_meta_sound_nodes lists the nodes and list_meta_sounds finds sources.
+Read the top-level metadata of a MetaSound Source asset (a preset included), loading it if needed: its class, the root graph class name, the graph inputs and outputs (name and type) with their counts, interface_count (the number of interfaces the document declares) and the node, connection (edge) and variable counts of the root graph's default page; with include_defaults, each input's default value too. Read-only; a path that does not resolve to a UMetaSoundSource, a MetaSound Patch included, is an error. list_metasound_nodes lists the nodes; get_assets_by_type with asset_type MetaSoundSource finds sources.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example" |
+| `include_defaults` | boolean | no | Optional bool (default false). When true, each inputs[] entry gains value: its default as the MetaSound editor builder reads it (a literal string), or "(inherited)" when the builder has none (a preset input taken from its referenced asset). Opens the editor builder for the asset; the asset is not changed. |
 
-**Returns:** `{ source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, inputs: [{ name: string, type: string }], outputs: [{ name: string, type: string }] }`
+**Returns:** `{ source_name: string, asset_path: string, class_name: string, graph_class_name: string, input_count: number, output_count: number, interface_count: number, node_count: number, connection_count: number, variable_count: number, inputs: [{ name: string, type: string, value?: string }], outputs: [{ name: string, type: string }] }`
 
-## `get_metasound_preset_parameters`
+## `get_metasound_node_info`
 
 *Read-only.*
 
-Gets all parameter defaults from a MetaSound preset.  Loads the preset, obtains a builder, iterates GetGraphInputNames, and reads each default value along with its type from the document interface.
+Read one node of the default graph of a MetaSound Source by GUID: its name, class name, input/output/environment vertices (name, type_name, vertex_id), each input's stored default literal (has_value, literal_type, value; has_value false means no literal is set), the input literal defaults by vertex, and the Configuration struct class; input_name narrows inputs and input_defaults to one input, and an unknown input name fails listing the valid ones. Read-only; get node ids from list_metasound_nodes, write an input default with set_metasound_node_input_default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `preset_path` | string | yes | Content path of the MetaSound preset asset. |
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused. |
+| `input_name` | string | no | Optional name of one input vertex (FMetasoundFrontendVertex::Name): inputs and input_defaults then hold only that input. A name the node has no input for is an error listing the inputs. |
 
-**Returns:** `{ preset_path: string, parameters: [{name, type, value}], parameter_count: int }`
+**Returns:** `{ metasound_path, node_id, name, class_name, input_name?, inputs: [{name, type_name, vertex_id, has_value, literal_type?, value?}], outputs: [{name, type_name, vertex_id}], environment: [...], input_defaults: [{vertex_id, input_name, value, type}], configuration_class }`
+
+## `get_metasound_node_property`
+
+*Read-only.*
+
+Read one field of the Configuration struct of a MetaSound Source node by property name, returning its C++ type, has_value and value as JSON. Fails when the node has no Configuration struct or the struct has no such property. Read-only; write it with set_metasound_node_property.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
+| `node_id` | string | yes | Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused. |
+| `property` | string | yes | FProperty name on the Configuration struct. |
+
+**Returns:** `{ metasound_path, node_id, property, type, has_value, value? }`
 
 ## `get_modulation_generator_info`
 
@@ -633,18 +630,6 @@ Reads a USoundModulationGenerator asset without changing it. Returns generator_p
 | `generator_path` | string | yes | Asset path to the USoundModulationGenerator |
 
 **Returns:** `{ generator_path, generator_class, settings: {...} }`
-
-## `get_modulation_info`
-
-*Read-only.*
-
-Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `bus_path` | string | yes | Asset path to the USoundControlBus, e.g. "/Game/Audio/Bus_Music.Bus_Music" |
-
-**Returns:** `{ bus_path, default_value, current_value, subsystem_active }`
 
 ## `get_modulation_parameter_info`
 
@@ -670,29 +655,17 @@ Read every FSoundAttenuationSettings field (shape, falloff, spatialization, LPF,
 
 **Returns:** `{ attenuation_path: string, asset_class: string, settings: object }`
 
-## `get_sound_class_hierarchy`
-
-*Read-only.*
-
-Read one level of the hierarchy of a USoundClass asset: its parent and parent_path (parent "None" for a root), the names of its direct children and child_count. Call it again on a parent or child to walk further. Read-only.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `sound_class_path` | string | yes | Asset path of the USoundClass, e.g. "/Game/Audio/SC_SFX.SC_SFX". |
-
-**Returns:** `{ name: string, sound_class_path: string, parent: string, parent_path: string, children: [string], child_count: int }`
-
 ## `get_sound_class_properties`
 
 *Read-only.*
 
-Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its direct parent and direct children by name and path; parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further with get_sound_class_hierarchy on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
+Read a USoundClass asset: every FSoundClassProperties field that set_sound_class_properties writes (volume, pitch, filters, reverb and routing flags, output_target, loading_behavior) plus its name and its direct parent and direct children by name and path; parent_class is "None" for a root class, and child_count is the number of children listed (null references are skipped). One level only: walk further by calling it again on a parent or child. Read-only; it loads the asset by object or package path, and one that does not load as a USoundClass is an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sound_class_path` | string | yes | Content path of the USoundClass asset. |
 
-**Returns:** `{ sound_class_path: string, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, parent_class: string, parent_class_path: string, child_classes: [{name, path}], child_count: int }`
+**Returns:** `{ name: string, sound_class_path: string, volume: float, pitch: float, low_pass_frequency: float, attenuation_distance_scale: float, lfe_bleed: float, voice_center_channel_volume: float, radio_filter_volume: float, radio_filter_volume_threshold: float, default_2d_reverb_send_amount: float, apply_effects: bool, always_play: bool, is_ui_sound: bool, is_music: bool, center_channel_only: bool, apply_ambient_volumes: bool, reverb: bool, output_target: string, loading_behavior: string, parent_class: string, parent_class_path: string, child_classes: [{name, path}], child_count: int }`
 
 ## `get_sound_concurrency_properties`
 
@@ -722,7 +695,7 @@ Read the node graph of a USoundCue without changing it: every node in AllNodes w
 
 *Read-only.*
 
-Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_modulation_info and the output parameter with get_modulation_parameter_info.
+Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_control_bus_info and the output parameter with get_modulation_parameter_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -778,7 +751,7 @@ Read the effect chain of a USoundSubmix asset in order: one entry per slot with 
 
 **Returns:** `{ submix_path: string, effects: [object], chain_length: int }`
 
-## `list_meta_sound_node_types`
+## `list_metasound_node_types`
 
 *Read-only.*
 
@@ -790,41 +763,17 @@ Enumerate all MetaSound node classes registered with the engine (via Metasound::
 
 **Returns:** `{ count, types: [{ class_name, class_path, type, version, is_native }] }`
 
-## `list_meta_sound_nodes`
+## `list_metasound_nodes`
 
 *Read-only.*
 
-List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_meta_sound_node_info and the other node tools.
+List every node in the default graph of a MetaSound Source asset with its GUID id, name, class name and input/output counts, plus count. Read-only; pass the id to get_metasound_node_info and the other node tools.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
 
 **Returns:** `{ metasound_path, count, nodes: [{ id, name, class_name, input_count, output_count }] }`
-
-## `list_meta_sound_references`
-
-*Read-only.*
-
-List the packages that reference a MetaSound Source asset, hard or soft, from the Asset Registry, with their count. Read-only; the source is loaded to resolve its package. For assets of any type use get_asset_referencers.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
-
-**Returns:** `{ metasound_path, count, references: [{ package_name }] }`
-
-## `list_meta_sounds`
-
-*Read-only.*
-
-List all UMetaSoundSource assets under a content path (default /Game).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `package_path` | string | no | Content path to filter on (default "/Game"). |
-
-**Returns:** `{ package_path, count, sounds: [{ path, name, class }] }`
 
 ## `list_subtitle_cues`
 
@@ -837,85 +786,6 @@ Lists all subtitle cues on a USubtitleAssetUserData.  Read-only walk of the Subt
 | `asset_path` | string | yes | Content path of the USubtitleAssetUserData asset. |
 
 **Returns:** `{ asset_path: string, success: bool, count: int, max_duration: float, cues: [{index, text, start_offset, duration, duration_type, priority, subtitle_type, comment}] }`
-
-## `metasound_add_interface`
-
-*Additive.*
-
-Adds a registered interface to an existing MetaSound Source's graph.  Obtains a builder for the saved asset via the editor subsystem's FindOrBeginBuilding (the reliable headless path), validates the interface via IsInterfaceRegistered, then calls UMetaSoundBuilderBase::AddInterface (which adds the interface's input/output nodes). The asset is saved after the edit.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source (e.g. "/Game/MetaSounds/MS_Example" or fully-qualified ".MS_Example"). |
-| `interface_name` | string | yes | Name of a registered MetaSound interface to add (required) |
-
-**Returns:** `{ asset_path: string, node_kind: string, interface_name: string, added: bool, saved: bool }`
-
-## `metasound_add_node_by_classname`
-
-*Destructive.*
-
-Add a real process node to a MetaSound Source graph by its registered class name (e.g. UE/Sine/Audio).  Unlike add_metasound_graph_input (which adds a graph input node), this instantiates a DSP node so you can author a real signal patch headless. Returns the node's GUID (node_id) and its enumerated input/output pins (name + data_type) for follow-up set/connect calls. The asset is saved. NOT idempotent: each call adds a new node instance (delete + recreate the source for a clean run).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `class_namespace` | string | yes | Registered node class namespace, e.g. "UE". |
-| `class_name` | string | yes | Registered node class name, e.g. "Sine". |
-| `class_variant` | string | no | Optional class variant, e.g. "Audio" (omit for the default/no-variant class). |
-| `major_version` | number | no | Optional major version (default 1). |
-
-**Returns:** `{ asset_path: string, node_id: string, class_namespace: string, class_name: string, class_variant: string, inputs: [{name,data_type}], outputs: [{name,data_type}], added: bool, saved: bool }`
-
-## `metasound_connect_node_to_graph_output`
-
-*Destructive, idempotent.*
-
-Connect a concrete node's output pin to a named graph output, completing a signal patch (e.g. Sine.Audio -> the source's audio output).  Uses ConnectNodeOutputToGraphOutput (idempotent: replaces any existing edge). Reports the honest EMetaSoundBuilderResult.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `node_id` | string | yes | GUID of the source node (from metasound_add_node_by_classname). |
-| `node_output_name` | string | yes | Name of the node's output pin (e.g. "Audio"). |
-| `graph_output_name` | string | yes | Name of the target graph output (discover via get_metasound_graph_info). |
-
-**Returns:** `{ asset_path: string, node_id: string, node_output_name: string, graph_output_name: string, connected: bool, result: string, saved: bool }`
-
-## `metasound_set_input_default`
-
-*Destructive, idempotent.*
-
-Set the default value of one graph input of a MetaSound Source asset through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs: get_metasound_info; a node pin: metasound_set_node_input_default; a preset by parameter_type: set_metasound_preset_parameter.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `input_name` | string | yes | Name of the graph input whose default to set. |
-| `value` | number | no | Float default value, a JSON number (optional, used if no other *_value is provided); another JSON type is an error |
-| `int_value` | number | no | Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value) |
-| `bool_value` | boolean | no | Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value) |
-| `string_value` | string | no | String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value) |
-
-**Returns:** `{ asset_path: string, input_name: string, value_type: string, value_set: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
-
-## `metasound_set_node_input_default`
-
-*Destructive, idempotent.*
-
-Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from metasound_add_node_by_classname) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error. A failed save makes success false. For a graph input use metasound_set_input_default.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `node_id` | string | yes | GUID of the node (from metasound_add_node_by_classname). |
-| `input_name` | string | yes | Name of the node input pin (discover via the node's enumerated inputs). |
-| `value` | number | no | Float default, a JSON number (optional, used if no other *_value is provided). |
-| `int_value` | number | no | Int32 default, a whole JSON number (optional, mutually exclusive). |
-| `bool_value` | boolean | no | Bool default, JSON true or false (optional, mutually exclusive). |
-| `string_value` | string | no | String default, a JSON string (optional, mutually exclusive). |
-
-**Returns:** `{ asset_path: string, node_id: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }`
 
 ## `play_sound`
 
@@ -989,12 +859,12 @@ Removes a graph OUTPUT (and its node) from a MetaSound Source by name (inverse o
 
 *Destructive, idempotent.*
 
-Removes a node from a MetaSound Source graph by its node_id GUID (inverse of metasound_add_node_by_classname).  Parses the node_id into a node handle and queries ContainsNode first: if the node is already absent it returns already_absent without error (idempotent), otherwise it calls UMetaSoundBuilderBase::RemoveNode (pruning unused dependencies) and reports the result. Saves the asset.
+Removes a node from a MetaSound Source graph by its node_id GUID (inverse of add_metasound_node).  Parses the node_id into a node handle and queries ContainsNode first: if the node is already absent it returns already_absent without error (idempotent), otherwise it calls UMetaSoundBuilderBase::RemoveNode (pruning unused dependencies) and reports the result. Saves the asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `node_id` | string | yes | GUID of the node to remove (from metasound_add_node_by_classname). |
+| `node_id` | string | yes | GUID of the node to remove (from add_metasound_node). |
 
 **Returns:** `{ asset_path: string, node_id: string, removed: bool, already_absent: bool, saved: bool, save_error: string?, note: string? }`
 
@@ -1028,7 +898,7 @@ Detach the effect at effect_index from a USoundfieldSubmix effect chain (undoabl
 
 *Destructive, idempotent.*
 
-Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; use remove_subtitles_asset to destroy the whole asset instead. Idempotent: an out-of-range index returns removed:false + note, not an error.
+Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; use delete_asset to destroy the whole asset instead. Idempotent: an out-of-range index returns removed:false + note, not an error.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1036,18 +906,6 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 | `cue_index` | number | yes | 0-based index into Subtitles[]. |
 
 **Returns:** `{ asset_path, cue_index, removed, previous_count, new_count }`
-
-## `remove_subtitles_asset`
-
-*Destructive, idempotent.*
-
-Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Full /Game/... asset path of the subtitles asset. |
-
-**Returns:** `{ asset_path, deleted, already_existed, asset_class?, note? }`
 
 ## `set_audio_bus_channels`
 
@@ -1108,7 +966,7 @@ Sets the stored target value, and optionally the attack and release fade times i
 
 *Destructive, idempotent.*
 
-Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_modulation_info.
+Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_control_bus_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1118,7 +976,45 @@ Pushes a runtime value into a USoundControlBus through a global bus mix of the e
 
 **Returns:** `{ bus_path, value, fade_time, applied }`
 
-## `set_meta_sound_node_property`
+## `set_metasound_graph_input_default`
+
+*Destructive, idempotent.*
+
+Set the default value of one graph input of a MetaSound Source asset (a preset included) through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. Or give parameter_type (float, int, bool or string) and value in that JSON type, the typed fields then being ignored. A missing or mistyped value, an unknown parameter_type, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs and their defaults: get_metasound_info (include_defaults); a node pin: set_metasound_node_input_default.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `input_name` | string | yes | Name of the graph input whose default to set. |
+| `preset_path` | string | no | Alias of metasound_path. |
+| `parameter_name` | string | no | Alias of input_name. |
+| `parameter_type` | string | no | Optional literal type of value: "float", "int", "bool" or "string". When given, value must be of that JSON type (a whole number for int) and int_value/bool_value/string_value are ignored; another type name is an error. |
+| `value` | any | no | Float default value, a JSON number (optional, used if no other *_value is provided); with parameter_type, the value in the JSON type it names. Another JSON type is an error |
+| `int_value` | number | no | Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value) |
+| `bool_value` | boolean | no | Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value) |
+| `string_value` | string | no | String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value) |
+
+**Returns:** `{ asset_path: string, input_name: string, value_type: string, value_set: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
+
+## `set_metasound_node_input_default`
+
+*Destructive, idempotent.*
+
+Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from add_metasound_node) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error. A failed save makes success false. For a graph input use set_metasound_graph_input_default.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
+| `node_id` | string | yes | GUID of the node (from add_metasound_node). |
+| `input_name` | string | yes | Name of the node input pin (discover via the node's enumerated inputs). |
+| `value` | number | no | Float default, a JSON number (optional, used if no other *_value is provided). |
+| `int_value` | number | no | Int32 default, a whole JSON number (optional, mutually exclusive). |
+| `bool_value` | boolean | no | Bool default, JSON true or false (optional, mutually exclusive). |
+| `string_value` | string | no | String default, a JSON string (optional, mutually exclusive). |
+
+**Returns:** `{ asset_path: string, node_id: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }`
+
+## `set_metasound_node_property`
 
 *Destructive, idempotent.*
 
@@ -1127,32 +1023,17 @@ Write one field of a MetaSound Source node's Configuration struct by reflection,
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | MetaSound Source asset path, e.g. "/Game/Audio/MS_Rain"; MetaSound Patches are not accepted. |
-| `node_id` | string | yes | Node GUID, as list_meta_sound_nodes returns it in id; a value that is not a GUID is refused. |
+| `node_id` | string | yes | Node GUID, as list_metasound_nodes returns it in id; a value that is not a GUID is refused. |
 | `property` | string | yes | FProperty name on the Configuration struct. |
 | `value` | any | yes | New value for the field as JSON, converted by FJsonObjectConverter: a number, bool, string, array or object (for a struct field); numbers and booleans can also be passed as strings ("0.5", "true"). |
 
 **Returns:** `{ metasound_path, node_id, property, set, value_changed, new_value?, saved, save_error? }`
 
-## `set_metasound_preset_parameter`
-
-*Destructive, idempotent.*
-
-Set the default value of one graph input on a MetaSound Source asset, normally a preset, found by content path. value must be the JSON type parameter_type names (a whole number for int); it is written into the asset through the MetaSound editor builder in one undo step and saved. A missing or mistyped value, an unknown parameter_type, a path that is not a MetaSound Source (patches are refused), or an input that is missing or does not take that type is an error, with nothing written. success means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error, the change kept in memory. Inputs: get_metasound_preset_parameters; new preset: create_metasound_preset; one typed field per type: metasound_set_input_default.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `preset_path` | string | yes | Content path of the MetaSound preset asset, e.g. "/Game/Audio/MSP_Engine". |
-| `parameter_name` | string | yes | Name of the graph input to set, as get_metasound_preset_parameters lists it. |
-| `value` | any | yes | Value to set, of the JSON type parameter_type names: a number for float, a whole number for int, true or false for bool, a string for string; a missing value or another type is an error |
-| `parameter_type` | string | no | Literal type for the value: "float" (default), "bool", "int", "string". |
-
-**Returns:** `{ preset_path: string, parameter_name: string, success: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
-
 ## `set_modulation_generator_settings`
 
 *Destructive, idempotent.*
 
-Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored, other generator classes are refused, and the LFO shape cannot be set here. Returns generator_path, generator_class, settings as stored, updated, saved.
+Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored and other generator classes are refused. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1377,20 +1258,6 @@ Author USoundWave tunables on an imported sound wave via reflection (partial mer
 
 **Returns:** `{ sound_wave_path: string, asset_class: string, settings: object, applied_keys: [string], applied_looping: bool, looping: bool, saved: bool }`
 
-## `set_soundfield_effect_settings`
-
-*Destructive, idempotent.*
-
-Cannot write soundfield effect settings in this engine version, so every call fails and nothing is changed: USoundfieldEffectBase::GetSettingsClass is protected, so the settings class an effect needs cannot be found. The submix and the effect slot are still checked first (a missing submix or an out-of-range effect_index gets its own error); a valid slot fails with applied_count 0 and a note.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `submix_path` | string | yes | Full path to the USoundfieldSubmix (required). |
-| `effect_index` | number | yes | Zero-based index into SoundfieldEffectChain (required). |
-| `settings` | object | yes | JSON object {property_name: value, ...}; validated as an object but never written |
-
-**Returns:** `{ success: false, error, data: { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note } }`
-
 ## `set_submix_effect_settings`
 
 *Destructive, idempotent.*
@@ -1405,35 +1272,22 @@ Configure a submix effect preset's Settings struct (by chain index) via reflecti
 
 **Returns:** `{ submix_path: string, effect_index: int, preset_class: string, settings: object, saved: bool }`
 
-## `set_subtitle_cue_text`
+## `set_subtitle_cue`
 
 *Destructive, idempotent.*
 
-Sets the text on an existing subtitle cue.  Loads the USubtitleAssetUserData, verifies cue_index is in range, sets Subtitles[cue_index].Text, and saves.
+Updates the text and timing fields on an existing subtitle cue.  Loads the USubtitleAssetUserData, applies any combination of text / start_offset / duration / duration_type to Subtitles[cue_index], and saves. Fields not provided are left untouched.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Content path of the USubtitleAssetUserData asset. |
 | `cue_index` | number | yes | Zero-based index into the Subtitles array (required). |
-| `text` | string | yes | New subtitle text (required). |
-
-**Returns:** `{ asset_path: string, cue_index: int, text: string, success: bool, saved: bool }`
-
-## `set_subtitle_cue_timing`
-
-*Destructive, idempotent.*
-
-Updates the timing fields on an existing subtitle cue.  Loads the USubtitleAssetUserData, applies any combination of start_offset / duration / duration_type to Subtitles[cue_index], and saves. Fields not provided are left untouched.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Content path of the USubtitleAssetUserData asset. |
-| `cue_index` | number | yes | Zero-based index into the Subtitles array (required). |
+| `text` | string | no | Optional new subtitle text (Subtitles[cue_index].Text); an empty string clears it. |
 | `start_offset` | number | no | Optional new StartOffset (seconds). |
 | `duration` | number | no | Optional new Duration (seconds). |
 | `duration_type` | string | no | Optional new SubtitleDurationType ("use_sound_duration" or "use_duration_property"). |
 
-**Returns:** `{ asset_path: string, cue_index: int, success: bool, applied_start_offset: bool, applied_duration: bool, applied_duration_type: bool, start_offset: float, duration: float, duration_type: string, saved: bool }`
+**Returns:** `{ asset_path: string, cue_index: int, success: bool, applied_text: bool, applied_start_offset: bool, applied_duration: bool, applied_duration_type: bool, text?: string (when text was given, read back), start_offset: float, duration: float, duration_type: string, saved: bool }`
 
 ## `stop_sound`
 

@@ -152,7 +152,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_can_reset_actor - Report, read-only, whether Interchange can reset an actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor, which needs a bound UInterchangeSceneImportAsset); returns actor_path and can_reset. The actor is found by full object path or by object name in the persistent level, not by label.
+// MCP:can_reset_interchange_actor - Report, read-only, whether Interchange can reset an actor of the editor world (UInterchangeEditorScriptLibrary::CanResetActor, which needs a bound UInterchangeSceneImportAsset); returns actor_path and can_reset. The actor is found by full object path or by object name in the persistent level, not by label.
 //   @param actor_path [string!] - Full object path of the actor (e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or its object name in the persistent level of the editor world (e.g. "StaticMeshActor_3"); labels are not matched.
 //   @returns { actor_path: string, can_reset: bool }
 TSharedPtr<FJsonObject> HandleInterchangeCanResetActor(const TSharedPtr<FJsonObject>& Params)
@@ -184,7 +184,7 @@ TSharedPtr<FJsonObject> HandleInterchangeCanResetActor(const TSharedPtr<FJsonObj
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_can_reset_world - Report, read-only, whether Interchange can reset a world (UInterchangeEditorScriptLibrary::CanResetWorld): the map asset world_path names, loaded if needed, or the current editor world. Returns can_reset, is_editor_world and resolved_world_path. Run the reset with interchange_reset_level_asset.
+// MCP:can_reset_interchange_world - Report, read-only, whether Interchange can reset a world (UInterchangeEditorScriptLibrary::CanResetWorld): the map asset world_path names, loaded if needed, or the current editor world. Returns can_reset, is_editor_world and resolved_world_path. Run the reset with reset_interchange_level_asset.
 //   @param world_path [string] - World asset path (e.g. "/Game/Maps/MyMap") or fully-qualified object path. Empty = current editor world.
 //   @returns { world_path: string, can_reset: bool, is_editor_world: bool }
 TSharedPtr<FJsonObject> HandleInterchangeCanResetWorld(const TSharedPtr<FJsonObject>& Params)
@@ -205,7 +205,7 @@ TSharedPtr<FJsonObject> HandleInterchangeCanResetWorld(const TSharedPtr<FJsonObj
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_reset_actors - Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the editor-world actors listed by object path or persistent-level object name; the library skips actors that fail CanResetActor, and the reply does not say which were reset. Returns count, resolved and unresolved_paths. Check first with interchange_can_reset_actor.
+// MCP:reset_interchange_actors - Run an Interchange reset (UInterchangeEditorScriptLibrary::ResetActors) on the editor-world actors listed by object path or persistent-level object name; the library skips actors that fail CanResetActor, and the reply does not say which were reset. Returns count, resolved and unresolved_paths. Check first with can_reset_interchange_actor.
 //   @param actor_paths [array!] - Actors to reset, each a full object path (e.g. "/Game/Maps/MyMap.MyMap:PersistentLevel.ActorName_0") or an object name in the persistent level; labels are not matched, and empty or unknown entries land in unresolved_paths.
 //   @returns { count: number, resolved: number, unresolved_paths: [string], note: string }
 TSharedPtr<FJsonObject> HandleInterchangeResetActors(const TSharedPtr<FJsonObject>& Params)
@@ -261,7 +261,7 @@ TSharedPtr<FJsonObject> HandleInterchangeResetActors(const TSharedPtr<FJsonObjec
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_reset_scene_import_asset - Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use interchange_reset_level_asset for a level.
+// MCP:reset_interchange_scene_import_asset - Call the Interchange reset of a UInterchangeSceneImportAsset (UInterchangeEditorScriptLibrary::ResetSceneImportAsset); other asset classes are refused. The engine only resets while the Interchange.FeatureFlags.InterchangeReset CVar is 1: with it at 0 the call does nothing and fails (reset false). The reset itself returns nothing, so reset true means it ran, not what it changed. Use reset_interchange_level_asset for a level.
 //   @param asset_path [string!] - Asset path of the UInterchangeSceneImportAsset (e.g. "/Game/Imports/MyScene.MyScene")
 //   @returns { asset_path: string, reset: bool, cvar_enabled: bool, note: string }
 TSharedPtr<FJsonObject> HandleInterchangeResetSceneImportAsset(const TSharedPtr<FJsonObject>& Params)
@@ -303,11 +303,11 @@ TSharedPtr<FJsonObject> HandleInterchangeResetSceneImportAsset(const TSharedPtr<
             ? TEXT("ResetSceneImportAsset ran; it returns nothing, so what it changed is not reported")
             : TEXT("CVar 'Interchange.FeatureFlags.InterchangeReset' is 0, so the engine resets nothing; set it to 1 and call again."));
     return mcp_common::MakeOutcomeReply(Data, bCVarEnabled, bCVarEnabled ? FString() :
-        FString(TEXT("interchange_reset_scene_import_asset did nothing: the Interchange.FeatureFlags.InterchangeReset CVar is 0. Set it to 1 (execute_console_command) and call again.")));
+        FString(TEXT("reset_interchange_scene_import_asset did nothing: the Interchange.FeatureFlags.InterchangeReset CVar is 0. Set it to 1 (execute_console_command) and call again.")));
 }
 
 // ---------------------------------------------------------------------------
-// MCP:interchange_reset_level_asset - Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing and the call fails (reset false, with the reason in note). It does not save. Returns reset, can_reset, cvar_enabled and a note.
+// MCP:reset_interchange_level_asset - Run an Interchange reset on a level (UInterchangeEditorScriptLibrary::ResetLevelAsset), the map world_path names or the current editor world, only when the Interchange.FeatureFlags.InterchangeReset CVar is on and CanResetWorld is true; otherwise it does nothing and the call fails (reset false, with the reason in note). It does not save. Returns reset, can_reset, cvar_enabled and a note.
 //   @param world_path [string] - World asset path (e.g. "/Game/Maps/MyMap") or fully-qualified object path. Empty = current editor world.
 //   @returns { world_path: string, resolved_world_path: string, reset: bool, can_reset: bool, cvar_enabled: bool, note: string }
 TSharedPtr<FJsonObject> HandleInterchangeResetLevelAsset(const TSharedPtr<FJsonObject>& Params)
@@ -342,15 +342,15 @@ TSharedPtr<FJsonObject> HandleInterchangeResetLevelAsset(const TSharedPtr<FJsonO
                 : TEXT("ResetLevelAsset invoked on bound world"));
     const bool bReset = bCVarEnabled && bCanReset;
     return mcp_common::MakeOutcomeReply(Data, bReset, bReset ? FString() : FString::Printf(
-        TEXT("interchange_reset_level_asset did nothing: %s"), *Data->GetStringField(TEXT("note"))));
+        TEXT("reset_interchange_level_asset did nothing: %s"), *Data->GetStringField(TEXT("note"))));
 }
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("interchange_can_reset_actor"), &HandleInterchangeCanResetActor },
-    { TEXT("interchange_can_reset_world"), &HandleInterchangeCanResetWorld },
-    { TEXT("interchange_reset_actors"), &HandleInterchangeResetActors },
-    { TEXT("interchange_reset_level_asset"), &HandleInterchangeResetLevelAsset },
-    { TEXT("interchange_reset_scene_import_asset"), &HandleInterchangeResetSceneImportAsset },
+    { TEXT("can_reset_interchange_actor"), &HandleInterchangeCanResetActor },
+    { TEXT("can_reset_interchange_world"), &HandleInterchangeCanResetWorld },
+    { TEXT("reset_interchange_actors"), &HandleInterchangeResetActors },
+    { TEXT("reset_interchange_level_asset"), &HandleInterchangeResetLevelAsset },
+    { TEXT("reset_interchange_scene_import_asset"), &HandleInterchangeResetSceneImportAsset },
 };
 } // namespace UEAgentInterchangeEditorCommands

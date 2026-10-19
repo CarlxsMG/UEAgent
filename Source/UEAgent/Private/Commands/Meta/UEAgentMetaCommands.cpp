@@ -5,14 +5,14 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
-// Bridge-control-flow commands (`batch`): they touch no engine subsystem, they run other commands
+// Bridge-control-flow commands (`execute_batch`): they touch no engine subsystem, they run other commands
 // through the bridge's own dispatch.
 namespace UEAgentMetaCommands
 {
 
 // MCP-DOMAIN: Meta
 
-// MCP:batch - Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no intermediate MCP round-trips -- the way to cut N calls to 1 when you are authoring in bulk. Any command the bridge dispatches can go in the list. By default every item runs even if an earlier one failed, and each result is reported individually; set stop_on_error to abort at the first failure, and transaction to make the whole run a single undo step.
+// MCP:execute_batch - Run SEVERAL commands back-to-back inside the SAME game-thread pass, with no intermediate MCP round-trips -- the way to cut N calls to 1 when you are authoring in bulk. Any command the bridge dispatches can go in the list. By default every item runs even if an earlier one failed, and each result is reported individually; set stop_on_error to abort at the first failure, and transaction to make the whole run a single undo step.
 //   @param commands [array!] - [{command_type: string, params?: object}, ...] (required, non-empty)
 //   @param stop_on_error [bool] - Stop after the first failing sub-command (default false)
 //   @param transaction [bool] - Wrap the whole run in one undo transaction, so a single undo reverts all of it (begin_transaction / end_transaction, or cancel_transaction instead when stop_on_error tripped on an error). Default false.
@@ -24,13 +24,13 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
     UUEAgentBridge* Bridge = GEditor ? GEditor->GetEditorSubsystem<UUEAgentBridge>() : nullptr;
     if (!Bridge)
     {
-        return mcp_common::MakeErrorReply(TEXT("batch: the MCP bridge is not running"));
+        return mcp_common::MakeErrorReply(TEXT("execute_batch: the MCP bridge is not running"));
     }
 
     const TArray<TSharedPtr<FJsonValue>>* CommandsArray = nullptr;
     if (!Params.IsValid() || !Params->TryGetArrayField(TEXT("commands"), CommandsArray) || !CommandsArray || CommandsArray->Num() == 0)
     {
-        return mcp_common::MakeErrorReply(TEXT("batch requires a non-empty 'commands' array"));
+        return mcp_common::MakeErrorReply(TEXT("execute_batch requires a non-empty 'commands' array"));
     }
 
     bool bStopOnError = false;
@@ -72,11 +72,11 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
         // Disallow nesting: a batch item recursing into another batch adds nothing (its
         // sub-items would run in this same pass anyway) and complicates stop_on_error /
         // transaction semantics for no benefit.
-        if (SubCommandType == TEXT("batch"))
+        if (SubCommandType == TEXT("execute_batch"))
         {
             bAnyError = true;
             ItemResult->SetBoolField(TEXT("ok"), false);
-            ItemResult->SetStringField(TEXT("error"), TEXT("nested batch is not supported"));
+            ItemResult->SetStringField(TEXT("error"), TEXT("nested execute_batch is not supported"));
             ResultsArray.Add(MakeShared<FJsonValueObject>(ItemResult));
             if (bStopOnError) { bStoppedEarly = true; break; }
             continue;
@@ -148,6 +148,6 @@ TSharedPtr<FJsonObject> HandleBatch(const TSharedPtr<FJsonObject>& Params)
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("batch"), &HandleBatch },
+    { TEXT("execute_batch"), &HandleBatch },
 };
 } // namespace UEAgentMetaCommands

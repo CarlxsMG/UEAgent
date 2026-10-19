@@ -41,7 +41,7 @@ without asking, while a wrong `false` only costs a confirmation.
 
 The annotation overrides it
 ---------------------------
-When the name misleads the verb rule (`frame_timing` reads, `foliage_type_exists` reads), the
+When the name misleads the verb rule (`get_frame_timing` reads, `does_foliage_type_exist` reads), the
 command's `// MCP:` block says so on its own line:
 
     //   @hints read-only
@@ -54,8 +54,8 @@ evidence is printed and the catalog is not written.
 
 Controls (they gate the catalog codegen)
 ----------------------------------------
-POSITIVE read-only: get_blueprint_info, list_meta_sounds, get_graph_nodes, find_blueprint_node_references.
-NOT read-only: delete_asset, compile_blueprint, get_compile_errors (it compiles),
+POSITIVE read-only: get_blueprint_info, list_metasound_nodes, get_graph_nodes, find_blueprint_node_references.
+NOT read-only: delete_asset, compile_blueprint, compile_anim_blueprint (it compiles),
 audit_blueprint_health (it compiles and saves), set_actor_label.
 Destructive: delete_asset, remove_widget, set_actor_label. Additive: add_graph_node, create_blueprint.
 A scan that cannot reproduce those is refuted.
@@ -113,8 +113,8 @@ NETWORK_MARKER = re.compile(r"\bFHttpModule\b|\b(?:LaunchURL)\s*\(")
 # ---------------------------------------------------------------------------
 # Verbs.
 # ---------------------------------------------------------------------------
-# A domain prefix comes before the verb: interchange_get_pipelines, metasound_add_interface.
-DOMAIN_PREFIXES = {"interchange", "metasound", "batch", "bulk"}
+# A domain prefix before the verb (2.0 put the verb first everywhere; kept for a name that adds one).
+DOMAIN_PREFIXES: set[str] = set()
 READ_VERBS = {
     "get", "list", "find", "inspect", "diff", "compare", "audit", "validate", "check", "verify",
     "is", "has", "can", "does", "evaluate", "read", "scan", "search", "query", "count", "poll",
@@ -144,8 +144,8 @@ HINTS_LINE_RE = re.compile(r"^//\s{3,}@hints\s+(.+)$")
 # The block's marker, as codegen_command_catalog.ANNOTATION_MARKER_RE reads it.
 MARKER_RE = re.compile(r"^//\s*MCP:(\S+)\s+-\s+(.+)$")
 
-POSITIVE_READ_ONLY = ["get_blueprint_info", "list_meta_sounds", "get_graph_nodes", "find_blueprint_node_references"]
-NOT_READ_ONLY = ["delete_asset", "compile_blueprint", "get_compile_errors", "audit_blueprint_health", "set_actor_label"]
+POSITIVE_READ_ONLY = ["get_blueprint_info", "list_metasound_nodes", "get_graph_nodes", "find_blueprint_node_references"]
+NOT_READ_ONLY = ["delete_asset", "compile_blueprint", "compile_anim_blueprint", "audit_blueprint_health", "set_actor_label"]
 DESTRUCTIVE = ["delete_asset", "remove_widget", "set_actor_label"]
 ADDITIVE = ["add_graph_node", "create_blueprint"]
 

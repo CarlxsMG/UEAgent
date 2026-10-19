@@ -346,7 +346,7 @@ namespace
 
     /**
      * Serialize a completed FAutomationTestExecutionInfo into the canonical result shape
-     * shared by run_automation_test, start_gauntlet_run and get_automation_test_results.
+     * shared by run_automation_test and get_automation_test_results.
      * Contract: { test_name, started, completed, passed, verdict,
      *                  duration_s, errors, warnings,
      *                  entries:[{type,message,context,filename,line}], entry_count }
@@ -395,10 +395,9 @@ namespace
         return Skipped;
     }
 
-    // Shared flow for run_automation_test + start_gauntlet_run (both in-process
-    // single-callback FAutomationTestFramework runners). Both share the same shape
-    // (contains-check + headless-gate + StartTestByName + ExecuteLatentCommands +
-    // IsLatentCommandQueueEmpty + StopTest + cache), so this helper holds it once.
+    // The flow of run_automation_test, an in-process single-callback FAutomationTestFramework
+    // runner: contains-check + headless-gate + StartTestByName + ExecuteLatentCommands +
+    // IsLatentCommandQueueEmpty + StopTest + cache.
     //
     // OutError: nullptr on hard error (no recovery, error response filled in); non-null on skipped
     // (test cannot run here) or on a synchronous pass/fail verdict.
@@ -501,7 +500,7 @@ namespace
     }
 }
 
-// MCP:execute_python - Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE TRAP -- this tool is the ONE HOLE in the plugin's PIE guard: the commands that compile a Blueprint or write to disk are REFUSED while Play-in-Editor is live (McpPieSafety.gen.h), but arbitrary Python cannot be classified statically, so a script that reaches compile/save through unreal.* (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, anything that dirties a Blueprint) RUNS ANYWAY. With PIE live that ends either in a DEAD EDITOR -- the compiler's UREINST_* trampoline retains a world and CheckForWorldGCLeaks is Fatal, taking every unsaved edit with it -- or in a save that reports success without writing a byte (Editor.AllowSavingAssetsDuringPIE=0). So: call is_play_in_editor_active FIRST whenever your script compiles, saves, or mutates a Blueprint, and stop PIE before running it. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call: scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties / get_property_value. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
+// MCP:execute_python - Execute Python code inside the running Unreal Editor. DO NOT GUESS A FIELD NAME: most of this tool's errors are "object has no attribute" -- and the field usually EXISTS, just not where you reached for it: `HitResult().impact_point` raises, `get_editor_property` cannot find it, and only `to_dict()` returns it (Transform.translation is the reverse). The engine's own stub and Epic's web docs list it either way, so neither settles it -- ask the object (dir(x), x.to_dict(), x.get_editor_property(...)). PIE TRAP -- this tool is the ONE HOLE in the plugin's PIE guard: the commands that compile a Blueprint or write to disk are REFUSED while Play-in-Editor is live (McpPieSafety.gen.h), but arbitrary Python cannot be classified statically, so a script that reaches compile/save through unreal.* (BlueprintEditorLibrary.compile_blueprint, EditorAssetLibrary.save_asset, save_loaded_asset, anything that dirties a Blueprint) RUNS ANYWAY. With PIE live that ends either in a DEAD EDITOR -- the compiler's UREINST_* trampoline retains a world and CheckForWorldGCLeaks is Fatal, taking every unsaved edit with it -- or in a save that reports success without writing a byte (Editor.AllowSavingAssetsDuringPIE=0). So: call is_play_in_editor_active FIRST whenever your script compiles, saves, or mutates a Blueprint, and stop PIE before running it. READING the live world during PIE is safe and is exactly what this tool is for -- do not avoid it for that. BEFORE writing a loop, check what already answers it in ONE call: scripts that re-implement something a tool already does fail far more often than scripts doing something genuinely new -- hand-rolled scaffolding is where the errors are, and a bug in the scaffold reads exactly like a finding about the game. enumerate actors of a class -> get_actors_by_class. enumerate them AND read their properties, filtered by class or editor label, drilling into one component, with the answering world STAMPED on the result (this tool cannot tell you which world answered) -> get_actor_properties_by_class. read properties off ONE known object -> get_properties. list an actor's components -> get_actor_components. one line trace -> raycast_scene. sample a property across a whole PIE session ARMED BEFORE BeginPlay -- a window a post-tick callback cannot reach at all -> watch_pie_property. But do NOT read this as "always prefer the specific tool": only a minority of scripts are replaceable end-to-end. Python remains the right answer when the script does what those cannot: several classes in one round trip, walking components AND calling a method, filtering by name substring, correlating two values in the same tick, or anything that mutates. Do not trade one call for twelve. WARNING: `log_output` IS NOT THE LOG OF THE CALL -- it is Python's own prints only (UE fills it from a delegate broadcast solely by unreal.log/log_warning/log_error), so every UE_LOG the ENGINE emits during your script is absent from it. Read `engine_log` instead: it is the GLog slice bracketed to this call, Warning+Error by default. Example: build_meta_human can run, return None, write zero assets and report a clean `log_output` while "LogMetaHumanCoreTechLib: Error: Texture Synthesis has not been initialized" sits in GLog. When a call reports success and NOTHING HAPPENED, `engine_log` is the first place to look; widen with engine_log_level=Log, or pass `log_cursor_before` to get_output_log_lines(since_sequence_id=...) for the unfiltered rest.
 //   @param command - Python code to run (single or multi-line).
 //   @param capture_output - Run as a file and collect captured log (default true)
 //   @param mode - Execution mode: ExecuteFile, ExecuteStatement, or EvaluateStatement (default ExecuteFile)
@@ -802,7 +801,7 @@ TSharedPtr<FJsonObject> HandleRunSmokeTests(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_automation_test_results - Returns the cached result of the last synchronous test completed through run_automation_test or start_gauntlet_run, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
+// MCP:get_automation_test_results - Returns the cached result of the last synchronous test completed through run_automation_test, without running anything: test_name, passed, verdict, duration_s, errors, warnings and entries. Skipped or multi-tick tests leave the cache unchanged; fails when no test has completed this editor session.
 //   @returns { test_name, started, completed, passed, verdict, duration_s, errors, warnings, entries:[{type,message,context,filename,line}], entry_count }
 TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObject>& Params)
 {
@@ -816,7 +815,7 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Result);
 }
 // ============================================================================
-// Functional Test authoring + Gauntlet stub
+// Functional Test authoring
 // ============================================================================
 //
 // The automation harness is headless and cannot validate gameplay at runtime;
@@ -826,14 +825,12 @@ TSharedPtr<FJsonObject> HandleGetAutomationTestResults(const TSharedPtr<FJsonObj
 //                                 Blueprint-scriptable test actor.
 //   * run_functional_test_in_pie -- start a PIE session that runs the named
 //                                 functional test, return its verdict.
-//   * start_gauntlet_run        -- stubbed honest-gated entry point: Gauntlet
-//                                 is a separate runtime harness that needs a
-//                                 dedicated build target; we surface the API
-//                                 here but cannot actually drive it from a
-//                                 headless MCP server yet. Run Gauntlet
-//                                 manually via the editor CLI.
 //
-// All three are Editor-only (FunctionalTestingEditor is an editor module).
+// Gauntlet proper is a separate runtime harness (a dedicated UnrealEditor-Cmd.exe
+// -Gauntlet=<controller> subprocess) that this server does not spawn; run_automation_test
+// gives the in-editor verdict of a registered automation test.
+//
+// Both are Editor-only (FunctionalTestingEditor is an editor module).
 
 // MCP:create_functional_test - Create a Blueprint subclass of AFunctionalTest (the canonical UE pattern for a multiplayer-friendly, Blueprint-scriptable test actor) and save it.
 //   @param asset_name - Name for the new Functional Test BP asset.
@@ -1049,42 +1046,6 @@ TSharedPtr<FJsonObject> HandleRunFunctionalTestInPie(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:start_gauntlet_run - Drive the in-process FAutomationTestFramework as the in-editor equivalent of a Gauntlet test run. Gauntlet proper still requires a dedicated subprocess (UnrealEditor-Cmd.exe -Gauntlet=...) that the MCP headless harness cannot spawn, but for the common case of "run a test and report pass/fail" the Automation Framework gives the same verdict from inside the editor. We run synchronously (single game-thread callback) and report the execution info (errors / warnings / duration). Multi-tick tests (PIE / load-map / latent waits) are abandoned honestly with completed=false (StopTest asserts on a non-empty latent queue).
-//   @param test_name - Name of the test to run (e.g. "Project.NetworkStress" or any registered automation test).
-//   @returns { test_name, gauntlet_started: true, gauntlet_subprocess: false, automation_equivalent: true, started, completed, errors, warnings, duration_s, verdict: "pass"|"fail"|"skipped", note }
-TSharedPtr<FJsonObject> HandleStartGauntletRun(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString TestName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("test_name"), TestName)) { return Missing; }
-
-    // The shared flow lives in RunAutomationTestCommon. We stamp the
-    // gauntlet-specific payload fields (gauntlet_started / gauntlet_subprocess / automation_equivalent)
-    // on top of the standard result so the cmd keeps its distinct identity.
-    TSharedPtr<FJsonObject> Error;
-    FAutomationRunCache Cache(&LastTestName, &LastTestExecutionInfo, &bHasLastResult);
-    TSharedPtr<FJsonObject> Result = RunAutomationTestCommon(TestName, Error, &Cache);
-    if (Error.IsValid()) { return Error; }
-    if (Result.IsValid())
-    {
-        Result->SetBoolField(TEXT("gauntlet_started"), true);
-        Result->SetBoolField(TEXT("gauntlet_subprocess"), false);
-        Result->SetBoolField(TEXT("automation_equivalent"), true);
-        const FString GauntletNote = TEXT("[In-process FAutomationTestFramework run, NOT an actual Gauntlet subprocess. For true Gauntlet, run UnrealEditor-Cmd.exe -Gauntlet=<controller> from your shell.]");
-        if (Result->HasField(TEXT("note")))
-        {
-            const FString Existing = Result->GetStringField(TEXT("note"));
-            Result->SetStringField(TEXT("note"), Existing + TEXT(" ") + GauntletNote);
-        }
-        else
-        {
-            Result->SetStringField(TEXT("note"), GauntletNote);
-        }
-        return mcp_common::MakeOkReply(Result);
-    }
-    return mcp_common::MakeErrorReply(TEXT("RunAutomationTestCommon returned no result (internal error)"));
-}
-
 // MCP:get_output_log_lines - Read the single per-editor-session log buffer UEAgent attaches to GLog (general editor output, not PIE-only -- Serialize() captures every category/verbosity that passes through GLog, regardless of PIE state; usable for PIE Functional Test / wait_for_pie_completion orchestration too). NON-DESTRUCTIVE cursor read (since_sequence_id, same idiom as poll_gameplay_messages), structured entries. Supports all three filters (message text, verbosity level, category).
 //   @param count - Optional int32 cap on the number of entries returned (default 200, max 4096).
 //   @param filter - Optional case-insensitive substring on the message text.
@@ -1154,6 +1115,5 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("run_automation_test"), &HandleRunAutomationTest },
     { TEXT("run_functional_test_in_pie"), &HandleRunFunctionalTestInPie },
     { TEXT("run_smoke_tests"), &HandleRunSmokeTests },
-    { TEXT("start_gauntlet_run"), &HandleStartGauntletRun },
 };
 } // namespace UEAgentAutomationCommands

@@ -56,7 +56,9 @@ namespace McpReadbackFollowUp
 		{
 			Query->SetField(TEXT("graph_name"), Get(Params, TEXT("graph_name")));
 		}
-		const FV Pins = Get(ProbeOrEmpty(Send, TEXT("get_node_pin_info"), Query), TEXT("pins"));
+		// get_graph_nodes with node_id answers that one node, at full fidelity, as nodes[0].
+		const TArray<FV> Nodes = AsList(Get(ProbeOrEmpty(Send, TEXT("get_graph_nodes"), Query), TEXT("nodes")));
+		const FV Pins = Nodes.Num() > 0 ? Get(Nodes[0], TEXT("pins")) : None();
 		if (!IsList(Pins) || Len(Pins) == 0)
 		{
 			return nullptr;
@@ -75,7 +77,7 @@ namespace McpReadbackFollowUp
 			if (IsList(Links) && Len(Links) > 1)
 			{
 				return DegradingFinding(TEXT("extra_link"), S(Percent(TEXT("1 link on '%s'"), { Pin })), S(Percent(TEXT("%d links"), { N(Len(Links)) })),
-					TEXT("reread:get_node_pin_info"), RB_check_connect_pins_0);
+					TEXT("reread:get_graph_nodes"), RB_check_connect_pins_0);
 			}
 			return nullptr;
 		}
@@ -420,7 +422,7 @@ namespace McpReadbackFollowUp
 		});
 	}
 
-	/** "owned by another session": PIE started inside a `batch` has an unknown owner, so the bridge refuses to stop it. */
+	/** "owned by another session": PIE started inside a `execute_batch` has an unknown owner, so the bridge refuses to stop it. */
 	static FO CheckUnownedPie(const FO& Params, const FO& Result, const FSend& Send)
 	{
 		if (!Contains(Lower(ErrorOf(Result)), TEXT("owned by another session")))
@@ -450,10 +452,12 @@ namespace McpReadbackFollowUp
 		return FailureReason(TEXT("false_not_found"), TEXT("reread:is_play_in_editor_active"), RB_check_widget_tree_during_pie_0);
 	}
 
-	/** "instance not found" for a world-scoped subsystem while PIE runs: the lifetime resolves against the EDITOR world. */
+	/** "not found / not yet initialized" for a world-scoped subsystem read on the EDITOR world while PIE runs: the
+	 *  instance may live in the PIE world instead. The editor world is what lifetime=world reads without `world`,
+	 *  and what any world-scoped lifetime reads with world='editor' (gameinstance and localplayer default to PIE). */
 	static FO CheckSubsystemInEditorWorld(const FO& Params, const FO& Result, const FSend& Send)
 	{
-		if (!Contains(Lower(ErrorOf(Result)), TEXT("instance not found")))
+		if (!Contains(Lower(ErrorOf(Result)), TEXT("not yet initialized")))
 		{
 			return nullptr;
 		}
@@ -462,6 +466,12 @@ namespace McpReadbackFollowUp
 		if (!StrEq(Lt, TEXT("world")) && !StrEq(Lt, TEXT("gameinstance")) && !StrEq(Lt, TEXT("localplayer"))) // world-scoped lifetimes
 		{
 			return nullptr;
+		}
+		const FString World = LowerStrip(Get(Params, TEXT("world")));
+		const bool bReadEditorWorld = StrEq(World, TEXT("editor")) || (World.IsEmpty() && StrEq(Lt, TEXT("world")));
+		if (!bReadEditorWorld)
+		{
+			return nullptr; // it already read a live world: "not found" there means what it says
 		}
 		if (!LivePieState(Send).IsValid())
 		{
@@ -491,29 +501,34 @@ namespace McpReadbackFollowUp
 		{
 			return nullptr;
 		}
-		const FO ExpressionList = ProbeOrEmpty(Send, TEXT("get_material_expressions"), Dict({ { TEXT("material_path"), S(Material) } }));
-		if (ExpressionList->Values.Num() == 0)
+		const FO Graph = ProbeOrEmpty(Send, TEXT("get_material_graph_info"), Dict({ { TEXT("material_path"), S(Material) } }));
+		if (Graph->Values.Num() == 0)
 		{
 			return nullptr;
 		}
-		const FV Expressions = Get(ExpressionList, TEXT("expressions"));
+		const FV Expressions = Get(Graph, TEXT("nodes"));
 		if (!IsList(Expressions))
 		{
 			return nullptr;
 		}
+		// Every expression the material owns: the listed nodes, plus the orphans its expression
+		// collection does not list.
 		TArray<FString> LiveNames;
-		for (const FV& E : AsList(Expressions))
+		for (const FV& Listing : { Expressions, Get(Graph, TEXT("orphan_nodes")) })
 		{
-			if (IsDict(E))
+			for (const FV& E : AsList(Listing))
 			{
-				SetAdd(LiveNames, TextOf(Get(E, TEXT("name"))));
+				if (IsDict(E))
+				{
+					SetAdd(LiveNames, TextOf(Get(E, TEXT("name"))));
+				}
 			}
 		}
 		if (InList(LiveNames, Name))
 		{
 			return nullptr;
 		}
-		return FailureReason(TEXT("failed_but_did_it"), TEXT("reread:get_material_expressions"),
+		return FailureReason(TEXT("failed_but_did_it"), TEXT("reread:get_material_graph_info"),
 			Percent(RB_check_expression_delete_0, { S(Name), N(LiveNames.Num()) }));
 	}
 
@@ -591,7 +606,7 @@ void McpReadbackChecks::RegisterFollowUp(McpReadback::FTables& Tables)
 	F.Add(TEXT("delete_node"), &CheckGraphInMemory);
 	F.Add(TEXT("get_graph_nodes"), &CheckAmbiguousName);
 	F.Add(TEXT("get_blueprint_functions"), &CheckAmbiguousName);
-	F.Add(TEXT("set_blueprint_component_property"), &CheckBlueprintComponentProperty);
+	F.Add(TEXT("set_blueprint_component_properties"), &CheckBlueprintComponentProperty);
 	F.Add(TEXT("connect_pins"), &CheckConnectPins);
 	F.Add(TEXT("compile_material"), &CheckCompileMaterial);
 	F.Add(TEXT("add_struct_member"), &CheckStructMember);
@@ -600,14 +615,14 @@ void McpReadbackChecks::RegisterFollowUp(McpReadback::FTables& Tables)
 
 	TMap<FString, McpReadback::FOnFailure>& O = Tables.OnFailure;
 	O.Add(TEXT("get_widget_blueprint_tree"), &CheckWidgetTreeDuringPie);
-	O.Add(TEXT("get_subsystem_instance"), &CheckSubsystemInEditorWorld);
+	O.Add(TEXT("inspect_subsystem_instance"), &CheckSubsystemInEditorWorld);
 	O.Add(TEXT("trigger_input_action"), &CheckInputWithoutController);
 	O.Add(TEXT("delete_material_expression"), &CheckExpressionDelete);
-	O.Add(TEXT("set_bp_variable_default"), &CheckInheritedVariable);
+	O.Add(TEXT("set_blueprint_variable_default"), &CheckInheritedVariable);
 	O.Add(TEXT("stop_play_in_editor"), &CheckUnownedPie);
 	O.Add(TEXT("save_asset"), &CheckMissingAssetDuringPie);
 	O.Add(TEXT("get_function_pins"), &CheckFunctionNotFound);
-	O.Add(TEXT("set_bp_function_rpc"), &CheckRpcOnCustomEvent);
+	O.Add(TEXT("set_blueprint_function_rpc"), &CheckRpcOnCustomEvent);
 	O.Add(TEXT("get_skeleton_info"), &CheckSkeletonOutsideGame);
 	O.Add(TEXT("connect_to_material_output"), &CheckUnknownMaterialOutput);
 	O.Add(TEXT("disconnect_to_material_output"), &CheckUnknownMaterialOutput);

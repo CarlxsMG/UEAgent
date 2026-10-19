@@ -11,6 +11,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialExpression.h"
+#include "Materials/MaterialFunction.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
@@ -123,40 +124,6 @@ namespace UEAgentMaterialCommandsImpl
         return true;
     }
 
-    /** Which typed default a get_material_default_parameter request asks for. */
-    enum class EDefaultValueKind : uint8
-    {
-        Scalar,
-        Vector,
-        Texture,
-        StaticSwitch,
-        Unsupported
-    };
-
-    /** Case-insensitive param_type -> EDefaultValueKind. */
-    EDefaultValueKind ParseDefaultValueKind(const FString& Text)
-    {
-        struct FKindName
-        {
-            const TCHAR* Name;
-            EDefaultValueKind Kind;
-        };
-        static const FKindName KnownKinds[] = {
-            { TEXT("scalar"), EDefaultValueKind::Scalar },
-            { TEXT("vector"), EDefaultValueKind::Vector },
-            { TEXT("texture"), EDefaultValueKind::Texture },
-            { TEXT("static_switch"), EDefaultValueKind::StaticSwitch },
-        };
-        for (const FKindName& Candidate : KnownKinds)
-        {
-            if (Text.Equals(Candidate.Name, ESearchCase::IgnoreCase))
-            {
-                return Candidate.Kind;
-            }
-        }
-        return EDefaultValueKind::Unsupported;
-    }
-
     /**
      * Writes Material's package to disk: callers check by reloading, which a dirty flag alone would
      * not satisfy. False, with OutError, when the material has no package or the save fails.
@@ -169,13 +136,6 @@ namespace UEAgentMaterialCommandsImpl
         }
         OutError = TEXT("Could not get package from material");
         return false;
-    }
-
-    /** {r, g, b, a} for a linear colour. */
-    TSharedPtr<FJsonObject> ColorToJson(const FLinearColor& Color)
-    {
-        TSharedPtr<FJsonObject> Channels = mcp_common::LinearColorToJsonObject(Color);
-        return Channels;
     }
 
     /** The editor's IAssetTools; loading the module is a no-op once it is up. */
@@ -357,66 +317,53 @@ namespace UEAgentMaterialCommandsImpl
         return Row;
     }
 
-    /** How many parameters of each kind a material exposes. */
-    struct FParameterCensus
-    {
-        int32 Scalars = 0;
-        int32 Vectors = 0;
-        int32 Textures = 0;
-        int32 StaticSwitches = 0;
-    };
-
-    using FParameterInfoGetter = void (UMaterialInterface::*)(TArray<FMaterialParameterInfo>&, TArray<FGuid>&) const;
-
-    int32 CountParameterInfos(const UMaterialInterface* Material, FParameterInfoGetter Getter)
+    /**
+     * True when the instance (through its parent chain) exposes a global parameter of that type and
+     * name. The UMaterialEditingLibrary setters below cannot answer it: they write any name -- an
+     * orphan override for a parameter the parent does not have -- and always return false.
+     */
+    bool InstanceExposesParameter(const UMaterialInstanceConstant* Instance, EMaterialParameterType Type, FName ParamName)
     {
         TArray<FMaterialParameterInfo> Infos;
-        TArray<FGuid> Guids;
-        (Material->*Getter)(Infos, Guids);
-        return Infos.Num();
-    }
-
-    FParameterCensus TakeParameterCensus(const UMaterialInterface* Material)
-    {
-        FParameterCensus Census;
-        Census.Scalars = CountParameterInfos(Material, &UMaterialInterface::GetAllScalarParameterInfo);
-        Census.Vectors = CountParameterInfos(Material, &UMaterialInterface::GetAllVectorParameterInfo);
-        Census.Textures = CountParameterInfos(Material, &UMaterialInterface::GetAllTextureParameterInfo);
-        Census.StaticSwitches = CountParameterInfos(Material, &UMaterialInterface::GetAllStaticSwitchParameterInfo);
-        return Census;
-    }
-
-    /** A variant suffix becomes part of an asset name: it may not be empty or hold separators. */
-    bool IsUsableVariantSuffix(const FString& Suffix)
-    {
-        return !Suffix.IsEmpty()
-            && !Suffix.Contains(TEXT(" "))
-            && !Suffix.Contains(TEXT("."))
-            && !Suffix.Contains(TEXT("/"));
+        TArray<FGuid> Ids;
+        Instance->GetAllParameterInfoOfType(Type, Infos, Ids);
+        return Infos.ContainsByPredicate([ParamName](const FMaterialParameterInfo& Info)
+        {
+            return Info.Name == ParamName && Info.Association == EMaterialParameterAssociation::GlobalParameter;
+        });
     }
 
     /**
      * Applies one parameter_overrides entry: a number sets a scalar, a bool a static switch and an
      * object {r, g, b[, a]} a vector (alpha defaults to 1). Returns the kind that was applied, or
-     * nullptr when the value has another JSON type or the engine refused the parameter.
+     * nullptr when the value has another JSON type or the parent exposes no global parameter of that
+     * type and name (nothing is written then, so no orphan override is left on the instance).
      */
     const TCHAR* ApplyParameterOverride(UMaterialInstanceConstant* Instance, const FString& ParamName, const FJsonValue& Value)
     {
+        const FName Name(*ParamName);
         switch (Value.Type)
         {
         case EJson::Number:
         {
-            const float Scalar = static_cast<float>(Value.AsNumber());
-            return UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(Instance, FName(*ParamName), Scalar)
-                ? TEXT("scalar") : nullptr;
+            if (!InstanceExposesParameter(Instance, EMaterialParameterType::Scalar, Name))
+            {
+                return nullptr;
+            }
+            UMaterialEditingLibrary::SetMaterialInstanceScalarParameterValue(Instance, Name, static_cast<float>(Value.AsNumber()));
+            return TEXT("scalar");
         }
         case EJson::Boolean:
-            return UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(Instance, FName(*ParamName), Value.AsBool())
-                ? TEXT("static_switch") : nullptr;
+            if (!InstanceExposesParameter(Instance, EMaterialParameterType::StaticSwitch, Name))
+            {
+                return nullptr;
+            }
+            UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(Instance, Name, Value.AsBool());
+            return TEXT("static_switch");
         case EJson::Object:
         {
             const TSharedPtr<FJsonObject> Channels = Value.AsObject();
-            if (!Channels.IsValid())
+            if (!Channels.IsValid() || !InstanceExposesParameter(Instance, EMaterialParameterType::Vector, Name))
             {
                 return nullptr;
             }
@@ -424,8 +371,8 @@ namespace UEAgentMaterialCommandsImpl
             const float Green = static_cast<float>(Channels->GetNumberField(TEXT("g")));
             const float Blue = static_cast<float>(Channels->GetNumberField(TEXT("b")));
             const float Alpha = Channels->HasField(TEXT("a")) ? static_cast<float>(Channels->GetNumberField(TEXT("a"))) : 1.0f;
-            return UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(Instance, FName(*ParamName), FLinearColor(Red, Green, Blue, Alpha))
-                ? TEXT("vector") : nullptr;
+            UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(Instance, Name, FLinearColor(Red, Green, Blue, Alpha));
+            return TEXT("vector");
         }
         default:
             return nullptr;
@@ -433,7 +380,7 @@ namespace UEAgentMaterialCommandsImpl
     }
 }
 
-// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance / create_material_instance_constant when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
+// MCP:create_material - Create a new base material asset (UMaterial) -- the graph-owning master whose parameters and static switches every instance of it inherits. Prefer create_material_instance when you only need a re-skin of something that exists: an instance costs no new shader permutations and leaves the original updatable. After creating, build the graph with create_material_expression + connect_material_expressions, then verify with get_material_stats (compile_errors empty and stats_valid true) -- compile_material only acknowledges, it does not report errors, and a landscape material that fails to compile silently falls back to the default material.
 //   @param material_path - Content FOLDER the material is created in (e.g., '/Game/Materials')
 //   @param material_name - Name of the material asset to create
 //   @returns { material_path: string (object path of the new material, '/Game/Materials/M_X.M_X'), material_name: string, package_path: string, success: bool } -- an existing asset of that name is an error, never overwritten
@@ -491,25 +438,52 @@ TSharedPtr<FJsonObject> HandleCreateMaterial(const TSharedPtr<FJsonObject>& Para
     return Reply;
 }
 
-// MCP:create_material_instance - Create a material instance (MIC) from a parent material -- the cheap, non-destructive way to re-skin a vendor or engine material: the parent stays untouched and updatable while only your overrides are stored, and no new shader is compiled. Idempotent (already_exists=true when it is already there). Same operation as create_material_instance_constant, which takes a single full asset path instead of separate folder and name. Tune it with set_material_instance_param_override, and remember static switches inherit from the parent and are set separately.
-//   @param instance_path - Package path for the material instance (e.g., '/Game/Materials/MyInstance')
+// MCP:create_material_instance - Create a material instance (MIC) from a parent material -- the cheap, non-destructive way to re-skin a vendor or engine material: the parent stays untouched and updatable while only your overrides are stored, and no new shader is compiled -- optionally applying a dict of parameter overrides in the same call. Idempotent (already_exists=true when it is already there; parameter_overrides are then not applied and note says so). The parent may be omitted (a parentless instance) and may be given as a bare material NAME instead of a path; resolve an ambiguous name first. Check applied_overrides_count against what you sent and re-read with get_material_parameters: a name the parent does not expose is simply not applied. Tune it later with set_material_instance_parameter, and remember static switches inherit from the parent and are set separately.
+//   @param instance_path - Content folder for the material instance (e.g., '/Game/Materials'); defaults to /Game/MCP. The asset is created at <instance_path>/<instance_name>
+//   @param package_path - Alias of instance_path
 //   @param instance_name - Name of the material instance to create
-//   @param parent_material_path - Full path to the parent material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
-//   @returns { instance_path: string, instance_name: string, parent_material?: string, parent_material_path: string, parent_material_name: string, success: bool, already_exists?: bool, saved: bool, save_error?: string }
+//   @param name - Alias of instance_name
+//   @param parent_material_path - Optional parent material: a full path ('/Game/Materials/MyMaterial.MyMaterial') or a bare material asset name looked up under /Game; omit it for a parentless instance
+//   @param parameter_overrides - Optional dict {param_name: scalar_number | {r,g,b[,a]} vector object | static_switch_bool} applied to the new instance before it is saved
+//   @returns { instance_path: string, instance_name: string, material_instance_path: string, material_instance_name: string, parent_material?: string, parent_material_path: string, parent_material_name: string, created: bool, already_existed: bool, applied_overrides: [{name, type}], applied_overrides_count: int, success: bool, already_exists?: bool, note?: string, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObject>& Params)
 {
+    // Folder: instance_path, else its alias package_path, else the default folder.
     FString TargetFolder;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("instance_path"), TargetFolder, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString NewAssetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("instance_name"), NewAssetName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString ParentPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parent_material_path"), ParentPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UMaterialInterface* Parent = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialInterface>(ParentPath);
-    if (Parent == nullptr)
+    if (!Params->TryGetStringField(TEXT("instance_path"), TargetFolder) && !Params->TryGetStringField(TEXT("package_path"), TargetFolder))
     {
-        return UEAgentMaterialCommandsImpl::NotFoundByPath(TEXT("Parent material"), ParentPath);
+        TargetFolder = mcp_common::DefaultAssetFolder();
+    }
+    while (TargetFolder.EndsWith(TEXT("/")))
+    {
+        TargetFolder.LeftChopInline(1, EAllowShrinking::No);
+    }
+    FString NewAssetName;
+    if (!Params->TryGetStringField(TEXT("instance_name"), NewAssetName) && !Params->TryGetStringField(TEXT("name"), NewAssetName))
+    {
+        return mcp_common::MissingParameterReply(TEXT("instance_name"));
+    }
+    FString ParentPath;
+    Params->TryGetStringField(TEXT("parent_material_path"), ParentPath);
+    const TSharedPtr<FJsonObject>* Overrides = nullptr;
+    const bool bHasOverrides = Params->TryGetObjectField(TEXT("parameter_overrides"), Overrides) && Overrides != nullptr && Overrides->IsValid();
+
+    // The parent is optional; given, it is a path or, failing that, a bare material asset name.
+    UMaterialInterface* Parent = nullptr;
+    if (!ParentPath.IsEmpty())
+    {
+        Parent = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialInterface>(ParentPath);
+        FAssetData NamedParent;
+        if (Parent == nullptr && !ParentPath.Contains(TEXT("/"))
+            && UEAgentMaterialCommandsImpl::FindMaterialAssetByName(mcp_common::AssetRegistry(), ParentPath, NamedParent))
+        {
+            Parent = Cast<UMaterialInterface>(NamedParent.GetAsset());
+        }
+        if (Parent == nullptr)
+        {
+            return UEAgentMaterialCommandsImpl::NotFoundByPath(TEXT("Parent material"), ParentPath);
+        }
     }
 
     // CreateAsset names the package <folder>/<name>, so the new object lives at <folder>/<name>.<name>.
@@ -517,17 +491,30 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(ObjectPath)) { return Invalid; }
     if (UEditorAssetLibrary::DoesAssetExist(ObjectPath))
     {
-        // Idempotent create: an instance that is already there is reported, not recreated.
+        // Idempotent create: an instance that is already there is reported, not recreated or edited.
         const UMaterialInstanceConstant* Existing = LoadObject<UMaterialInstanceConstant>(nullptr, *ObjectPath);
         if (Existing == nullptr)
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material instance already exists at path: %s"), *ObjectPath));
         }
+        const FString ExistingParentPath = Existing->Parent ? Existing->Parent->GetPathName() : FString();
         TSharedPtr<FJsonObject> ExistingInfo = MakeShared<FJsonObject>();
         ExistingInfo->SetStringField(TEXT("instance_path"), ObjectPath);
         ExistingInfo->SetStringField(TEXT("instance_name"), NewAssetName);
-        ExistingInfo->SetStringField(TEXT("parent_material"), Existing->Parent ? Existing->Parent->GetPathName() : FString());
+        ExistingInfo->SetStringField(TEXT("material_instance_path"), Existing->GetPathName());
+        ExistingInfo->SetStringField(TEXT("material_instance_name"), Existing->GetName());
+        ExistingInfo->SetStringField(TEXT("parent_material"), ExistingParentPath);
+        ExistingInfo->SetStringField(TEXT("parent_material_path"), Existing->Parent ? ExistingParentPath : FString(TEXT("None")));
+        ExistingInfo->SetStringField(TEXT("parent_material_name"), Existing->Parent ? Existing->Parent->GetName() : FString(TEXT("None")));
+        ExistingInfo->SetBoolField(TEXT("created"), false);
+        ExistingInfo->SetBoolField(TEXT("already_existed"), true);
         ExistingInfo->SetBoolField(TEXT("already_exists"), true);
+        ExistingInfo->SetArrayField(TEXT("applied_overrides"), TArray<TSharedPtr<FJsonValue>>());
+        ExistingInfo->SetNumberField(TEXT("applied_overrides_count"), 0);
+        if (bHasOverrides)
+        {
+            ExistingInfo->SetStringField(TEXT("note"), TEXT("The instance already existed: it was left unchanged and parameter_overrides were not applied."));
+        }
         return mcp_common::MakeOkReply(ExistingInfo);
     }
 
@@ -550,8 +537,35 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
         return mcp_common::MakeErrorReply(TEXT("Created asset is not a UMaterialInstanceConstant"));
     }
 
-    // Write it to disk right away (as create_material_instance_constant does): a dirty package
-    // alone would report success for an asset that does not outlive the editor session.
+    // Optional overrides {name: number | bool | {r,g,b[,a]}}. Only what the engine accepted is
+    // listed back; a name the parent does not expose is simply not applied.
+    TArray<TSharedPtr<FJsonValue>> AppliedRows;
+    if (bHasOverrides)
+    {
+        for (const auto& Entry : (*Overrides)->Values)
+        {
+            if (!Entry.Value.IsValid())
+            {
+                continue;
+            }
+            const FString OverrideName = FString::ConstructFromPtrSize(*Entry.Key, Entry.Key.Len());
+            const TCHAR* AppliedKind = UEAgentMaterialCommandsImpl::ApplyParameterOverride(Instance, OverrideName, *Entry.Value);
+            if (AppliedKind == nullptr)
+            {
+                continue;
+            }
+            TSharedPtr<FJsonObject> AppliedRow = MakeShared<FJsonObject>();
+            AppliedRow->SetStringField(TEXT("name"), OverrideName);
+            AppliedRow->SetStringField(TEXT("type"), AppliedKind);
+            AppliedRows.Add(MakeShared<FJsonValueObject>(AppliedRow));
+        }
+        // Refresh the instance (static permutation included) before it is written.
+        UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
+        Instance->PostEditChange();
+    }
+
+    // Write it to disk right away: a dirty package alone would report success for an asset that
+    // does not outlive the editor session.
     Instance->MarkPackageDirty();
     FString SaveError;
     const bool bSaved = mcp_common::SaveAssetPackage(Instance->GetOutermost(), Instance, SaveError);
@@ -559,29 +573,65 @@ TSharedPtr<FJsonObject> HandleCreateMaterialInstance(const TSharedPtr<FJsonObjec
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("instance_path"), ObjectPath);
     Reply->SetStringField(TEXT("instance_name"), NewAssetName);
-    Reply->SetStringField(TEXT("parent_material_path"), ParentPath);
-    Reply->SetStringField(TEXT("parent_material_name"), Parent->GetName());
+    Reply->SetStringField(TEXT("material_instance_path"), Instance->GetPathName());
+    Reply->SetStringField(TEXT("material_instance_name"), Instance->GetName());
+    // A parent given by path is echoed as sent; one found by bare name is reported by its resolved path.
+    const FString ReportedParentPath = Parent == nullptr ? FString(TEXT("None"))
+        : (ParentPath.Contains(TEXT("/")) ? ParentPath : Parent->GetPathName());
+    Reply->SetStringField(TEXT("parent_material_path"), ReportedParentPath);
+    Reply->SetStringField(TEXT("parent_material_name"), Parent != nullptr ? Parent->GetName() : FString(TEXT("None")));
+    Reply->SetBoolField(TEXT("created"), true);
+    Reply->SetBoolField(TEXT("already_existed"), false);
+    Reply->SetArrayField(TEXT("applied_overrides"), AppliedRows);
+    Reply->SetNumberField(TEXT("applied_overrides_count"), AppliedRows.Num());
     Reply->SetBoolField(TEXT("success"), true);
     mcp_common::AddSaveOutcome(Reply, bSaved, SaveError);
     return Reply;
 }
 
-// MCP:create_material_expression - Add ONE node to a material graph, by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output. The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_expressions and get_material_stats, not with the success flag.
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
+// MCP:create_material_expression - Add ONE node to a material graph -- or to a material function's internal graph -- by expression class path (e.g. /Script/Engine.MaterialExpressionConstant, ...TextureSample, ...ScalarParameter), at a graph position. The building block of headless material authoring: create the nodes, then wire them with connect_material_expressions and connect_to_material_output (inside a function: connect_material_function_pins, then recompile_material_function). The node arrives UNCONNECTED, so nothing renders differently until it is wired -- verify with get_material_graph_info and get_material_stats, not with the success flag.
+//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial'); a UMaterialFunction path is accepted too and creates the node inside that function
+//   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer): the node is created inside the function's graph
 //   @param expression_class_name - Material expression class name (e.g., '/Script/Engine.MaterialExpressionConstant')
 //   @param node_pos_x - Optional graph editor X position; defaults to 0
 //   @param node_pos_y - Optional graph editor Y position; defaults to 0
-//   @returns { material_path: string, expression_class_name: string, expression_name: string, node_pos_x: int, node_pos_y: int, success: bool }
+//   @returns { material_path: string, material_function_path?: string (the function's object path, when the node went into a function), expression_class_name: string, expression_name: string, node_pos_x: int, node_pos_y: int, success: bool }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
+    // material_path, else material_function_path; which key was used decides what is tried first.
     FString GraphPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), GraphPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    bool bFunctionKey = false;
+    if (!Params->TryGetStringField(TEXT("material_path"), GraphPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_function_path"), GraphPath))
+        {
+            return mcp_common::MissingParameterReply(TEXT("material_path"));
+        }
+        bFunctionKey = true;
+    }
     FString NodeClassName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("expression_class_name"), NodeClassName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // The graph owner: a UMaterial, or a UMaterialFunction (tried first when material_function_path was sent).
     UMaterial* Graph = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadBaseMaterial(GraphPath, Graph)) { return LoadError; }
+    UMaterialFunction* FunctionGraph = nullptr;
+    if (bFunctionKey)
+    {
+        FunctionGraph = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(GraphPath);
+    }
+    if (FunctionGraph == nullptr)
+    {
+        Graph = AssetPathUtils::LoadOrLoadSoftPathString<UMaterial>(GraphPath);
+    }
+    if (Graph == nullptr && FunctionGraph == nullptr && !bFunctionKey)
+    {
+        FunctionGraph = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(GraphPath);
+    }
+    if (Graph == nullptr && FunctionGraph == nullptr)
+    {
+        return UEAgentMaterialCommandsImpl::NotFoundByPath(TEXT("Material or material function"), GraphPath);
+    }
 
     // In-memory lookup first; a class that is not loaded yet is only loaded when given as a path.
     UClass* NodeClass = FindObject<UClass>(nullptr, *NodeClassName);
@@ -605,15 +655,32 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
     Params->TryGetNumberField(TEXT("node_pos_x"), GraphX);
     Params->TryGetNumberField(TEXT("node_pos_y"), GraphY);
 
-    UMaterialExpression* NewNode = UMaterialEditingLibrary::CreateMaterialExpression(Graph, NodeClass, GraphX, GraphY);
+    // Inside a function the function-scoped creator is used: it makes the function the node's owner,
+    // so any expression class can be placed there, not only the function input/output nodes.
+    UMaterialExpression* NewNode = FunctionGraph != nullptr
+        ? UMaterialEditingLibrary::CreateMaterialExpressionInFunction(FunctionGraph, NodeClass, GraphX, GraphY)
+        : UMaterialEditingLibrary::CreateMaterialExpression(Graph, NodeClass, GraphX, GraphY);
     if (NewNode == nullptr)
     {
-        return mcp_common::MakeErrorReply(TEXT("Failed to create material expression"));
+        return mcp_common::MakeErrorReply(FunctionGraph != nullptr
+            ? TEXT("Failed to create material expression in function")
+            : TEXT("Failed to create material expression"));
     }
-    Graph->MarkPackageDirty();
+    if (FunctionGraph != nullptr)
+    {
+        FunctionGraph->MarkPackageDirty();
+    }
+    else
+    {
+        Graph->MarkPackageDirty();
+    }
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("material_path"), GraphPath);
+    if (FunctionGraph != nullptr)
+    {
+        Reply->SetStringField(TEXT("material_function_path"), FunctionGraph->GetPathName());
+    }
     Reply->SetStringField(TEXT("expression_class_name"), NodeClassName);
     Reply->SetStringField(TEXT("expression_name"), NewNode->GetName());
     Reply->SetNumberField(TEXT("node_pos_x"), GraphX);
@@ -622,7 +689,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialExpression(const TSharedPtr<FJsonObj
     return Reply;
 }
 
-// MCP:delete_material_expression - Delete ONE node from a material graph by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_expressions until the count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag.
+// MCP:delete_material_expression - Delete ONE node from a material graph by name. Deliberately one at a time, and that is the safe way to empty a graph: the engine's bulk delete_all_material_expressions can leave half the nodes behind with no error, and a rebuild on top then produces duplicate parameter names that no parameter listing reveals (duplicates collapse by name). Loop this instead, re-reading get_material_graph_info until its expression_count reaches 0. The underlying engine call also returns false while having done the work, so count the nodes rather than trusting the flag.
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
 //   @param expression_name - Name of the material expression to delete
 //   @returns { material_path: string, expression_name: string, success: bool }
@@ -655,7 +722,7 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialExpression(const TSharedPtr<FJsonObj
     return Reply;
 }
 
-// MCP:connect_material_expressions - Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_expressions / get_material_graph_info, then compile and check get_material_stats.
+// MCP:connect_material_expressions - Wire one material node's output pin into another node's input pin -- the call that turns loose expressions into a working graph, and the only headless route to some pins. Input names go WITHOUT spaces (BaseColor and AmbientOcclusion work, "Base Color" does not), and MakeMaterialAttributes accepts named pins the graph walker reports as unnamed, including Displacement. A true return only means the pin NAME resolved: confirm the connection landed by re-reading get_material_graph_info, then compile and check get_material_stats.
 //   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
 //   @param from_expression_name - Name of the source material expression
 //   @param from_output_name - Name of the output pin on the source expression
@@ -757,40 +824,6 @@ TSharedPtr<FJsonObject> HandleDisconnectMaterialExpressions(const TSharedPtr<FJs
     Reply->SetStringField(TEXT("to_input_name"), TargetPin);
     Reply->SetBoolField(TEXT("disconnected"), bLinkBroken);
     Reply->SetBoolField(TEXT("already_disconnected"), !bLinkBroken);
-    Reply->SetBoolField(TEXT("success"), true);
-    return Reply;
-}
-
-// MCP:get_material_expressions - List every node in a material's graph with its name, class and description -- the census that tells you what a material is built from, and the count oracle when deleting nodes one by one (delete until it reaches 0). Also the way to spot the duplicate parameter nodes a partial bulk-delete leaves behind, which no parameter listing shows because duplicates collapse by name. Nodes only: for the WIRING between them use get_material_graph_info, and note this works on a UMaterial, not a UMaterialFunction (the Python equivalent throws on one).
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
-//   @returns { material_path: string, material_name: string, expressions: [{ name, class, class_path, description }], expression_count: int, success: bool }
-
-TSharedPtr<FJsonObject> HandleGetMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
-{
-    FString GraphPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), GraphPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UMaterial* Graph = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadBaseMaterial(GraphPath, Graph)) { return LoadError; }
-
-    TArray<TSharedPtr<FJsonValue>> NodeList;
-    UEAgentMaterialCommandsImpl::VisitGraphNodes(Graph, [&NodeList](UMaterialExpression* Node)
-    {
-        const UClass* NodeClass = Node->GetClass();
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), Node->GetName());
-        Entry->SetStringField(TEXT("class"), NodeClass->GetName());
-        Entry->SetStringField(TEXT("class_path"), NodeClass->GetPathName());
-        Entry->SetStringField(TEXT("description"), Node->GetDescription());
-        NodeList.Add(MakeShared<FJsonValueObject>(Entry));
-        return true;
-    });
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("material_path"), GraphPath);
-    Reply->SetStringField(TEXT("material_name"), Graph->GetName());
-    Reply->SetNumberField(TEXT("expression_count"), NodeList.Num());
-    Reply->SetArrayField(TEXT("expressions"), NodeList);
     Reply->SetBoolField(TEXT("success"), true);
     return Reply;
 }
@@ -949,103 +982,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialUsageFlag(const TSharedPtr<FJsonObject>
     return Reply;
 }
 
-// MCP:get_material_default_parameter - Read the RESOLVED default value of a named parameter on the base UMaterial graph, with an honest found flag.  Pairs with set_material_node_param (ParameterName + DefaultValue) which is a writer-without-reader.  The engine getters return a default (0 / black / null / false) BOTH when the parameter holds that value AND when it does not exist; this command uses the bool-returning UMaterial::Get*ParameterDefaultValue family to distinguish them, returning found=false (NOT a masquerading default) when the parameter is absent.
-//   @param material_path - Full path to the material (e.g., '/Game/Materials/MyMaterial.MyMaterial')
-//   @param param_name - Name of the parameter to resolve (the ScalarParameter/VectorParameter/etc. ParameterName)
-//   @param param_type - Parameter type to read: 'scalar' | 'vector' | 'texture' | 'static_switch'
-//   @returns { material_path: string, param_name: string, param_type: string, found: bool, value?: (float | {r,g,b,a} | string texture_path | bool), success: bool }
-
-TSharedPtr<FJsonObject> HandleGetMaterialDefaultParameter(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), AssetPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString ParamName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString ParamType;
-    if (!Params->TryGetStringField(TEXT("param_type"), ParamType))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: param_type. Expected one of: scalar | vector | texture | static_switch"));
-    }
-
-    UMaterial* Material = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = UEAgentMaterialCommandsImpl::LoadBaseMaterial(AssetPath, Material)) { return LoadError; }
-
-    // FHashedMaterialParameterInfo converts implicitly from an FName, so the bare name addresses
-    // the global (non-layer) parameter.
-    const FName ParamKey(*ParamName);
-
-    using UEAgentMaterialCommandsImpl::EDefaultValueKind;
-    const EDefaultValueKind Kind = UEAgentMaterialCommandsImpl::ParseDefaultValueKind(ParamType);
-    if (Kind == EDefaultValueKind::Unsupported)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("Unknown param_type: %s. Expected one of: scalar | vector | texture | static_switch"), *ParamType));
-    }
-
-    // Each getter's bool is the honest "found" flag: it tells a default that happens to be zero /
-    // black / null / false apart from a parameter that does not exist at all.
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    bool bFound = false;
-    switch (Kind)
-    {
-    case EDefaultValueKind::Scalar:
-    {
-        float Scalar = 0.0f;
-        bFound = Material->GetScalarParameterDefaultValue(ParamKey, Scalar);
-        if (bFound)
-        {
-            Reply->SetNumberField(TEXT("value"), Scalar);
-        }
-        break;
-    }
-    case EDefaultValueKind::Vector:
-    {
-        FLinearColor Color = FLinearColor::Black;
-        bFound = Material->GetVectorParameterDefaultValue(ParamKey, Color);
-        if (bFound)
-        {
-            Reply->SetObjectField(TEXT("value"), UEAgentMaterialCommandsImpl::ColorToJson(Color));
-        }
-        break;
-    }
-    case EDefaultValueKind::Texture:
-    {
-        UTexture* Texture = nullptr;
-        bFound = Material->GetTextureParameterDefaultValue(ParamKey, Texture);
-        if (bFound)
-        {
-            // A texture parameter may legitimately default to no texture at all; that reads as "".
-            Reply->SetStringField(TEXT("value"), Texture ? Texture->GetPathName() : FString());
-        }
-        break;
-    }
-    case EDefaultValueKind::StaticSwitch:
-    {
-        bool bSwitch = false;
-        FGuid SwitchGuid;
-        bFound = Material->GetStaticSwitchParameterDefaultValue(ParamKey, bSwitch, SwitchGuid);
-        if (bFound)
-        {
-            Reply->SetBoolField(TEXT("value"), bSwitch);
-        }
-        break;
-    }
-    default:
-        break;
-    }
-
-    UE_LOG(LogTemp, Verbose, TEXT("MCP get_material_default_parameter: %s '%s' (%s) found=%d"),
-           *AssetPath, *ParamName, *ParamType, bFound ? 1 : 0);
-
-    Reply->SetStringField(TEXT("material_path"), AssetPath);
-    Reply->SetStringField(TEXT("param_name"), ParamName);
-    Reply->SetStringField(TEXT("param_type"), ParamType);
-    Reply->SetBoolField(TEXT("found"), bFound);
-    Reply->SetBoolField(TEXT("success"), true);
-    return Reply;
-}
-
-// MCP:get_material_usage - What would I break if I changed this material: every asset that references it, bucketed by kind (static mesh, skeletal mesh, blueprint, level, other) with counts, plus the material's own blend mode and two-sided / masked / translucent / opaque flags. The impact check before editing or deleting a shared material. Note it takes a material NAME, not a path, so an ambiguous name can resolve to the wrong asset -- confirm with resolve_asset_by_name first. Nothing to do with get_material_usage_flag, which is about permitted geometry types.
+// MCP:get_material_referencers - What would I break if I changed this material: every asset that references it, bucketed by kind (static mesh, skeletal mesh, blueprint, level, other) with counts, plus the material's own blend mode and two-sided / masked / translucent / opaque flags. The impact check before editing or deleting a shared material. Note it takes a material NAME, not a path, so an ambiguous name can resolve to the wrong asset -- confirm with resolve_asset_by_name first. Nothing to do with get_material_usage_flag, which is about permitted geometry types.
 //   @param material_name - Name of the material asset
 //   @returns { material_name: string, material_class: string, material_category: string, material_tooltip: string, material_display_name: string, usage: [{package_name, asset_name, asset_class, asset_path, usage_type, usage_category, asset_category, asset_tooltip, asset_display_name}], usage_count: int, static_mesh_usage_count: int, skeletal_mesh_usage_count: int, blueprint_usage_count: int, level_usage_count: int, other_usage_count: int, material_has_referencers: bool, material_is_two_sided: bool, material_is_masked: bool, material_is_translucent: bool, material_is_opaque: bool, blend_mode: string }
 
@@ -1088,142 +1025,6 @@ TSharedPtr<FJsonObject> HandleGetMaterialUsage(const TSharedPtr<FJsonObject>& Pa
     // "Used" is answered by the registry: a material counts as used when anything references it.
     Reply->SetBoolField(TEXT("material_has_referencers"), ReferencingPackages.Num() > 0);
     UEAgentMaterialCommandsImpl::WriteSurfaceTraits(Reply, Material);
-    return Reply;
-}
-
-// MCP:create_material_variant - Create a material instance from a base material AND apply a dict of parameter overrides in the same call -- one shot for "same material, different colour/roughness/switch", instead of create_material_instance followed by N set calls. The overrides dict accepts scalars, vector objects and static switch booleans. Addresses the base by NAME rather than path, so resolve an ambiguous name first; check applied_overrides_count against what you sent, and re-read with get_material_all_parameters, since a name that does not exist on the parent is simply not applied.
-//   @param material_name - Name of the base material asset
-//   @param variant_name - Name for the new variant (must not be empty and cannot contain spaces, dots, or slashes)
-//   @param parameter_overrides - Optional dict {param_name: scalar_number | vector_object | static_switch_bool} applied to the variant
-//   @returns { material_name: string, variant_name: string, variant_path: string, variant_asset_name: string, variant_class: string, parent_material: string, success: bool, variant_saved: bool, applied_overrides_count: int, applied_overrides: [{name, type}], message: string, material_class: string, material_category: string, material_tooltip: string, material_display_name: string, parameters_count: int, scalar_parameters_count: int, vector_parameters_count: int, texture_parameters_count: int, static_switch_parameters_count: int, material_is_two_sided: bool, material_is_masked: bool, material_is_translucent: bool, material_is_opaque: bool, blend_mode: string }
-
-TSharedPtr<FJsonObject> HandleCreateMaterialVariant(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BaseName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_name"), BaseName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    FString Suffix;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_name"), Suffix, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (BaseName.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Parameter 'material_name' cannot be empty"));
-    }
-    if (Suffix.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Parameter 'variant_name' cannot be empty"));
-    }
-
-    IAssetRegistry& Registry = mcp_common::AssetRegistry();
-    FAssetData BaseAsset;
-    if (!UEAgentMaterialCommandsImpl::FindMaterialAssetByName(Registry, BaseName, BaseAsset))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material not found: %s"), *BaseName));
-    }
-    UMaterialInterface* Parent = Cast<UMaterialInterface>(BaseAsset.GetAsset());
-    if (Parent == nullptr)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to load material: %s"), *BaseName));
-    }
-    if (!UEAgentMaterialCommandsImpl::IsUsableVariantSuffix(Suffix))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Invalid variant name. Must not be empty and cannot contain spaces, dots, or slashes"));
-    }
-
-    // The variant is named "<material>_<variant>"; refuse when a package of that name is registered.
-    const FString VariantAssetName = FString::Printf(TEXT("%s_%s"), *BaseName, *Suffix);
-    TArray<FAssetData> NameClashes;
-    Registry.GetAssetsByPackageName(FName(*VariantAssetName), NameClashes);
-    if (NameClashes.Num() > 0)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material variant already exists: %s"), *VariantAssetName));
-    }
-
-    // Parameter census of the parent, reported alongside the variant.
-    const UEAgentMaterialCommandsImpl::FParameterCensus Census = UEAgentMaterialCommandsImpl::TakeParameterCensus(Parent);
-
-    // The variant is a UMaterialInstanceConstant saved next to its parent (under /Game when the
-    // parent's folder is unknown), the same kind of asset create_material_instance makes.
-    FString TargetFolder = BaseAsset.PackagePath.ToString();
-    if (TargetFolder.IsEmpty())
-    {
-        TargetFolder = TEXT("/Game");
-    }
-    const FString VariantObjectPath = FString::Printf(TEXT("%s/%s.%s"), *TargetFolder, *VariantAssetName, *VariantAssetName);
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(VariantObjectPath)) { return Invalid; }
-    if (UEditorAssetLibrary::DoesAssetExist(VariantObjectPath))
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material variant already exists: %s"), *VariantObjectPath));
-    }
-
-    IAssetTools& Tools = UEAgentMaterialCommandsImpl::AssetToolsApi();
-    UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
-    if (Factory == nullptr)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to create UMaterialInstanceConstantFactoryNew"));
-    }
-    Factory->InitialParent = Parent;
-
-    UMaterialInstanceConstant* Variant = Cast<UMaterialInstanceConstant>(
-        Tools.CreateAsset(VariantAssetName, TargetFolder, UMaterialInstanceConstant::StaticClass(), Factory));
-    if (Variant == nullptr)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create material variant asset at: %s"), *VariantObjectPath));
-    }
-    // CreateAsset already honours InitialParent; setting it again keeps the parent link explicit.
-    UMaterialEditingLibrary::SetMaterialInstanceParent(Variant, Parent);
-
-    // Optional overrides {name: number | bool | {r,g,b[,a]}}. Only what the engine accepted is
-    // listed back; a name the parent does not expose is simply not applied.
-    TArray<TSharedPtr<FJsonValue>> AppliedRows;
-    const TSharedPtr<FJsonObject>* Overrides = nullptr;
-    if (Params->TryGetObjectField(TEXT("parameter_overrides"), Overrides) && Overrides != nullptr && Overrides->IsValid())
-    {
-        for (const auto& Entry : (*Overrides)->Values)
-        {
-            if (!Entry.Value.IsValid())
-            {
-                continue;
-            }
-            const FString OverrideName = FString::ConstructFromPtrSize(*Entry.Key, Entry.Key.Len());
-            const TCHAR* AppliedKind = UEAgentMaterialCommandsImpl::ApplyParameterOverride(Variant, OverrideName, *Entry.Value);
-            if (AppliedKind == nullptr)
-            {
-                continue;
-            }
-            TSharedPtr<FJsonObject> AppliedRow = MakeShared<FJsonObject>();
-            AppliedRow->SetStringField(TEXT("name"), OverrideName);
-            AppliedRow->SetStringField(TEXT("type"), AppliedKind);
-            AppliedRows.Add(MakeShared<FJsonValueObject>(AppliedRow));
-        }
-    }
-
-    // Refresh the instance, then write it to disk.
-    UMaterialEditingLibrary::UpdateMaterialInstance(Variant);
-    Variant->PostEditChange();
-    Variant->MarkPackageDirty();
-    const bool bVariantSaved = UEditorAssetLibrary::SaveLoadedAsset(Variant, /*bOnlyIfIsDirty=*/false);
-    const bool bVariantExists = Variant != nullptr;
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("material_name"), BaseName);
-    Reply->SetStringField(TEXT("variant_name"), Suffix);
-    Reply->SetStringField(TEXT("variant_path"), VariantObjectPath);
-    Reply->SetStringField(TEXT("variant_asset_name"), VariantAssetName);
-    Reply->SetStringField(TEXT("variant_class"), Variant->GetClass()->GetName());
-    Reply->SetStringField(TEXT("parent_material"), Parent->GetName());
-    Reply->SetBoolField(TEXT("success"), bVariantExists);
-    Reply->SetBoolField(TEXT("variant_saved"), bVariantSaved);
-    Reply->SetNumberField(TEXT("applied_overrides_count"), AppliedRows.Num());
-    Reply->SetArrayField(TEXT("applied_overrides"), AppliedRows);
-    Reply->SetStringField(TEXT("message"), bVariantSaved
-        ? TEXT("Material variant created and saved successfully")
-        : TEXT("Material variant created but failed to save to disk"));
-    UEAgentMaterialCommandsImpl::WriteMaterialClassInfo(Reply, Parent);
-    Reply->SetNumberField(TEXT("parameters_count"), Census.Scalars + Census.Vectors + Census.Textures + Census.StaticSwitches);
-    Reply->SetNumberField(TEXT("scalar_parameters_count"), Census.Scalars);
-    Reply->SetNumberField(TEXT("vector_parameters_count"), Census.Vectors);
-    Reply->SetNumberField(TEXT("texture_parameters_count"), Census.Textures);
-    Reply->SetNumberField(TEXT("static_switch_parameters_count"), Census.StaticSwitches);
-    UEAgentMaterialCommandsImpl::WriteSurfaceTraits(Reply, Parent);
     return Reply;
 }
 
@@ -1306,14 +1107,11 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_material"), &HandleCreateMaterial },
     { TEXT("create_material_expression"), &HandleCreateMaterialExpression },
     { TEXT("create_material_instance"), &HandleCreateMaterialInstance },
-    { TEXT("create_material_variant"), &HandleCreateMaterialVariant },
     { TEXT("delete_material_expression"), &HandleDeleteMaterialExpression },
     { TEXT("disconnect_material_expressions"), &HandleDisconnectMaterialExpressions },
-    { TEXT("get_material_default_parameter"), &HandleGetMaterialDefaultParameter },
-    { TEXT("get_material_expressions"), &HandleGetMaterialExpressions },
     { TEXT("get_material_physical_material"), &HandleGetMaterialPhysicalMaterial },
     { TEXT("get_material_stats"), &HandleGetMaterialStats },
-    { TEXT("get_material_usage"), &HandleGetMaterialUsage },
+    { TEXT("get_material_referencers"), &HandleGetMaterialUsage },
     { TEXT("get_material_usage_flag"), &HandleGetMaterialUsageFlag },
     { TEXT("set_material_physical_material"), &HandleSetMaterialPhysicalMaterial },
     { TEXT("set_material_usage_flag"), &HandleSetMaterialUsageFlag },

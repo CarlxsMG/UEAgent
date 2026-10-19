@@ -203,18 +203,6 @@ namespace McpReadbackInResponseA
 			TEXT("session:prior census in PIE world"), Percent(RB_check_delete_after_pie_census_0, { S(Join(Packages, TEXT(", "))) }));
 	}
 
-	/** reference_count is a hardcoded constant, not a count. */
-	static FO CheckTagRefcount(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
-		if (!Has(Data, TEXT("reference_count")))
-		{
-			return nullptr;
-		}
-		return WarningFinding(TEXT("count_is_constant"), Get(Params, TEXT("tag_name")), Get(Data, TEXT("reference_count")), TEXT("in-response:reference_count"),
-			RB_check_tag_refcount_0);
-	}
-
 	/**
 	 * A tiny count behind a huge sweep does not prove UNIQUENESS: the sweep only sees LOADED classes.
 	 * It only speaks for that shape (count <= 2, 1000+ classes scanned); otherwise this tool is a
@@ -520,7 +508,8 @@ namespace McpReadbackInResponseA
 			Percent(RB_check_ghost_map_0, { Or(Get(Data, TEXT("map_path")), S(TEXT("map_path not reported"))) }));
 	}
 
-	/** Empty cells in a complex row read do not mean "not written" (e.g. enum index 0 exports as empty). */
+	/** Empty cells in a row read with include_export_text do not mean "not written" (e.g. enum index 0 exports as
+	 *  empty). Without include_export_text there is no `fields`, and nothing to check. */
 	static FO CheckComplexRow(const FO& Params, const FO& Result)
 	{
 		const FO Data = Payload(Result);
@@ -573,7 +562,7 @@ void McpReadbackChecks::RegisterInResponseA(McpReadback::FTables& Tables)
 {
 	using namespace McpReadbackInResponseA;
 	TMap<FString, McpReadback::FInResponse>& T = Tables.InResponse;
-	T.Add(TEXT("set_bp_variable_default"), &CheckBpVariableDefault);
+	T.Add(TEXT("set_blueprint_variable_default"), &CheckBpVariableDefault);
 	T.Add(TEXT("add_collision_profile"), &CheckCollisionProfile);
 	T.Add(TEXT("compile_blueprint"), &CheckCompileBlueprint);
 	T.Add(TEXT("set_component_property"), &CheckComponentProperty);
@@ -581,8 +570,7 @@ void McpReadbackChecks::RegisterInResponseA(McpReadback::FTables& Tables)
 	T.Add(TEXT("find_blueprint_node_references"), &CheckNodeReferences);
 	T.Add(TEXT("get_component_properties"), &CheckReadAfterCompile);
 	T.Add(TEXT("delete_actor"), &CheckDeleteAfterPieCensus);
-	T.Add(TEXT("batch_delete_actors"), &CheckDeleteAfterPieCensus);
-	T.Add(TEXT("count_gameplay_tag_references"), &CheckTagRefcount);
+	T.Add(TEXT("delete_actors"), &CheckDeleteAfterPieCensus);
 	T.Add(TEXT("find_classes_implementing_interface"), &CheckInterfaceSweep);
 	T.Add(TEXT("get_default_game_map"), &CheckDefaultMapAggregate);
 	T.Add(TEXT("audit_widget_accessibility"), &CheckBlindTouchTarget);
@@ -592,7 +580,7 @@ void McpReadbackChecks::RegisterInResponseA(McpReadback::FTables& Tables)
 	T.Add(TEXT("list_subsystem_instances"), &CheckSubsystemListEditor);
 	T.Add(TEXT("list_save_games"), &CheckFlatSaveFiles);
 	T.Add(TEXT("create_world_partition_map"), &CheckGhostMap);
-	T.Add(TEXT("read_data_table_row_complex"), &CheckComplexRow);
+	T.Add(TEXT("get_data_table_row"), &CheckComplexRow);
 	T.Add(TEXT("get_smart_object_component_definition"), &CheckSmartObjectRegistry);
 
 	// These four readers share the ambiguous-world check, which needs to know WHICH one called. On

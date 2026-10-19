@@ -2,13 +2,13 @@
 
 # Level
 
-127 tools. Back to the [index](README.md).
+115 tools. Back to the [index](README.md).
 
 ## `add_foliage_instances`
 
 *Destructive.*
 
-Place foliage instances of a UFoliageType at explicit transforms in the level's InstancedFoliageActor. DANGER: measured CRASHING the editor process (access violation inside UnrealEditor-FoliageEdit.dll) -- reproducibly, and a single instance crashes just like a thousand, so trimming the count does not help. The reply you see is a "Connection reset", which reads like a network hiccup and is not. Use add_instanced_static_mesh_component + add_ism_instance instead: an InstancedFoliageActor is itself an actor holding instanced-static-mesh components, so it is the same code path minus the crash. Save your work before calling this at all.
+Place foliage instances of a UFoliageType at explicit transforms in the level's InstancedFoliageActor. DANGER: measured CRASHING the editor process (access violation inside UnrealEditor-FoliageEdit.dll) -- reproducibly, and a single instance crashes just like a thousand, so trimming the count does not help. The reply you see is a "Connection reset", which reads like a network hiccup and is not. Use add_instanced_static_mesh_component + add_instanced_static_mesh_instance instead: an InstancedFoliageActor is itself an actor holding instanced-static-mesh components, so it is the same code path minus the crash. Save your work before calling this at all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -89,22 +89,6 @@ Join two existing landscape spline control points with a segment -- the second h
 | `landscape_name` | string | no | Optional landscape actor name, defaults to first found |
 
 **Returns:** `{ landscape_name: string, segment_index: int, segment_count: int, start_point_index: int, end_point_index: int, added: bool }`
-
-## `add_light`
-
-*Additive.*
-
-Spawn a Directional, Point, Spot, Rect or Sky light actor in the editor world (not PIE) at location and rotation, optionally setting intensity and color, outside any undo transaction; nothing is saved. Returns light_type and the internal actor_name of the new actor.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `light_type` | string | yes | Directional, Point, Spot, Rect, or Sky (case-insensitive); anything else is an error. |
-| `location` | array | no | [x, y, z] world location in cm; default [0, 0, 0]. Any other value (an object, another length) is an error and no light is spawned. |
-| `rotation` | array | no | World rotation in degrees as [pitch, yaw, roll], default [0, 0, 0]; directional, spot and rect lights shine along its forward axis. |
-| `intensity` | number | no | Value for the Intensity property in the units of the light (Directional: lux; Sky: a multiplier); engine default when omitted. |
-| `color` | array | no | [r, g, b] linear color, usually 0..1; default white. Any other value (an object, a hex string, another length) is an error and no light is spawned. |
-
-**Returns:** `{ light_type: string, actor_name: string }`
 
 ## `add_slope_mask_node`
 
@@ -217,16 +201,6 @@ Start an asynchronous static lighting build of all levels in the editor world (n
 
 **Returns:** `{ quality: string, started: bool, note: string }`
 
-## `build_minimap`
-
-*Read-only.*
-
-Report whether the current editor world is World Partition and already has a minimap; it never builds one, because minimap generation is a GPU scene capture that only the WorldPartitionMiniMapBuilder commandlet (with -AllowCommandletRendering) or the editor's Build > Build Minimap can run. It reads the editor world, also during PIE, and on a partitioned world sets already_has_minimap from whether a WorldPartitionMiniMap actor holds a texture; built is always false and success true, note and message say why, and nothing is written. A non-partitioned world returns is_world_partition=false without already_has_minimap. A missing editor world is an error. Read the partition state with get_world_partition_info; HLODs have the same kind of gate in build_hlod.
-
-No parameters.
-
-**Returns:** `{ world: string, is_world_partition: bool, built: bool, already_has_minimap?: bool, success: bool, note: string, message: string }`
-
 ## `capture_pie_screenshot`
 
 *Destructive.*
@@ -253,30 +227,6 @@ Closes the in-place edit opened by edit_level_instance: the engine commits (or d
 
 **Returns:** `{ actor_name: string, committed: bool, was_editing: bool, discarded: bool, note: string }`
 
-## `configure_gravity`
-
-*Destructive, idempotent.*
-
-Set world gravity from a named preset (Earth -980, Moon -163, Mars -371, Zero, Low, High -1960, Enabled, Disabled), writing the same WorldSettings fields as set_world_gravity and returning old/new/requested triplets plus a physics-component census of the world. Prefer set_world_gravity when you have an exact number. WARNING: gravity_configured is a real re-read (it compares GlobalGravityZ against what was asked), but an UNRECOGNISED preset name is NOT an error: it comes back gravity_configured:false with the reason in gravity_message and nothing written -- read that field, not the envelope.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `gravity_settings` | string | yes | Preset NAME, one of 'Enabled'/'Disabled', 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero', 'Low', 'High', in any capitalisation ('EARTH' works too). For an arbitrary number use set_world_gravity. |
-
-**Returns:** `{ gravity_settings: string, gravity_configured: bool, gravity_message: string, old_gravity_x: float, old_gravity_y: float, old_gravity_z: float, old_gravity_enabled: bool, new_gravity_x: float, new_gravity_y: float, new_gravity_z: float, new_gravity_enabled: bool, requested_gravity_x: float, requested_gravity_y: float, requested_gravity_z: float, requested_gravity_enabled: bool, world_name: string, world_physics_enabled: bool, world_physics_delta_time: float, world_physics_time_seconds: float, world_physics_real_time_seconds: float, world_physics_component_count: int, world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int, gravity_impact: float, gravity_impact_rating: string, gravity_recommendations: [string] }`
-
-## `convert_map_to_world_partition`
-
-*Read-only.*
-
-Report whether the current editor world is already World Partition; it never converts anything, because the only complete conversion is the WorldPartitionConvert commandlet run as a separate process (-run=WorldPartitionConvert -AllowCommandletRendering), and the in-editor converter edits the level in place without saving. It reads the editor world, also during PIE: a partitioned world returns already_converted=true, any other already_converted=false with a note naming the commandlet; converted is always false and success true, and nothing is written. map_path is accepted and ignored, so open the map first with load_level. A missing editor world is an error. To start a World Partition map from scratch use create_world_partition_map; read the partition state with get_world_partition_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `map_path` | string | no | Accepted and ignored: the world checked is always the current editor world, whatever path is given. |
-
-**Returns:** `{ world: string, is_world_partition: bool, converted: bool, already_converted: bool, success: bool, note: string, message: string }`
-
 ## `copy_landscape_region`
 
 *Additive.*
@@ -296,7 +246,7 @@ Clone a rectangle of terrain relief: copy a heightmap region between two landsca
 
 *Additive, idempotent.*
 
-Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
+Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_assets with data_layer_asset_path; list them: get_data_layer_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -418,6 +368,18 @@ Detach an actor from its current parent keeping world transform
 
 **Returns:** `{ actor: string, was_attached: bool, detached: bool, former_parent: string }`
 
+## `does_foliage_type_exist`
+
+*Read-only.*
+
+Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- get_foliage_instance_count (has_instances) answers whether anything of it is placed in the level.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `foliage_type_path` | string | yes | Asset path (e.g. /Game/Foliage/BP_Tree) |
+
+**Returns:** `{ exists: bool, asset_path: string }`
+
 ## `edit_level_instance`
 
 *Destructive, idempotent.*
@@ -473,18 +435,6 @@ Move the camera of every level editor viewport to frame one actor of the editor 
 | `actor_name` | string | no | Optional internal name or outliner label of the actor to frame; omitted, the current selection is framed |
 
 **Returns:** `{ focused_actor?: string, focused_count?: int }`
-
-## `foliage_type_exists`
-
-*Read-only.*
-
-Yes/no guard: does this FoliageType asset path exist and load? Cheap precondition check before a create/scatter/tune call so a typo in the path fails here instead of deep inside another tool. Asks about the ASSET only -- has_foliage_instances answers whether anything of it is placed in the level.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_type_path` | string | yes | Asset path (e.g. /Game/Foliage/BP_Tree) |
-
-**Returns:** `{ exists: bool, asset_path: string }`
 
 ## `get_absolute_transform`
 
@@ -560,19 +510,6 @@ Read whether an EDITOR-world actor is location-locked in the viewport (AActor::I
 
 **Returns:** `{ actor_name, locked }`
 
-## `get_actor_references`
-
-*Read-only.*
-
-Despite the name this does NOT find who references the actor: it lists that actor's own COMPONENTS (type/name/class), i.e. a thinner get_actor_components with no mesh/light detail. For real reference graphs use the Asset Registry tools (get_asset_referencers / get_asset_dependencies). World-aware: world='editor' (default) | 'pie' | 'server' | 'client' | 'pie:N', which also makes it see components ADDED AT RUNTIME (AddComponent in BeginPlay) that the editor world does not have; the reply stamps world_name/world_package/net_mode/pie_instance.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_name` | string | yes | Actor's internal name (GetName) or editor label (GetActorLabel); exact match. |
-| `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence. |
-
-**Returns:** `{ actor_name: string, actor_class: string, world: string, references: [{ type: string, name: string, class: string }], references_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
-
 ## `get_actors_by_class`
 
 *Read-only.*
@@ -600,29 +537,18 @@ Spatial query: every actor whose ORIGIN (not its bounds) lies within radius cm o
 
 **Returns:** `{ center_x: number, center_y: number, center_z: number, radius: number, world: string, actors: [{ name: string, class: string, distance: number, location: { x: number, y: number, z: number } }], actors_count: number, world_name: string|null, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
 
-## `get_data_layer_asset_info`
-
-*Read-only.*
-
-Reads type, debug color and runtime flags of a UDataLayerAsset.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `data_layer_asset_path` | string | yes | Full /Game path to the data layer asset. |
-
-**Returns:** `{ data_layer_asset_path: string, asset_path: string, name: string, data_layer_type: string, is_runtime: bool, is_private: bool, supports_actor_filters: bool, debug_color: [number, number, number, number] }`
-
 ## `get_data_layer_assets`
 
 *Read-only.*
 
-Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, each with name, object path and type (Editor, Runtime or Unknown). Every match is loaded to read its type; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances. For one asset's runtime flags and debug color use get_data_layer_asset_info.
+Lists the UDataLayerAsset assets (subclasses included) under a content folder and all its sub-folders, found through the Asset Registry, or reads exactly one with data_layer_asset_path; each entry carries name, object path, type (Editor, Runtime or Unknown), the runtime flags and the debug color. Every match is loaded to read them; nothing is modified and the list is not paginated. These are layer assets, not the layers of the open World Partition map: list those with get_data_layer_instances.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | no | Content path to search (optional, default "/Game", recursive) |
+| `path` | string | no | Content path to search (optional, default "/Game", recursive). Ignored when data_layer_asset_path is given. |
+| `data_layer_asset_path` | string | no | Optional full path of ONE data layer asset to read instead of searching; an asset that does not load as a UDataLayerAsset is an error. |
 
-**Returns:** `{ path: string, data_layer_assets: [{ name: string, path: string, type: string }], count: number }`
+**Returns:** `{ path: string, data_layer_asset_path?: string (echo, single-asset mode), data_layer_assets: [{ name: string, path: string, type: string, is_runtime?: bool, is_private?: bool, supports_actor_filters?: bool, debug_color?: [number, number, number, number] }], count: number }`
 
 ## `get_data_layer_instances`
 
@@ -638,7 +564,7 @@ No parameters.
 
 *Read-only.*
 
-List the actual foliage instances of one FoliageType inside a world-space sphere, with each one's location, rotation, scale and instance_index. Use it to check what is standing on a spot before building there, or as a dry run before remove_foliage_in_radius. Capped by max_results (default 100, hard cap 1000), so a full count must come from get_foliage_instance_count, not from len(instances).
+List the actual foliage instances of one FoliageType inside a world-space sphere, with each one's location, rotation, scale and instance_index. Use it to check what is standing on a spot before building there, or as a dry run before remove_foliage_instances with the same center and radius. Capped by max_results (default 100, hard cap 1000), so a full count must come from get_foliage_instance_count, not from len(instances).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -655,13 +581,13 @@ List the actual foliage instances of one FoliageType inside a world-space sphere
 
 *Read-only.*
 
-Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. Use get_foliage_in_radius when you need WHERE they are, has_foliage_instances for a plain yes/no.
+Count how many instances of one FoliageType are placed across the level's InstancedFoliageActors. The cheapest oracle for "did that scatter place anything / did the removal clear it" -- one number, no transform payload. has_instances is the plain yes/no. Use get_foliage_in_radius when you need WHERE they are.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `foliage_type_path` | string | yes | Full path of the UFoliageType asset |
 
-**Returns:** `{ foliage_type_path: string, foliage_type: string, instance_count: int, placed_instance_count: int, foliage_actor_count: int }`
+**Returns:** `{ foliage_type_path: string, foliage_type: string, has_instances: bool (instance_count > 0), instance_count: int, placed_instance_count: int, foliage_actor_count: int }`
 
 ## `get_foliage_type_properties`
 
@@ -845,57 +771,23 @@ No parameters.
 
 *Read-only.*
 
-Reads the editor world's World Partition state.  REAL read: works on any map. Returns is_world_partition_enabled=false on the default (non-WP) editor map, which is the correct result.
+Reads the editor world's World Partition state: data layer count, runtime hash class, streaming, the number of GENERATED streaming grids (0 until a cook/build generates them; edit-time grid settings live in the map's World Settings) and whether a minimap texture already exists (a minimap is built only by the WorldPartitionMiniMapBuilder commandlet with -AllowCommandletRendering or Build > Build Minimap). REAL read: works on any map, also during PIE. Returns is_world_partition_enabled=false on the default (non-WP) editor map, which is the correct result.
 
 No parameters.
 
-**Returns:** `{ world_name: string, is_world_partition_enabled: bool, num_data_layers: int, runtime_hash_type: string, is_streaming_enabled: bool, note: string }`
-
-## `get_world_partition_runtime_hash`
-
-*Read-only.*
-
-Reads the editor world's World Partition runtime hash.  REAL read: reports the runtime hash class and the number of GENERATED streaming grids (UWorldPartitionRuntimeSpatialHash::GetNumGrids), which is 0 until a cook/build generates the runtime grids. On the default non-WP editor map it honestly returns is_world_partition=false (no swap is done).
-
-No parameters.
-
-**Returns:** `{ is_world_partition: bool, runtime_hash_type?: string, num_streaming_grids?: int, success: bool, note: string }`
+**Returns:** `{ world_name: string, is_world_partition_enabled: bool, num_data_layers: int, runtime_hash_type: string, is_streaming_enabled: bool, num_streaming_grids: int (generated runtime grids of a spatial hash; 0 otherwise), has_minimap: bool (a WorldPartitionMiniMap actor holds a texture), note: string }`
 
 ## `get_world_settings`
 
 *Read-only.*
 
-Read a world's framework wiring: default GameMode plus the pawn / PlayerController / HUD / spectator classes it hands out, and gravity, time dilation and paused state. Use this to check WHICH GameMode+PC a map will spawn; use get_world_settings_detail for the physics/KillZ/world-bounds side. World-aware: with the default world='editor' there is no live GameMode, so the classes come from the DefaultGameMode CDO -- i.e. what the map INTENDS; ask for world='server' and GetAuthGameMode() returns the GameMode a running PIE ACTUALLY instantiated, which is the read that settles a set_player_controller_class that looks applied and is not. WARNING: world_type is stamped by the canonical world evidence, so it can read 'PIE', not only Game/Editor/Other.
+Read a world's framework wiring: default GameMode plus the pawn / PlayerController / HUD / spectator classes it hands out, and gravity, time dilation and paused state. Use this to check WHICH GameMode+PC a map will spawn. It also reads the physics/bounds side: the authored GlobalGravityZ, its override switch and the effective gravity, KillZ and its damage type, whether world-bounds checks are on (KillZ does nothing without them), WorldToMeters and bForceNoPrecomputedLighting -- the read-back of set_world_gravity and set_kill_z, which write the editor world. World-aware: with the default world='editor' there is no live GameMode, so the classes come from the DefaultGameMode CDO -- i.e. what the map INTENDS; ask for world='server' and GetAuthGameMode() returns the GameMode a running PIE ACTUALLY instantiated, which is the read that settles a set_player_controller_class that looks applied and is not. WARNING: world_type is stamped by the canonical world evidence, so it can read 'PIE', not only Game/Editor/Other.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `world` | string | no | Optional world selector: absent/'editor' (default) \| 'pie' (ambiguous: PlayWorld, else the first PIE context) \| 'server' (the PIE world with authority -- the only one with a live AuthGameMode) \| 'client' \| 'pie:N' \| 'game' (alias of 'pie'). An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence. |
 
-**Returns:** `{ world: string, world_name: string, world_type: string, default_game_mode: string, default_pawn_class: string, player_controller_class: string, hud_class: string, spectator_class: string, world_gravity_enabled: bool (the effective gravity Z is non-zero), world_gravity_overridden: bool (Override World Gravity), world_gravity_z: number, time_dilation: number, paused: number, world_package: string|null, net_mode: string|null, pie_instance: number }`
-
-## `get_world_settings_detail`
-
-*Read-only.*
-
-Read a world's physics/bounds side of WorldSettings: GlobalGravityZ plus the override flag AND the effective GetGravityZ, KillZ and its damage type, enable_world_bounds_checks, world_to_meters, time dilation, default GameMode and force_no_precomputed_lighting. This is the read-back for set_world_gravity / set_kill_z, and the place that tells you whether world-bounds checks are even on; use get_world_settings instead for the GameMode/pawn/PlayerController/HUD wiring. World-aware: world='editor' (default -- and it is the EDITOR world that set_world_gravity/set_kill_z actually write) | 'server' | 'client' | 'pie:N' | 'pie' read the RUNNING duplicate instead, which is how you tell "the map is authored with this gravity" apart from "the session is running with it".
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `world` | string | no | Optional world selector: absent/'editor' (default -- the world set_world_gravity and set_kill_z write, so this is their read-back) \| 'server' \| 'client' \| 'pie:N' \| 'pie' (ambiguous) \| 'game' (alias of 'pie') read the live PIE duplicate. An unrecognised value FAILS naming the worlds that exist; it never falls back to another world in silence. |
-
-**Returns:** `{ world: string, world_name: string, global_gravity_z: number, global_gravity_set: bool, effective_gravity_z: number, kill_z: number, kill_z_damage_type: string, enable_world_bounds_checks: bool, world_to_meters: number, time_dilation: number, default_game_mode: string, force_no_precomputed_lighting: bool, world_package: string|null, world_type: string|null, net_mode: string|null, pie_instance: number }`
-
-## `has_foliage_instances`
-
-*Read-only.*
-
-Yes/no: does this FoliageType have any instances placed in the current level (with the count alongside)? The one-line gate for "is this vegetation actually in the map"; foliage_type_exists answers the different question of whether the asset exists at all, and get_foliage_in_radius says where the instances are.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_type_path` | string | yes | Asset path of the UFoliageType to query |
-
-**Returns:** `{ has_instances: bool, instance_count: int, foliage_type_path: string }`
+**Returns:** `{ world: string, world_name: string, world_type: string, default_game_mode: string, default_pawn_class: string, player_controller_class: string, hud_class: string, spectator_class: string, world_gravity_enabled: bool (the effective gravity Z is non-zero), world_gravity_overridden: bool (Override World Gravity), world_gravity_z: number, global_gravity_z: number (the authored override value), global_gravity_set: bool (Override World Gravity), effective_gravity_z: number (WorldSettings GetGravityZ), kill_z: number, kill_z_damage_type: string, enable_world_bounds_checks: bool, world_to_meters: number, force_no_precomputed_lighting: bool, time_dilation: number, paused: number, world_package: string|null, net_mode: string|null, pie_instance: number }`
 
 ## `import_landscape_heightmap`
 
@@ -1063,18 +955,6 @@ Removes an editor-world actor from a data layer instance (inverse of assign_acto
 
 **Returns:** `{ actor_name: string, data_layer_asset_path: string, instance_name: string, short_name: string, removed: bool, message: string }`
 
-## `remove_all_foliage_for_type`
-
-*Destructive.*
-
-Delete EVERY placed instance of one FoliageType from all InstancedFoliageActors in the level -- the bulk undo for a scatter that went wrong. Destructive and not per-region; use remove_foliage_in_radius to clear only around a point. The FoliageType asset itself is untouched. Check remaining=0 in the reply, not just removed_all.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `foliage_type_path` | string | yes | Full path of the UFoliageType asset |
-
-**Returns:** `{ foliage_type_path: string, foliage_type: string, removed_count: int, remaining: int, foliage_actors_affected: int, removed_all: bool }`
-
 ## `remove_data_layer_instance`
 
 *Destructive, idempotent.*
@@ -1087,21 +967,21 @@ Removes a data layer instance from the editor world's World Partition (inverse o
 
 **Returns:** `{ data_layer_asset_path: string, deleted: bool, already_deleted: bool, instance_name?: string, note?: string }`
 
-## `remove_foliage_in_radius`
+## `remove_foliage_instances`
 
 *Destructive.*
 
-Clear foliage around a point: delete every instance of one FoliageType inside a world-space sphere -- the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Use remove_all_foliage_for_type to remove it everywhere instead. Preview what would go with get_foliage_in_radius first; the oracle is instances_removed plus a re-count.
+Delete the placed instances of one FoliageType from all InstancedFoliageActors in the level: EVERY instance by default -- the bulk undo for a scatter that went wrong -- or, with a radius, only those inside a world-space sphere, the way to carve a building site, road or clearing out of existing vegetation without wiping the whole type. Preview a sphere with get_foliage_in_radius first. The FoliageType asset itself is untouched. Undoable. Check remaining (and remaining_in_radius for a sphere) in the reply, not just removed_count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `foliage_type_path` | string | yes | Asset path of the UFoliageType to remove (matches against mesh on the type) |
-| `radius` | number | yes | Radius in world units |
-| `center_x` | number | no | X component of the world-space center of the removal sphere |
-| `center_y` | number | no | Y component of the world-space center of the removal sphere |
-| `center_z` | number | no | Z component of the world-space center of the removal sphere |
+| `foliage_type_path` | string | yes | Full path of the UFoliageType asset |
+| `center_x` | number | no | Optional X of the world-space center of the removal sphere (default 0); needs radius. |
+| `center_y` | number | no | Optional Y of the world-space center of the removal sphere (default 0); needs radius. |
+| `center_z` | number | no | Optional Z of the world-space center of the removal sphere (default 0); needs radius. |
+| `radius` | number | no | Optional radius of the removal sphere in world units, > 0. When given only instances inside the sphere are removed; when omitted every instance of the type is. |
 
-**Returns:** `{ applied, instances_removed, requested_radius }`
+**Returns:** `{ foliage_type_path: string, foliage_type: string, removed_count: int, remaining: int (instances of the type left anywhere), foliage_actors_affected: int, removed_all: bool (remaining == 0), requested_radius?: number (sphere mode), remaining_in_radius?: int (sphere mode: instances left inside the sphere, 0 when it worked) }`
 
 ## `remove_landscape_layer`
 
@@ -1174,7 +1054,7 @@ Removes a streaming sub-level from the current editor world.  If the sub-level i
 
 *Destructive.*
 
-Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_ism_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
+Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_instanced_static_mesh_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1191,7 +1071,7 @@ Scatter N seeded-random foliage instances of a type inside a world-space box (sa
 
 *Destructive.*
 
-Scatter foliage only where a landscape PAINT LAYER is strong enough: samples seeded candidates in a box, keeps those whose layer weight clears layer_weight_threshold, and rejects the rest -- so trees land on the forest layer and not on rock. The rule-driven sibling of scatter_foliage_in_box. DANGER: it reaches the same FFoliageInfo::AddInstance path that can crash the editor from its two sibling tools, so treat it as unsafe and prefer add_instanced_static_mesh_component + add_ism_instance (query the layer weight yourself) or a PCG graph. Save your work before calling it.
+Scatter foliage only where a landscape PAINT LAYER is strong enough: samples seeded candidates in a box, keeps those whose layer weight clears layer_weight_threshold, and rejects the rest -- so trees land on the forest layer and not on rock. The rule-driven sibling of scatter_foliage_in_box. DANGER: it reaches the same FFoliageInfo::AddInstance path that can crash the editor from its two sibling tools, so treat it as unsafe and prefer add_instanced_static_mesh_component + add_instanced_static_mesh_instance (query the layer weight yourself) or a PCG graph. Save your work before calling it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1431,7 +1311,7 @@ Set tunables of a FoliageType_InstancedStaticMesh asset in one call, only the fi
 
 *Destructive, idempotent.*
 
-Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings_detail -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
+Set the KillZ death plane on the EDITOR world's WorldSettings: any actor falling below this world Z is destroyed, provided the world's bounds checks are enabled (read that flag with get_world_settings, enable_world_bounds_checks -- with it off, KillZ does nothing and the fall looks like a bug). Optionally sets the damage type applied on the kill. Values come back RE-READ off WorldSettings, not echoed. Undoable, but it dirties the MAP: save_level to keep it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1542,18 +1422,6 @@ Point the world's GameMode at a PlayerController class, writing the live GameMod
 
 **Returns:** `{ player_controller_class: string, game_mode_class: string, written_to: string ('live_game_mode' | 'game_mode_defaults'), success: bool (the written slot reads back the class; still not a PIE oracle) }`
 
-## `set_preserve_scale_ratio`
-
-*Destructive, idempotent.*
-
-DOES NOTHING and says so: the editor's preserve-scale-ratio preference (UEditorPerProjectUserSettings::bPreserveScaleRatio) is not in the public UPROPERTY set, so this tool writes nothing and always answers applied:false with a note pointing at Editor Preferences > Level Editor > Viewports. Kept only so the call fails loudly instead of silently; it does not affect set_actor_transform, whose scale is always taken literally.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `preserve` | boolean | yes | Required bool, accepted and echoed back but never applied to anything. |
-
-**Returns:** `{ applied: false (always), preserve: bool (your input, echoed), note: string explaining the gap }`
-
 ## `set_spline_points`
 
 *Destructive, idempotent.*
@@ -1612,28 +1480,15 @@ Point the active PIE session's PlayerController camera at an actor (APlayerContr
 
 *Destructive, idempotent.*
 
-Set an exact global gravity on the EDITOR world's WorldSettings: writes GlobalGravityZ and the "Override World Gravity" flag, then RE-READS GetGravityZ() into the reply so gravity_z is a measurement rather than an echo. Earth is about -980 with the default centimetre unit. Use this when you want a number; use configure_gravity for named presets (Earth/Moon/Mars/Zero). Undoable (wrapped in a transaction) but it dirties the MAP -- save_level to keep it, and check the .umap is not read-only or the save writes nothing.
+Set an exact global gravity on the EDITOR world's WorldSettings, or one from a named preset (Earth -980, Moon -163, Mars -371, Zero, Low -490, High -1960, Enabled -980, Disabled 0): writes GlobalGravityZ and the "Override World Gravity" flag, then RE-READS GetGravityZ() into the reply so gravity_z is a measurement rather than an echo, next to the previous values and a census of the world's physics components with an impact rating. Earth is about -980 with the default centimetre unit. Undoable (wrapped in a transaction) but it dirties the MAP -- save_level to keep it, and check the .umap is not read-only or the save writes nothing. Read it back with get_world_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `gravity_z` | number | yes | Custom gravity along Z in cm/s^2 (negative = downward; Earth is about -980). |
-| `enable_override` | boolean | no | Optional bool (default true). True makes the world use gravity_z; false disables the override so the project default applies again. |
+| `gravity_z` | number | no | Custom gravity along Z in cm/s^2 (negative = downward; Earth is about -980). Required unless preset is given; sending both is refused. |
+| `preset` | string | no | Optional preset NAME instead of gravity_z, in any capitalisation: 'Earth' (-980), 'Moon' (-163), 'Mars' (-371), 'Zero' (0), 'Low' (-490), 'High' (-1960), 'Enabled' (-980), 'Disabled' (an override of 0). An unknown name is refused and nothing is written. |
+| `enable_override` | boolean | no | Optional bool (default true). True makes the world use the gravity; false disables the override so the project default applies again. |
 
-**Returns:** `{ applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), success: bool (hardcoded) }`
-
-## `set_world_partition_runtime_hash`
-
-*Read-only.*
-
-Report, without changing anything, that the runtime hash grid settings of the editor world cannot be edited from here: CellSize and LoadingRange live in the private, editor-only Grids array of the runtime spatial hash, which has no public setter, and the streaming grid is generated at cook or build time. cell_size, loading_range and grid_name are accepted and ignored, so applied is always false and success true. A partitioned world also returns its runtime_hash_type and runtime_regenerated=false; any other world returns is_world_partition=false. Nothing is written, during PIE too. A missing editor world is an error. Read the hash and its generated grid count with get_world_partition_runtime_hash, the overall partition state with get_world_partition_info; grid settings are edited in the World Settings of the map.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `cell_size` | number | no | Accepted and ignored, never applied: the desired streaming cell size, in world units. |
-| `loading_range` | number | no | Accepted and ignored, never applied: the desired loading range, in world units. |
-| `grid_name` | string | no | Accepted and ignored, never applied: the name of the target runtime grid. |
-
-**Returns:** `{ is_world_partition: bool, runtime_hash_type?: string, applied: bool, runtime_regenerated?: bool, success: bool, note: string }`
+**Returns:** `{ applied_gravity_z: number (what landed in GlobalGravityZ), enable_override: bool, gravity_z: number (re-read GetGravityZ, the effective value), previous_gravity_z: number (effective gravity before the write), previous_override: bool (Override World Gravity before the write), preset?: string (echo), world_name: string, world_physics_component_count: int (actors with a primitive component), world_simulate_physics_component_count: int, world_dynamic_physics_component_count: int (Movable), gravity_impact: number, gravity_impact_rating: string, gravity_recommendations: [string], success: bool (hardcoded) }`
 
 ## `smooth_landscape_in_box`
 

@@ -4,7 +4,6 @@
 
 #include "Animation/Skeleton.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "EditorAssetLibrary.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"   // FArrayProperty / FScriptArrayHelper / FObjectPropertyBase — reflection resize of the private Channels TArray in remove_pose_search_channel_from_schema
@@ -110,46 +109,6 @@ namespace
             ChannelsJson.Add(MakeShared<FJsonValueObject>(ChanObj));
         }
         return ChannelsJson;
-    }
-
-    // The reply of deleting the asset at AssetPath only when it is a T. A path with no asset is a no-op; an asset that
-    // does not load, one of another class, and a delete the engine refuses are errors, and nothing is deleted on a refusal.
-    template <typename T>
-    TSharedPtr<FJsonObject> PoseSearch_DeleteTypedAsset(const FString& AssetPath, const TCHAR* PathField,
-        const TCHAR* Command, const TCHAR* TypeLabel)
-    {
-        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-        Resp->SetStringField(PathField, AssetPath);
-        if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
-        {
-            Resp->SetBoolField(TEXT("deleted"), false);
-            Resp->SetBoolField(TEXT("already_existed"), false);
-            Resp->SetStringField(TEXT("note"), FString::Printf(TEXT("%s does not exist; nothing to remove"), PathField));
-            return mcp_common::MakeOkReply(Resp);
-        }
-        UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-        if (!Asset)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("%s: could not load asset at %s"), Command, *AssetPath));
-        }
-        const FString AssetClassName = Asset->GetClass()->GetName();
-        Resp->SetStringField(TEXT("asset_class"), AssetClassName);
-        if (!Cast<T>(Asset))
-        {
-            const FString Refusal = FString::Printf(TEXT("asset is not a %s (got %s) - wrong type, refusing to delete"),
-                TypeLabel, *AssetClassName);
-            Resp->SetBoolField(TEXT("deleted"), false);
-            Resp->SetStringField(TEXT("note"), Refusal);
-            return mcp_common::MakeOutcomeReply(Resp, false, FString::Printf(TEXT("%s: %s at %s"), Command, *Refusal, *AssetPath));
-        }
-        const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
-        Resp->SetBoolField(TEXT("deleted"), bDeleted);
-        Resp->SetBoolField(TEXT("already_existed"), true);
-        return mcp_common::MakeOutcomeReply(Resp, bDeleted, bDeleted ? FString() : FString::Printf(
-            TEXT("%s: the %s at %s was not deleted (UEditorAssetLibrary::DeleteAsset returned false: a Play-in-Editor ")
-            TEXT("session running, an asset the Asset Registry does not list, or a file that cannot be deleted; the ")
-            TEXT("Output Log names which)"), Command, TypeLabel, *AssetPath));
     }
 }
 
@@ -878,34 +837,8 @@ TSharedPtr<FJsonObject> HandleInspectPoseSearchDatabase(const TSharedPtr<FJsonOb
 }
 
 // ---------------------------------------------------------------------------
-// Typed delete inverses for schema/database/anim.
+// Database animation-asset removal.
 // ---------------------------------------------------------------------------
-
-// MCP:remove_pose_search_schema - Destroy a UPoseSearchSchema asset (mirror of create_pose_search_schema). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchSchema, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
-//   @param schema_path - Full /Game/... asset path of the schema.
-//   @returns { schema_path, deleted, already_existed, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
-
-TSharedPtr<FJsonObject> HandleRemovePoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SchemaPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("schema_path"), SchemaPath)) { return Missing; }
-    return PoseSearch_DeleteTypedAsset<UPoseSearchSchema>(
-        SchemaPath, TEXT("schema_path"), TEXT("remove_pose_search_schema"), TEXT("UPoseSearchSchema"));
-}
-
-// MCP:remove_pose_search_database - Destroy a UPoseSearchDatabase asset (mirror of create_pose_search_database). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UPoseSearchDatabase, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
-//   @param database_path - Full /Game/... asset path of the database.
-//   @returns { database_path, deleted, already_existed, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
-
-TSharedPtr<FJsonObject> HandleRemovePoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
-{
-    FString DatabasePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("database_path"), DatabasePath)) { return Missing; }
-    return PoseSearch_DeleteTypedAsset<UPoseSearchDatabase>(
-        DatabasePath, TEXT("database_path"), TEXT("remove_pose_search_database"), TEXT("UPoseSearchDatabase"));
-}
 
 // MCP:remove_animation_asset_from_pose_search_database - Remove one FPoseSearchDatabaseAnimationAsset entry from a UPoseSearchDatabase by 0-based index (inverse of add_animation_asset_to_pose_search_database). Idempotent: an out-of-range index returns removed:false + note, not an error. The database index is NOT rebuilt here -- run build_pose_search_database_index afterwards.
 //   @param database_path - Full /Game/... asset path of the database.
@@ -1129,11 +1062,12 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaProperties(const TSharedPtr<FJs
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_pose_search_schema_properties"), SaveError);
 }
 
-// MCP:set_pose_search_schema_skeleton - Bind (or rebind) the USkeleton of the schema's FPoseSearchRoledSkeleton entry under `role`. Idempotent by role: if a skeleton is already bound under that role it is REPLACED; if no roled entry exists for that role yet, one is created. Use add_pose_search_roled_skeleton instead when you want to ADD a second character's role without disturbing the first.
+// MCP:set_pose_search_schema_skeleton - Bind (or rebind) the USkeleton, and optionally the UMirrorDataTable, of the schema's FPoseSearchRoledSkeleton entry under `role`; with a new role it appends a second character's entry to a multi-character schema. Idempotent by role: if an entry already exists under that role its skeleton is REPLACED (and its mirror table when mirror_data_table_path is given), already_existed true; otherwise one entry is appended for that role, added true. Other roles are never touched, and no duplicate role entry is ever pushed.
 //   @param asset_path - Asset path of the UPoseSearchSchema to edit (required).
 //   @param skeleton_path - Asset path of the USkeleton to bind under the given role (required).
 //   @param role - Role name (FName) identifying the FPoseSearchRoledSkeleton entry within a multi-character schema (optional; empty = default role).
-//   @returns { asset_path, role, previous_skeleton_path, new_skeleton_path, changed, saved }
+//   @param mirror_data_table_path - Optional. Asset path of a UMirrorDataTable to bind under the role: given to the new entry, or written on the existing one. Omitted or empty: a new entry gets none and an existing entry keeps its table. A path that does not load as a UMirrorDataTable is an error and nothing is written.
+//   @returns { asset_path, role, previous_skeleton_path, new_skeleton_path, previous_mirror_data_table_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, changed, saved }
 TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
     UPoseSearchSchema* Schema = nullptr;
@@ -1148,18 +1082,38 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaSkeleton(const TSharedPtr<FJson
     Params->TryGetStringField(TEXT("role"), RoleStr);
     const FName Role(*RoleStr); // empty -> default role via AddSkeleton's default arg
 
+    // Optional mirror table: empty = none for a new entry, untouched for an existing one.
+    // A non-empty path that fails to resolve is an honest error, not a silent skip.
+    FString MirrorTablePath;
+    Params->TryGetStringField(TEXT("mirror_data_table_path"), MirrorTablePath);
+    UMirrorDataTable* MirrorTable = nullptr;
+    if (!MirrorTablePath.IsEmpty())
+    {
+        if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MirrorTablePath, TEXT("UMirrorDataTable"), MirrorTable)) { return Error; }
+    }
+
     const FString PreviousSkeletonPath = Schema->GetSkeleton(Role) ? Schema->GetSkeleton(Role)->GetPathName() : FString();
+    FString PreviousMirrorPath;
 
     Schema->Modify();
-    // AddSkeleton always APPENDS an entry (PoseSearchSchema.cpp), so the role's entry is edited in place.
-    if (FPoseSearchRoledSkeleton* Entry = Schema->GetRoledSkeleton(Role))
+    // AddSkeleton always APPENDS an entry (PoseSearchSchema.cpp, no dedupe), so the role's entry is edited
+    // in place and AddSkeleton runs only for a role that has none yet.
+    FPoseSearchRoledSkeleton* Entry = Schema->GetRoledSkeleton(Role);
+    const bool bAlreadyExisted = Entry != nullptr;
+    if (Entry)
     {
+        PreviousMirrorPath = Entry->MirrorDataTable ? Entry->MirrorDataTable->GetPathName() : FString();
         Entry->Skeleton = Skeleton;
+        if (MirrorTable)
+        {
+            Entry->MirrorDataTable = MirrorTable;
+        }
     }
     else
     {
-        Schema->AddSkeleton(Skeleton, nullptr, Role);
+        Schema->AddSkeleton(Skeleton, MirrorTable, Role);
     }
+    // PostEditChange re-Finalizes the schema against the (possibly larger) roled-skeleton set.
     Schema->PostEditChange();
     Schema->MarkPackageDirty();
 
@@ -1171,7 +1125,15 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaSkeleton(const TSharedPtr<FJson
     Obj->SetStringField(TEXT("role"), RoleStr);
     Obj->SetStringField(TEXT("previous_skeleton_path"), PreviousSkeletonPath);
     Obj->SetStringField(TEXT("new_skeleton_path"), Skeleton->GetPathName());
-    Obj->SetBoolField(TEXT("changed"), PreviousSkeletonPath != Skeleton->GetPathName());
+    const FPoseSearchRoledSkeleton* After = Schema->GetRoledSkeleton(Role);
+    const FString MirrorAfterPath = (After && After->MirrorDataTable) ? After->MirrorDataTable->GetPathName() : FString();
+    Obj->SetStringField(TEXT("previous_mirror_data_table_path"), PreviousMirrorPath);
+    Obj->SetStringField(TEXT("mirror_data_table_path"), MirrorAfterPath);
+    Obj->SetNumberField(TEXT("roled_skeleton_count"), Schema->GetRoledSkeletons().Num());
+    Obj->SetBoolField(TEXT("added"), !bAlreadyExisted);
+    Obj->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
+    Obj->SetBoolField(TEXT("changed"), !bAlreadyExisted || PreviousSkeletonPath != Skeleton->GetPathName()
+        || PreviousMirrorPath != MirrorAfterPath);
     return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("set_pose_search_schema_skeleton"), SaveError);
 }
 
@@ -1195,7 +1157,7 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaMirrorDataTable(const TSharedPt
     if (!Entry)
     {
         return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("No roled skeleton under role '%s': bind one first (set_pose_search_schema_skeleton or add_pose_search_roled_skeleton)"),
+            TEXT("No roled skeleton under role '%s': bind one first (set_pose_search_schema_skeleton)"),
             *RoleStr));
     }
 
@@ -1279,8 +1241,9 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaRole(const TSharedPtr<FJsonObje
 //
 // A UPoseSearchSchema owns TArray<FPoseSearchRoledSkeleton> Skeletons (PRIVATE
 // UPROPERTY). One entry per animation Role; single-character schemas have the
-// lone default-role entry. add/remove below are the append/erase inverses on
-// that list — the roled-skeleton peers of add/remove_pose_search_channel_from_schema.
+// lone default-role entry. set_pose_search_schema_skeleton (append for a new role)
+// and remove_pose_search_roled_skeleton are the append/erase inverses on that list
+// — the roled-skeleton peers of add/remove_pose_search_channel_from_schema.
 //
 //   FPoseSearchRoledSkeleton { TObjectPtr<USkeleton> Skeleton;
 //       TObjectPtr<UMirrorDataTable> MirrorDataTable; FName Role; } (public fields).
@@ -1289,9 +1252,9 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaRole(const TSharedPtr<FJsonObje
 //   UMirrorDataTable* = nullptr, const FName& Role) (POSESEARCH_API).
 //
 // GOTCHA (AddSkeleton does NOT dedupe): it is a pure append (UE 5.8 source:
-//   PoseSearchSchema.cpp::AddSkeleton emplaces unconditionally), so add guards on
-//   GetRoledSkeleton(role) first and no-ops when the role is already present —
-//   otherwise a second call would push a duplicate role entry.
+//   PoseSearchSchema.cpp::AddSkeleton emplaces unconditionally), so
+//   set_pose_search_schema_skeleton looks up GetRoledSkeleton(role) first and edits
+//   that entry in place — otherwise a second call would push a duplicate role entry.
 // GOTCHA (no public RemoveSkeleton): remove resizes the private Skeletons array
 //   by reflection (FArrayProperty + FScriptArrayHelper::RemoveValues), the same
 //   private-array-resize idiom as remove_pose_search_channel_from_schema.
@@ -1299,85 +1262,7 @@ TSharedPtr<FJsonObject> HandleSetPoseSearchSchemaRole(const TSharedPtr<FJsonObje
 //   the roled-skeleton set) and are WITH_EDITOR-gated (Finalize is editor-only).
 // ---------------------------------------------------------------------------
 
-// MCP:add_pose_search_roled_skeleton - Append a roled FPoseSearchRoledSkeleton (Skeleton + optional MirrorDataTable under a Role) to a UPoseSearchSchema for multi-character search. Idempotent on role: if an entry already exists under that role it no-ops (added=false, already_existed=true, saved=false, nothing saved) instead of pushing a duplicate -- use set_pose_search_schema_skeleton if you actually want to REPLACE the skeleton bound to a role.
-//   @param asset_path - Asset path of the target UPoseSearchSchema (required).
-//   @param skeleton_path - Asset path of the USkeleton to bind under the role (required).
-//   @param role - Role name (FName) identifying the entry within a multi-character schema (required; empty = default/None role).
-//   @param mirror_data_table_path - Asset path of a UMirrorDataTable to bind under the role (optional; empty = none).
-//   @returns { asset_path, role, skeleton_path, mirror_data_table_path, roled_skeleton_count, added, already_existed, saved, note? }
-//   NOTE (impl): the guard exists because UPoseSearchSchema::AddSkeleton does NOT dedupe -- it is a pure append.
-TSharedPtr<FJsonObject> HandleAddPoseSearchRoledSkeleton(const TSharedPtr<FJsonObject>& Params)
-{
-    UPoseSearchSchema* Schema = nullptr;
-    if (TSharedPtr<FJsonObject> Error = PoseSearch_ReadSchema(Params, Schema)) { return Error; }
-
-    FString SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeleton_path"), SkeletonPath)) { return Missing; }
-
-    // role is required by contract but "" is a legal value (the default/None role).
-    FString RoleStr;
-    if (!Params->TryGetStringField(TEXT("role"), RoleStr))
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Missing required parameter: role (FName; empty string = default/None role)"));
-    }
-    const FName Role(*RoleStr);
-
-    FString MirrorTablePath;
-    Params->TryGetStringField(TEXT("mirror_data_table_path"), MirrorTablePath);
-
-    // Guard: AddSkeleton is a pure append, so bail out (no write) when the role
-    // already has an entry — re-running must not push a duplicate roled skeleton.
-    if (Schema->GetRoledSkeleton(Role))
-    {
-        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetStringField(TEXT("asset_path"), Schema->GetPathName());
-        Obj->SetStringField(TEXT("role"), RoleStr);
-        Obj->SetStringField(TEXT("skeleton_path"), SkeletonPath);
-        Obj->SetStringField(TEXT("mirror_data_table_path"), MirrorTablePath);
-        Obj->SetNumberField(TEXT("roled_skeleton_count"), Schema->GetRoledSkeletons().Num());
-        Obj->SetBoolField(TEXT("added"), false);
-        Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), false);
-        Obj->SetStringField(TEXT("note"), TEXT("the role already has an entry; nothing added, nothing saved"));
-        return mcp_common::MakeOkReply(Obj);
-    }
-
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SkeletonPath, TEXT("USkeleton"), Skeleton)) { return Error; }
-
-    // Optional mirror table: empty path => nullptr (AddSkeleton's default arg).
-    // A non-empty path that fails to resolve is an honest error, not a silent skip.
-    UMirrorDataTable* MirrorTable = nullptr;
-    if (!MirrorTablePath.IsEmpty())
-    {
-        if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(MirrorTablePath, TEXT("UMirrorDataTable"), MirrorTable)) { return Error; }
-    }
-
-    Schema->Modify();
-    Schema->AddSkeleton(Skeleton, MirrorTable, Role);
-
-    // PostEditChange runs the schema's WITH_EDITOR PostEditChangeProperty override
-    // (PoseSearchSchema.cpp -> private Finalize()), re-Finalizing against the
-    // now-larger roled-skeleton set. Same canonical external-Finalize path the
-    // channel/setter handlers use.
-    Schema->PostEditChange();
-
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(Schema->GetPackage(), Schema, SaveError);
-
-    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-    Obj->SetStringField(TEXT("asset_path"), Schema->GetPathName());
-    Obj->SetStringField(TEXT("role"), RoleStr);
-    Obj->SetStringField(TEXT("skeleton_path"), Skeleton->GetPathName());
-    Obj->SetStringField(TEXT("mirror_data_table_path"), MirrorTable ? MirrorTable->GetPathName() : FString());
-    Obj->SetNumberField(TEXT("roled_skeleton_count"), Schema->GetRoledSkeletons().Num());
-    Obj->SetBoolField(TEXT("added"), true);
-    Obj->SetBoolField(TEXT("already_existed"), false);
-    return mcp_common::MakeSavedReply(Obj, bSaved, TEXT("add_pose_search_roled_skeleton"), SaveError);
-}
-
-// MCP:remove_pose_search_roled_skeleton - Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of add_pose_search_roled_skeleton). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
+// MCP:remove_pose_search_roled_skeleton - Remove a roled FPoseSearchRoledSkeleton entry from a UPoseSearchSchema by role or by index (inverse of set_pose_search_schema_skeleton with a new role). Idempotent: no match = no write, reported as already_absent with saved=false. The schema is re-finalized after the removal, so finalized_channels changes with it.
 //   @param asset_path - Asset path of the target UPoseSearchSchema (required).
 //   @param role - Role name (FName) of the FPoseSearchRoledSkeleton entry to remove (provide this OR skeleton_index; empty = default/None role).
 //   @param skeleton_index - 0-based index into the roled-skeleton list of the entry to remove (provide this OR role).
@@ -1922,7 +1807,6 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_animation_asset_to_pose_search_database"), &HandleAddAnimationAssetToPoseSearchDatabase },
     { TEXT("add_pose_search_channel_to_schema"), &HandleAddPoseSearchChannelToSchema },
-    { TEXT("add_pose_search_roled_skeleton"), &HandleAddPoseSearchRoledSkeleton },
     { TEXT("build_pose_search_database_index"), &HandleBuildPoseSearchDatabaseIndex },
     { TEXT("create_pose_search_database"), &HandleCreatePoseSearchDatabase },
     { TEXT("create_pose_search_schema"), &HandleCreatePoseSearchSchema },
@@ -1932,9 +1816,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("inspect_pose_search_schema"), &HandleInspectPoseSearchSchema },
     { TEXT("remove_animation_asset_from_pose_search_database"), &HandleRemoveAnimationAssetFromPoseSearchDatabase },
     { TEXT("remove_pose_search_channel_from_schema"), &HandleRemovePoseSearchChannelFromSchema },
-    { TEXT("remove_pose_search_database"), &HandleRemovePoseSearchDatabase },
     { TEXT("remove_pose_search_roled_skeleton"), &HandleRemovePoseSearchRoledSkeleton },
-    { TEXT("remove_pose_search_schema"), &HandleRemovePoseSearchSchema },
     { TEXT("set_pose_search_database_schema"), &HandleSetPoseSearchDatabaseSchema },
     { TEXT("set_pose_search_schema_mirror_data_table"), &HandleSetPoseSearchSchemaMirrorDataTable },
     { TEXT("set_pose_search_schema_properties"), &HandleSetPoseSearchSchemaProperties },

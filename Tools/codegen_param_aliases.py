@@ -9,9 +9,8 @@ the catalog itself shows (counted over command_catalog.json):
     "the path of a blueprint"   -> 6 different names:
         blueprint_name (104 cmds), asset_path (71), anim_blueprint_path (25),
         path (22), object_path (21), blueprint_path (10)
-    "the arguments of a call"   -> 4 names over 4 SIBLING tools:
-        call_function/call_library_function `parameters`, call_component_function
-        `params`, call_object_method `args_json`
+    "the arguments of a call"   -> 3 names that callers reach for: `parameters` (call_function),
+        `params` and `args_json` (the spellings of the tools 2.0 folded into it)
     "the state machine"         -> machine_name (12) vs state_machine_name (3)
     "the source state"          -> source_state (AnimBP, 6) vs from_state (StateTree, 1)
 
@@ -131,15 +130,14 @@ EXPLICIT_ALIASES: list[tuple[str, str, str]] = [
      "104 commands accept an asset PATH in a param called blueprint_NAME; "
      "blueprint_path is the name a caller reaches for and it exists on only 10"),
     ("parameters", "params",
-     "call_function/call_library_function take `parameters`, call_component_function "
-     "takes `params`, call_object_method takes `args_json`: four sibling tools, "
-     "three names for the same dict"),
+     "call_function takes `parameters`; `params` and `args_json` are the spellings of "
+     "the call tools 2.0 folded into it: three names for the same dict"),
     ("params", "parameters",
      "the same trio in the other direction"),
     ("args_json", "parameters",
-     "call_object_method's spelling of the same dict"),
+     "the old call_object_method spelling of the same dict"),
     ("args_json", "params",
-     "call_object_method's spelling, pointed at call_component_function's"),
+     "the old call_object_method spelling, pointed at the `params` spelling"),
     ("parameters", "args_json",
      "the same trio in the other direction"),
     ("params", "args_json",

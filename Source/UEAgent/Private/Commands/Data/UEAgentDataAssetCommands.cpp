@@ -798,7 +798,7 @@ namespace
     }
 }
 
-// MCP:create_data_table - Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
+// MCP:create_data_table - Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with set_data_table_row (create_if_missing=true) or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
 //   @param table_name - Name of the new DataTable.
 //   @param row_struct - Name of the UScriptStruct that defines the row structure.
 //   @param package_path - Target content package path where the asset is created (check the body for the default)
@@ -1204,41 +1204,6 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     return mcp_common::MakeOutcomeReply(ResultObj, OutcomeError.IsEmpty(), OutcomeError);
 }
 
-// MCP:get_data_table_row - Read ONE row of a DataTable by key and get every column as JSON . Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns. When you need the byte-exact ExportText of a column (to copy a vendor row, or to tell an empty enum from an unwritten one) use read_data_table_row_complex instead, and get_data_table_rows when you want the enum DISPLAY names.
-//   @param table_path - The full asset path to the DataTable.
-//   @param row_name - The name of the row to retrieve.
-//   @returns { table_path, row_name, row_data } where row_data is the fully serialized row struct (TMap / nested struct / FGameplayTag columns included)
-TSharedPtr<FJsonObject> HandleGetDataTableRow(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentDataAssetCommandsImpl;
-
-    FString RequestedTable;
-    FString RequestedRow;
-    if (TSharedPtr<FJsonObject> Missing = Impl::ReadTableAndRow(Params, RequestedTable, RequestedRow))
-    {
-        return Missing;
-    }
-
-    // The row memory is looked up untyped (FindRowUnchecked, as add/set/delete_data_table_row do).
-    // The typed FindRow<FTableRowBase> goes through FindRowInternal, which returns nullptr for ANY row struct
-    // that is not a child of FTableRowBase BEFORE it even looks at the row map -- so every row of a table
-    // keyed by a Blueprint / user-defined struct would read as missing although get_data_table_info and
-    // get_data_table_rows list it. With no type gate, a null here can only be a key that is not there.
-    UDataTable* Table = nullptr;
-    const uint8* Row = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::OpenRow(RequestedTable, RequestedRow, Table, Row))
-    {
-        return Failure;
-    }
-
-    // TMap, nested struct and GameplayTag(Container) columns all go through the shared typed exporter.
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("table_path"), RequestedTable);
-    Reply->SetStringField(TEXT("row_name"), RequestedRow);
-    Reply->SetObjectField(TEXT("row_data"), Impl::RowColumnsToJson(Table->RowStruct, Row));
-    return mcp_common::MakeOkReply(Reply);
-}
-
 // MCP:get_data_table_rows - Dump EVERY row of a DataTable as an array, with the row count -- for browsing or diffing a whole table of items, recipes, quests or loot. The reader to pick when a column is a user-defined ENUM: it emits the enumerator's DISPLAY NAME, whereas the ExportText readers return "" for the index-0 enumerator, which is indistinguishable from a column that was never written. Whole-table sized, so for one row use get_data_table_row and for one column across rows use get_data_table_column.
 //   @param table_path - The full asset path to the DataTable.
 //   @returns { table_path, row_name, rows, row_count }
@@ -1274,7 +1239,7 @@ TSharedPtr<FJsonObject> HandleGetDataTableRows(const TSharedPtr<FJsonObject>& Pa
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:get_data_table_info - Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, get_data_table_row or read_data_table_row_complex; one column: get_data_table_column; build a composite: create_composite_data_table.
+// MCP:get_data_table_info - Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, or get_data_table_row (include_export_text for each cell as ExportText); one column: get_data_table_column; build a composite: create_composite_data_table.
 //   @param table_path - The full asset path to the DataTable or UCompositeDataTable, e.g. "/Game/Data/DT_Items".
 //   @param include_row_sources - Composite tables only. Optional bool (default false): also return the winning parent for EVERY merged row. Expensive on large tables.
 //   @returns { table_path, table_name, table_class, row_struct, row_count, row_names, columns:[{ name, type, is_map, is_soft, is_tag }] } plus, for a UCompositeDataTable: { parent_tables:[{ index, path, name, table_class, row_struct, row_count, row_struct_matches, contributes, null_entry }], parent_count, contributing_parent_count, merged_row_count, sum_parent_row_counts, expected_merged_row_count, merged_row_count_matches_parents, parent_row_struct_mismatch:[], shadowed_rows:[{ row_name, winner, winner_parent_slot, shadowed_by_winner:[] }], shadowed_row_count, row_sources_included, row_sources? }
@@ -1386,9 +1351,9 @@ namespace
     }
 }
 
-// Shared implementation for add_data_table_row / set_data_table_row. Both are an
-// upsert via UDataTable::AddRow(FName, const uint8*, const UScriptStruct*) which
-// internally removes any existing row and copies in the new struct memory.
+// Implementation of set_data_table_row (bRequireExisting unless create_if_missing). The
+// write is an upsert via UDataTable::AddRow(FName, const uint8*, const UScriptStruct*)
+// which internally removes any existing row and copies in the new struct memory.
 // We build the row in an FStructOnScope (allocated + initialized for RowStruct),
 // import each provided column via reflection (FProperty::ImportText_InContainer),
 // then copy it in. We then read the row BACK to confirm persistence and return it.
@@ -1421,7 +1386,7 @@ static TSharedPtr<FJsonObject> WriteDataTableRow(const TSharedPtr<FJsonObject>& 
     if (bRequireExisting && !bExisted)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Row not found (set requires existing row): %s"), *RowName));
+            FString::Printf(TEXT("Row not found: %s (pass create_if_missing=true to create it)"), *RowName));
     }
 
     // The exact struct AddRow expects: must equal &GetEmptyUsingStruct() (==RowStruct).
@@ -1520,24 +1485,17 @@ static TSharedPtr<FJsonObject> WriteDataTableRow(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:add_data_table_row - Create a new row in a DataTable (upsert -- it overwrites if the key exists), passing columns as a plain JSON object. Values go through reflection, so scalars, enums by name, nested structs and arrays all work. It fails the WHOLE write when any column cannot be imported, rather than committing a half-filled row with silent defaults, and lists anything it did not recognise in unknown_columns -- read that array, a typo'd column name is dropped, not an error. GameplayTag and GameplayTagContainer columns are the ones that reject a bare string: pass them in ExportText form, e.g. (TagName="A.B"). Use set_data_table_row to require the row to exist, or set_data_table_row_fields for a partial per-column update with before/after evidence.
+// MCP:set_data_table_row - Write a DataTable row from a plain JSON object of columns and save the table. By default the row must EXIST and a missing key is an error -- the guard that stops a typo'd row name from quietly creating a second row; create_if_missing=true creates the row (from struct defaults) when absent, an upsert. Values go through reflection, so scalars, enums by name, nested structs and arrays all work. Columns you omit keep their current values; the write fails as a whole if any provided column cannot be imported, rather than committing a half-filled row with silent defaults, and unrecognised names come back in unknown_columns -- read that array, a typo'd column name is dropped, not an error. Pass GameplayTag and GameplayTagContainer columns in ExportText form, e.g. (TagName="A.B"). For per-column before/after evidence use set_data_table_row_fields; for one cell use set_data_table_cell.
 //   @param table_path - Full asset path of the DataTable (e.g. /Game/MyGame/DT_Example)
 //   @param row_name - Name (key) of the row to write
-//   @param row_data - Object of {column_name: value}; values may be string/number/bool
-//   @returns success or error payload
-TSharedPtr<FJsonObject> HandleAddDataTableRow(const TSharedPtr<FJsonObject>& Params)
-{
-    return WriteDataTableRow(Params, /*bRequireExisting*/ false);
-}
-
-// MCP:set_data_table_row - Update an EXISTING DataTable row, erroring if the key is absent -- that guard is the only difference from add_data_table_row, and it is what stops a typo'd row name from quietly creating a second row. Columns you omit keep their current values; the write fails as a whole if any provided column cannot be imported, and unrecognised names come back in unknown_columns. Pass GameplayTag columns in ExportText form, e.g. (TagName="A.B"). For per-column before/after evidence use set_data_table_row_fields; for one cell use set_data_table_cell.
-//   @param table_path - Full asset path of the DataTable
-//   @param row_name - Name (key) of the existing row to update
-//   @param row_data - Object of {column_name: value} to apply over the current row
-//   @returns success or error payload
+//   @param row_data - Object of {column_name: value} to apply over the current row (or over struct defaults for a new row)
+//   @param create_if_missing - Optional bool, default false: true creates the row when the key is absent instead of erroring
+//   @returns { table_path: string, row_name: string, row_struct: string, updated_existing: bool, columns_written: int, row_count: int, saved: bool, row_data?: object, unknown_columns?: [string] }
 TSharedPtr<FJsonObject> HandleSetDataTableRow(const TSharedPtr<FJsonObject>& Params)
 {
-    return WriteDataTableRow(Params, /*bRequireExisting*/ true);
+    bool bCreateIfMissing = false;
+    Params->TryGetBoolField(TEXT("create_if_missing"), bCreateIfMissing);
+    return WriteDataTableRow(Params, /*bRequireExisting*/ !bCreateIfMissing);
 }
 
 // MCP:delete_data_table_row - Remove one row from a DataTable by key, saving the asset and VERIFYING the removal by re-reading (it reports existed, removed, still_exists and the new row_count, so the reply is its own oracle rather than a bare success). Check existed to tell "deleted it" from "there was never such a key" (then saved=false, nothing saved). Anything still referencing that row name by handle now resolves to nothing, silently -- audit with find_blueprint_node_references before deleting a live row.
@@ -1653,8 +1611,8 @@ TSharedPtr<FJsonObject> HandleImportDataTableCSV(const TSharedPtr<FJsonObject>& 
 // Per-row native-JSON round-trip
 // get/set_data_table_row use REFLECTION field-by-field. That path cannot round-trip a
 // TMap<Enum, SoftClass> column (the exported wrapper form does not re-import; the value
-// silently collapses to () while the write still "succeeds"). get_data_table_row_as_json and
-// set_data_table_row_from_json use UE's OWN DataTable JSON exporter/importer (WriteRowAsJSON /
+// silently collapses to () while the write still "succeeds"). get_data_table_row with
+// include_native_json and set_data_table_row_from_json use UE's OWN DataTable JSON exporter/importer (WriteRowAsJSON /
 // CreateTableFromJSONString) so nested structs / FGameplayTag(Container) / soft refs / TMap
 // columns round-trip exactly.
 // ========================================================================== //
@@ -1690,44 +1648,10 @@ namespace
     }
 }
 
-// MCP:get_data_table_row_as_json - Export ONE DataTable row through UE's own DataTable JSON writer, returning both the verbatim native JSON string and a parsed object -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/duplicate/round-trip. Use it over get_data_table_row when the value has to go back INTO the engine (it emits GameplayTagContainers in the ExportText form the importer accepts). The round trip is not lossless for multi-word user-defined enums, so re-read what you wrote.
-//   @param table_path - Full asset path of the DataTable
-//   @param row_name - Name (key) of the row
-//   @returns { table_path, row_name, row_struct, row_json (verbatim native JSON string), row_data (parsed) }
-TSharedPtr<FJsonObject> HandleGetDataTableRowAsJson(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentDataAssetCommandsImpl;
-
-    FString RequestedTable;
-    FString RequestedRow;
-    if (TSharedPtr<FJsonObject> Missing = Impl::ReadTableAndRow(Params, RequestedTable, RequestedRow))
-    {
-        return Missing;
-    }
-    UDataTable* Table = nullptr;
-    const uint8* Row = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::OpenRow(RequestedTable, RequestedRow, Table, Row))
-    {
-        return Failure;
-    }
-
-    const FString NativeJson = MCPExt_WriteRowAsNativeJsonString(Table, Row);
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetStringField(TEXT("table_path"), RequestedTable);
-    Reply->SetStringField(TEXT("row_name"), RequestedRow);
-    Reply->SetStringField(TEXT("row_struct"), Table->RowStruct->GetName());
-    // Verbatim native JSON: this string goes straight back into set_data_table_row_from_json.
-    Reply->SetStringField(TEXT("row_json"), NativeJson);
-    // The same row as a parsed, typed object, for convenience.
-    Reply->SetObjectField(TEXT("row_data"), Impl::RowColumnsToJson(Table->RowStruct, Row));
-    return mcp_common::MakeOkReply(Reply);
-}
-
-// MCP:set_data_table_row_from_json - Write a whole DataTable row from a native-format JSON object (the shape get_data_table_row_as_json emits), with merge=true to overwrite only the columns you supply. The route for copying a row between tables or authoring a complex row in one call. ALWAYS read the problems array: success:true routinely coexists with columns that never landed -- a GameplayTagContainer passed as a JSON array is rejected and left empty (give it as the string "(GameplayTags=((TagName=\"A.B\")))"), a sub-field whose internal name differs from the display name you used stays at its struct default, and a user-defined enum whose display name has spaces is cut at the first space and lands on the index-0 enumerator (write the internal NewEnumeratorN name instead). Confirm with read_data_table_row_complex.
+// MCP:set_data_table_row_from_json - Write a whole DataTable row from a native-format JSON object (the shape get_data_table_row emits as row_json with include_native_json), with merge=true to overwrite only the columns you supply. The route for copying a row between tables or authoring a complex row in one call. ALWAYS read the problems array: success:true routinely coexists with columns that never landed -- a GameplayTagContainer passed as a JSON array is rejected and left empty (give it as the string "(GameplayTags=((TagName=\"A.B\")))"), a sub-field whose internal name differs from the display name you used stays at its struct default, and a user-defined enum whose display name has spaces is cut at the first space and lands on the index-0 enumerator (write the internal NewEnumeratorN name instead). Confirm with get_data_table_row include_export_text=true.
 //   @param table_path - Full asset path of the DataTable
 //   @param row_name - Name (key) of the row to write
-//   @param row_json - A JSON object of {column:value} (as produced by get_data_table_row_as_json)
+//   @param row_json - A JSON object of {column:value} (as produced by get_data_table_row as row_json with include_native_json)
 //   @param merge - When true and the row exists, only the caller-provided columns are overwritten
 //   @returns success or error payload
 TSharedPtr<FJsonObject> HandleSetDataTableRowFromJson(const TSharedPtr<FJsonObject>& Params)
@@ -1741,7 +1665,7 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFromJson(const TSharedPtr<FJsonObje
         return Missing;
     }
     // row_json may arrive as a JSON OBJECT (the tool schema's declared type, and the natural
-    // form when a caller parses get_data_table_row_as_json's row_json string) OR as a JSON STRING (that
+    // form when a caller parses get_data_table_row's row_json string (include_native_json)) OR as a JSON STRING (that
     // verbatim native JSON text). Accept EITHER: a string-only read (TryGetStringField) fails object
     // payloads with "Missing required parameter: row_json".
     // Both reads sit in one negated guard, so the catalog publishes row_json as required (of either type).
@@ -1889,9 +1813,9 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFromJson(const TSharedPtr<FJsonObje
 // then overlays just the provided columns, which it obtains by round-tripping the
 // provided `fields` through UE's OWN DataTable JSON importer in a transient table (the
 // only path that reimports a TMap<Enum,SoftClass> correctly -- with each map value as a
-// BARE path string, never the reflection ExportText wrapper). read_data_table_row_complex
-// echoes each cell via FProperty::ExportText so TMaps / nested arrays / soft refs, which
-// get_data_table_row serializes to {} for TMaps, actually appear.
+// BARE path string, never the reflection ExportText wrapper). get_data_table_row with
+// include_export_text echoes each cell via FProperty::ExportText so TMaps / nested arrays /
+// soft refs, which its row_data serializes to {} for TMaps, actually appear.
 // ========================================================================== //
 
 namespace
@@ -1922,7 +1846,7 @@ namespace
     }
 
     // Serialize one row via UE's native DataTable JSON writer AS A RECURSABLE JSON OBJECT for the
-    // deep-merge. This is NOT byte-identical to the get_data_table_row_as_json path:
+    // deep-merge. This is NOT byte-identical to the get_data_table_row include_native_json path:
     //   (1) EDataTableExportFlags::UseJsonObjectsForStructs (that path uses None) so nested struct
     //       members export as JSON objects the deep-merge can recurse into, not one opaque ExportText
     //       string; AND
@@ -2176,37 +2100,57 @@ TSharedPtr<FJsonObject> HandleSetDataTableRowFields(const TSharedPtr<FJsonObject
         ((bRowExists) && bSaved) ? FString() : mcp_common::SavedOutcomeError(TEXT("set_data_table_row_fields")));
 }
 
-// MCP:read_data_table_row_complex - Read one DataTable row with every cell as its ExportText string, so TMap<Enum,SoftClass>, nested struct arrays and soft references appear in full (get_data_table_row shows TMaps as {}); read-only. Returns row_struct and fields as {column: text}; a missing row is an error.
-//   @param data_table - Full asset path of the DataTable (table_path also accepted)
-//   @param row_name - Name (key) of the row to read
-//   @param table_path - Alias of data_table (the DataTable asset path, e.g. "/Game/Data/DT_Items"); data_table wins when both are given
-//   @returns { table_path, row_name, row_struct, fields:{column: exporttext-serialized value} }
-TSharedPtr<FJsonObject> HandleReadDataTableRowComplex(const TSharedPtr<FJsonObject>& Params)
+// MCP:get_data_table_row - Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap<Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
+//   @param table_path - The full asset path to the DataTable.
+//   @param row_name - The name of the row to retrieve.
+//   @param include_native_json - Optional bool, default false: add row_json, the row as UE's native DataTable JSON string.
+//   @param include_export_text - Optional bool, default false: add fields, {column: ExportText string} for every cell.
+//   @returns { table_path: string, row_name: string, row_struct: string, row_data: object, row_json?: string, fields?: object } where row_data is the fully serialized row struct (TMap / nested struct / FGameplayTag columns included)
+TSharedPtr<FJsonObject> HandleGetDataTableRow(const TSharedPtr<FJsonObject>& Params)
 {
-    FString TablePath;
-    if (!Params->TryGetStringField(TEXT("data_table"), TablePath) &&
-        !Params->TryGetStringField(TEXT("table_path"), TablePath))
+    namespace Impl = UEAgentDataAssetCommandsImpl;
+
+    FString RequestedTable;
+    FString RequestedRow;
+    if (TSharedPtr<FJsonObject> Missing = Impl::ReadTableAndRow(Params, RequestedTable, RequestedRow))
     {
-        return mcp_common::MissingParameterReply(TEXT("data_table"));
+        return Missing;
     }
-    FString RowName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("row_name"), RowName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    UDataTable* DataTable = nullptr;
-    const uint8* RowData = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = UEAgentDataAssetCommandsImpl::OpenRow(TablePath, RowName, DataTable, RowData))
+    bool bIncludeNativeJson = false;
+    Params->TryGetBoolField(TEXT("include_native_json"), bIncludeNativeJson);
+    bool bIncludeExportText = false;
+    Params->TryGetBoolField(TEXT("include_export_text"), bIncludeExportText);
+
+    // The row memory is looked up untyped (FindRowUnchecked, as set/delete_data_table_row do).
+    // The typed FindRow<FTableRowBase> goes through FindRowInternal, which returns nullptr for ANY row struct
+    // that is not a child of FTableRowBase BEFORE it even looks at the row map -- so every row of a table
+    // keyed by a Blueprint / user-defined struct would read as missing although get_data_table_info and
+    // get_data_table_rows list it. With no type gate, a null here can only be a key that is not there.
+    UDataTable* Table = nullptr;
+    const uint8* Row = nullptr;
+    if (TSharedPtr<FJsonObject> Failure = Impl::OpenRow(RequestedTable, RequestedRow, Table, Row))
     {
         return Failure;
     }
 
-    // Every cell as its ExportText string, so TMap / nested struct arrays / soft refs come out whole.
-    TSharedPtr<FJsonObject> ExportedCells = MakeShared<FJsonObject>();
-    RowToExportTextObject(DataTable->RowStruct, RowData, ExportedCells);
-
+    // TMap, nested struct and GameplayTag(Container) columns all go through the shared typed exporter.
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetObjectField(TEXT("fields"), ExportedCells);
-    Reply->SetStringField(TEXT("row_struct"), DataTable->RowStruct->GetName());
-    Reply->SetStringField(TEXT("row_name"), RowName);
-    Reply->SetStringField(TEXT("table_path"), TablePath);
+    Reply->SetStringField(TEXT("table_path"), RequestedTable);
+    Reply->SetStringField(TEXT("row_name"), RequestedRow);
+    Reply->SetStringField(TEXT("row_struct"), Table->RowStruct->GetName());
+    Reply->SetObjectField(TEXT("row_data"), Impl::RowColumnsToJson(Table->RowStruct, Row));
+    if (bIncludeNativeJson)
+    {
+        // Verbatim native JSON: this string goes straight back into set_data_table_row_from_json.
+        Reply->SetStringField(TEXT("row_json"), MCPExt_WriteRowAsNativeJsonString(Table, Row));
+    }
+    if (bIncludeExportText)
+    {
+        // Every cell as its ExportText string, so TMap / nested struct arrays / soft refs come out whole.
+        TSharedPtr<FJsonObject> ExportedCells = MakeShared<FJsonObject>();
+        RowToExportTextObject(Table->RowStruct, Row, ExportedCells);
+        Reply->SetObjectField(TEXT("fields"), ExportedCells);
+    }
     return mcp_common::MakeOkReply(Reply);
 }
 
@@ -2896,15 +2840,15 @@ TSharedPtr<FJsonObject> HandleGetCurveKeys(const TSharedPtr<FJsonObject>& Params
 }
 
 // ========================================================================== //
-// read_datatable_from_package_file -- read a DataTable from a RAW EXTERNAL .uasset file (collision-safe)
+// read_data_table_from_package_file -- read a DataTable from a RAW EXTERNAL .uasset file (collision-safe)
 // diff_data_tables                 -- per-row/per-cell DataTable diff (two assets, or before/after JSON)
 //
-// read_datatable_from_package_file: the file declares a /Game/... package name shared with the LIVE project, so a
+// read_data_table_from_package_file: the file declares a /Game/... package name shared with the LIVE project, so a
 // plain LoadPackage(nullptr, "/Game/...", ...) would collide with the in-memory copy.
 // We dodge that by registering a THROWAWAY, uniquely-named mount point over the file's
 // directory and loading it under that private root (/MCPExtRead_<guid>/<Asset>), so the
 // live /Game/... object is never rebound or touched. Rows are serialized with the SAME
-// native UDataTable::WriteRowAsJSON path as get_data_table_row_as_json. The mount is
+// native UDataTable::WriteRowAsJSON path as get_data_table_row include_native_json. The mount is
 // unregistered + the throwaway load's keep-flags cleared + GC'd afterward.
 //
 // diff_data_tables: builds rowName->row-object maps for both sides (via that same native writer for
@@ -3150,7 +3094,7 @@ namespace
     }
 } // namespace
 
-// MCP:read_datatable_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) under a throwaway mount, so a live asset with the same /Game name is untouched; then unmounts and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
+// MCP:read_data_table_from_package_file - Read a DataTable from any .uasset file on disk (e.g. a backup) under a throwaway mount, so a live asset with the same /Game name is untouched; then unmounts and, by default, garbage-collects. Returns table_name, row_struct, row_count and rows as native JSON, or one row via row_name.
 //   @param package_file - Absolute filesystem path to the external .uasset (alias: file_path)
 //   @param object_name - Optional name of the DataTable object inside the package (defaults to the first UDataTable / the package's primary asset)
 //   @param row_name - Optional single row to return; when omitted every row is returned
@@ -3462,7 +3406,7 @@ TSharedPtr<FJsonObject> HandleGetDataTableColumn(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:export_data_table_as_json - Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap<Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row_as_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
+// MCP:export_data_table_as_json - Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap<Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row with include_native_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
 //   @param table_path - Full asset path of the DataTable.
 //   @param data_table - Alias of table_path; it is read first, so it wins when both are given.
 //   @param file_path - Optional OS file path; the JSON is also written there as UTF-8, overwriting an existing file, and echoed back as written_to
@@ -3734,7 +3678,6 @@ TSharedPtr<FJsonObject> HandleSetDataTableCell(const TSharedPtr<FJsonObject>& Pa
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_curve_key"), &HandleAddCurveKey },
-    { TEXT("add_data_table_row"), &HandleAddDataTableRow },
     { TEXT("create_composite_data_table"), &HandleCreateCompositeDataTable },
     { TEXT("create_curve_asset"), &HandleCreateCurveAsset },
     { TEXT("create_data_asset"), &HandleCreateDataAsset },
@@ -3748,11 +3691,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_data_table_column"), &HandleGetDataTableColumn },
     { TEXT("get_data_table_info"), &HandleGetDataTableInfo },
     { TEXT("get_data_table_row"), &HandleGetDataTableRow },
-    { TEXT("get_data_table_row_as_json"), &HandleGetDataTableRowAsJson },
     { TEXT("get_data_table_rows"), &HandleGetDataTableRows },
     { TEXT("import_data_table_csv"), &HandleImportDataTableCSV },
-    { TEXT("read_data_table_row_complex"), &HandleReadDataTableRowComplex },
-    { TEXT("read_datatable_from_package_file"), &HandleReadDataTableFromPackageFile },
+    { TEXT("read_data_table_from_package_file"), &HandleReadDataTableFromPackageFile },
     { TEXT("remove_curve_key"), &HandleRemoveCurveKey },
     { TEXT("rename_data_table_row"), &HandleRenameDataTableRow },
     { TEXT("set_data_asset_property"), &HandleSetDataAssetProperty },

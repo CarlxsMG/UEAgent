@@ -17,7 +17,7 @@
 #include "WorldPartition/DataLayer/DataLayerInstance.h"          // UDataLayerInstance (GetDataLayerShortName/FullName/FName/GetType/IsRuntime/GetAsset)
 #include "WorldPartition/DataLayer/DataLayerType.h"              // EDataLayerType
 #include "WorldPartition/DataLayer/DataLayerAsset.h"             // UDataLayerAsset
-#include "WorldPartition/WorldPartitionMiniMap.h"                // AWorldPartitionMiniMap (read-only already_has_minimap probe)
+#include "WorldPartition/WorldPartitionMiniMap.h"                // AWorldPartitionMiniMap (read-only has_minimap probe)
 
 #include "DataLayer/DataLayerEditorSubsystem.h"                  // UDataLayerEditorSubsystem + FDataLayerCreationParameters (DataLayerEditor module)
 
@@ -50,8 +50,8 @@
  *
  * The editor world is never swapped. On a map without World Partition the reads report it as disabled (or
  * return an empty list), and the commands that need it fail with an explicit error instead of faking
- * success. convert_map_to_world_partition, build_minimap and set_world_partition_runtime_hash only inspect:
- * the real operation is commandlet-only or happens at cook/build time, so they mutate nothing.
+ * success. Converting a map, building its minimap and editing its runtime grid settings are commandlet-only
+ * or happen at cook/build time, so no command here pretends to do them.
  */
 namespace UEAgentWorldPartitionCommands
 {
@@ -182,8 +182,8 @@ namespace UEAgentWorldPartitionCommandsImpl
     }
 }
 
-// MCP:get_world_partition_info - Reads the editor world's World Partition state.  REAL read: works on any map. Returns is_world_partition_enabled=false on the default (non-WP) editor map, which is the correct result.
-//   @returns { world_name: string, is_world_partition_enabled: bool, num_data_layers: int, runtime_hash_type: string, is_streaming_enabled: bool, note: string }
+// MCP:get_world_partition_info - Reads the editor world's World Partition state: data layer count, runtime hash class, streaming, the number of GENERATED streaming grids (0 until a cook/build generates them; edit-time grid settings live in the map's World Settings) and whether a minimap texture already exists (a minimap is built only by the WorldPartitionMiniMapBuilder commandlet with -AllowCommandletRendering or Build > Build Minimap). REAL read: works on any map, also during PIE. Returns is_world_partition_enabled=false on the default (non-WP) editor map, which is the correct result.
+//   @returns { world_name: string, is_world_partition_enabled: bool, num_data_layers: int, runtime_hash_type: string, is_streaming_enabled: bool, num_streaming_grids: int (generated runtime grids of a spatial hash; 0 otherwise), has_minimap: bool (a WorldPartitionMiniMap actor holds a texture), note: string }
 
 TSharedPtr<FJsonObject> HandleGetWorldPartitionInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -199,10 +199,27 @@ TSharedPtr<FJsonObject> HandleGetWorldPartitionInfo(const TSharedPtr<FJsonObject
 
     int32 NumDataLayers = 0;
     bool bStreamingEnabled = false;
+    int32 NumStreamingGrids = 0;
+    bool bHasMinimap = false;
 
     if (WorldPartition)
     {
         bStreamingEnabled = WorldPartition->IsStreamingEnabled();
+        // Generated streaming grids: 0 until a cook/build generates the runtime grids.
+        if (UWorldPartitionRuntimeSpatialHash* SpatialHash = Cast<UWorldPartitionRuntimeSpatialHash>(WorldPartition->RuntimeHash))
+        {
+            NumStreamingGrids = static_cast<int32>(SpatialHash->GetNumGrids());
+        }
+        // Read-only probe: an AWorldPartitionMiniMap with a non-null MiniMapTexture means a minimap was
+        // already generated for this world. It spawns nothing and renders nothing.
+        for (TActorIterator<AWorldPartitionMiniMap> It(World); It; ++It)
+        {
+            if (*It && It->MiniMapTexture != nullptr)
+            {
+                bHasMinimap = true;
+                break;
+            }
+        }
         if (UDataLayerManager* Manager = WorldPartition->GetDataLayerManager())
         {
             Manager->ForEachDataLayerInstance([&NumDataLayers](UDataLayerInstance* /*Instance*/)
@@ -216,6 +233,8 @@ TSharedPtr<FJsonObject> HandleGetWorldPartitionInfo(const TSharedPtr<FJsonObject
     ResultObj->SetNumberField(TEXT("num_data_layers"), NumDataLayers);
     ResultObj->SetStringField(TEXT("runtime_hash_type"), UEAgentWorldPartitionCommandsImpl::RuntimeHashTypeName(WorldPartition));
     ResultObj->SetBoolField(TEXT("is_streaming_enabled"), bStreamingEnabled);
+    ResultObj->SetNumberField(TEXT("num_streaming_grids"), NumStreamingGrids);
+    ResultObj->SetBoolField(TEXT("has_minimap"), bHasMinimap);
     ResultObj->SetStringField(TEXT("note"), bEnabled
         ? TEXT("Editor world is World Partition enabled")
         : TEXT("Editor world is NOT World Partition (default map); enabled=false is the correct read"));
@@ -704,194 +723,6 @@ TSharedPtr<FJsonObject> HandleGetDataLayerInstances(const TSharedPtr<FJsonObject
     ResultObj->SetStringField(TEXT("note"), bWorldPartition
         ? TEXT("Listed the editor world's data layer instances")
         : TEXT("Editor world is not World Partition; empty list is the correct read"));
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:convert_map_to_world_partition - Report whether the current editor world is already World Partition; it never converts anything, because the only complete conversion is the WorldPartitionConvert commandlet run as a separate process (-run=WorldPartitionConvert -AllowCommandletRendering), and the in-editor converter edits the level in place without saving. It reads the editor world, also during PIE: a partitioned world returns already_converted=true, any other already_converted=false with a note naming the commandlet; converted is always false and success true, and nothing is written. map_path is accepted and ignored, so open the map first with load_level. A missing editor world is an error. To start a World Partition map from scratch use create_world_partition_map; read the partition state with get_world_partition_info.
-//   @param map_path - Accepted and ignored: the world checked is always the current editor world, whatever path is given.
-//   @returns { world: string, is_world_partition: bool, converted: bool, already_converted: bool, success: bool, note: string, message: string }
-//   @hints read-only
-
-TSharedPtr<FJsonObject> HandleConvertMapToWorldPartition(const TSharedPtr<FJsonObject>& Params)
-{
-    // HONEST gate (mirrors HandleBuildHLOD): a real conversion of an existing level to
-    // World Partition is only available through the UWorldPartitionConvertCommandlet
-    // (a separate -run=WorldPartitionConvert -AllowCommandletRendering process). The one
-    // runtime API, FWorldPartitionConverter::Convert, is DESTRUCTIVE in place
-    // (ConvertAllActorsToPackaging / EditorDestroyActor / RemoveLevelFromWorld) and does
-    // not save, so using it would corrupt the editor world and break idempotency. We
-    // therefore never drive a conversion here; we only do the headless-safe part for
-    // real (resolve the editor world, detect WP) and report honestly.
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
-
-    // Informational only: the world actually inspected is the current editor world.
-    FString MapPath;
-    Params->TryGetStringField(TEXT("map_path"), MapPath);
-
-    const bool bIsPartitioned = World->IsPartitionedWorld();
-
-    TSharedPtr<FJsonObject> ResultObj = DataAuthoringUtils::WorldPartitionGateReply(*World, TEXT("converted"));
-
-    if (bIsPartitioned)
-    {
-        // Already a World Partition world: nothing to convert. Honest, stable payload.
-        ResultObj->SetBoolField(TEXT("already_converted"), true);
-        ResultObj->SetStringField(TEXT("note"),
-            TEXT("Editor world is already World Partition; nothing to convert"));
-        ResultObj->SetStringField(TEXT("message"),
-            TEXT("No conversion performed: editor world is already a World Partition map"));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    // Normal case: a non-WP editor world. Conversion is commandlet-only / destructive
-    // runtime-only, so we honestly perform nothing and point at the from-scratch path.
-    ResultObj->SetBoolField(TEXT("already_converted"), false);
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("Converting an existing level to World Partition is commandlet-only (UWorldPartitionConvertCommandlet, requires running -run=WorldPartitionConvert -AllowCommandletRendering as a separate process). The runtime FWorldPartitionConverter::Convert mutates the level in place and does not save, so it cannot be driven safely or synchronously from this request; no conversion was performed. To create a World Partition map from scratch use create_world_partition_map."));
-    ResultObj->SetStringField(TEXT("message"),
-        TEXT("Map-to-WorldPartition conversion is commandlet-only; no conversion was performed. Use create_world_partition_map to author a WP map from scratch."));
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:build_minimap - Report whether the current editor world is World Partition and already has a minimap; it never builds one, because minimap generation is a GPU scene capture that only the WorldPartitionMiniMapBuilder commandlet (with -AllowCommandletRendering) or the editor's Build > Build Minimap can run. It reads the editor world, also during PIE, and on a partitioned world sets already_has_minimap from whether a WorldPartitionMiniMap actor holds a texture; built is always false and success true, note and message say why, and nothing is written. A non-partitioned world returns is_world_partition=false without already_has_minimap. A missing editor world is an error. Read the partition state with get_world_partition_info; HLODs have the same kind of gate in build_hlod.
-//   @returns { world: string, is_world_partition: bool, built: bool, already_has_minimap?: bool, success: bool, note: string, message: string }
-//   @hints read-only
-
-TSharedPtr<FJsonObject> HandleBuildMinimap(const TSharedPtr<FJsonObject>& Params)
-{
-    // HONEST gate (mirrors HandleBuildHLOD): generating a World Partition minimap is a
-    // real GPU scene-capture (FWorldPartitionMiniMapHelper::CaptureBoundsMiniMapToTexture
-    // -> ASceneCapture2D::CaptureScene + FakeEngineTick) and/or the
-    // UWorldPartitionMiniMapBuilder whose RequiresCommandletRendering()==true (blocked by
-    // IsAllowCommandletRendering()==false). Neither can run synchronously inside this
-    // single request. We do the headless-safe part for real: resolve the editor world,
-    // detect World Partition, and (read-only) report whether a minimap texture already
-    // exists, then report honestly that no build was performed.
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
-
-    const bool bIsPartitioned = World->IsPartitionedWorld();
-
-    TSharedPtr<FJsonObject> ResultObj = DataAuthoringUtils::WorldPartitionGateReply(*World, TEXT("built"));
-
-    if (!bIsPartitioned)
-    {
-        // Minimap is meaningless without World Partition: honest, stable payload.
-        ResultObj->SetStringField(TEXT("note"),
-            TEXT("Minimap build requires a World Partition world; current editor world is not partitioned, so no minimap was built"));
-        ResultObj->SetStringField(TEXT("message"),
-            TEXT("Minimap build not applicable: editor world is not a World Partition map"));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    // Read-only probe: an AWorldPartitionMiniMap with a non-null MiniMapTexture means a
-    // minimap was already generated for this world. This is a pure read (TActorIterator
-    // + null-check of a TObjectPtr<UTexture2D>); it spawns nothing and renders nothing.
-    bool bAlreadyHasMinimap = false;
-    for (TActorIterator<AWorldPartitionMiniMap> It(World); It; ++It)
-    {
-        AWorldPartitionMiniMap* MiniMap = *It;
-        if (MiniMap && MiniMap->MiniMapTexture != nullptr)
-        {
-            bAlreadyHasMinimap = true;
-            break;
-        }
-    }
-    ResultObj->SetBoolField(TEXT("already_has_minimap"), bAlreadyHasMinimap);
-
-    // World Partition is present, but a real minimap build is GPU/commandlet-rendering
-    // only and cannot be driven synchronously here, so we report honestly.
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("World Partition detected; minimap generation is a GPU scene-capture / commandlet-rendering operation (UWorldPartitionMiniMapBuilder / FWorldPartitionMiniMapHelper::CaptureBoundsMiniMapToTexture, requires -AllowCommandletRendering) and cannot be driven synchronously from a single request, so no minimap was built."));
-    ResultObj->SetStringField(TEXT("message"),
-        TEXT("Minimap build is GPU/commandlet-rendering only; run the WorldPartitionMiniMapBuilder commandlet (with -AllowCommandletRendering) or Build > Build Minimap to generate"));
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:get_world_partition_runtime_hash - Reads the editor world's World Partition runtime hash.  REAL read: reports the runtime hash class and the number of GENERATED streaming grids (UWorldPartitionRuntimeSpatialHash::GetNumGrids), which is 0 until a cook/build generates the runtime grids. On the default non-WP editor map it honestly returns is_world_partition=false (no swap is done).
-//   @returns { is_world_partition: bool, runtime_hash_type?: string, num_streaming_grids?: int, success: bool, note: string }
-
-TSharedPtr<FJsonObject> HandleGetWorldPartitionRuntimeHash(const TSharedPtr<FJsonObject>& Params)
-{
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-
-    // Honest read: the default editor map is not partitioned. We never swap the editor
-    // world, so is_world_partition=false is the correct result (success stays true).
-    if (!World->IsPartitionedWorld())
-    {
-        ResultObj->SetBoolField(TEXT("is_world_partition"), false);
-        ResultObj->SetBoolField(TEXT("success"), true);
-        ResultObj->SetStringField(TEXT("note"), TEXT("Editor world is not World Partition."));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    // REAL read of the World Partition runtime hash type + generated streaming grids.
-    UWorldPartition* WP = World->GetWorldPartition();
-
-    int32 NumGrids = 0;
-    if (UWorldPartitionRuntimeSpatialHash* SpatialHash = Cast<UWorldPartitionRuntimeSpatialHash>(WP->RuntimeHash))
-    {
-        NumGrids = static_cast<int32>(SpatialHash->GetNumGrids());
-    }
-
-    ResultObj->SetBoolField(TEXT("is_world_partition"), true);
-    ResultObj->SetStringField(TEXT("runtime_hash_type"), UEAgentWorldPartitionCommandsImpl::RuntimeHashTypeName(WP));
-    ResultObj->SetNumberField(TEXT("num_streaming_grids"), NumGrids);
-    ResultObj->SetBoolField(TEXT("success"), true);
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("num_streaming_grids reads generated runtime grids (0 when not cooked); edit-time grid settings live in editor-only data."));
-
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:set_world_partition_runtime_hash - Report, without changing anything, that the runtime hash grid settings of the editor world cannot be edited from here: CellSize and LoadingRange live in the private, editor-only Grids array of the runtime spatial hash, which has no public setter, and the streaming grid is generated at cook or build time. cell_size, loading_range and grid_name are accepted and ignored, so applied is always false and success true. A partitioned world also returns its runtime_hash_type and runtime_regenerated=false; any other world returns is_world_partition=false. Nothing is written, during PIE too. A missing editor world is an error. Read the hash and its generated grid count with get_world_partition_runtime_hash, the overall partition state with get_world_partition_info; grid settings are edited in the World Settings of the map.
-//   @param cell_size - Accepted and ignored, never applied: the desired streaming cell size, in world units.
-//   @param loading_range - Accepted and ignored, never applied: the desired loading range, in world units.
-//   @param grid_name - Accepted and ignored, never applied: the name of the target runtime grid.
-//   @returns { is_world_partition: bool, runtime_hash_type?: string, applied: bool, runtime_regenerated?: bool, success: bool, note: string }
-//   @hints read-only
-
-TSharedPtr<FJsonObject> HandleSetWorldPartitionRuntimeHash(const TSharedPtr<FJsonObject>& Params)
-{
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World)) { return NoWorld; }
-
-    // Informative-only params: accepted and parsed so callers get honest validation, but
-    // never applied (the grid settings have no public setter and the streaming grid is
-    // generated at cook/build, so no synchronous headless mutation is possible).
-    int32 CellSize = 0;
-    Params->TryGetNumberField(TEXT("cell_size"), CellSize);
-    double LoadingRange = 0.0;
-    Params->TryGetNumberField(TEXT("loading_range"), LoadingRange);
-    FString GridName;
-    Params->TryGetStringField(TEXT("grid_name"), GridName);
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-
-    // HONEST gate: setting grid settings requires a World Partition map. The default
-    // editor map is not partitioned and we never swap the editor world.
-    if (!World->IsPartitionedWorld())
-    {
-        ResultObj->SetBoolField(TEXT("is_world_partition"), false);
-        ResultObj->SetBoolField(TEXT("applied"), false);
-        ResultObj->SetBoolField(TEXT("success"), true);
-        ResultObj->SetStringField(TEXT("note"), TEXT("Requires a World Partition map."));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    // World Partition present: read back the runtime hash type for real, but DO NOT MUTATE.
-    ResultObj->SetBoolField(TEXT("is_world_partition"), true);
-    ResultObj->SetStringField(TEXT("runtime_hash_type"), UEAgentWorldPartitionCommandsImpl::RuntimeHashTypeName(World->GetWorldPartition()));
-    ResultObj->SetBoolField(TEXT("applied"), false);
-    ResultObj->SetBoolField(TEXT("runtime_regenerated"), false);
-    ResultObj->SetBoolField(TEXT("success"), true);
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("WP runtime grid settings (CellSize/LoadingRange) live in UWorldPartitionRuntimeSpatialHash::Grids, editor-only private UPROPERTY with no public setter; the streaming grid is generated during cook/build (GenerateStreaming is WITH_EDITOR), so it cannot be set synchronously headless. No runtime change applied."));
 
     return mcp_common::MakeOkReply(ResultObj);
 }
@@ -1588,13 +1419,10 @@ TSharedPtr<FJsonObject> HandleRemoveOrphanedOfpaActors(const TSharedPtr<FJsonObj
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("assign_actor_to_data_layer_instance"), &HandleAssignActorToDataLayerInstance },
-    { TEXT("build_minimap"), &HandleBuildMinimap },
-    { TEXT("convert_map_to_world_partition"), &HandleConvertMapToWorldPartition },
     { TEXT("create_data_layer_instance"), &HandleCreateDataLayerInstance },
     { TEXT("create_world_partition_map"), &HandleCreateWorldPartitionMap },
     { TEXT("get_data_layer_instances"), &HandleGetDataLayerInstances },
     { TEXT("get_world_partition_info"), &HandleGetWorldPartitionInfo },
-    { TEXT("get_world_partition_runtime_hash"), &HandleGetWorldPartitionRuntimeHash },
     { TEXT("list_orphaned_ofpa_actors"), &HandleListOrphanedOfpaActors },
     { TEXT("list_world_partition_actors"), &HandleListWorldPartitionActors },
     { TEXT("load_world_partition_region"), &HandleLoadWorldPartitionRegion },
@@ -1603,6 +1431,5 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("remove_orphaned_ofpa_actors"), &HandleRemoveOrphanedOfpaActors },
     { TEXT("set_actor_spatially_loaded"), &HandleSetActorSpatiallyLoaded },
     { TEXT("set_data_layer_parent"), &HandleSetDataLayerParent },
-    { TEXT("set_world_partition_runtime_hash"), &HandleSetWorldPartitionRuntimeHash },
 };
 } // namespace UEAgentWorldPartitionCommands

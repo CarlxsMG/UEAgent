@@ -239,7 +239,7 @@ namespace
     }
 
     // Find a widget by name anywhere in a Widget BP's design-time WidgetTree (bind_widget_to_viewmodel
-    // destination resolution, add_tree_view parent_widget_name resolution).
+    // destination resolution, add_list_view parent_widget_name resolution).
     UWidget* FindWidgetInTreeByName(UWidgetTree* Tree, const FName& Name)
     {
         UWidget* Found = nullptr;
@@ -267,7 +267,7 @@ namespace
     }
 
     /**
-     * What add_list_view / add_tile_view / add_tree_view resolve before they edit: the Widget Blueprint and its tree,
+     * What add_list_view resolves before it edits: the Widget Blueprint and its tree,
      * the view of the requested class that already holds the view's name (null when none does), and the entry widget
      * class (null when none is given).
      */
@@ -327,7 +327,7 @@ namespace
     }
 
     /**
-     * Why add_list_view / add_tile_view / add_tree_view cannot place a new view in Tree, or empty when they can: it
+     * Why add_list_view cannot place a new view in Tree, or empty when it can: it
      * goes under ParentPanel when one is given, else under the root panel, or becomes the root of an empty tree. A
      * root that is not a panel cannot take a child, and making the view the root instead would orphan that root and
      * its subtree; a panel that takes a single child and already has one cannot take another.
@@ -347,7 +347,7 @@ namespace
             {
                 return FString::Printf(
                     TEXT("the root widget '%s' is a %s, not a panel, so it cannot hold the new view; make a panel the root ")
-                    TEXT("first (add_tree_view can also take a panel as parent_widget_name). Nothing was added."),
+                    TEXT("first (add_list_view can also take a panel as parent_widget_name). Nothing was added."),
                     *Root->GetName(), *Root->GetClass()->GetName());
             }
         }
@@ -360,7 +360,7 @@ namespace
         return FString();
     }
 
-    // add_list_view / add_tile_view / add_tree_view: constructs a ViewT (UListView or a subclass) named WidgetName
+    // add_list_view: constructs a ViewT (UListView or a subclass: UTileView, UTreeView) named WidgetName
     // in Tree, sets its EntryWidgetClass to EntryClass when given, and adds it under ParentPanel -- without one,
     // under the root canvas or panel, or as the root of an empty tree. Call ListViewHostError_MVVM first: null,
     // with nothing constructed, when there is no such place; null also when Tree cannot construct the view.
@@ -419,7 +419,7 @@ namespace
     }
 
     /**
-     * The class field ClassField and entry_widget_class of the add_list_view / add_tile_view / add_tree_view reply,
+     * The class field ClassField and entry_widget_class of the add_list_view reply,
      * read off View, the widget that holds the requested name: the view just added, or the widget that already held
      * that name, whatever its class. The class is spelled as in C++ (UListView, UTileView, UTreeView); a widget that
      * is not a list-type view has no entry class, so that field is empty.
@@ -434,7 +434,7 @@ namespace
     }
 
     /**
-     * The reply of add_list_view / add_tile_view / add_tree_view when Existing, a view of the requested class, already
+     * The reply of add_list_view when Existing, a view of the requested class, already
      * holds the requested name ViewName: it is left as it is, and nothing is modified, compiled or saved. ClassField and
      * entry_widget_class are its own; NameField is the name param of the tool.
      */
@@ -1405,34 +1405,108 @@ TSharedPtr<FJsonObject> HandleUnbindWidgetFromViewModel(const TSharedPtr<FJsonOb
 }
 
 // =============================================================================
-// add_list_view -- adds a UListView to the widget BP's WidgetTree root.
-// Idempotent by list_view_name.
+// add_list_view -- adds a UListView, UTileView or UTreeView (view_type) to the
+// widget BP's WidgetTree root or a named parent panel. Idempotent by
+// list_view_name.
+//
+// HONEST SCOPE for view_type=Tree: AUTHORING only. Populating the tree's
+// actual hierarchy (SetTreeItemsSource + the OnGetItemChildren delegate that
+// supplies each node's children) is out of scope: OnGetItemChildren is a
+// native TSlateDelegates callback set via UTreeView::SetOnGetItemChildren (a
+// C++ template method, not a reflected UPROPERTY/UFUNCTION) or the BP-only
+// dynamic delegate wired in the widget BP graph -- neither is something this
+// reflection-based authoring tool can set.
 // =============================================================================
-// MCP:add_list_view - Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UListView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint
-//   @param list_view_name - FName of the new UListView widget
-//   @param entry_widget_class - Optional entry widget class (asset or /Script path)
-//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }
+// MCP:add_list_view - Construct a list-type view -- a UListView, a UTileView (view_type=Tile) or a UTreeView (view_type=Tree) -- named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a view of the requested class already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint, an unknown view_type or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: a tree view's items and their children are supplied at runtime; fill a list or tile view in PIE with set_pie_list_view_items.
+//   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory"
+//   @param list_view_name - FName of the new view widget in the tree; also the idempotency key
+//   @param widget_name - Alias of list_view_name, read only when list_view_name is absent
+//   @param entry_widget_class - Optional entry widget class for each row, tile or tree node (asset path such as "/Game/UI/WBP_ItemTile", or a /Script path)
+//   @param view_type - Optional "List" (default, UListView), "Tile" (UTileView) or "Tree" (UTreeView), case-insensitive; anything else is an error
+//   @param parent_widget_name - Optional name of an existing panel widget (UPanelWidget) in the tree to insert the new view under; omitted = the root canvas or panel (in an empty tree the view becomes the root)
+//   @returns { widget_blueprint_name, list_view_name, list_view_class, view_type, already_existed, entry_widget_class, parent_widget_name?, widget_added, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleAddListView(const TSharedPtr<FJsonObject>& Params)
 {
     FString WidgetBPName;
     if (TSharedPtr<FJsonObject> Missing = ReadWidgetBlueprintName_MVVM(Params, WidgetBPName)) { return Missing; }
+    // list_view_name, else its alias widget_name.
     FString ListViewName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("list_view_name"), ListViewName)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("list_view_name"), ListViewName))
+    {
+        Params->TryGetStringField(TEXT("widget_name"), ListViewName);
+    }
+    if (ListViewName.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter: list_view_name (or widget_name)"));
+    }
 
     FString EntryClassRef;
     Params->TryGetStringField(TEXT("entry_widget_class"), EntryClassRef);
+    FString ViewType = TEXT("List");
+    Params->TryGetStringField(TEXT("view_type"), ViewType);
+    FString ParentWidgetName;
+    Params->TryGetStringField(TEXT("parent_widget_name"), ParentWidgetName);
+
+    // The view class, checked before anything is loaded or edited.
+    const UClass* ViewClass = nullptr;
+    if (ViewType.Equals(TEXT("List"), ESearchCase::IgnoreCase))
+    {
+        ViewType = TEXT("List");
+        ViewClass = UListView::StaticClass();
+    }
+    else if (ViewType.Equals(TEXT("Tile"), ESearchCase::IgnoreCase))
+    {
+        ViewType = TEXT("Tile");
+        ViewClass = UTileView::StaticClass();
+    }
+    else if (ViewType.Equals(TEXT("Tree"), ESearchCase::IgnoreCase))
+    {
+        ViewType = TEXT("Tree");
+        ViewClass = UTreeView::StaticClass();
+    }
+    else
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Invalid view_type '%s' (List|Tile|Tree); nothing was added."), *ViewType));
+    }
 
     FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, UListView::StaticClass(), EntryClassRef, View))
+    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, ViewClass, EntryClassRef, View))
     {
         return Failure;
     }
+
+    // Resolve the optional parent panel BEFORE mutating anything, so a bad parent_widget_name
+    // fails clean without a half-built tree left behind.
+    UPanelWidget* ParentPanel = nullptr;
+    if (!ParentWidgetName.IsEmpty())
+    {
+        UWidget* ParentWidget = FindWidgetInTreeByName(View.Tree, FName(*ParentWidgetName));
+        if (!ParentWidget)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("add_list_view: parent_widget_name '%s' not found in '%s'"), *ParentWidgetName, *WidgetBPName));
+        }
+        ParentPanel = Cast<UPanelWidget>(ParentWidget);
+        if (!ParentPanel)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("add_list_view: parent_widget_name '%s' (class %s) is not a panel widget that can accept children"),
+                *ParentWidgetName, *ParentWidget->GetClass()->GetName()));
+        }
+    }
     if (View.ExistingWidget)
     {
-        return ExistingViewReply_MVVM(WidgetBPName, TEXT("list_view_name"), ListViewName, TEXT("list_view_class"), View.ExistingWidget);
+        TSharedPtr<FJsonObject> Out =
+            ExistingViewReply_MVVM(WidgetBPName, TEXT("list_view_name"), ListViewName, TEXT("list_view_class"), View.ExistingWidget);
+        Out->SetStringField(TEXT("view_type"), ViewType);
+        if (!ParentWidgetName.IsEmpty())
+        {
+            Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
+        }
+        return Out;
     }
-    const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
+    const FString HostError = ListViewHostError_MVVM(View.Tree, ParentPanel);
     if (!HostError.IsEmpty())
     {
         return mcp_common::MakeErrorReply(HostError);
@@ -1442,81 +1516,47 @@ TSharedPtr<FJsonObject> HandleAddListView(const TSharedPtr<FJsonObject>& Params)
     View.WidgetBP->Modify();
     View.Tree->Modify();
 
-    UListView* NewView = AddListTypeView_MVVM<UListView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
+    // UTileView and UTreeView both derive from UListView.
+    UListView* NewView = nullptr;
+    if (ViewClass == UTileView::StaticClass())
+    {
+        NewView = AddListTypeView_MVVM<UTileView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
+    }
+    else if (ViewClass == UTreeView::StaticClass())
+    {
+        NewView = AddListTypeView_MVVM<UTreeView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
+    }
+    else
+    {
+        NewView = AddListTypeView_MVVM<UListView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
+    }
     if (!NewView)
     {
-        return mcp_common::MakeErrorReply(
-            TEXT("Tree->ConstructWidget<UListView> returned null"));
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Tree->ConstructWidget<%s%s> returned null"), ViewClass->GetPrefixCPP(), *ViewClass->GetName()));
     }
 
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
 
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_list_view: %s added on %s"), *ListViewName, *WidgetBPName);
+    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_list_view: %s (%s) added on %s"), *ListViewName, *ViewType, *WidgetBPName);
 
     TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
     Out->SetStringField(TEXT("list_view_name"), ListViewName);
     AddViewClassFields_MVVM(Out, TEXT("list_view_class"), NewView);
+    Out->SetStringField(TEXT("view_type"), ViewType);
     Out->SetBoolField(TEXT("already_existed"), false);
+    if (!ParentWidgetName.IsEmpty())
+    {
+        Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
+    }
     Out->SetBoolField(TEXT("widget_added"), true);
+    if (ViewClass == UTreeView::StaticClass())
+    {
+        Out->SetStringField(TEXT("note"),
+            TEXT("Authoring only: constructs the UTreeView + EntryWidgetClass. Populating the tree (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is out of scope -- that delegate is a native TSlateDelegates callback, not reflectively assignable; wire it in the widget BP graph or drive it live in PIE."));
+    }
     return SavedReply_MVVM(Out, bSaved, TEXT("add_list_view"), SaveErr);
-}
-
-// =============================================================================
-// add_tile_view -- same shape as add_list_view but forces UTileView.
-// =============================================================================
-// MCP:add_tile_view - Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTileView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
-//   @param list_view_name - Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key.
-//   @param entry_widget_class - Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path.
-//   @returns { widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }
-TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
-{
-    FString WidgetBPName;
-    if (TSharedPtr<FJsonObject> Missing = ReadWidgetBlueprintName_MVVM(Params, WidgetBPName)) { return Missing; }
-    FString ListViewName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("list_view_name"), ListViewName)) { return Missing; }
-
-    FString EntryClassRef;
-    Params->TryGetStringField(TEXT("entry_widget_class"), EntryClassRef);
-
-    FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, ListViewName, UTileView::StaticClass(), EntryClassRef, View))
-    {
-        return Failure;
-    }
-    if (View.ExistingWidget)
-    {
-        return ExistingViewReply_MVVM(WidgetBPName, TEXT("list_view_name"), ListViewName, TEXT("list_view_class"), View.ExistingWidget);
-    }
-    const FString HostError = ListViewHostError_MVVM(View.Tree, nullptr);
-    if (!HostError.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(HostError);
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddTileView", "MCP: Add TileView"));
-    View.WidgetBP->Modify();
-    View.Tree->Modify();
-
-    UTileView* NewView = AddListTypeView_MVVM<UTileView>(View.Tree, View.ViewName, View.EntryClass, nullptr);
-    if (!NewView)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Tree->ConstructWidget<UTileView> returned null"));
-    }
-
-    FString SaveErr;
-    const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
-
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tile_view: %s added on %s"), *ListViewName, *WidgetBPName);
-
-    TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
-    Out->SetStringField(TEXT("list_view_name"), ListViewName);
-    AddViewClassFields_MVVM(Out, TEXT("list_view_class"), NewView);
-    Out->SetBoolField(TEXT("already_existed"), false);
-    Out->SetBoolField(TEXT("widget_added"), true);
-    return SavedReply_MVVM(Out, bSaved, TEXT("add_tile_view"), SaveErr);
 }
 
 // =============================================================================
@@ -1528,7 +1568,7 @@ TSharedPtr<FJsonObject> HandleAddTileView(const TSharedPtr<FJsonObject>& Params)
 // graph event node; this command returns the honest gap rather than
 // fabricating a property that doesn't exist.
 // =============================================================================
-// MCP:set_widget_drag_drop - Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
+// MCP:set_widget_drag_drop - Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view (view_type List, Tile or Tree).
 //   @param widget_blueprint_name - /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory".
 //   @param widget_name - Name of the widget in the tree of that Blueprint, e.g. "ItemTiles"; only a list, tile or tree view can take the class.
 //   @param operation_class - Class path of a UDragDropOperation subclass, e.g. "/Script/UMG.DragDropOperation" or "/Game/UI/DDO_Item.DDO_Item_C"; defaults to /Script/UMG.DragDropOperation.
@@ -1806,11 +1846,10 @@ TSharedPtr<FJsonObject> HandleCreateCommonUIStack(const TSharedPtr<FJsonObject>&
 
 // =============================================================================
 // set_pie_list_view_items -- populate a LIVE UListView/UTileView in the running
-// PIE session. add_list_view/add_tile_view only construct an EMPTY view; this
-// is the headless way to populate and exercise one. Companion to those two
-// authoring tools.
+// PIE session. add_list_view only constructs an EMPTY view; this is the
+// headless way to populate and exercise one. Companion to that authoring tool.
 // =============================================================================
-// MCP:set_pie_list_view_items - Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_name (optionally drilling into child_name) among the active viewport UserWidgets using the same walk click_pie_widget uses, resolves each entry in items[] to a UObject* (an actor name/label in the PIE world, else a /Game asset path via FSoftObjectPath::TryLoad), then calls SetListItems (or AddItems when append=true). Companion to add_list_view/add_tile_view, which only construct an EMPTY view.
+// MCP:set_pie_list_view_items - Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_name (optionally drilling into child_name) among the active viewport UserWidgets using the same walk click_pie_widget uses, resolves each entry in items[] to a UObject* (an actor name/label in the PIE world, else a /Game asset path via FSoftObjectPath::TryLoad), then calls SetListItems (or AddItems when append=true). Companion to add_list_view (view_type List or Tile), which only constructs an EMPTY view.
 //   @param widget_name - Required. Name of the target UListView/UTileView in the live tree (as reported by read_pie_widgets), resolved the same way click_pie_widget resolves widget_name.
 //   @param child_name - Optional: after resolving widget_name, drill into a descendant widget with this name and populate THAT widget instead.
 //   @param player_index - Optional (default 0): restrict widget resolution to viewport UserWidgets owned by this local player index (single-player PIE resolves globally).
@@ -1893,7 +1932,7 @@ TSharedPtr<FJsonObject> HandleSetPieListViewItems(const TSharedPtr<FJsonObject>&
     }
 
     // UTileView derives from UListView (both share SetListItems/AddItems/GetNumItems), so a
-    // single Cast<UListView> covers both add_list_view and add_tile_view targets.
+    // single Cast<UListView> covers add_list_view's List and Tile targets.
     UListView* ListView = Cast<UListView>(Target);
     if (!ListView)
     {
@@ -1979,112 +2018,6 @@ TSharedPtr<FJsonObject> HandleSetPieListViewItems(const TSharedPtr<FJsonObject>&
     Out->SetStringField(TEXT("world"), WorldSelector);
     mcp_common::AddWorldEvidence(Out, PieWorld);
     return Out;
-}
-
-// =============================================================================
-// add_tree_view -- sibling of add_list_view/add_tile_view: constructs a
-// UTreeView under the widget BP root (or a named parent panel). Idempotent by
-// widget_name.
-//
-// HONEST SCOPE: this is an AUTHORING tool only (same posture as
-// add_list_view/add_tile_view for their own EntryWidgetClass). Populating the
-// tree's actual hierarchy (SetTreeItemsSource + the OnGetItemChildren delegate
-// that supplies each node's children) is out of scope: OnGetItemChildren is a
-// native TSlateDelegates callback set via UTreeView::SetOnGetItemChildren (a
-// C++ template method, not a reflected UPROPERTY/UFUNCTION) or the BP-only
-// dynamic delegate wired in the widget BP graph -- neither is something this
-// reflection-based authoring tool can set. This tool only constructs the
-// widget and wires its EntryWidgetClass, exactly like add_list_view/
-// add_tile_view do.
-// =============================================================================
-// MCP:add_tree_view - Construct a UTreeView named widget_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTreeView already called widget_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: the tree items and their children are supplied at runtime. A list: add_list_view; tiles: add_tile_view.
-//   @param widget_blueprint_name - /Game path of the Widget Blueprint
-//   @param widget_name - FName of the new UTreeView widget
-//   @param entry_widget_class - Optional entry widget class (asset or /Script path)
-//   @param parent_widget_name - Optional: name of an existing panel widget (UPanelWidget) in the tree to insert the new UTreeView under. Omitted = same root-insertion behavior as add_list_view/add_tile_view (canvas/panel root; in an empty tree the view becomes the root; a non-panel root is an error).
-//   @returns { widget_blueprint_name, widget_name, tree_view_class, already_existed, entry_widget_class, parent_widget_name?, widget_added, saved, save_error?, note }
-TSharedPtr<FJsonObject> HandleAddTreeView(const TSharedPtr<FJsonObject>& Params)
-{
-    FString WidgetBPName;
-    if (TSharedPtr<FJsonObject> Missing = ReadWidgetBlueprintName_MVVM(Params, WidgetBPName)) { return Missing; }
-    FString TreeViewName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_name"), TreeViewName)) { return Missing; }
-
-    FString EntryClassRef;
-    Params->TryGetStringField(TEXT("entry_widget_class"), EntryClassRef);
-
-    FString ParentWidgetName;
-    Params->TryGetStringField(TEXT("parent_widget_name"), ParentWidgetName);
-
-    FListViewTarget_MVVM View;
-    if (TSharedPtr<FJsonObject> Failure = ResolveListViewTarget_MVVM(WidgetBPName, TreeViewName, UTreeView::StaticClass(), EntryClassRef, View))
-    {
-        return Failure;
-    }
-
-    // Resolve the optional parent panel BEFORE mutating anything, so a bad parent_widget_name
-    // fails clean without a half-built tree left behind.
-    UPanelWidget* ParentPanel = nullptr;
-    if (!ParentWidgetName.IsEmpty())
-    {
-        UWidget* ParentWidget = FindWidgetInTreeByName(View.Tree, FName(*ParentWidgetName));
-        if (!ParentWidget)
-        {
-            return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("add_tree_view: parent_widget_name '%s' not found in '%s'"), *ParentWidgetName, *WidgetBPName));
-        }
-        ParentPanel = Cast<UPanelWidget>(ParentWidget);
-        if (!ParentPanel)
-        {
-            return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("add_tree_view: parent_widget_name '%s' (class %s) is not a panel widget that can accept children"),
-                *ParentWidgetName, *ParentWidget->GetClass()->GetName()));
-        }
-    }
-    if (View.ExistingWidget)
-    {
-        TSharedPtr<FJsonObject> Out =
-            ExistingViewReply_MVVM(WidgetBPName, TEXT("widget_name"), TreeViewName, TEXT("tree_view_class"), View.ExistingWidget);
-        if (!ParentWidgetName.IsEmpty())
-        {
-            Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
-        }
-        return Out;
-    }
-    const FString HostError = ListViewHostError_MVVM(View.Tree, ParentPanel);
-    if (!HostError.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(HostError);
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MVVM_AddTreeView", "MCP: Add TreeView"));
-    View.WidgetBP->Modify();
-    View.Tree->Modify();
-
-    UTreeView* NewView = AddListTypeView_MVVM<UTreeView>(View.Tree, View.ViewName, View.EntryClass, ParentPanel);
-    if (!NewView)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Tree->ConstructWidget<UTreeView> returned null"));
-    }
-
-    FString SaveErr;
-    const bool bSaved = SaveWidgetBlueprint(View.WidgetBP, SaveErr);
-
-    UE_LOG(LogTemp, Verbose, TEXT("[MCP] add_tree_view: %s added on %s"), *TreeViewName, *WidgetBPName);
-
-    TSharedPtr<FJsonObject> Out = StartReply_MVVM(true, WidgetBPName);
-    Out->SetStringField(TEXT("widget_name"), TreeViewName);
-    AddViewClassFields_MVVM(Out, TEXT("tree_view_class"), NewView);
-    Out->SetBoolField(TEXT("already_existed"), false);
-    if (!ParentWidgetName.IsEmpty())
-    {
-        Out->SetStringField(TEXT("parent_widget_name"), ParentWidgetName);
-    }
-    Out->SetBoolField(TEXT("widget_added"), true);
-    Out->SetStringField(TEXT("note"),
-        TEXT("Authoring only: constructs the UTreeView + EntryWidgetClass. Populating the tree (SetTreeItemsSource + the OnGetItemChildren delegate that supplies each node's children) is out of scope -- that delegate is a native TSlateDelegates callback, not reflectively assignable; wire it in the widget BP graph or drive it live in PIE."));
-    return SavedReply_MVVM(Out, bSaved, TEXT("add_tree_view"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2197,8 +2130,6 @@ TSharedPtr<FJsonObject> HandlePopCommonUIWidget(const TSharedPtr<FJsonObject>& P
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_list_view"), &HandleAddListView },
-    { TEXT("add_tile_view"), &HandleAddTileView },
-    { TEXT("add_tree_view"), &HandleAddTreeView },
     { TEXT("add_viewmodel"), &HandleAddViewModel },
     { TEXT("bind_widget_to_viewmodel"), &HandleBindWidgetToViewModel },
     { TEXT("create_common_ui_stack"), &HandleCreateCommonUIStack },

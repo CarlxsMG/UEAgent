@@ -2,7 +2,6 @@
 #include "Commands/Common/McpCommonUtils.h"
 
 #include "Editor.h"
-#include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -29,8 +28,8 @@
 /**
  * Static Mesh asset commands.
  *
- * create_editable_static_mesh duplicates a mesh (by default /Engine/BasicShapes/Cube) into /Game, so the
- * editing commands can work on a copy instead of on /Engine content. Queries and Nanite settings go through
+ * The editing commands work on a /Game copy of a mesh (duplicate_asset), never on /Engine content. Queries and
+ * Nanite settings go through
  * UStaticMeshEditorSubsystem (StaticMeshEditor module); sockets, collision, material slots and lightmap
  * settings are edited through the UStaticMesh and UBodySetup APIs directly.
  */
@@ -41,13 +40,6 @@ namespace UEAgentStaticMeshCommands
 
 namespace
 {
-	FString SMNormalizeFolder(const FString& In)
-	{
-	 FString Out = In;
-		Out.RemoveFromEnd(TEXT("/"));
-		return Out;
-	}
-
 	FString CollisionFlagToString(ECollisionTraceFlag Flag)
 	{
 		switch (Flag)
@@ -157,99 +149,11 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// create_editable_static_mesh
-// ---------------------------------------------------------------------------
-// MCP:create_editable_static_mesh - Copy a UStaticMesh (default /Engine/BasicShapes/Cube) into a new asset at package_path/static_mesh_name with StaticDuplicateObject, creating the folder if needed, and save it, so an engine or other read-only mesh can be edited as a copy; the source is not modified and there is no undo. Idempotent: a static mesh already at that path is returned untouched with created=false, whatever its source. A source that does not load, a name taken by another asset class or a failed save is an error. duplicate_asset copies any asset type inside its own folder.
-//   @param package_path - Target folder path (e.g. "/Game/MyMeshes").
-//   @param static_mesh_name - Name for the new mesh asset.
-//   @param source_mesh - Source mesh to duplicate (defaults to engine Cube)
-//   @returns { asset_path, static_mesh_name, source_mesh, created }
-TSharedPtr<FJsonObject> HandleCreateEditableStaticMesh(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString PackagePath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), PackagePath)) { return Missing; }
-
-	FString MeshName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("static_mesh_name"), MeshName)) { return Missing; }
-
-	FString SourceMesh = TEXT("/Engine/BasicShapes/Cube");
-	Params->TryGetStringField(TEXT("source_mesh"), SourceMesh);
-
-	PackagePath = SMNormalizeFolder(PackagePath);
-	const FString FullPath = PackagePath + TEXT("/") + MeshName;
-	if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-
-	// Idempotent: if already exists, load and return info
-	if (UEditorAssetLibrary::DoesAssetExist(FullPath))
-	{
-		UStaticMesh* Existing = mcp_common::LoadAssetOrSoftPath<UStaticMesh>(FullPath);
-		if (Existing)
-		{
-			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-			Data->SetStringField(TEXT("asset_path"), FullPath);
-			Data->SetStringField(TEXT("static_mesh_name"), MeshName);
-			Data->SetStringField(TEXT("source_mesh"), SourceMesh);
-			Data->SetBoolField(TEXT("created"), false);
-			return mcp_common::MakeOkReply(Data);
-		}
-	}
-
-	// Ensure target folder exists
-	if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
-	{
-		UEditorAssetLibrary::MakeDirectory(PackagePath);
-	}
-
-	// Load source mesh
-	UStaticMesh* LoadedMesh = LoadObject<UStaticMesh>(nullptr, *SourceMesh);
-	if (!LoadedMesh)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Failed to load source mesh: %s"), *SourceMesh));
-	}
-
-	// Create destination package
-	FString PackageError;
-	UPackage* DestPackage = mcp_common::CreateAssetPackage(FullPath, MeshName, UStaticMesh::StaticClass(), PackageError);
-	if (!DestPackage)
-	{
-	    return mcp_common::MakeErrorReply(PackageError);
-	}
-
-	// Duplicate mesh into the new package using StaticDuplicateObject
-	UStaticMesh* NewMesh = Cast<UStaticMesh>(StaticDuplicateObject(LoadedMesh, DestPackage, *MeshName, RF_Public | RF_Standalone));
-	if (!NewMesh)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Failed to duplicate mesh to %s"), *FullPath));
-	}
-
-	// Mark dirty and save
-	FString SaveError;
-	if (!mcp_common::SaveAssetPackage(DestPackage, NewMesh, SaveError))
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Failed to save duplicated mesh: %s"), *SaveError));
-	}
-
-	// Flush rendering commands to ensure mesh resources are ready
-	FlushRenderingCommands();
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("asset_path"), FullPath);
-	Data->SetStringField(TEXT("static_mesh_name"), MeshName);
-	Data->SetStringField(TEXT("source_mesh"), SourceMesh);
-	Data->SetBoolField(TEXT("created"), true);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // get_static_mesh_info
 // ---------------------------------------------------------------------------
-// MCP:get_static_mesh_info - Get detailed info about a static mesh: LODs, verts, materials (with slots), sockets, nanite, collision, bounds.
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @returns { static_mesh_path, num_lods, num_verts_lod0, num_materials, num_sockets, materials: [{slot_index, slot_name, material_path}], collision_complexity, nanite_enabled, bounds_origin_x, bounds_origin_y, bounds_origin_z, bounds_extent_x, bounds_extent_y, bounds_extent_z, sphere_radius }
+// MCP:get_static_mesh_info - Get detailed info about a static mesh without changing it: LODs, verts, materials (with slots), every socket with its transform and tag, nanite, collision, bounds, and the asset-level lightmap settings (lightmap_resolution, the texel resolution static lighting is baked at, and lightmap_coordinate_index, the UV channel holding the lightmap UVs; an override on a placed component is not read). A mesh that does not load is an error. Per-section flags are get_static_mesh_sections.
+//   @param static_mesh_path - Package or object path of the UStaticMesh asset, e.g. "/Game/Meshes/SM_Crate".
+//   @returns { static_mesh_path, num_lods, num_verts_lod0, num_materials, num_sockets, materials: [{slot_index, slot_name, material_path}], sockets: [{name, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, tag}], collision_complexity, nanite_enabled, lightmap_resolution, lightmap_coordinate_index, bounds_origin_x, bounds_origin_y, bounds_origin_z, bounds_extent_x, bounds_extent_y, bounds_extent_z, sphere_radius }
 TSharedPtr<FJsonObject> HandleGetStaticMeshInfo(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -286,14 +190,31 @@ TSharedPtr<FJsonObject> HandleGetStaticMeshInfo(
 		MaterialsArray.Add(MakeShared<FJsonValueObject>(SlotObj));
 	}
 
+	// Every socket with its relative transform and tag.
+	TArray<TSharedPtr<FJsonValue>> SocketsArray;
+	for (const TObjectPtr<UStaticMeshSocket>& SocketPtr : Mesh->Sockets)
+	{
+		const UStaticMeshSocket* Socket = SocketPtr;
+		if (!Socket) { continue; }
+
+		TSharedPtr<FJsonObject> SocketObj = MakeShared<FJsonObject>();
+		SocketObj->SetStringField(TEXT("name"), Socket->SocketName.ToString());
+		StaticMesh_AddSocketTransform(SocketObj, Socket);
+		SocketObj->SetStringField(TEXT("tag"), Socket->Tag);
+		SocketsArray.Add(MakeShared<FJsonValueObject>(SocketObj));
+	}
+
 	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("num_lods"), NumLODs);
 	Data->SetNumberField(TEXT("num_verts_lod0"), NumVerts);
 	Data->SetNumberField(TEXT("num_materials"), NumMats);
 	Data->SetNumberField(TEXT("num_sockets"), NumSockets);
 	Data->SetArrayField(TEXT("materials"), MaterialsArray);
+	Data->SetArrayField(TEXT("sockets"), SocketsArray);
 	Data->SetStringField(TEXT("collision_complexity"), CollisionStr);
 	Data->SetBoolField(TEXT("nanite_enabled"), bNanite);
+	Data->SetNumberField(TEXT("lightmap_resolution"), Mesh->GetLightMapResolution());
+	Data->SetNumberField(TEXT("lightmap_coordinate_index"), Mesh->GetLightMapCoordinateIndex());
 	Data->SetNumberField(TEXT("bounds_origin_x"), Bounds.Origin.X);
 	Data->SetNumberField(TEXT("bounds_origin_y"), Bounds.Origin.Y);
 	Data->SetNumberField(TEXT("bounds_origin_z"), Bounds.Origin.Z);
@@ -360,7 +281,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshNanite(
 // ---------------------------------------------------------------------------
 // add_static_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_static_mesh_socket - Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. A socket_name the mesh already has is an error, and so is a location, rotation or scale that is not three numbers; both are checked before the mesh is touched. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_sockets; skeletal meshes use add_skeletal_mesh_socket.
+// MCP:add_static_mesh_socket - Add a new socket to a UStaticMesh asset (package or object path) with an optional relative location, rotation, scale and tag, then save the mesh; no undo transaction. A socket_name the mesh already has is an error, and so is a location, rotation or scale that is not three numbers; both are checked before the mesh is touched. A failed save is an error, yet the socket stays on the mesh in memory. Edit an existing socket with set_static_mesh_socket_transform or rename_static_mesh_socket; list them with get_static_mesh_info; skeletal meshes use add_skeletal_mesh_socket.
 //   @param static_mesh_path - Content path to the UStaticMesh asset.
 //   @param socket_name - Name for the new socket.
 //   @param location - Socket relative location as [x, y, z] (optional)
@@ -426,7 +347,7 @@ TSharedPtr<FJsonObject> HandleAddStaticMeshSocket(
 // ---------------------------------------------------------------------------
 // remove_static_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_static_mesh_socket - Remove one socket, found by name, from a UStaticMesh asset loaded from its package or object path, then save the mesh; there is no undo transaction. A name the mesh does not have is a success with removed=false, and nothing is touched or saved (idempotent). A mesh that does not load is an error, and so is a failed save -- refused while PIE runs or under a read-only root -- after which the socket is already gone from the mesh in memory. socket_count is the number of sockets left. List sockets with get_static_mesh_sockets, add one with add_static_mesh_socket, rename one with rename_static_mesh_socket; skeletal meshes use remove_skeletal_mesh_socket and skeletons remove_socket_from_skeleton_asset.
+// MCP:remove_static_mesh_socket - Remove one socket, found by name, from a UStaticMesh asset loaded from its package or object path, then save the mesh; there is no undo transaction. A name the mesh does not have is a success with removed=false, and nothing is touched or saved (idempotent). A mesh that does not load is an error, and so is a failed save -- refused while PIE runs or under a read-only root -- after which the socket is already gone from the mesh in memory. socket_count is the number of sockets left. List sockets with get_static_mesh_info, add one with add_static_mesh_socket, rename one with rename_static_mesh_socket; skeletal meshes use remove_skeletal_mesh_socket and skeletons remove_skeleton_socket.
 //   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
 //   @param socket_name - Name of the socket to remove, compared as an FName (case-insensitive).
 //   @returns { static_mesh_path, socket_name, removed, socket_count }
@@ -465,40 +386,6 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshSocket(
 	Data->SetStringField(TEXT("socket_name"), SocketName);
 	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetNumberField(TEXT("socket_count"), Mesh->Sockets.Num());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// get_static_mesh_sockets
-// ---------------------------------------------------------------------------
-// MCP:get_static_mesh_sockets - List all sockets of a static mesh with transform and tag.
-//   @param static_mesh_path - Content path to the UStaticMesh asset.
-//   @returns { static_mesh_path, socket_count, sockets: [{name, location:{x,y,z}, rotation:{pitch,yaw,roll}, scale:{x,y,z}, tag}] }
-TSharedPtr<FJsonObject> HandleGetStaticMeshSockets(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MeshPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("static_mesh_path"), MeshPath)) { return Missing; }
-
-	UStaticMesh* Mesh = nullptr;
-	if (TSharedPtr<FJsonObject> Error = StaticMesh_Load(MeshPath, Mesh)) { return Error; }
-
-	TArray<TSharedPtr<FJsonValue>> SocketsArray;
-	for (const TObjectPtr<UStaticMeshSocket>& SocketPtr : Mesh->Sockets)
-	{
-		const UStaticMeshSocket* Socket = SocketPtr;
-		if (!Socket) { continue; }
-
-		TSharedPtr<FJsonObject> SocketObj = MakeShared<FJsonObject>();
-		SocketObj->SetStringField(TEXT("name"), Socket->SocketName.ToString());
-		StaticMesh_AddSocketTransform(SocketObj, Socket);
-		SocketObj->SetStringField(TEXT("tag"), Socket->Tag);
-		SocketsArray.Add(MakeShared<FJsonValueObject>(SocketObj));
-	}
-
-	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
-	Data->SetNumberField(TEXT("socket_count"), SocketsArray.Num());
-	Data->SetArrayField(TEXT("sockets"), SocketsArray);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -736,7 +623,7 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshCollisionComplexity(
 // ---------------------------------------------------------------------------
 // get_static_mesh_sections
 // ---------------------------------------------------------------------------
-// MCP:get_static_mesh_sections - List every section of every render LOD of a UStaticMesh asset, loaded from its package or object path, without changing it: lod_index, section_index and the cast_shadow, collision_enabled and visible_in_ray_tracing flags of each, read through the StaticMeshEditor subsystem. A mesh without render data has no LODs and returns an empty list; a mesh that does not load, or a missing subsystem, is an error. total_sections counts the rows. Material slots, vertex counts, sockets and bounds are get_static_mesh_info; skeletal meshes use get_skeletal_mesh_section_info; lightmap settings are get_static_mesh_lightmap.
+// MCP:get_static_mesh_sections - List every section of every render LOD of a UStaticMesh asset, loaded from its package or object path, without changing it: lod_index, section_index and the cast_shadow, collision_enabled and visible_in_ray_tracing flags of each, read through the StaticMeshEditor subsystem. A mesh without render data has no LODs and returns an empty list; a mesh that does not load, or a missing subsystem, is an error. total_sections counts the rows. Material slots, vertex counts, sockets, bounds and lightmap settings are get_static_mesh_info; skeletal meshes use get_skeletal_mesh_section_info.
 //   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
 //   @returns { static_mesh_path: string, sections: [{ lod_index: number, section_index: number, cast_shadow: bool, collision_enabled: bool, visible_in_ray_tracing: bool }], total_sections: number }
 TSharedPtr<FJsonObject> HandleGetStaticMeshSections(
@@ -843,35 +730,11 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshLightmap(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_static_mesh_lightmap"));
 }
 
-// ---------------------------------------------------------------------------
-// get_static_mesh_lightmap
-// ---------------------------------------------------------------------------
-// MCP:get_static_mesh_lightmap - Read the asset-level lightmap settings of a UStaticMesh, loaded from its package or object path, without changing it: lightmap_resolution, the texel resolution static lighting is baked at, and lightmap_coordinate_index, the UV channel that holds the lightmap UVs. These are the mesh defaults; an override set on a placed component in a level is not read. A mesh that does not load is an error. Write them with set_static_mesh_lightmap; LODs, materials, sockets, collision and bounds are get_static_mesh_info; per-section flags are get_static_mesh_sections.
-//   @param static_mesh_path - Package or object path of the UStaticMesh, e.g. "/Game/Meshes/SM_Crate".
-//   @returns { static_mesh_path, lightmap_resolution, lightmap_coordinate_index }
-TSharedPtr<FJsonObject> HandleGetStaticMeshLightmap(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MeshPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("static_mesh_path"), MeshPath)) { return Missing; }
-
-	UStaticMesh* Mesh = nullptr;
-	if (TSharedPtr<FJsonObject> Error = StaticMesh_Load(MeshPath, Mesh)) { return Error; }
-
-	TSharedPtr<FJsonObject> Data = StaticMesh_NewPayload(MeshPath);
-	Data->SetNumberField(TEXT("lightmap_resolution"), Mesh->GetLightMapResolution());
-	Data->SetNumberField(TEXT("lightmap_coordinate_index"), Mesh->GetLightMapCoordinateIndex());
-	return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("add_static_mesh_socket"), &HandleAddStaticMeshSocket },
-	{ TEXT("create_editable_static_mesh"), &HandleCreateEditableStaticMesh },
 	{ TEXT("get_static_mesh_info"), &HandleGetStaticMeshInfo },
-	{ TEXT("get_static_mesh_lightmap"), &HandleGetStaticMeshLightmap },
 	{ TEXT("get_static_mesh_sections"), &HandleGetStaticMeshSections },
-	{ TEXT("get_static_mesh_sockets"), &HandleGetStaticMeshSockets },
 	{ TEXT("remove_static_mesh_socket"), &HandleRemoveStaticMeshSocket },
 	{ TEXT("rename_static_mesh_socket"), &HandleRenameStaticMeshSocket },
 	{ TEXT("set_static_mesh_collision_complexity"), &HandleSetStaticMeshCollisionComplexity },

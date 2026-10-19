@@ -385,7 +385,7 @@ namespace UEAgentPhysicsCommandsImpl
     }
 }
 
-// MCP:get_physics_settings - One-shot physics census of the current world: UPhysicsSettings substepping/delta-time values, world gravity_z, and a walk of every actor counting collision-enabled vs disabled, simulating bodies, mobility split and mass totals, plus a heuristic quality label and a recommendations list. Use it for a broad "what is the physics state of this level" sweep instead of hand-writing the actor loop in Python; for ONE component's collision use get_collision_info, and to change gravity use set_world_gravity / set_physics_gravity. Read the numbers with three caveats visible in the code: physics_engine is a hardcoded "PhysX" literal (UE5 actually runs Chaos), the walk takes only the FIRST primitive component per actor so multi-component actors are undercounted, and generate_hit_events is always 0 (never populated).
+// MCP:get_physics_settings - One-shot physics census of the current world: UPhysicsSettings substepping/delta-time values, world gravity_z, and a walk of every actor counting collision-enabled vs disabled, simulating bodies, mobility split and mass totals, plus a heuristic quality label and a recommendations list. Use it for a broad "what is the physics state of this level" sweep instead of hand-writing the actor loop in Python; for ONE component's collision use get_collision_info, and to change gravity use set_world_gravity (this world) or set_project_settings_value (the project default). Read the numbers with three caveats visible in the code: physics_engine is a hardcoded "PhysX" literal (UE5 actually runs Chaos), the walk takes only the FIRST primitive component per actor so multi-component actors are undercounted, and generate_hit_events is always 0 (never populated).
 //   @returns { physics_settings_found: bool, physics_engine: string (hardcoded "PhysX"), physics_quality: string (heuristic from max_physics_delta_time), max_physics_delta_time, max_substep_delta_time, max_substeps, world_name, world_gravity_z, world_gravity_enabled, per-component counts (collision enabled/disabled, simulating, static/stationary/movable, overlap events), mass totals (only simulating bodies contribute), recommendations: [string], complexity score }
 
 TSharedPtr<FJsonObject> HandleGetPhysicsSettings(const TSharedPtr<FJsonObject>& Params)
@@ -556,8 +556,8 @@ TSharedPtr<FJsonObject> HandleGetPhysicsSettings(const TSharedPtr<FJsonObject>& 
     return Report;
 }
 
-// configure_gravity lives in UEAgentLevelCommands.cpp (UEAgentLevelCommands), alongside
-// set_world_gravity, which writes the same AWorldSettings::GlobalGravityZ/bGlobalGravitySet fields.
+// set_world_gravity (presets included) lives in UEAgentLevelCommands.cpp; it writes
+// AWorldSettings::GlobalGravityZ/bGlobalGravitySet.
 
 // MCP:get_collision_info - Read ONE placed primitive component's collision setup and physics state: collision enabled mode, per-channel responses (WorldStatic / WorldDynamic / Pawn / PhysicsBody), overlap and hit event flags, simulate-physics, mobility, and the physical material with its friction / restitution / density. The tool to answer "why does this not block / not overlap" without writing Python. Two limits from the code: it searches by component NAME across the world's actors but only inspects each actor's FIRST primitive component, so a secondary component (a second collider, a trigger next to a mesh) reports "not found" even though it exists; and it reads the component's live responses, NOT the profile definition -- for the profile itself use get_collision_profile (which is blind to +EditProfiles overrides), and prove a channel really blocks with raycast_scene.
 //   @param component_name - Name of the primitive component to query (must be its actor's first primitive component to be findable).
@@ -792,7 +792,7 @@ TSharedPtr<FJsonObject> HandleAddImpulseToActor(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_instanced_static_mesh_component - Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_ism_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.
+// MCP:add_instanced_static_mesh_component - Attach an InstancedStaticMeshComponent (ISM) to a placed editor-world actor so you can then scatter many copies of one static mesh through it with add_instanced_static_mesh_instance. Idempotent: if the actor already has an ISM it returns that one with already_existed=true instead of adding a second. This is the working alternative to the foliage scatter tools, which crash the editor in this build.
 //   @param actor_name - Display label or internal name of the target editor-world actor (required)
 //   @param static_mesh_path - Optional /Game/... path to a UStaticMesh asset (defaults to engine cube if absent)
 //   @returns { actor_name: string, component_name: string, component_class: string, num_instances: int, already_existed: bool }
@@ -943,7 +943,7 @@ namespace
     }
 }
 
-// MCP:add_ism_instance - Place one more instance of an InstancedStaticMeshComponent's mesh at a world transform -- the cheap way to scatter many copies of a mesh (rocks, props, vegetation) without spawning an actor each. Pair it with add_instanced_static_mesh_component to create the component first. Prefer this route over the foliage tools: scatter_foliage_in_box and add_foliage_instances both CRASH the editor in this build, and an ISM is the same code path a foliage actor and PCG use anyway.
+// MCP:add_instanced_static_mesh_instance - Place one more instance of an InstancedStaticMeshComponent's mesh at a world transform -- the cheap way to scatter many copies of a mesh (rocks, props, vegetation) without spawning an actor each. Pair it with add_instanced_static_mesh_component to create the component first. Prefer this route over the foliage tools: scatter_foliage_in_box and add_foliage_instances both CRASH the editor in this build, and an ISM is the same code path a foliage actor and PCG use anyway.
 //   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
 //   @param component_name - Optional ISM component name (defaults to the first one on the actor)
 //   @param location - [x, y, z] world-space translation (required)
@@ -976,31 +976,64 @@ TSharedPtr<FJsonObject> HandleAddIsmInstance(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_ism_instance - Delete ONE instance from an InstancedStaticMeshComponent by index. Indices shift after a removal, so remove from the highest index down when deleting several; to empty the component entirely use clear_ism_instances instead. Re-read num_instances from the reply (or get_ism_instance_info) as the oracle -- removed:true alone is not proof of the final count.
+// MCP:remove_instanced_static_mesh_instance - Delete ONE instance from an InstancedStaticMeshComponent by index, or, with all=true, wipe every instance in one call (the component itself stays) -- e.g. to reset a scatter before re-running it. Indices shift after a removal, so remove from the highest index down when deleting several one by one. Re-read num_instances from the reply (or get_instanced_static_mesh_instance_info) as the oracle -- removed:true alone is not proof of the final count.
 //   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
 //   @param component_name - Optional ISM component name
-//   @param instance_index - Index of the instance to remove (required, >=0)
-//   @returns { removed: bool, num_instances: int }
+//   @param instance_index - Index of the instance to remove (>=0); required unless all is true, ignored when it is
+//   @param all - Optional bool (default false): remove every instance (ClearInstances) instead of one
+//   @returns { removed: bool, num_instances: int, component_name: string, all: bool, cleared: bool (all=true only: no instance left), removed_count: int (all=true only) }
 TSharedPtr<FJsonObject> HandleRemoveIsmInstance(const TSharedPtr<FJsonObject>& Params)
 {
+    // Optional params read up front: all=true needs no instance_index.
+    bool bAll = false;
+    Params->TryGetBoolField(TEXT("all"), bAll);
+    double IndexD = 0.0;
+    const bool bHasIndex = Params->TryGetNumberField(TEXT("instance_index"), IndexD);
+
+    FString ActorName;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
+
+    const int32 InstanceIndex = static_cast<int32>(IndexD);
+    if (!bAll)
+    {
+        if (!bHasIndex)
+        {
+            return mcp_common::MakeErrorReply(TEXT("Missing required parameter: instance_index (or pass all=true to remove every instance)"));
+        }
+        if (InstanceIndex < 0)
+        {
+            return mcp_common::MakeErrorReply(TEXT("'instance_index' must be >= 0"));
+        }
+    }
+
     UInstancedStaticMeshComponent* ISM = nullptr;
     FString ResolvedCompName;
-    int32 InstanceIndex = INDEX_NONE;
-    if (TSharedPtr<FJsonObject> Error = Physics_ReadIsmInstance(Params, ISM, ResolvedCompName, InstanceIndex))
+    if (TSharedPtr<FJsonObject> Error = Physics_FindIsm(Params, ActorName, /*bNameComponentInError=*/false, ISM, ResolvedCompName))
     {
         return Error;
     }
 
-    const bool bRemoved = ISM->RemoveInstance(InstanceIndex);
-
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("removed"), bRemoved);
+    Result->SetBoolField(TEXT("all"), bAll);
+    if (bAll)
+    {
+        const int32 CountBefore = ISM->GetInstanceCount();
+        ISM->ClearInstances();
+        const int32 CountAfter = ISM->GetInstanceCount();
+        Result->SetBoolField(TEXT("cleared"), CountAfter == 0);
+        Result->SetBoolField(TEXT("removed"), CountAfter < CountBefore);
+        Result->SetNumberField(TEXT("removed_count"), CountBefore - CountAfter);
+    }
+    else
+    {
+        Result->SetBoolField(TEXT("removed"), ISM->RemoveInstance(InstanceIndex));
+    }
     Result->SetNumberField(TEXT("num_instances"), ISM->GetInstanceCount());
     Result->SetStringField(TEXT("component_name"), ResolvedCompName);
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:update_ism_instance_transform - Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
+// MCP:update_instanced_static_mesh_instance_transform - Move, rotate or rescale ONE existing instance of an InstancedStaticMeshComponent in place, by index -- cheaper than remove + re-add and it keeps the index stable. Leave mark_render_state_dirty at its default true or the viewport keeps drawing the old transform.
 //   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
 //   @param component_name - Optional ISM component name
 //   @param instance_index - Index of the instance to update (required, >=0)
@@ -1040,32 +1073,7 @@ TSharedPtr<FJsonObject> HandleUpdateIsmInstanceTransform(const TSharedPtr<FJsonO
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:clear_ism_instances - Wipe ALL instances from an InstancedStaticMeshComponent in one call (the component itself stays). Use it to reset a scatter before re-running it, rather than looping remove_ism_instance. Returns the post-clear num_instances, which should be 0.
-//   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
-//   @param component_name - Optional ISM component name
-//   @returns { cleared: bool, num_instances: int }
-TSharedPtr<FJsonObject> HandleClearIsmInstances(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ActorName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
-
-    UInstancedStaticMeshComponent* ISM = nullptr;
-    FString ResolvedCompName;
-    if (TSharedPtr<FJsonObject> Error = Physics_FindIsm(Params, ActorName, /*bNameComponentInError=*/false, ISM, ResolvedCompName))
-    {
-        return Error;
-    }
-
-    ISM->ClearInstances();
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetBoolField(TEXT("cleared"), true);
-    Result->SetNumberField(TEXT("num_instances"), ISM->GetInstanceCount());
-    Result->SetStringField(TEXT("component_name"), ResolvedCompName);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:get_ism_instance_info - Count the instances in an InstancedStaticMeshComponent, or read one instance's transform (location / rotation / scale) and per-instance custom data floats. Two modes from one call: omit instance_index for COUNT mode (num_instances + num_custom_data_floats -- the oracle for "did my scatter actually place anything"), pass it for per-instance mode. Reads the component in the editor world, so it needs no PIE.
+// MCP:get_instanced_static_mesh_instance_info - Count the instances in an InstancedStaticMeshComponent, or read one instance's transform (location / rotation / scale) and per-instance custom data floats. Two modes from one call: omit instance_index for COUNT mode (num_instances + num_custom_data_floats -- the oracle for "did my scatter actually place anything"), pass it for per-instance mode. Reads the component in the editor world, so it needs no PIE.
 //   @param actor_name - Display label or internal name of the actor carrying the ISM component (required)
 //   @param component_name - Optional ISM component name (defaults to the first one on the actor)
 //   @param instance_index - Optional; absent -> count mode; present and >=0 -> per-instance mode (must be a valid index)
@@ -1220,7 +1228,7 @@ TSharedPtr<FJsonObject> HandleRaycastScene(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:overlap_scene - Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
+// MCP:query_scene_overlaps - Sphere / box / capsule overlap query against the world: "what is inside this volume?", returning one JSON entry per overlapping actor+component instead of export-text, so no Python is needed to parse it. Use it over raycast_scene when the question is proximity/containment rather than line of sight -- e.g. is the pawn actually inside a water body's real collision, is anything blocking a build spot. Accepts the same `world` selector (editor / server / client / pie:N): an editor-world query does NOT see World-Partition/OFPA actor collision, so pass a live PIE world, and in co-op say WHICH one or an empty result is uninterpretable.
 //   @param shape [string!] - "sphere" | "box" | "capsule"
 //   @param location [array!] - World-space [x, y, z] shape center
 //   @param radius [number] - Sphere/capsule radius (required for those shapes)
@@ -1327,7 +1335,7 @@ TSharedPtr<FJsonObject> HandleOverlapScene(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_actor_bounds - Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use overlap_scene/raycast_scene with a `world` selector.
+// MCP:get_actor_bounds - Measure how BIG an actor really is: its aggregate world-space bounding box (origin, half-extent, min, max) in the EDITOR world. The size oracle for placement and footprint questions, and the honest test for "did that volume/brush actually get built" -- a spawned volume whose extent comes back (0,0,0) has no geometry no matter what the spawning tool reported. Its `components` filter is the reason to prefer it over reading a component property: "all" (default, AActor::GetActorBounds -- inflated by interaction/trigger shapes), "colliding" (only collision-enabled components) or "mesh"/"rendered" (UMeshComponent geometry ONLY, so trigger spheres/boxes are excluded and the box hugs what you actually see). Editor world only -- for a PIE-world footprint use query_scene_overlaps/raycast_scene with a `world` selector.
 //   @param actor_name [string!] - Actor name or editor label
 //   @param components [string] - Which components contribute: "all" (default; everything, trigger shapes included) | "colliding" (collision-enabled only) | "mesh" | "rendered" (UMeshComponent geometry only)
 //   @param include_child_actors [bool] - Include child-actor components' bounds. Defaults to false.
@@ -1480,16 +1488,15 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_impulse_to_actor"), &HandleAddImpulseToActor },
     { TEXT("add_instanced_static_mesh_component"), &HandleAddInstancedStaticMeshComponent },
-    { TEXT("add_ism_instance"), &HandleAddIsmInstance },
-    { TEXT("clear_ism_instances"), &HandleClearIsmInstances },
+    { TEXT("add_instanced_static_mesh_instance"), &HandleAddIsmInstance },
     { TEXT("get_actor_bounds"), &HandleGetActorBounds },
     { TEXT("get_collision_info"), &HandleGetCollisionInfo },
-    { TEXT("get_ism_instance_info"), &HandleGetIsmInstanceInfo },
+    { TEXT("get_instanced_static_mesh_instance_info"), &HandleGetIsmInstanceInfo },
     { TEXT("get_physics_settings"), &HandleGetPhysicsSettings },
     { TEXT("get_scene_bounds"), &HandleGetSceneBounds },
-    { TEXT("overlap_scene"), &HandleOverlapScene },
+    { TEXT("query_scene_overlaps"), &HandleOverlapScene },
     { TEXT("raycast_scene"), &HandleRaycastScene },
-    { TEXT("remove_ism_instance"), &HandleRemoveIsmInstance },
-    { TEXT("update_ism_instance_transform"), &HandleUpdateIsmInstanceTransform },
+    { TEXT("remove_instanced_static_mesh_instance"), &HandleRemoveIsmInstance },
+    { TEXT("update_instanced_static_mesh_instance_transform"), &HandleUpdateIsmInstanceTransform },
 };
 } // namespace UEAgentPhysicsCommands

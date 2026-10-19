@@ -158,10 +158,11 @@ namespace
 // ---------------------------------------------------------------------------
 // list_usd_variant_sets
 // ---------------------------------------------------------------------------
-// MCP:list_usd_variant_sets - List every variant set authored on a prim, plus the current selection for each set (selections map may be empty when no selection is authored)
+// MCP:list_usd_variant_sets - List every variant set authored on a prim with its variant names and the current selection for each set (the selections map may be empty when no selection is authored), or with variant_set_name only that set, reported also as variant_set_name, current_selection and variant_count. A variant_set_name the prim does not author is an error.
 //   @param stage_name [string!] - Stage cache key
 //   @param prim_path [string!] - SdfPath of the prim to inspect
-//   @returns { prim_path: string, names: [string], selections: object, count: int }
+//   @param variant_set_name - Optional name of the one variant set to report
+//   @returns { prim_path: string, names: [string], selections: object, variants: object (set name -> [variant name]), count: int, variant_set_name?: string, current_selection?: string, variant_count?: int }
 
 TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& Params)
 {
@@ -182,64 +183,46 @@ TSharedPtr<FJsonObject> HandleListUsdVariantSets(const TSharedPtr<FJsonObject>& 
 	// FUsdVariantSets is constructed only by FUsdPrim (friend access). For a
 	// valid prim, GetVariantSets() always returns a non-invalid instance.
 	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
-	const TArray<FString> Names = VSets.GetNames();
-	const TMap<FString, FString> Selections = VSets.GetAllVariantSelections();
+	TArray<FString> Names = VSets.GetNames();
+	TMap<FString, FString> Selections = VSets.GetAllVariantSelections();
 
+	// One named set: HasVariantSet is the explicit guard (the bool conversion is well-defined on a missing
+	// set in pxr::, so a missing name must not read as an empty set).
+	FString OnlySet;
+	const bool bOneSet = Params->TryGetStringField(TEXT("variant_set_name"), OnlySet) && !OnlySet.IsEmpty();
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	if (bOneSet)
+	{
+		UE::FUsdVariantSet VSet;
+		if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, OnlySet, PrimPath, TEXT(""), VSet))
+		{
+			return Error;
+		}
+		const TArray<FString> Variants = VSet.GetVariantNames();
+		const FString Selection = VSet.GetVariantSelection();
+		Names = { OnlySet };
+		Selections.Empty();
+		if (!Selection.IsEmpty())
+		{
+			Selections.Add(OnlySet, Selection);
+		}
+		Data->SetStringField(TEXT("variant_set_name"), OnlySet);
+		Data->SetStringField(TEXT("current_selection"), Selection);
+		Data->SetNumberField(TEXT("variant_count"), Variants.Num());
+	}
+
+	// Each listed set's variant names.
+	TSharedPtr<FJsonObject> VariantsBySet = MakeShared<FJsonObject>();
+	for (const FString& SetName : Names)
+	{
+		VariantsBySet->SetArrayField(SetName, mcp_common::StringsToJson(VSets.GetVariantSet(SetName).GetVariantNames()));
+	}
+
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetArrayField(TEXT("names"), mcp_common::StringsToJson(Names));
 	Data->SetObjectField(TEXT("selections"), SelectionsToJson(Selections));
+	Data->SetObjectField(TEXT("variants"), VariantsBySet);
 	Data->SetNumberField(TEXT("count"), Names.Num());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// get_usd_variant_set_info
-// ---------------------------------------------------------------------------
-// MCP:get_usd_variant_set_info - Read the variant names and current selection for a single variant set on a prim
-//   @param stage_name [string!] - Stage cache key
-//   @param prim_path [string!] - SdfPath of the prim that authors the variant set
-//   @param variant_set_name [string!] - Name of the variant set to inspect
-//   @returns { prim_path: string, variant_set_name: string, variants: [string], current_selection: string, variant_count: int }
-
-TSharedPtr<FJsonObject> HandleGetUsdVariantSetInfo(const TSharedPtr<FJsonObject>& Params)
-{
-	UE::FUsdStage Stage;
-	FString StageName;
-	FString PrimPath;
-	if (TSharedPtr<FJsonObject> Error = UsdVariant_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
-	{
-		return Error;
-	}
-
-	FString VariantSetName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("variant_set_name"), VariantSetName)) { return Missing; }
-
-	UE::FUsdPrim Prim;
-	if (TSharedPtr<FJsonObject> Error = UsdVariant_FindPrim(Stage, StageName, PrimPath, Prim))
-	{
-		return Error;
-	}
-
-	// FUsdVariantSet is also friend-constructed only by FUsdPrim or
-	// FUsdVariantSets. The bool conversion is well-defined on a missing set
-	// in pxr::, but HasVariantSet is the explicit guard.
-	UE::FUsdVariantSets VSets = Prim.GetVariantSets();
-	UE::FUsdVariantSet VSet;
-	if (TSharedPtr<FJsonObject> Error = UsdVariant_GetVariantSet(VSets, VariantSetName, PrimPath, TEXT(""), VSet))
-	{
-		return Error;
-	}
-
-	const TArray<FString> Variants = VSet.GetVariantNames();
-	const FString Selection = VSet.GetVariantSelection();
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("prim_path"), PrimPath);
-	Data->SetStringField(TEXT("variant_set_name"), VariantSetName);
-	Data->SetArrayField(TEXT("variants"), mcp_common::StringsToJson(Variants));
-	Data->SetStringField(TEXT("current_selection"), Selection);
-	Data->SetNumberField(TEXT("variant_count"), Variants.Num());
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -480,7 +463,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_usd_variant"), &HandleAddUsdVariant },
 	{ TEXT("add_usd_variant_set"), &HandleAddUsdVariantSet },
 	{ TEXT("clear_usd_variant_selection"), &HandleClearUsdVariantSelection },
-	{ TEXT("get_usd_variant_set_info"), &HandleGetUsdVariantSetInfo },
 	{ TEXT("list_usd_variant_sets"), &HandleListUsdVariantSets },
 	{ TEXT("set_usd_variant_selection"), &HandleSetUsdVariantSelection },
 };

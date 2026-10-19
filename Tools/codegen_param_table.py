@@ -92,7 +92,7 @@ SOURCE = "Resources/command_catalog.json"
 # ---------------------------------------------------------------------------
 PROTOCOL_KEYS: list[tuple[str, str]] = [
     ("command_type",
-     "sub-command envelope key of `batch` items and of build_blueprint_graph nodes "
+     "sub-command envelope key of `execute_batch` items and of build_blueprint_graph nodes "
      "(UEAgentMetaCommands.cpp HandleBatch)"),
     ("command",
      "alternative spelling of the command name used by hand-written callers"),

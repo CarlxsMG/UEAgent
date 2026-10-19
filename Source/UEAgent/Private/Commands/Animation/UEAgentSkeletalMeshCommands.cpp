@@ -2,7 +2,6 @@
 #include "Commands/Common/McpCommonUtils.h"
 
 #include "Editor.h"
-#include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
 
@@ -188,100 +187,6 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// create_editable_skeletal_mesh
-// ---------------------------------------------------------------------------
-// MCP:create_editable_skeletal_mesh - Duplicate a skeletal mesh (default /Engine/EngineMeshes/SkeletalCube) to package_path/skeletal_mesh_name in the project's content so it can be edited, creating the folder if needed. The copy keeps the source's skeleton (create_editable_skeleton makes a /Game skeleton) and is saved only when source control is enabled, otherwise follow with save_asset. Idempotent: a skeletal mesh already at that path is returned with created=false; any other asset there is an error. A source_mesh that is not a skeletal mesh is an error, and so is a destination that is engine content, under a read-only root or under no mounted root. duplicate_asset copies other asset types.
-//   @param package_path - Destination folder: a long package path used as given (/Game, /Game/MyGame or a project plugin mount), or a relative folder taken under /Game.
-//   @param skeletal_mesh_name - Name for the new skeletal mesh asset
-//   @param source_mesh - Content path to source mesh to duplicate (default /Engine/EngineMeshes/SkeletalCube)
-//   @returns { asset_path: string, skeletal_mesh_name: string, source_mesh: string, created: bool }
-
-TSharedPtr<FJsonObject> HandleCreateEditableSkeletalMesh(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString PackagePath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), PackagePath)) { return Missing; }
-
-	FString MeshName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_name"), MeshName)) { return Missing; }
-
-	FString SourceMesh = TEXT("/Engine/EngineMeshes/SkeletalCube");
-	Params->TryGetStringField(TEXT("source_mesh"), SourceMesh);
-
-	// A long package path ("/Game", "/Game/X", a plugin mount) is used as given; a relative folder ("X/Y") is
-	// taken under /Game.
-	while (PackagePath.EndsWith(TEXT("/")))
-	{
-		PackagePath.LeftChopInline(1);
-	}
-	if (PackagePath.IsEmpty())
-	{
-		PackagePath = TEXT("/Game");
-	}
-	else if (!PackagePath.StartsWith(TEXT("/")))
-	{
-		PackagePath = TEXT("/Game/") + PackagePath;
-	}
-	const FString FullPath = PackagePath + TEXT("/") + MeshName;
-	if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-	const FString DestinationBlocker = SkMesh_PackageWriteBlocker(FullPath);
-	if (!DestinationBlocker.IsEmpty())
-	{
-		return mcp_common::MakeErrorReply(FString::Printf(
-			TEXT("Cannot create the editable copy: %s. Pick a folder in the project's content, e.g. /Game/MyGame."),
-			*DestinationBlocker));
-	}
-
-	// Idempotent. UEditorAssetLibrary::DoesAssetExist is not reliable headless for
-	// recently-created assets (see headless-asset-gotchas) -- LoadObject directly
-	// against the destination path is the honest check: it either resolves a real
-	// asset or it doesn't, with no registry-lag false negative.
-	{
-		USkeletalMesh* Existing = mcp_common::LoadAssetOrSoftPath<USkeletalMesh>(FullPath);
-		if (Existing)
-		{
-			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-			Data->SetStringField(TEXT("asset_path"), FullPath);
-			Data->SetStringField(TEXT("skeletal_mesh_name"), MeshName);
-			Data->SetStringField(TEXT("source_mesh"), SourceMesh);
-			Data->SetBoolField(TEXT("created"), false);
-			return mcp_common::MakeOkReply(Data);
-		}
-	}
-
-	// The source must be a skeletal mesh: duplicating whatever sits at source_mesh would report another asset
-	// type as an editable skeletal mesh.
-	USkeletalMesh* SourceSkMesh = mcp_common::LoadAssetOrSoftPath<USkeletalMesh>(SourceMesh);
-	if (!SourceSkMesh)
-	{
-		const UObject* Other = mcp_common::LoadAssetOrSoftPath(SourceMesh, UObject::StaticClass());
-		return mcp_common::MakeErrorReply(Other
-			? FString::Printf(TEXT("source_mesh %s is a %s, not a skeletal mesh; duplicate_asset copies other asset types"),
-				*SourceMesh, *Other->GetClass()->GetName())
-			: FString::Printf(TEXT("source_mesh not found: %s"), *SourceMesh));
-	}
-
-	if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
-		UEditorAssetLibrary::MakeDirectory(PackagePath);
-
-	UObject* DuplicatedObj = UEditorAssetLibrary::DuplicateLoadedAsset(SourceSkMesh, FullPath);
-	if (!DuplicatedObj)
-		DuplicatedObj = UEditorAssetLibrary::DuplicateAsset(SourceSkMesh->GetPathName(), FullPath);
-	if (!Cast<USkeletalMesh>(DuplicatedObj))
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Failed to duplicate %s to %s"), *SourceMesh, *FullPath));
-	}
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("asset_path"), FullPath);
-	Data->SetStringField(TEXT("skeletal_mesh_name"), MeshName);
-	Data->SetStringField(TEXT("source_mesh"), SourceMesh);
-	Data->SetBoolField(TEXT("created"), true);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // get_skeletal_mesh_info
 // ---------------------------------------------------------------------------
 // MCP:get_skeletal_mesh_info - Get detailed info about a skeletal mesh: LODs, materials, morph targets, sockets, bones.
@@ -349,7 +254,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshInfo(
 // ---------------------------------------------------------------------------
 // add_skeletal_mesh_socket
 // ---------------------------------------------------------------------------
-// MCP:add_skeletal_mesh_socket - Add a socket on a named bone of a skeletal mesh asset (undoable) and save the mesh. A copy also goes to the mesh's skeleton, which is then saved too; when the skeleton already has a socket of that name, the mesh has no skeleton, or the skeleton is engine content or under a read-only root, no copy is made (added_to_skeleton false) and skeleton_note says why. Errors, writing nothing, when the mesh does not load, the mesh already has a socket of that name, or the bone is missing from the mesh or its skeleton. success is false when a changed package fails to save. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_socket_to_skeleton_asset.
+// MCP:add_skeletal_mesh_socket - Add a socket on a named bone of a skeletal mesh asset (undoable) and save the mesh. A copy also goes to the mesh's skeleton, which is then saved too; when the skeleton already has a socket of that name, the mesh has no skeleton, or the skeleton is engine content or under a read-only root, no copy is made (added_to_skeleton false) and skeleton_note says why. Errors, writing nothing, when the mesh does not load, the mesh already has a socket of that name, or the bone is missing from the mesh or its skeleton. success is false when a changed package fails to save. Edit existing sockets with set_skeletal_mesh_socket_transform or rename_skeletal_mesh_socket; skeleton-only sockets with add_skeleton_socket.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset
 //   @param socket_name - Name for the new socket; leading and trailing spaces are trimmed, and a name the mesh already has is an error.
 //   @param bone_name - Name of the bone to attach the socket to; it must exist in the mesh and, when the copy goes to the skeleton, in the skeleton too.
@@ -535,7 +440,7 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshMorphTargets(
 // ---------------------------------------------------------------------------
 // get_skeletal_mesh_lod_info
 // ---------------------------------------------------------------------------
-// MCP:get_skeletal_mesh_lod_info - Read the settings of one LOD of a skeletal mesh asset found by content path: screen size, material map entry count, CPU access, the build settings, the reduction settings and the flat LOD scalars (hysteresis, prioritization weight, morph error tolerance, skin cache usage, mesh deformer). Enums come back by name, e.g. "SMTC_NumOfTriangles" or "Auto", a form the setters accept. Nothing is written. A mesh that does not load, or a lod_index outside its LOD count, is an error. Each block has its setter: set_skeletal_mesh_lod_build_settings, set_skeletal_mesh_lod_reduction_settings, set_skeletal_mesh_lod_settings and set_skeletal_mesh_lod_screen_size. Per-LOD vertex counts: get_skeletal_mesh_info; triangle counts: get_asset_lod_settings; sections: get_skeletal_mesh_section_info.
+// MCP:get_skeletal_mesh_lod_info - Read the settings of one LOD of a skeletal mesh asset found by content path: screen size, material map entry count, CPU access, the build settings, the reduction settings and the flat LOD scalars (hysteresis, prioritization weight, morph error tolerance, skin cache usage, mesh deformer). Enums come back by name, e.g. "SMTC_NumOfTriangles" or "Auto", a form the setters accept. Nothing is written. A mesh that does not load, or a lod_index outside its LOD count, is an error. Each block has its setter: set_skeletal_mesh_lod_build_settings, set_skeletal_mesh_lod_reduction_settings, and set_skeletal_mesh_lod_settings (screen_size included). Per-LOD vertex counts: get_skeletal_mesh_info; triangle counts: get_asset_lod_settings; sections: get_skeletal_mesh_section_info.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param lod_index - 0-based LOD index to read (default 0); it must be below the LOD count of the mesh
 //   @returns { lod_index: int, screen_size: float, num_material_map_entries: int, allow_cpu_access: bool, build_settings: {...}, reduction_settings: {...}, lod_hysteresis: float, weight_of_prioritization: float, morph_target_position_error_tolerance: float, skin_cache_usage: string, allow_mesh_deformer: bool }
@@ -814,16 +719,17 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodReductionSettings(
 // ---------------------------------------------------------------------------
 // set_skeletal_mesh_lod_settings
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_lod_settings - Set the remaining flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter covers (hysteresis, CPU access, morph error tolerance, skin cache usage, mesh deformer, prioritization weight).  Partial update (idempotent): only fields present are written.
+// MCP:set_skeletal_mesh_lod_settings - Set the flat per-LOD scalars/enums of FSkeletalMeshLODInfo that no other setter covers (screen size, hysteresis, CPU access, morph error tolerance, skin cache usage, mesh deformer, prioritization weight) on one LOD or, with lod_index -1 or "all", on every LOD of the mesh, then save the mesh. Partial update (idempotent): only fields present are written; a bad skin_cache_usage or lod_index is refused before anything is written. A failed save is an error that leaves the change in memory. Per-platform screen-size overrides are left as they are.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset.
-//   @param lod_index - LOD index to modify (default 0).
+//   @param lod_index - Optional. 0-based LOD index to modify (default 0), or -1 / "all" for every LOD. allow_cpu_access with every LOD goes through USkeletalMeshEditorSubsystem::SetAllowCPUAccess.
+//   @param screen_size - Optional float, ScreenSize.Default: the screen size at which this LOD switches in (e.g. 0.3).
 //   @param lod_hysteresis - float, avoids flickering at the LOD boundary.
 //   @param allow_cpu_access - bool, keep this LOD's data on the CPU (e.g. for FX sampling).
 //   @param morph_target_position_error_tolerance - float in microns, Clamp 0.01..10000 (default 20).
 //   @param skin_cache_usage - ESkinCacheUsage by NAME: Auto|Disabled|Enabled (Disabled=255, parsed by name).
 //   @param allow_mesh_deformer - bool, whether a Mesh Deformer is used on this LOD.
 //   @param weight_of_prioritization - float >=0, weight given to BonesToPrioritize/SectionsToPrioritize.
-//   @returns { lod_index: int, settings_applied: {...}, saved: bool }
+//   @returns { skeletal_mesh_path: string, lod_index: int (-1 for every LOD), all_lods: bool, applied_lods: int, settings_applied: {...}, old_screen_size?: float (one LOD), old_screen_sizes?: [float] (every LOD), saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 	const TSharedPtr<FJsonObject>& Params)
@@ -831,40 +737,116 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodSettings(
 	FString MeshPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
 
+	// lod_index: a 0-based LOD (a JSON number or a numeric string), or -1 / "all" for every LOD.
 	int32 LodIndex = 0;
-	Params->TryGetNumberField(TEXT("lod_index"), LodIndex);
+	FString LodIndexText;
+	if (Params->TryGetStringField(TEXT("lod_index"), LodIndexText))
+	{
+		LodIndexText.TrimStartAndEndInline();
+		if (LodIndexText.Equals(TEXT("all"), ESearchCase::IgnoreCase))
+		{
+			LodIndex = INDEX_NONE;
+		}
+		else if (LodIndexText.IsNumeric())
+		{
+			LodIndex = FCString::Atoi(*LodIndexText);
+		}
+		else
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("lod_index must be a 0-based LOD index, -1 or \"all\" (got \"%s\")"), *LodIndexText));
+		}
+	}
+	else
+	{
+		Params->TryGetNumberField(TEXT("lod_index"), LodIndex);
+	}
+	const bool bAllLods = LodIndex == INDEX_NONE;
+
+	// Values are read and validated before anything is written.
+	double ScreenSize = 0.0, Hysteresis = 0.0, Weight = 0.0, Tolerance = 0.0;
+	bool bCpuAccess = false, bMeshDeformer = false;
+	const bool bHasScreenSize = Params->TryGetNumberField(TEXT("screen_size"), ScreenSize);
+	const bool bHasHysteresis = Params->TryGetNumberField(TEXT("lod_hysteresis"), Hysteresis);
+	const bool bHasWeight = Params->TryGetNumberField(TEXT("weight_of_prioritization"), Weight);
+	const bool bHasTolerance = Params->TryGetNumberField(TEXT("morph_target_position_error_tolerance"), Tolerance);
+	const bool bHasCpuAccess = Params->TryGetBoolField(TEXT("allow_cpu_access"), bCpuAccess);
+	const bool bHasMeshDeformer = Params->TryGetBoolField(TEXT("allow_mesh_deformer"), bMeshDeformer);
+	FString SkinCacheText;
+	ESkinCacheUsage SkinCache = ESkinCacheUsage::Auto;
+	const bool bHasSkinCache = Params->TryGetStringField(TEXT("skin_cache_usage"), SkinCacheText);
+	if (bHasSkinCache && !ParseEnumByName(SkinCacheText, TEXT("ESkinCacheUsage::"), SkinCache))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Unknown skin_cache_usage: %s (Auto/Disabled/Enabled)"), *SkinCacheText));
+	}
 
 	USkeletalMesh* Mesh = nullptr;
 	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
 
-	FSkeletalMeshLODInfo* LODInfo = nullptr;
-	if (TSharedPtr<FJsonObject> Error = SkMesh_FindLODInfo(Mesh, LodIndex, TEXT("LOD index"), LODInfo)) { return Error; }
-
-	TSharedPtr<FJsonObject> AppliedObj = MakeShared<FJsonObject>();
-	FString S; double Num; bool B;
-
-	if (Params->TryGetNumberField(TEXT("lod_hysteresis"), Num)) { LODInfo->LODHysteresis = static_cast<float>(Num); AppliedObj->SetNumberField(TEXT("lod_hysteresis"), Num); }
-	if (Params->TryGetNumberField(TEXT("weight_of_prioritization"), Num)) { LODInfo->WeightOfPrioritization = FMath::Max(0.f, static_cast<float>(Num)); AppliedObj->SetNumberField(TEXT("weight_of_prioritization"), LODInfo->WeightOfPrioritization); }
-	if (Params->TryGetNumberField(TEXT("morph_target_position_error_tolerance"), Num)) { LODInfo->MorphTargetPositionErrorTolerance = FMath::Clamp(static_cast<float>(Num), 0.01f, 10000.f); AppliedObj->SetNumberField(TEXT("morph_target_position_error_tolerance"), LODInfo->MorphTargetPositionErrorTolerance); }
-	if (Params->TryGetBoolField(TEXT("allow_cpu_access"), B)) { LODInfo->bAllowCPUAccess = B ? 1 : 0; AppliedObj->SetBoolField(TEXT("allow_cpu_access"), B); }
-	if (Params->TryGetBoolField(TEXT("allow_mesh_deformer"), B)) { LODInfo->bAllowMeshDeformer = B ? 1 : 0; AppliedObj->SetBoolField(TEXT("allow_mesh_deformer"), B); }
-	if (Params->TryGetStringField(TEXT("skin_cache_usage"), S))
+	// The LODs this call writes: the one asked for (refused when out of range), or every LOD.
+	TArray<FSkeletalMeshLODInfo*> Infos;
+	if (bAllLods)
 	{
-		ESkinCacheUsage E;
-		if (!ParseEnumByName(S, TEXT("ESkinCacheUsage::"), E))
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Unknown skin_cache_usage: %s (Auto/Disabled/Enabled)"), *S));
-		LODInfo->SkinCacheUsage = E;
-		AppliedObj->SetStringField(TEXT("skin_cache_usage"), EnumToName(E));
+		for (int32 Index = 0; Index < Mesh->GetLODNum(); ++Index)
+		{
+			if (FSkeletalMeshLODInfo* Info = Mesh->GetLODInfo(Index))
+			{
+				Infos.Add(Info);
+			}
+		}
+	}
+	else
+	{
+		FSkeletalMeshLODInfo* LODInfo = nullptr;
+		if (TSharedPtr<FJsonObject> Error = SkMesh_FindLODInfo(Mesh, LodIndex, TEXT("LOD index"), LODInfo)) { return Error; }
+		Infos.Add(LODInfo);
 	}
 
 	Mesh->Modify();
+	TSharedPtr<FJsonObject> AppliedObj = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> OldScreenSizes;
+	for (FSkeletalMeshLODInfo* LODInfo : Infos)
+	{
+		if (bHasScreenSize)
+		{
+			OldScreenSizes.Add(MakeShared<FJsonValueNumber>(LODInfo->ScreenSize.Default));
+			LODInfo->ScreenSize.Default = static_cast<float>(ScreenSize);
+			AppliedObj->SetNumberField(TEXT("screen_size"), LODInfo->ScreenSize.Default);
+		}
+		if (bHasHysteresis) { LODInfo->LODHysteresis = static_cast<float>(Hysteresis); AppliedObj->SetNumberField(TEXT("lod_hysteresis"), Hysteresis); }
+		if (bHasWeight) { LODInfo->WeightOfPrioritization = FMath::Max(0.f, static_cast<float>(Weight)); AppliedObj->SetNumberField(TEXT("weight_of_prioritization"), LODInfo->WeightOfPrioritization); }
+		if (bHasTolerance) { LODInfo->MorphTargetPositionErrorTolerance = FMath::Clamp(static_cast<float>(Tolerance), 0.01f, 10000.f); AppliedObj->SetNumberField(TEXT("morph_target_position_error_tolerance"), LODInfo->MorphTargetPositionErrorTolerance); }
+		// Every LOD's CPU access goes through the editor subsystem below instead.
+		if (bHasCpuAccess && !bAllLods) { LODInfo->bAllowCPUAccess = bCpuAccess ? 1 : 0; AppliedObj->SetBoolField(TEXT("allow_cpu_access"), bCpuAccess); }
+		if (bHasMeshDeformer) { LODInfo->bAllowMeshDeformer = bMeshDeformer ? 1 : 0; AppliedObj->SetBoolField(TEXT("allow_mesh_deformer"), bMeshDeformer); }
+		if (bHasSkinCache) { LODInfo->SkinCacheUsage = SkinCache; AppliedObj->SetStringField(TEXT("skin_cache_usage"), EnumToName(SkinCache)); }
+	}
+	if (bHasCpuAccess && bAllLods)
+	{
+		USkeletalMeshEditorSubsystem::SetAllowCPUAccess(Mesh, bCpuAccess);
+		AppliedObj->SetBoolField(TEXT("allow_cpu_access"), bCpuAccess);
+	}
+
 	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
 		return SaveFailed;
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
+	Data->SetBoolField(TEXT("all_lods"), bAllLods);
+	Data->SetNumberField(TEXT("applied_lods"), Infos.Num());
 	Data->SetObjectField(TEXT("settings_applied"), AppliedObj);
+	if (bHasScreenSize)
+	{
+		if (bAllLods)
+		{
+			Data->SetArrayField(TEXT("old_screen_sizes"), OldScreenSizes);
+		}
+		else if (OldScreenSizes.Num() > 0)
+		{
+			Data->SetField(TEXT("old_screen_size"), OldScreenSizes[0]);
+		}
+	}
 	Data->SetBoolField(TEXT("saved"), true);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1349,64 +1331,16 @@ TSharedPtr<FJsonObject> HandleGetSkeletalMeshSectionInfo(
 }
 
 // ---------------------------------------------------------------------------
-// set_skeletal_mesh_section_recompute_tangent
+// set_skeletal_mesh_section_flags
 // ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_section_recompute_tangent - Turn runtime tangent recomputation (a GPU skin cache feature) on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_cast_shadow and set_skeletal_mesh_section_visible_in_ray_tracing.
+// MCP:set_skeletal_mesh_section_flags - Turn shadow casting, runtime tangent recomputation (a GPU skin cache feature) and/or ray-tracing visibility on or off for one section of one LOD of a skeletal mesh asset found by content path; pass at least one of the three flags, and only the flags passed are written. The SkeletalMeshEditorSubsystem writes the section's user data (one undo step per flag) and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error, and the flags written before the refused one stay in memory unsaved; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param lod_index - 0-based LOD index containing the section (default 0)
 //   @param section_index - 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0)
-//   @param recompute_tangent - New value for the flag (default true)
-//   @returns { lod_index: int, section_index: int, recompute_tangent: bool, saved: bool }
-
-TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionRecomputeTangent(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MeshPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
-
-	int32 LodIndex = 0;
-	Params->TryGetNumberField(TEXT("lod_index"), LodIndex);
-
-	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
-
-	bool bValue = true;
-	Params->TryGetBoolField(TEXT("recompute_tangent"), bValue);
-
-	USkeletalMesh* Mesh = nullptr;
-	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
-
-	USkeletalMeshEditorSubsystem* Subsys = GEditor->GetEditorSubsystem<USkeletalMeshEditorSubsystem>();
-	if (!Subsys)
-		return mcp_common::MakeErrorReply(TEXT("SkeletalMeshEditorSubsystem unavailable"));
-
-	Mesh->Modify();
-	if (!Subsys->SetSectionRecomputeTangent(Mesh, LodIndex, SectionIndex, bValue))
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("SetSectionRecomputeTangent failed for LOD %d section %d"), LodIndex, SectionIndex));
-	}
-
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("lod_index"), LodIndex);
-	Data->SetNumberField(TEXT("section_index"), SectionIndex);
-	Data->SetBoolField(TEXT("recompute_tangent"), bValue);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// set_skeletal_mesh_section_cast_shadow
-// ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_section_cast_shadow - Turn shadow casting on or off for one section of one LOD of a skeletal mesh asset found by content path. The SkeletalMeshEditorSubsystem writes the section's user data in one undo step and rebuilds the render data, then the mesh is saved. A mesh that does not load, a LOD or section index its imported model does not have, or a call during PIE (the subsystem refuses it) is an error; so is a failed save, which leaves the change in memory. Setting the current value again re-applies and re-saves it. Read the section flags with get_skeletal_mesh_section_info; the sibling flags are set_skeletal_mesh_section_recompute_tangent and set_skeletal_mesh_section_visible_in_ray_tracing.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
-//   @param lod_index - 0-based LOD index containing the section (default 0)
-//   @param section_index - 0-based index of the section within that LOD, as get_skeletal_mesh_section_info lists it (default 0)
-//   @param cast_shadow - New value for the flag (default true)
-//   @returns { lod_index: int, section_index: int, cast_shadow: bool, saved: bool }
+//   @param cast_shadow - Optional bool: whether the section casts shadows.
+//   @param recompute_tangent - Optional bool: whether the GPU skin cache recomputes the section's tangents at runtime.
+//   @param visible_in_ray_tracing - Optional bool: whether the section is visible in ray tracing (bVisibleInRayTracing). b_visible is accepted as an alias.
+//   @returns { skeletal_mesh_path: string, lod_index: int, section_index: int, cast_shadow?: bool, recompute_tangent?: bool, visible_in_ray_tracing?: bool, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 	const TSharedPtr<FJsonObject>& Params)
@@ -1420,8 +1354,22 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 	int32 SectionIndex = 0;
 	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
 
-	bool bValue = true;
-	Params->TryGetBoolField(TEXT("cast_shadow"), bValue);
+	// The flags to write: only those passed, at least one.
+	bool bCastShadow = true;
+	const bool bHasCastShadow = Params->TryGetBoolField(TEXT("cast_shadow"), bCastShadow);
+	bool bRecomputeTangent = true;
+	const bool bHasRecomputeTangent = Params->TryGetBoolField(TEXT("recompute_tangent"), bRecomputeTangent);
+	bool bVisibleInRayTracing = true;
+	bool bHasVisibleInRayTracing = true;
+	if (!Params->TryGetBoolField(TEXT("visible_in_ray_tracing"), bVisibleInRayTracing))
+	{
+		bHasVisibleInRayTracing = Params->TryGetBoolField(TEXT("b_visible"), bVisibleInRayTracing);
+	}
+	if (!bHasCastShadow && !bHasRecomputeTangent && !bHasVisibleInRayTracing)
+	{
+		return mcp_common::MakeErrorReply(
+			TEXT("Pass at least one flag to write: cast_shadow, recompute_tangent or visible_in_ray_tracing (bools)"));
+	}
 
 	USkeletalMesh* Mesh = nullptr;
 	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
@@ -1431,19 +1379,40 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionCastShadow(
 		return mcp_common::MakeErrorReply(TEXT("SkeletalMeshEditorSubsystem unavailable"));
 
 	Mesh->Modify();
-	if (!Subsys->SetSectionCastShadow(Mesh, LodIndex, SectionIndex, bValue))
+	if (bHasCastShadow && !Subsys->SetSectionCastShadow(Mesh, LodIndex, SectionIndex, bCastShadow))
 	{
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("SetSectionCastShadow failed for LOD %d section %d"), LodIndex, SectionIndex));
+	}
+	if (bHasRecomputeTangent && !Subsys->SetSectionRecomputeTangent(Mesh, LodIndex, SectionIndex, bRecomputeTangent))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("SetSectionRecomputeTangent failed for LOD %d section %d"), LodIndex, SectionIndex));
+	}
+	if (bHasVisibleInRayTracing && !Subsys->SetSectionVisibleInRayTracing(Mesh, LodIndex, SectionIndex, bVisibleInRayTracing))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("SetSectionVisibleInRayTracing failed for LOD %d section %d"), LodIndex, SectionIndex));
 	}
 
 	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
 		return SaveFailed;
 
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
 	Data->SetNumberField(TEXT("lod_index"), LodIndex);
 	Data->SetNumberField(TEXT("section_index"), SectionIndex);
-	Data->SetBoolField(TEXT("cast_shadow"), bValue);
+	if (bHasCastShadow)
+	{
+		Data->SetBoolField(TEXT("cast_shadow"), bCastShadow);
+	}
+	if (bHasRecomputeTangent)
+	{
+		Data->SetBoolField(TEXT("recompute_tangent"), bRecomputeTangent);
+	}
+	if (bHasVisibleInRayTracing)
+	{
+		Data->SetBoolField(TEXT("visible_in_ray_tracing"), bVisibleInRayTracing);
+	}
 	Data->SetBoolField(TEXT("saved"), true);
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1587,10 +1556,6 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 //   remove_skeletal_mesh_lod          drop an LOD entry by index via
 //                                     USkeletalMesh::RemoveSourceModel.
 //                                     LOD 0 is protected.
-//   set_skeletal_mesh_lod_screen_size per-LOD ScreenSize.Default (FPerPlatform
-//                                     Float::Default is the "all platforms"
-//                                     override; per-platform overrides are not
-//                                     exposed here for simplicity).
 //   set_skeletal_mesh_min_lod         set MinLodIdx (the forced-min-LOD bias
 //                                     applied to this mesh everywhere).
 //   bake_skeletal_mesh_lod            call USkeletalMeshEditorSubsystem::
@@ -1603,7 +1568,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 // next save.
 // ========================================================================== //
 
-// MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated: bake_skeletal_mesh_lod with regenerate_even_if_imported=true and new_lod_count omitted builds the new LOD (its defaults skip it, as it copies LOD 0's imported flag; note says which applies), then keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_screen_size; take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
+// MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated: bake_skeletal_mesh_lod with regenerate_even_if_imported=true and new_lod_count omitted builds the new LOD (its defaults skip it, as it copies LOD 0's imported flag; note says which applies), then keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_settings (screen_size); take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param screen_size - Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped
 //   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }
@@ -1689,42 +1654,7 @@ Mesh->Modify();
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_skeletal_mesh_lod_screen_size - Set ScreenSize.Default (the screen size at which this LOD switches in) of one LOD of a skeletal mesh asset. Marks the mesh dirty but does NOT save it, so follow with save_asset; per-platform overrides are left as they are. Returns old_screen_size and screen_size.
-//   @param skeletal_mesh_path - Skeletal mesh asset path, e.g. "/Game/Characters/SKM_Hero".
-//   @param lod_index - 0-based LOD index; must be below the LOD count of the mesh.
-//   @param screen_size - New ScreenSize.Default value, e.g. 0.3; the call fails without it.
-//   @returns { skeletal_mesh_path: string, lod_index: int, old_screen_size: float, screen_size: float, applied: bool }
-TSharedPtr<FJsonObject> HandleSetSkeletalMeshLodScreenSize(const TSharedPtr<FJsonObject>& Params)
-{
-    FString MeshPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
-
-    int32 LodIndex = 0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("lod_index"), LodIndex)) { return Missing; }
-
-    double ScreenSizeValue = 0.0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("screen_size"), ScreenSizeValue)) { return Missing; }
-    const float ScreenSize = static_cast<float>(ScreenSizeValue);
-
-    USkeletalMesh* Mesh = nullptr;
-    if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
-
-    FSkeletalMeshLODInfo* LODInfo = nullptr;
-    if (TSharedPtr<FJsonObject> Error = SkMesh_FindLODInfo(Mesh, LodIndex, TEXT("lod_index"), LODInfo)) { return Error; }
-
-    Mesh->Modify();
-    const float OldScreenSize = LODInfo->ScreenSize.Default;
-    LODInfo->ScreenSize.Default = ScreenSize;
-
-    TSharedPtr<FJsonObject> ResultObj = SkMesh_NewPayload(MeshPath);
-    ResultObj->SetNumberField(TEXT("lod_index"), LodIndex);
-    ResultObj->SetNumberField(TEXT("old_screen_size"), OldScreenSize);
-    ResultObj->SetNumberField(TEXT("screen_size"), ScreenSize);
-    ResultObj->SetBoolField(TEXT("applied"), true);
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:set_skeletal_mesh_min_lod - Set the minimum LOD a skeletal mesh asset (found by content path) renders, so the more detailed LODs below it are skipped while they stay in the asset. It replaces the whole Minimum LOD property with this one value, per-platform overrides included, or the per-quality-level one when the project setting UseSkeletalMeshMinLODPerQualityLevels is on. A missing min_lod, one outside 0 to the LOD count minus 1, or a mesh that does not load is an error. One undo step; the mesh is marked dirty but not saved, so follow with save_asset. old_min_lod is the value in effect before the call. To take a LOD out of the asset use remove_skeletal_mesh_lod; to change switch distances, set_skeletal_mesh_lod_screen_size.
+// MCP:set_skeletal_mesh_min_lod - Set the minimum LOD a skeletal mesh asset (found by content path) renders, so the more detailed LODs below it are skipped while they stay in the asset. It replaces the whole Minimum LOD property with this one value, per-platform overrides included, or the per-quality-level one when the project setting UseSkeletalMeshMinLODPerQualityLevels is on. A missing min_lod, one outside 0 to the LOD count minus 1, or a mesh that does not load is an error. One undo step; the mesh is marked dirty but not saved, so follow with save_asset. old_min_lod is the value in effect before the call. To take a LOD out of the asset use remove_skeletal_mesh_lod; to change switch distances, set_skeletal_mesh_lod_settings with screen_size.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param min_lod - New minimum LOD index, 0-based (must be in [0, NumLODs-1])
 //   @returns { skeletal_mesh_path: string, old_min_lod: int, min_lod: int, lod_count: int, applied: bool }
@@ -2120,73 +2050,6 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshSocketTransform(
 }
 
 // ---------------------------------------------------------------------------
-// set_skeletal_mesh_section_visible_in_ray_tracing
-// ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_section_visible_in_ray_tracing - Toggle a section's bVisibleInRayTracing flag on a specific skeletal mesh LOD.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param lod_index - LOD index containing the section (default 0)
-//   @param section_index - Index of the section to modify (default 0)
-//   @param b_visible - New value for the flag (default true)
-//   @returns { lod_index: int, section_index: int, b_visible: bool, saved: bool }
-
-TSharedPtr<FJsonObject> HandleSetSkeletalMeshSectionVisibleInRayTracing(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MeshPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
-
-	int32 LodIndex = 0;
-	Params->TryGetNumberField(TEXT("lod_index"), LodIndex);
-
-	int32 SectionIndex = 0;
-	Params->TryGetNumberField(TEXT("section_index"), SectionIndex);
-
-	bool bValue = true;
-	Params->TryGetBoolField(TEXT("b_visible"), bValue);
-
-	USkeletalMesh* Mesh = nullptr;
-	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
-
-	UE_LOG(LogTemp, Verbose, TEXT("[MCP] set_skeletal_mesh_section_visible_in_ray_tracing: "
-		"%s LOD %d section %d -> %d"),
-		*MeshPath, LodIndex, SectionIndex, bValue ? 1 : 0);
-
-	Mesh->Modify();
-	// SetSectionVisibleInRayTracing is non-static (SkeletalMeshEditorSubsystem.h);
-	// unlike RenameSocket/RemoveSocket/etc which are static, this one needs the subsystem instance
-	// via GEditor->GetEditorSubsystem<USkeletalMeshEditorSubsystem>() (UEditorSubsystem pattern).
-	if (GEditor)
-	{
-		if (USkeletalMeshEditorSubsystem* SkMeshEditor = GEditor->GetEditorSubsystem<USkeletalMeshEditorSubsystem>())
-		{
-			if (!SkMeshEditor->SetSectionVisibleInRayTracing(Mesh, LodIndex, SectionIndex, bValue))
-				return mcp_common::MakeErrorReply(
-					FString::Printf(TEXT("SetSectionVisibleInRayTracing failed for LOD %d section %d"), LodIndex, SectionIndex));
-		}
-		else
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("USkeletalMeshEditorSubsystem not available -- editor-only subsystem not initialised"));
-		}
-	}
-	else
-	{
-		return mcp_common::MakeErrorReply(
-			TEXT("GEditor not available -- editor-only subsystem requires editor context"));
-	}
-
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetNumberField(TEXT("lod_index"), LodIndex);
-	Data->SetNumberField(TEXT("section_index"), SectionIndex);
-	Data->SetBoolField(TEXT("b_visible"), bValue);
-	Data->SetBoolField(TEXT("saved"), true);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // assign_skeletal_mesh_physics_asset
 // ---------------------------------------------------------------------------
 // MCP:assign_skeletal_mesh_physics_asset - Assign a physics asset to a skeletal mesh (or pass null/empty to clear it).
@@ -2236,42 +2099,6 @@ TSharedPtr<FJsonObject> HandleAssignSkeletalMeshPhysicsAsset(
 	Data->SetBoolField(TEXT("cleared"), PhysAsset == nullptr);
 	Data->SetStringField(TEXT("physics_asset_name"),
 		PhysAsset ? PhysAsset->GetName() : FString());
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// set_skeletal_mesh_allow_cpu_access
-// ---------------------------------------------------------------------------
-// MCP:set_skeletal_mesh_allow_cpu_access - Set bAllowCPUAccess on every LOD of a skeletal mesh. Used to keep vertex/skin data resident for FX sampling or other CPU work.
-//   @param skeletal_mesh_path - Content path to the skeletal mesh asset
-//   @param b_allow - New value for the flag (default true)
-//   @returns { skeletal_mesh_path: string, b_allow: bool, applied_lods: int, saved: bool }
-
-TSharedPtr<FJsonObject> HandleSetSkeletalMeshAllowCpuAccess(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MeshPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
-
-	bool bAllow = true;
-	Params->TryGetBoolField(TEXT("b_allow"), bAllow);
-
-	USkeletalMesh* Mesh = nullptr;
-	if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }
-
-	UE_LOG(LogTemp, Verbose, TEXT("[MCP] set_skeletal_mesh_allow_cpu_access: %s -> %d"),
-		*MeshPath, bAllow ? 1 : 0);
-
-	Mesh->Modify();
-	USkeletalMeshEditorSubsystem::SetAllowCPUAccess(Mesh, bAllow);
-
-	if (TSharedPtr<FJsonObject> SaveFailed = SkMesh_SaveOrReply(Mesh))
-		return SaveFailed;
-
-	TSharedPtr<FJsonObject> Data = SkMesh_NewPayload(MeshPath);
-	Data->SetBoolField(TEXT("b_allow"), bAllow);
-	Data->SetNumberField(TEXT("applied_lods"), Mesh->GetLODNum());
-	Data->SetBoolField(TEXT("saved"), true);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -2348,7 +2175,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("add_skeletal_mesh_socket"), &HandleAddSkeletalMeshSocket },
 	{ TEXT("assign_skeletal_mesh_physics_asset"), &HandleAssignSkeletalMeshPhysicsAsset },
 	{ TEXT("bake_skeletal_mesh_lod"), &HandleBakeSkeletalMeshLod },
-	{ TEXT("create_editable_skeletal_mesh"), &HandleCreateEditableSkeletalMesh },
 	{ TEXT("create_skeletal_mesh_morph_target"), &HandleCreateSkeletalMeshMorphTarget },
 	{ TEXT("get_morph_target_deltas"), &HandleGetMorphTargetDeltas },
 	{ TEXT("get_skeletal_mesh_info"), &HandleGetSkeletalMeshInfo },
@@ -2363,16 +2189,12 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("rename_skeletal_mesh_socket"), &HandleRenameSkeletalMeshSocket },
 	{ TEXT("set_morph_target_deltas"), &HandleSetMorphTargetDeltas },
 	{ TEXT("set_morph_target_generated_by_engine"), &HandleSetMorphTargetGeneratedByEngine },
-	{ TEXT("set_skeletal_mesh_allow_cpu_access"), &HandleSetSkeletalMeshAllowCpuAccess },
 	{ TEXT("set_skeletal_mesh_lod_build_settings"), &HandleSetSkeletalMeshLodBuildSettings },
 	{ TEXT("set_skeletal_mesh_lod_reduction_settings"), &HandleSetSkeletalMeshLodReductionSettings },
-	{ TEXT("set_skeletal_mesh_lod_screen_size"), &HandleSetSkeletalMeshLodScreenSize },
 	{ TEXT("set_skeletal_mesh_lod_settings"), &HandleSetSkeletalMeshLodSettings },
 	{ TEXT("set_skeletal_mesh_material_slot"), &HandleSetSkeletalMeshMaterialSlot },
 	{ TEXT("set_skeletal_mesh_min_lod"), &HandleSetSkeletalMeshMinLod },
-	{ TEXT("set_skeletal_mesh_section_cast_shadow"), &HandleSetSkeletalMeshSectionCastShadow },
-	{ TEXT("set_skeletal_mesh_section_recompute_tangent"), &HandleSetSkeletalMeshSectionRecomputeTangent },
-	{ TEXT("set_skeletal_mesh_section_visible_in_ray_tracing"), &HandleSetSkeletalMeshSectionVisibleInRayTracing },
+	{ TEXT("set_skeletal_mesh_section_flags"), &HandleSetSkeletalMeshSectionCastShadow },
 	{ TEXT("set_skeletal_mesh_socket_parent"), &HandleSetSkeletalMeshSocketParent },
 	{ TEXT("set_skeletal_mesh_socket_transform"), &HandleSetSkeletalMeshSocketTransform },
 };

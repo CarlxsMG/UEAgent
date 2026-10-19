@@ -2,7 +2,7 @@
 
 # Management
 
-23 tools. Back to the [index](README.md).
+19 tools. Back to the [index](README.md).
 
 ## `add_primary_asset_rule`
 
@@ -52,47 +52,36 @@ Audit a fork subtree for references that still point at the SOURCE tree it was c
 
 **Returns:** `{ fork_root: string, source_root: string, fix: bool, dependency_type: string, assets_scanned: int, offending_count: int, total_source_dependencies: int, offenders: [{asset, package, source_dependencies:[string], properties:[{property, ref}], remapped:int}], fixed_assets: int, refs_remapped: int, unresolved_counterparts: [string], message: string }`
 
-## `configure_plugin_setting`
-
-*Destructive, idempotent.*
-
-Write one key=value under a plugin config section through GConfig into GEngineIni (the Saved/Config user layer, not the versioned Config/DefaultEngine.ini), then read it back from the GConfig cache. Succeeds only when the read-back value matches; an unknown plugin fails without writing anything. For versioned settings use set_project_settings_value.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `plugin_name` | string | yes | Name of the plugin to configure |
-| `setting_name` | string | yes | Name of the plugin setting to configure |
-| `setting_value` | string | yes | Value to set for the plugin setting |
-| `section` | string | no | INI section name without brackets (optional, default "/Script/&lt;Plugin>.&lt;Plugin>") |
-
-**Returns:** `{ plugin_name: string, setting_name: string, setting_value: string, plugin_path: string, plugin_status: string, plugin_version: string, plugin_loaded: bool, plugin_enabled: bool, readback_value: string, config_file_path: string?, section: string, configuration_success: bool, configuration_message: string, config_file_used: string, plugin_description: string, plugin_author: string, plugin_category: string, plugin_file: string, configuration_timestamp: string }`
-
 ## `delete_asset`
 
 *Destructive.*
 
-Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts.
+Force-delete one asset with no confirmation or undo: references to it are nulled, the object is purged and its .uasset/.umap file removed from disk. Check get_asset_referencers first. Succeeds only when the file is gone from disk and the object from memory: a file left behind (read-only, or held open by another process) fails the call with file_still_exists true, and the asset comes back when the editor restarts. With expected_class it is a typed delete: an asset of any other class is refused and nothing is deleted, and a path with no asset is a no-op success.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Asset to delete, as an object path ("/Game/Props/SM_Box.SM_Box") or a bare package path ("/Game/Props/SM_Box") |
+| `expected_class` | any | no | Optional class the asset must be, or a list of classes it may be any one of, as short names ("AnimSequence") or /Script/ paths ("/Script/Engine.StaticMesh"). A Blueprint asset also passes when its generated class derives from one ("Subsystem" accepts a subsystem Blueprint). Another class is refused with success false, deleted false, expected_class_matched false, its asset_class (and generated_class_name for a Blueprint) and a note, and nothing is deleted. With it, a path that names no asset is a no-op: success, deleted false, already_existed false. A name that resolves to no class is an error. |
 
-**Returns:** `{ asset_path: string, object_path: string, asset_class: string, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deletion_timestamp: string? }`
+**Returns:** `{ asset_path: string, object_path: string, asset_class: string (class path), asset_class_name: string (short class name of the asset), generated_class_name?: string, expected_class_matched?: bool, package_name: string, original_file_size_bytes: number, original_file_size_mb: number, delete_success: bool, delete_message: string, asset_verified_deleted: bool, file_still_exists: bool, deleted: bool, already_existed: bool, note?: string, deletion_timestamp: string? }`
 
 ## `duplicate_asset`
 
 *Additive.*
 
-Duplicates an asset to a new name in the same directory, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
+Duplicates an asset to a new name, in the same directory or in destination_path, then PERSISTS the copy to disk immediately (unless Play-In-Editor is active -- see the "saved"/"save_error" note on the save step below; a duplicate is very often used AS a safety net before a risky edit, so leaving it memory-only defeats the point). A target name already taken, in memory or on disk, is refused with nothing touched, unless if_exists='return' hands back an existing asset of the source's class with created=false; a destination outside the project's writable content (engine content, a read-only root, no mounted root) is refused, and so is a source that is not of expected_class when one is given. By default (remap_internal_refs absent/false) this is otherwise a plain copy: like EditorAssetLibrary.duplicate_asset, any internal references the copy holds still point at the ORIGINAL (not remapped). Set remap_internal_refs=true to run the SAME 2nd-pass reference remap that duplicate_directory uses (FArchiveReplaceObjectRef mapping original->copy) so the copy's own self-references point at the copy, before that save. repoint_parents_within additionally re-applies a MaterialInstance parent via SetParentEditorOnly when the parent maps into the copied set (for a single asset this only fires if the copy's parent is the original itself).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | yes | Full asset path to duplicate (e.g. /Game/Assets/MyAsset) |
+| `asset_path` | string | yes | Full asset path to duplicate (e.g. /Game/Assets/MyAsset); engine content such as /Engine/BasicShapes/Cube can be copied into the project with destination_path |
 | `new_asset_name` | string | yes | Name for the duplicated asset |
+| `destination_path` | string | no | Optional folder for the copy, a long package path (/Game/MyMeshes, a project plugin mount) or a folder relative to /Game; default the source asset's own folder |
+| `if_exists` | string | no | Optional "error" (default: a taken target name is refused) or "return" (an asset of the source's class already at the target is returned untouched with created=false; one of another class is still refused) |
+| `expected_class` | any | no | Optional class the SOURCE asset must be, or a list of classes it may be any one of, short names ("SkeletalMesh") or /Script/ paths; a Blueprint also passes when its generated class derives from one. Any other source is refused and nothing is duplicated; a name that resolves to no class is an error. |
 | `remap_internal_refs` | boolean | no | Optional bool (default false). When true, remap the copy's internal refs (original->copy) before the save; adds { new_path, refs_remapped } to the result. |
 | `repoint_parents_within` | boolean | no | Optional bool (default false). When true (and remap_internal_refs true), also re-apply MaterialInstanceConstant parents that map into the copied set via SetParentEditorOnly. |
 
-**Returns:** `{ original_asset_path: string, new_asset_name: string, new_asset_path: string, duplication_success: bool, duplication_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_asset_class: string, original_package_name: string, new_path: string?, refs_remapped: int?, saved: bool?, save_error: string? }`
+**Returns:** `{ original_asset_path: string, new_asset_name: string, new_asset_path: string, destination_path: string, created: bool, duplication_success: bool, duplication_message: string, new_asset_class: string, new_package_name: string, asset_verified: bool, new_file_size_bytes: number?, new_file_size_mb: number?, original_asset_class: string, original_package_name: string, new_path: string?, refs_remapped: int?, saved: bool?, save_error: string? }`
 
 ## `duplicate_directory`
 
@@ -111,11 +100,13 @@ Recursively copy a content folder to a new path, REMAPPING references among the 
 
 *Read-only.*
 
-List every primary asset type the running Asset Manager has registered, read-only: each entry of types holds the type name, its asset_class (base class path) and num_assets from the last scan, and count says how many types there are. This is the live registry, not the project settings, so it includes types registered by game code and its counts cover scanned assets only (rescan with scan_primary_assets); the configured PrimaryAssetTypesToScan rules with their directories are get_primary_asset_types. There is no filter or paging; an uninitialized Asset Manager is an error. One type in detail: get_primary_asset_type_info; its asset ids: get_primary_asset_ids_by_type; its cook rules: get_primary_asset_cook_rules.
+List the primary asset types the running Asset Manager has registered, read-only: each entry of types holds the type name, its asset_class (base class path), num_assets from the last scan, has_blueprint_classes, is_editor_only and its directories, and count says how many entries there are. asset_type_name narrows it to one type, with found false (and an empty list) for a type the manager does not know, not an error. This is the live registry, not the project settings, so it includes types registered by game code and its counts cover scanned assets only (rescan with scan_primary_assets); the configured PrimaryAssetTypesToScan rules with their cook rules are get_primary_asset_types. An uninitialized Asset Manager is an error. A type's asset ids: get_primary_asset_ids_by_type.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `asset_type_name` | string | no | Optional name of one primary asset type (e.g. "Item") to read alone; omitted lists every registered type. |
 
-**Returns:** `{ types: [{ name, asset_class, num_assets }], count }`
+**Returns:** `{ types: [{ name, asset_class, num_assets, has_blueprint_classes, is_editor_only, directories: [string] }], count, asset_type_name?, found? }`
 
 ## `get_asset_bundle_data`
 
@@ -154,41 +145,17 @@ Read one plugin by name, read-only: Enabled or Disabled, version, author, catego
 
 **Returns:** `{ plugin_name: string, plugin_status: string, plugin_version: string, plugin_description: string, plugin_author: string, plugin_created_date: string, plugin_category: string, plugin_loaded: bool, plugin_enabled: bool, plugin_path: string, plugin_file: string, plugin_dependencies: [{ name: string, enabled: bool, optional: bool, version: string }], plugin_modules: [{ name: string, type: string, loading_phase: bool }], plugin_message: string, plugin_manager_version: string, plugin_search_paths: string, plugin_status_timestamp: string }`
 
-## `get_primary_asset_cook_rules`
-
-*Read-only.*
-
-Read the rules of one primary asset type as configured in the Asset Manager project settings, read-only: cook_rule, priority, chunk_id and apply_recursively of the first PrimaryAssetTypesToScan entry of that type, matched by name without case. The running Asset Manager is not consulted, so a type only registered by game code is not found, and a type with no configured rule is an error. cook_rule comes back as Unknown, Never, ProductionNeverCook, DevelopmentAlways, DevelopmentAlwaysProductionUnknownCook or Always, each accepted back by set_primary_asset_cook_rule. Change them with set_primary_asset_cook_rule (priority: add_primary_asset_rule); every configured rule: get_primary_asset_types; what the running manager holds: get_primary_asset_type_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `primary_asset_type` | string | yes | Name of the primary asset type as configured in PrimaryAssetTypesToScan (e.g. "Item"). |
-
-**Returns:** `{ primary_asset_type, cook_rule, priority, chunk_id, apply_recursively }`
-
 ## `get_primary_asset_id`
 
 *Read-only.*
 
-Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error. get_primary_asset_id_from_path is the same lookup without the split fields.
+Look up the registered Primary Asset Id ("Type:Name") of an asset path: primary_asset_id, is_valid and, when valid, primary_asset_type and primary_asset_name. A non-primary or unscanned asset gives is_valid=false, not an error; an uninitialized Asset Manager is an error. All ids of one type: get_primary_asset_ids_by_type; to make a type scannable, add_primary_asset_rule then scan_primary_assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Full object path including the object name, e.g. /Game/MyGame/M_Example.M_Example; a package-only path does not match. |
 
 **Returns:** `{ asset_path, primary_asset_id, is_valid, primary_asset_type, primary_asset_name }`
-
-## `get_primary_asset_id_from_path`
-
-*Read-only.*
-
-Look up the Primary Asset Id (Type:Name) that the running Asset Manager has registered for an object path, read-only: primary_asset_id and is_valid. A path that is not a scanned primary asset, or a package-only path, gives is_valid=false and an empty primary_asset_id, not an error; an uninitialized Asset Manager is an error. Same lookup as get_primary_asset_id, which also returns the type and name split apart; all ids of one type: get_primary_asset_ids_by_type; to make a type scannable, add_primary_asset_rule then scan_primary_assets.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `object_path` | string | yes | Full object path including the object name (e.g. /Game/MyAsset.MyAsset); a package-only path does not match |
-
-**Returns:** `{ object_path, primary_asset_id, is_valid }`
 
 ## `get_primary_asset_ids_by_type`
 
@@ -203,27 +170,17 @@ List the Primary Asset Ids the running Asset Manager has registered for one type
 
 **Returns:** `{ type, name, full_id, asset_type_name, success, asset_ids, count }`
 
-## `get_primary_asset_type_info`
-
-*Read-only.*
-
-Read what the running Asset Manager holds for one primary asset type: asset_class, has_blueprint_classes, is_editor_only, num_assets from the last scan and its directories. found=false for a type it does not know, not an error; get_primary_asset_types reads the configured rules instead.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_type_name` | string | yes | Name of the primary asset type (e.g. "Item") |
-
-**Returns:** `{ asset_type_name, found, asset_class, has_blueprint_classes, is_editor_only, num_assets, directories }`
-
 ## `get_primary_asset_types`
 
 *Read-only.*
 
-Read the configured Primary Asset Types from the Asset Manager settings.
+Read the PrimaryAssetTypesToScan rules configured in the Asset Manager project settings, read-only: each entry with its type, base_class, has_blueprint_classes, is_editor_only, directories, num_specific_assets and its cook rules (cook_rule, priority, chunk_id, apply_recursively), optionally only the entries of one primary_asset_type. The running Asset Manager is not consulted, so a type only registered by game code is not listed: get_all_primary_asset_types reads the live registry. cook_rule comes back as Unknown, Never, ProductionNeverCook, DevelopmentAlways, DevelopmentAlwaysProductionUnknownCook or Always, each accepted back by set_primary_asset_cook_rule.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `primary_asset_type` | string | no | Optional type name (e.g. "Item", matched without case): list only the rules of that type; a type with no configured rule is an error. |
 
-**Returns:** `{ types, type_count }`
+**Returns:** `{ types: [{ type, base_class, has_blueprint_classes, is_editor_only, directories: [string], num_specific_assets, cook_rule, priority, chunk_id, apply_recursively }], type_count, primary_asset_type? }`
 
 ## `move_asset`
 
@@ -300,7 +257,7 @@ Synchronously rescan the directories and specific assets of every PrimaryAssetTy
 
 *Destructive, idempotent.*
 
-Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_cook_rules; the reply's cook_rule is the short name of the stored rule.
+Set the CookRule of an existing PrimaryAssetTypesToScan rule in the Asset Manager project settings, plus ChunkId and bApplyRecursively when given, then write DefaultGame.ini (no undo); a failed write makes success false. An unknown type (add it with add_primary_asset_rule) or cook_rule is an error before any change. Priority is not touched here; add_primary_asset_rule sets it. Nothing is rescanned. Read the rules back with get_primary_asset_types (primary_asset_type); the reply's cook_rule is the short name of the stored rule.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

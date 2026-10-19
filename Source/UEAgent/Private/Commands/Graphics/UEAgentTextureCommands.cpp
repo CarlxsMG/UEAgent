@@ -477,12 +477,19 @@ TSharedPtr<FJsonObject> HandleCreateStaticTextureFromRenderTarget(const TSharedP
 // Sets UTexture::SRGB / CompressionSettings / LODGroup on an existing UTexture2D,
 // then PostEditChange + UpdateResource + save. Reads the resulting values back.
 // ---------------------------------------------------------------------------
-// MCP:set_texture_settings - Sets the given sRGB, compression and LOD group of a UTexture2D asset, rebuilds its resource when one changed and saves it in every case, returning the values read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning.
+// MCP:set_texture_settings - Sets the given sRGB, compression, LOD group and sampler/LOD fields (address X/Y, filter, mip-gen settings, LOD bias, max size, flip-green) of a UTexture2D asset, rebuilds its resource when one changed (PostEditChange + UpdateResource, no shader recompile) and saves it in every case, returning every setting read back. An unknown compression or LOD group name is still applied, as TC_Default or TEXTUREGROUP_World, with a compression_warning or lod_group_warning; an unknown address, filter or mip-gen name is skipped with an address_x_warning, address_y_warning, filter_warning or mip_gen_settings_warning. Enum params accept the name with or without its prefix.
 //   @param texture_path - Asset path of the texture to modify
 //   @param srgb - True treats the texture as sRGB color, false as linear data such as normal or mask maps; omit to keep the current value
 //   @param compression_settings - TextureCompressionSettings name with or without the TC_ prefix, e.g. "Default", "Normalmap", "Masks", "VectorDisplacementmap", "BC7", "HDR"; omit to keep the current value
 //   @param lod_group - TextureGroup name with or without the TEXTUREGROUP_ prefix, e.g. "World", "UI", "Character", "Effects"; omit to keep the current value
-//   @returns { texture_name: string, asset_path: string, changed: bool, saved: bool, srgb: bool, compression: string, lod_group: string, compression_warning?: string, lod_group_warning?: string, save_error?: string }
+//   @param address_x - Optional TextureAddress name, with or without TA_: Wrap, Clamp or Mirror; omit to keep the current value
+//   @param address_y - Optional TextureAddress name, with or without TA_: Wrap, Clamp or Mirror; omit to keep the current value
+//   @param filter - Optional TextureFilter name, with or without TF_: Nearest, Bilinear, Trilinear or Default; omit to keep the current value
+//   @param mip_gen_settings - Optional TextureMipGenSettings name, with or without TMGS_: FromTextureGroup, SimpleAverage, NoMipmaps, LeaveExistingMips, Sharpen0..10, Blur1..5, Unfiltered, Angular; omit to keep the current value
+//   @param lod_bias - Optional int LOD bias; omit to keep the current value
+//   @param max_texture_size - Optional int max texture size (0 = no limit, negatives clamp to 0); omit to keep the current value
+//   @param flip_green - Optional bool, flips the green channel; omit to keep the current value
+//   @returns { texture_name: string, asset_path: string, changed: bool, saved: bool, width: int, height: int, format: string, srgb: bool, compression: string, lod_group: string, address_x: string, address_y: string, filter: string, mip_gen_settings: string, lod_bias: int, max_texture_size: int, flip_green: bool, has_source: bool, source_width?: int, source_height?: int, source_format?: string, compression_warning?: string, lod_group_warning?: string, address_x_warning?: string, address_y_warning?: string, filter_warning?: string, mip_gen_settings_warning?: string, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleSetTextureSettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -530,56 +537,7 @@ TSharedPtr<FJsonObject> HandleSetTextureSettings(const TSharedPtr<FJsonObject>& 
         bChanged = true;
     }
 
-    if (bChanged)
-    {
-        Tex->PostEditChange();
-        Tex->UpdateResource();
-        Tex->MarkPackageDirty();
-    }
-
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(Tex->GetOutermost(), Tex, SaveError);
-
-    // Read-back verification.
-    Data->SetStringField(TEXT("texture_name"), Tex->GetName());
-    Data->SetStringField(TEXT("asset_path"), Tex->GetPathName());
-    Data->SetBoolField(TEXT("changed"), bChanged);
-    Data->SetBoolField(TEXT("srgb"), Tex->SRGB != 0);
-    Data->SetStringField(TEXT("compression"),
-        CompressionSettingsToString(Tex->CompressionSettings.GetValue()));
-    Data->SetStringField(TEXT("lod_group"),
-        UTexture::GetTextureGroupString(Tex->LODGroup.GetValue()));
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_texture_settings"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// set_texture_sampler_settings
-// Sets UTexture sampler/LOD fields (address X/Y, filter, mip-gen, LOD bias, max
-// size, flip-green) on an existing UTexture2D, then PostEditChange + UpdateResource
-// + save. No shader recompile. Reads the resulting values back via FillTextureInfo.
-// ---------------------------------------------------------------------------
-// MCP:set_texture_sampler_settings - Sets sampler/LOD settings on an existing UTexture2D and saves it.  Applies the requested fields, then PostEditChange + UpdateResource + save (no shader recompile), reading the resulting values back.  Enum params accept the name with or without prefix: address_x/address_y in {Wrap,Clamp,Mirror}; filter in {Nearest,Bilinear,Trilinear,Default}; mip_gen_settings in {FromTextureGroup,SimpleAverage,NoMipmaps,LeaveExistingMips,Sharpen0..10,Blur1..5,Unfiltered,Angular}.
-//   @param texture_path - Asset path of the texture to modify
-//   @param address_x - Optional TextureAddress enum string (Wrap/Clamp/Mirror)
-//   @param address_y - Optional TextureAddress enum string (Wrap/Clamp/Mirror)
-//   @param filter - Optional TextureFilter enum string (Nearest/Bilinear/Trilinear/Default)
-//   @param mip_gen_settings - Optional TextureMipGenSettings enum string
-//   @param lod_bias - Optional int LOD bias
-//   @param max_texture_size - Optional int max texture size (0 = no limit)
-//   @param flip_green - Optional bool, flips the green channel
-//   @returns { texture_name, asset_path, address_x, address_y, filter, mip_gen_settings, lod_bias, max_texture_size, flip_green, changed: bool, saved: bool, *_warning?: string, save_error?: string }
-TSharedPtr<FJsonObject> HandleSetTextureSamplerSettings(const TSharedPtr<FJsonObject>& Params)
-{
-    UTexture2D* Tex = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Texture_ReadTexture2D(Params, Tex))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    bool bChanged = false;
-
-    // Enum-by-name: accept the value with or without its TA_/TF_/TMGS_ prefix.
+    // Sampler/LOD enums by name: accept the value with or without its TA_/TF_/TMGS_ prefix.
     auto ParseEnumByName = [](UEnum* E, const TCHAR* Prefix, const FString& In, int64& OutValue) -> bool
     {
         if (!E || In.IsEmpty()) { return false; }
@@ -631,29 +589,57 @@ TSharedPtr<FJsonObject> HandleSetTextureSamplerSettings(const TSharedPtr<FJsonOb
     FString SaveError;
     const bool bSaved = mcp_common::SaveAssetPackage(Tex->GetOutermost(), Tex, SaveError);
 
-    FillTextureInfo(Data, Tex); // read-back, incl. the new sampler fields
+    // Read-back verification of every setting, the sampler fields included.
+    FillTextureInfo(Data, Tex);
     Data->SetBoolField(TEXT("changed"), bChanged);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_texture_sampler_settings"), SaveError);
+    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_texture_settings"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // get_texture_info
-// Reads width/height/format/srgb/compression/lod_group/has_source.
+// A UTexture2D: width/height/format/srgb/compression/lod_group, the sampler
+// fields and the source. A UTexture2DArray: its size, slices and source textures.
 // ---------------------------------------------------------------------------
-// MCP:get_texture_info - Reads metadata for a UTexture2D asset.  texture_path accepts short or fully-qualified "/Game/MyGame/T_Example.T_Example" asset paths.
-//   @param texture_path - Asset path of the texture (e.g. "/Game/MyGame/T_Example" or fully-qualified "/Game/MyGame/T_Example.T_Example")
-//   @returns { texture_name: string, asset_path: string, width: int, height: int, format: string, srgb: bool, compression: string, lod_group: string, has_source: bool, num_mips: int, mip_gen_settings: string }
+// MCP:get_texture_info - Reads the metadata of a UTexture2D or UTexture2DArray asset without changing it; texture_class says which. A UTexture2D reports its size, pixel format, sRGB, compression, LOD group, sampler/LOD settings (address, filter, mip-gen, LOD bias, max size, flip-green), mip count and source; a UTexture2DArray reports its slice size as width/height, num_slices, format, num_mips and source_texture_count. texture_path accepts short or fully-qualified "/Game/MyGame/T_Example.T_Example" asset paths.
+//   @param texture_path - Asset path of the texture or texture array (e.g. "/Game/MyGame/T_Example" or fully-qualified "/Game/MyGame/T_Example.T_Example")
+//   @returns { texture_name: string, asset_path: string, texture_class: string, width: int, height: int, format: string, num_mips: int, has_source: bool, srgb?: bool, compression?: string, lod_group?: string, address_x?: string, address_y?: string, filter?: string, mip_gen_settings?: string, lod_bias?: int, max_texture_size?: int, flip_green?: bool, source_width?: int, source_height?: int, source_format?: string, num_slices?: int, source_texture_count?: int }
 
 TSharedPtr<FJsonObject> HandleGetTextureInfo(const TSharedPtr<FJsonObject>& Params)
 {
-    UTexture2D* Tex = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Texture_ReadTexture2D(Params, Tex))
-    {
-        return Error;
-    }
+    FString TexPath;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("texture_path"), TexPath)) { return Missing; }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    FillTextureInfo(Data, Tex);
+    if (UTexture2D* Tex = mcp_common::ResolveAsset<UTexture2D>(TexPath))
+    {
+        FillTextureInfo(Data, Tex);
+        Data->SetStringField(TEXT("texture_class"), Tex->GetClass()->GetName());
+        Data->SetNumberField(TEXT("num_mips"), Tex->GetNumMips());
+        return mcp_common::MakeOkReply(Data);
+    }
+
+    UTexture2DArray* Arr = mcp_common::ResolveAsset<UTexture2DArray>(TexPath);
+    if (!Arr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Texture not found (neither a UTexture2D nor a UTexture2DArray): %s"), *TexPath));
+    }
+
+    // A freshly built array may report no platform slices yet; its source textures are the slices then.
+    int32 NumSlices = Arr->GetArraySize();
+    if (NumSlices <= 0 && Arr->SourceTextures.Num() > 0)
+    {
+        NumSlices = Arr->SourceTextures.Num();
+    }
+    Data->SetStringField(TEXT("texture_name"), Arr->GetName());
+    Data->SetStringField(TEXT("asset_path"), Arr->GetPathName());
+    Data->SetStringField(TEXT("texture_class"), Arr->GetClass()->GetName());
+    Data->SetNumberField(TEXT("width"), Arr->GetSizeX());
+    Data->SetNumberField(TEXT("height"), Arr->GetSizeY());
+    Data->SetNumberField(TEXT("num_slices"), NumSlices);
+    Data->SetStringField(TEXT("format"), GetPixelFormatString(Arr->GetPixelFormat()));
+    Data->SetNumberField(TEXT("num_mips"), Arr->GetNumMips());
+    Data->SetBoolField(TEXT("has_source"), Arr->Source.IsValid());
+    Data->SetNumberField(TEXT("source_texture_count"), Arr->SourceTextures.Num());
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -923,45 +909,6 @@ TSharedPtr<FJsonObject> HandleCreateRenderTargetCube(const TSharedPtr<FJsonObjec
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_render_target_cube"), SaveError);
 }
 
-// ---------------------------------------------------------------------------
-// get_texture_array_info
-// Reads num_slices (GetArraySize, with SourceTextures.Num() as a fallback),
-// size_x/size_y, and format from a persisted UTexture2DArray.
-// ---------------------------------------------------------------------------
-// MCP:get_texture_array_info - Reads metadata for a UTexture2DArray asset.  texture_array_path accepts short "/Game/MyGame/T_Array" or fully-qualified "...T_Array.T_Array" asset paths.
-//   @param texture_array_path - Asset path of the texture array (e.g. "/Game/MyGame/T_Array" or fully-qualified "...T_Array.T_Array")
-//   @returns { texture_array_name: string, asset_path: string, width: int, height: int, num_slices: int, format: string, has_source: bool, source_texture_count: int }
-
-TSharedPtr<FJsonObject> HandleGetTextureArrayInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ArrayPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("texture_array_path"), ArrayPath)) { return Missing; }
-
-    UTexture2DArray* Arr = mcp_common::ResolveAsset<UTexture2DArray>(ArrayPath);
-    if (!Arr)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Texture array not found: %s"), *ArrayPath));
-    }
-
-    int32 NumSlices = Arr->GetArraySize();
-    if (NumSlices <= 0 && Arr->SourceTextures.Num() > 0)
-    {
-        NumSlices = Arr->SourceTextures.Num();
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("name"), Arr->GetName());
-    Data->SetStringField(TEXT("asset_path"), Arr->GetPathName());
-    Data->SetNumberField(TEXT("num_slices"), NumSlices);
-    Data->SetNumberField(TEXT("size_x"), Arr->GetSizeX());
-    Data->SetNumberField(TEXT("size_y"), Arr->GetSizeY());
-    Data->SetStringField(TEXT("format"), GetPixelFormatString(Arr->GetPixelFormat()));
-    Data->SetNumberField(TEXT("num_mips"), Arr->GetNumMips());
-    Data->SetNumberField(TEXT("source_texture_count"), Arr->SourceTextures.Num());
-    return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_render_target_2d_array"), &HandleCreateRenderTarget2DArray },
@@ -969,9 +916,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_static_texture_from_render_target"), &HandleCreateStaticTextureFromRenderTarget },
     { TEXT("create_texture_2d_array"), &HandleCreateTexture2DArray },
     { TEXT("create_texture_2d_from_data"), &HandleCreateTexture2DFromData },
-    { TEXT("get_texture_array_info"), &HandleGetTextureArrayInfo },
     { TEXT("get_texture_info"), &HandleGetTextureInfo },
-    { TEXT("set_texture_sampler_settings"), &HandleSetTextureSamplerSettings },
     { TEXT("set_texture_settings"), &HandleSetTextureSettings },
 };
 } // namespace UEAgentTextureCommands

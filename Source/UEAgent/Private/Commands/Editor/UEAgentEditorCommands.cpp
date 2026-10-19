@@ -15,6 +15,10 @@
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
 #include "Engine/SpotLight.h"
+#include "Engine/RectLight.h"
+#include "Engine/SkyLight.h"
+#include "Components/LightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Camera/CameraActor.h"
 #include "GameFramework/Character.h"
 #include "Components/StaticMeshComponent.h"
@@ -348,7 +352,7 @@ namespace UEAgentEditorCommandsImpl
         return FAlignTarget{ LocationSum / Count, FRotator::MakeFromEuler(EulerSum / Count), ScaleSum / Count };
     }
 
-    // The engine actor classes spawn_actor accepts, by (case-insensitive) name.
+    // The engine actor classes spawn_actor accepts, by (case-insensitive) name; each light also by its short name.
     UClass* BuiltInSpawnClass(const FString& TypeName)
     {
         struct FSpawnable
@@ -361,6 +365,13 @@ namespace UEAgentEditorCommandsImpl
             { TEXT("PointLight"), APointLight::StaticClass() },
             { TEXT("SpotLight"), ASpotLight::StaticClass() },
             { TEXT("DirectionalLight"), ADirectionalLight::StaticClass() },
+            { TEXT("RectLight"), ARectLight::StaticClass() },
+            { TEXT("SkyLight"), ASkyLight::StaticClass() },
+            { TEXT("Point"), APointLight::StaticClass() },
+            { TEXT("Spot"), ASpotLight::StaticClass() },
+            { TEXT("Directional"), ADirectionalLight::StaticClass() },
+            { TEXT("Rect"), ARectLight::StaticClass() },
+            { TEXT("Sky"), ASkyLight::StaticClass() },
             { TEXT("CameraActor"), ACameraActor::StaticClass() },
             // A default ACharacter; gameplay characters derive their own classes.
             { TEXT("Character"), ACharacter::StaticClass() },
@@ -683,30 +694,52 @@ TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Pa
     return Reply;
 }
 
-// MCP:spawn_actor - Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor) into the editor level or a live PIE world, at an optional location/rotation/scale, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists, and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.
-//   @param type - One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor. Anything else is a clean error; Blueprints go through spawn_blueprint_actor.
-//   @param name - Internal name for the new actor; must be unused in the target world or the call is refused.
+// MCP:spawn_actor - Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character) into the editor level or a live PIE world, at an optional location/rotation/scale, optionally seeding a light's intensity and color, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists (omit name to let the engine pick a unique one), and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.
+//   @param type - One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, RectLight, SkyLight, CameraActor, Character (case-insensitive); a light also by its short name Point, Spot, Directional, Rect or Sky. Anything else is a clean error; Blueprints go through spawn_blueprint_actor.
+//   @param name - Optional internal name (and label) for the new actor; must be unused in the target world or the call is refused. When omitted the engine names the actor uniquely and the label is the class default.
 //   @param location - Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned.
-//   @param rotation - Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero.
+//   @param rotation - Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero. Directional, spot and rect lights shine along its forward axis.
 //   @param scale - Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; any other value (an object, another length) is an error and nothing is spawned.
 //   @param static_mesh - Optional UStaticMesh asset path, only honoured for type=StaticMeshActor (e.g. /Engine/BasicShapes/Cube).
+//   @param intensity - Optional, light types only: the light component's Intensity in the light's units (Directional: lux; Sky: a multiplier); engine default when omitted. Sent for a non-light type it is refused and nothing is spawned.
+//   @param color - Optional, light types only: [r, g, b] linear color, usually 0..1; engine default (white) when omitted. Sent for a non-light type it is refused and nothing is spawned.
 //   @param world - Optional world selector for WHERE the actor is spawned: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'game' (alias of 'pie') | 'server' (the PIE world with authority -- what you want for anything replicated) | 'client' | 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent spawn into the editor world.
-//   @returns { actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int }
+//   @returns { actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int, light_intensity?: number (light types: the intensity now on the component), light_color?: [r, g, b] (light types: the color now on the component) }
 
 TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
 {
     FString TypeName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("type"), TypeName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    // The name is optional: without one the engine picks a unique name and none of the name preflight applies.
     FString NewName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), NewName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    const bool bNamed = Params->TryGetStringField(TEXT("name"), NewName);
     if (TypeName.IsEmpty())
     {
         return UEAgentEditorCommandsImpl::EmptyParamReply(TEXT("type"));
     }
-    if (NewName.IsEmpty())
+    if (bNamed && NewName.IsEmpty())
     {
         return UEAgentEditorCommandsImpl::EmptyParamReply(TEXT("name"));
     }
+
+    UClass* SpawnClass = UEAgentEditorCommandsImpl::BuiltInSpawnClass(TypeName);
+    if (SpawnClass == nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown actor type: %s"), *TypeName));
+    }
+
+    // Optional light seeding, refused up front on a type that has no light component to take it.
+    double LightIntensity = 0.0;
+    const bool bHasIntensity = Params->TryGetNumberField(TEXT("intensity"), LightIntensity);
+    const bool bHasColor = Params->HasField(TEXT("color"));
+    const bool bIsLightType = SpawnClass->IsChildOf(ALight::StaticClass()) || SpawnClass->IsChildOf(ASkyLight::StaticClass());
+    if ((bHasIntensity || bHasColor) && !bIsLightType)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("intensity and color apply only to a light type (PointLight, SpotLight, DirectionalLight, RectLight, SkyLight), not %s; nothing was spawned"),
+            *TypeName));
+    }
+    const FVector ColorRgb = bHasColor ? mcp_common::ReadJsonVector(Params, TEXT("color")) : FVector::OneVector;
 
     // Optional placement. SpawnActor takes the location and rotation; the scale is
     // applied once the actor exists.
@@ -731,7 +764,7 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
         return mcp_common::MakeErrorReply(ResolveFailure);
     }
 
-    if (mcp_common::FindActorByObjectName(World, NewName) != nullptr)
+    if (bNamed && mcp_common::FindActorByObjectName(World, NewName) != nullptr)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor with name '%s' already exists"), *NewName));
     }
@@ -748,7 +781,7 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     // So ask exactly the engine's question (class nullptr, not AActor::StaticClass()) of
     // exactly the level it will spawn into: SpawnParams sets neither OverrideLevel nor Owner,
     // which makes that World->GetCurrentLevel() (LevelActor.cpp).
-    if (ULevel* SpawnLevel = World->GetCurrentLevel())
+    if (ULevel* SpawnLevel = bNamed ? World->GetCurrentLevel() : nullptr)
     {
         if (UObject* NameHolder = StaticFindObjectFast(nullptr, SpawnLevel, FName(*NewName)))
         {
@@ -765,20 +798,18 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     }
 
     // Undoable: the spawn records into this transaction.
-    FScopedTransaction SpawnTransaction(UEAgentEditorCommandsImpl::UndoTitle(TEXT("Spawn Actor"), NewName));
+    FScopedTransaction SpawnTransaction(UEAgentEditorCommandsImpl::UndoTitle(TEXT("Spawn Actor"), bNamed ? NewName : TypeName));
 
     FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = FName(*NewName);
-    // Should the preflight above ever miss a clash (another current level, a race with
-    // the GC), the engine then returns null and logs an error instead of aborting the
-    // process; the default NameMode is Required_Fatal.
-    SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Required_ErrorAndReturnNull;
-
-    UClass* SpawnClass = UEAgentEditorCommandsImpl::BuiltInSpawnClass(TypeName);
-    if (SpawnClass == nullptr)
+    if (bNamed)
     {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown actor type: %s"), *TypeName));
+        SpawnParams.Name = FName(*NewName);
+        // Should the preflight above ever miss a clash (another current level, a race with
+        // the GC), the engine then returns null and logs an error instead of aborting the
+        // process; the default NameMode is Required_Fatal.
+        SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Required_ErrorAndReturnNull;
     }
+
     AActor* Spawned = World->SpawnActor(SpawnClass, &SpawnAt, &SpawnFacing, SpawnParams);
 
     // A static mesh actor can get its mesh right away.
@@ -808,8 +839,38 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     Spawned->SetActorTransform(Placed);
 
     // The documented contract is "label = name". SpawnParams.Name only sets the internal
-    // object name, so handlers that resolve by label would not find the actor.
-    Spawned->SetActorLabel(NewName);
+    // object name, so handlers that resolve by label would not find the actor. Unnamed, the
+    // editor's default label stays.
+    if (bNamed)
+    {
+        Spawned->SetActorLabel(NewName);
+    }
+
+    // The light seeding, on whichever component the light carries, read back from it.
+    const FLinearColor LightColor(ColorRgb.X, ColorRgb.Y, ColorRgb.Z);
+    TOptional<float> IntensityNow;
+    TOptional<FLinearColor> ColorNow;
+    if (ASkyLight* Sky = Cast<ASkyLight>(Spawned))
+    {
+        if (USkyLightComponent* SkyComponent = Sky->GetLightComponent())
+        {
+            if (bHasIntensity) { SkyComponent->SetIntensity(static_cast<float>(LightIntensity)); }
+            if (bHasColor)     { SkyComponent->SetLightColor(LightColor); }
+            SkyComponent->MarkRenderStateDirty();
+            IntensityNow = SkyComponent->Intensity;
+            ColorNow = SkyComponent->GetLightColor();
+        }
+    }
+    else if (ALight* Light = Cast<ALight>(Spawned))
+    {
+        if (ULightComponent* LightComponent = Light->GetLightComponent())
+        {
+            if (bHasIntensity) { LightComponent->SetIntensity(static_cast<float>(LightIntensity)); }
+            if (bHasColor)     { LightComponent->SetLightColor(LightColor); }
+            IntensityNow = LightComponent->Intensity;
+            ColorNow = LightComponent->GetLightColor();
+        }
+    }
 
     // Stamped with the EXACT world the actor landed in; otherwise a spawn into the client
     // (or the editor) looks like one that worked. world_package is the tell: in World
@@ -821,10 +882,20 @@ TSharedPtr<FJsonObject> HandleSpawnActor(const TSharedPtr<FJsonObject>& Params)
     }
     Reply->SetStringField(TEXT("world"), SelectorUsed);
     mcp_common::AddWorldEvidence(Reply, World);
+    if (IntensityNow.IsSet())
+    {
+        Reply->SetNumberField(TEXT("light_intensity"), IntensityNow.GetValue());
+    }
+    if (ColorNow.IsSet())
+    {
+        const FLinearColor& C = ColorNow.GetValue();
+        Reply->SetArrayField(TEXT("light_color"), {
+            MakeShared<FJsonValueNumber>(C.R), MakeShared<FJsonValueNumber>(C.G), MakeShared<FJsonValueNumber>(C.B) });
+    }
     return Reply;
 }
 
-// MCP:delete_actor - Remove one actor from the EDITOR level through the editor's own delete path (select + edactDeleteSelected), so it is transacted and undoable, and echo back the deleted actor's JSON. WARNING: two edges that bite: it matches the INTERNAL name only -- unlike set_actor_transform, an editor LABEL will not resolve -- and it clears the current selection as a side effect. It cannot touch PIE actors (editor world only), and the deletion lives in memory until save_level writes the .umap. Use batch_delete_actors for several at once.
+// MCP:delete_actor - Remove one actor from the EDITOR level through the editor's own delete path (select + edactDeleteSelected), so it is transacted and undoable, and echo back the deleted actor's JSON. WARNING: two edges that bite: it matches the INTERNAL name only -- unlike set_actor_transform, an editor LABEL will not resolve -- and it clears the current selection as a side effect. It cannot touch PIE actors (editor world only), and the deletion lives in memory until save_level writes the .umap. Use delete_actors for several at once.
 //   @param name - Actor's internal name (GetName), case-insensitive but WHOLE-string. Editor labels are NOT accepted here; resolve one first with find_actors_by_name.
 //   @returns { deleted_actor: actor JSON captured before the delete }
 
@@ -874,7 +945,7 @@ TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)
     return Reply;
 }
 
-// MCP:set_actor_transform - Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use batch_set_actor_transform for many actors, place_actor_on_terrain to drop one onto the landscape.
+// MCP:set_actor_transform - Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use set_actor_transforms for many actors, place_actor_on_terrain to drop one onto the landscape.
 //   @param name - Actor's internal name (GetName) or editor label (GetActorLabel), case-insensitive whole-string match.
 //   @param world - Optional: "editor" (default) | "pie" | "server" | "client" | "pie:N". In co-op the authoritative pawn lives on the server, and a move written to the client world will be corrected by replication.
 //   @param location - Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; any other value (an object, another length) is an error and the actor is not touched.
@@ -1714,8 +1785,8 @@ namespace
     }
 
     // THE guard, shared by every handler that is about to call FEditorFileUtils::LoadMap
-    // (today: load_level and new_level -- new_level is a LoadMap of the engine template,
-    // so it carries exactly the same Fatal error).
+    // (today: load_level, which also loads the engine template map, so it carries exactly the
+    // same Fatal error whatever map it opens).
     //
     // Returns nullptr when the load may proceed (nothing resident, or bForce). Otherwise
     // returns the refusal response, ready to be returned as-is. OutResidents is filled in
@@ -1842,17 +1913,32 @@ namespace
     }
 }
 
-// MCP:load_level - Open a map in the editor (by /Game path or disk .umap), replacing the current world. Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
-//   @param filename - Disk path to a .umap, OR a /Game asset path (e.g. /Game/Maps/Foo) resolved to the on-disk map file
+// MCP:load_level - Open a map in the editor (by /Game or /Engine package path, or disk .umap), replacing the current world; default_template=true opens the engine's default template level instead (/Engine/Maps/Templates/Template_Default, ~45 actors: floor, PlayerStart, sky and lights), after which a save_level without `filename` would write over the ENGINE's own map (is_engine_template and warning say so). Also the repair for actors that VANISHED from a world in memory after compile_blueprint: reloading the same map brings the placed OFPA instances back with their per-instance config -- never re-place them. REFUSES up front when any other UWorld is still resident in memory, because the engine's world-leak check turns that into a Fatal error that kills the editor process and every unsaved edit with it; the refusal lists the resident worlds and the remedy. Run list_dirty_packages first: a reload discards unsaved work.
+//   @param filename - Disk path to a .umap, OR a long package path (e.g. /Game/Maps/Foo) resolved to the on-disk map file. Required unless default_template is true.
+//   @param default_template - Optional bool (default false): open the engine's default template level (/Engine/Maps/Templates/Template_Default) without naming it in filename; giving both is an error.
 //   @param load_as_template - When true, loads the level as a template; defaults to false
 //   @param force - Skip the resident-world preflight and call LoadMap anyway. With resident worlds alive this PROBABLY KILLS THE EDITOR: the engine raises a Fatal error ("World Memory Leaks"), the process dies and every unsaved in-memory edit is lost. Defaults to false.
-//   @returns { success: bool, error?: string, refused?: bool, load_attempted?: bool, resident_world_count?: int, resident_worlds?: [{ package: string, world_name: string, world_type: string, has_world_context: bool, is_load_target: bool }], remedy?: string, data?: { loaded_filename: string, target_package: string, level_name?: string, world_name?: string, resident_world_count: int, forced_past_resident_worlds: bool, resident_worlds?: [...] } }
+//   @returns { success: bool, error?: string, refused?: bool, load_attempted?: bool, resident_world_count?: int, resident_worlds?: [{ package: string, world_name: string, world_type: string, has_world_context: bool, is_load_target: bool }], remedy?: string, data?: { loaded_filename: string, target_package: string, default_template: bool, level_name?: string, world_name?: string, loaded_package?: string, is_engine_template?: bool, warning?: string (when the loaded map belongs to the engine), resident_world_count: int, forced_past_resident_worlds: bool, resident_worlds?: [...] } }
 
 TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
 {
-    // The map to open: required and non-empty.
+    // The map to open: filename, or the engine's default template level (what new_level opened).
     FString LevelFilename;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("filename"), LevelFilename, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    const bool bFilenameGiven = Params->TryGetStringField(TEXT("filename"), LevelFilename);
+    bool bDefaultTemplate = false;
+    Params->TryGetBoolField(TEXT("default_template"), bDefaultTemplate);
+    if (bDefaultTemplate)
+    {
+        if (bFilenameGiven && !LevelFilename.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TEXT("Pass filename OR default_template=true, not both; nothing was loaded"));
+        }
+        LevelFilename = TEXT("/Engine/Maps/Templates/Template_Default");
+    }
+    else if (!bFilenameGiven)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'filename' (or pass default_template=true)"));
+    }
     if (LevelFilename.IsEmpty())
     {
         return UEAgentEditorCommandsImpl::EmptyParamReply(TEXT("filename"));
@@ -1924,11 +2010,27 @@ TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("loaded_filename"), LevelFilename);
     Data->SetStringField(TEXT("target_package"), TargetPackageName);
+    Data->SetBoolField(TEXT("default_template"), bDefaultTemplate);
     McpAddMapLoadPreflightFields(Data, Preflight);
     if (bSuccess && World)
     {
         Data->SetStringField(TEXT("level_name"), World->GetName());
         Data->SetStringField(TEXT("world_name"), World->GetName());
+
+        // The REAL package the editor ended up on, read from the world, not assumed. An /Engine map (the
+        // default template) is one a save_level without `filename` would write over.
+        const UPackage* WorldPackage = World->GetOutermost();
+        const FString LoadedPackage = WorldPackage ? WorldPackage->GetName() : FString();
+        const bool bIsEngineTemplate = LoadedPackage.StartsWith(TEXT("/Engine/"));
+        Data->SetStringField(TEXT("loaded_package"), LoadedPackage);
+        Data->SetBoolField(TEXT("is_engine_template"), bIsEngineTemplate);
+        if (bIsEngineTemplate)
+        {
+            Data->SetStringField(TEXT("warning"), FString::Printf(
+                TEXT("The editor is now sitting on %s, a map that belongs to the ENGINE. A save_level WITHOUT `filename` ")
+                TEXT("from here writes over that map's own .umap; save your level explicitly with ")
+                TEXT("save_level(filename=\"/Game/.../YourMap\")."), *LoadedPackage));
+        }
     }
 
     return mcp_common::MakeOutcomeReply(
@@ -1937,98 +2039,7 @@ TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
         bSuccess ? FString() : TEXT("Failed to load level. Check if file exists and is a valid Unreal map file."));
 }
 
-// MCP:new_level - Loads the ENGINE default template map into the editor. It does NOT create a level and the level is NOT empty (~45 actors: Floor, PlayerStart, DirectionalLight, SkyLight, SkyAtmosphere, fog); `level_name` is accepted but IGNORED. After this the editor sits on an /Engine map, so a save_level without `filename` would write over the engine's own .umap. Like load_level it REFUSES to run while other UWorlds are resident in memory, because this is a LoadMap and the engine's world-leak check turns that into a Fatal error that kills the editor process (see force).
-//   @param level_name - IGNORED. Accepted for wire compatibility only; the loaded map is always /Engine/Maps/Templates/Template_Default. When you pass one, the response echoes it in requested_level_name and sets level_name_ignored=true.
-//   @param force - Skip the resident-world preflight and call LoadMap anyway. With resident worlds alive this PROBABLY KILLS THE EDITOR: the engine raises a Fatal error ("World Memory Leaks"), the process dies and every unsaved in-memory edit is lost. Defaults to false.
-//   @returns { success: bool, error?: string, refused?: bool, load_attempted?: bool, requested_filename?: string, target_package?: string, resident_world_count?: int, resident_worlds?: [{ package: string, world_name: string, world_type: string, has_world_context: bool, is_load_target: bool }], resident_world_is_load_target?: bool, remedy?: string, data?: { template_package: string, level_name_ignored: bool, requested_level_name?: string, resident_world_count: int, forced_past_resident_worlds: bool, resident_worlds?: [...], level_name?: string, world_name?: string, loaded_package?: string, is_engine_template?: bool, warning?: string, message?: string } }
-
-TSharedPtr<FJsonObject> HandleNewLevel(const TSharedPtr<FJsonObject>& Params)
-{
-    // `level_name` is used for nothing -- it is let in for contract compatibility, but
-    // the response declares it ignored instead of returning the template's name as if it
-    // were the level you asked for. An explicitly empty name is still refused.
-    FString RequestedName = TEXT("NewLevel");
-    const bool bLevelNameProvided = Params->TryGetStringField(TEXT("level_name"), RequestedName);
-    if (RequestedName.IsEmpty())
-    {
-        return UEAgentEditorCommandsImpl::EmptyParamReply(TEXT("level_name"));
-    }
-
-    bool bForce = false;
-    Params->TryGetBoolField(TEXT("force"), bForce);
-
-    // This does NOT create any world. It is an FEditorFileUtils::LoadMap over an
-    // ENGINE map, with everything that implies:
-    //   (a) the resulting level has ~45 actors, it is not empty;
-    //   (b) the editor ends up sitting on /Engine/Maps/Templates/Template_Default, so
-    //       a save_level WITHOUT `filename` writes over Engine/Content/Maps/Templates/Template_Default.umap;
-    //   (c) being a LoadMap, it shares THE SAME resident-world Fatal error as
-    //       load_level -- that is why it carries the SAME preflight, not a variant.
-    // Reference: FEditorFileUtils::LoadMap, LoadDefaultMapAtStartup
-    const FString DefaultMapPath = TEXT("/Engine/Maps/Templates/Template_Default");
-
-    // The same preflight as load_level, since this is a LoadMap too. The "destination" here is
-    // always the engine template, so is_load_target will only be true if someone left THAT map
-    // resident.
-    FMcpMapLoadPreflight Preflight;
-    if (TSharedPtr<FJsonObject> Refusal = McpPrepareMapLoad(
-            TEXT("new_level"), DefaultMapPath, DefaultMapPath, bForce, Preflight))
-    {
-        return Refusal;
-    }
-
-    // Not as a template, no progress dialog. Without an editor there is nothing to load into.
-    const bool bSuccess = (GEditor != nullptr)
-        && FEditorFileUtils::LoadMap(DefaultMapPath, /*LoadAsTemplate=*/false, /*bShowProgress=*/false);
-
-    // The world the editor ended up on (only meaningful after a successful load)
-    UWorld* NewWorld = bSuccess ? mcp_common::GetEditorWorld() : nullptr;
-
-    // Same honest envelope as load_level -- `success` is derived by
-    // MakeOutcomeReply from LoadMap's real bSuccess, and the payload does NOT carry
-    // an inner `success` of its own: with a flat object carrying its own `success`, the
-    // bridge synthesizes status:success over a payload that says the opposite.
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("template_package"), DefaultMapPath);
-    Data->SetBoolField(TEXT("level_name_ignored"), bLevelNameProvided);
-    McpAddMapLoadPreflightFields(Data, Preflight);
-    if (bLevelNameProvided)
-    {
-        // Echo explicitly marked as INPUT: it is not a reading of anything.
-        Data->SetStringField(TEXT("requested_level_name"), RequestedName);
-    }
-
-    if (bSuccess && NewWorld)
-    {
-        // The REAL path the editor ended up on, read from the world, not assumed.
-        const UPackage* WorldPackage = NewWorld->GetOutermost();
-        const FString LoadedPackage = WorldPackage ? WorldPackage->GetName() : FString();
-        const bool bIsEngineTemplate = LoadedPackage.StartsWith(TEXT("/Engine/"));
-
-        Data->SetStringField(TEXT("level_name"), NewWorld->GetName());
-        Data->SetStringField(TEXT("world_name"), NewWorld->GetName());
-        Data->SetStringField(TEXT("loaded_package"), LoadedPackage);
-        Data->SetBoolField(TEXT("is_engine_template"), bIsEngineTemplate);
-        Data->SetStringField(TEXT("warning"), FString::Printf(
-            TEXT("No level was created and the level is NOT empty. The editor is now sitting on %s%s. ")
-            TEXT("A save_level WITHOUT `filename` from here writes over that map's own .umap. ")
-            TEXT("To get a level of your own, save it explicitly: save_level(filename=\"/Game/.../YourMap\") ")
-            TEXT("-- and check get_current_level().package_name: if it starts with /Engine/, you are not in a level of yours."),
-            *LoadedPackage,
-            bIsEngineTemplate ? TEXT(", a map that belongs to the ENGINE") : TEXT("")));
-        Data->SetStringField(TEXT("message"), bLevelNameProvided
-            ? TEXT("Engine template map loaded. `level_name` was IGNORED -- nothing was named or created; see warning.")
-            : TEXT("Engine template map loaded. Nothing was created; see warning."));
-    }
-
-    return mcp_common::MakeOutcomeReply(
-        Data,
-        bSuccess,
-        bSuccess ? FString() : FString::Printf(
-            TEXT("Failed to load the engine template map %s"), *DefaultMapPath));
-}
-
-// MCP:get_current_level - Which map a world is sitting on: level_name, its package_name (/Game/... or /Engine/...), the resolved disk filename, whether the package is dirty, and a live actor count. package_name is the discriminator that catches the classic mistake -- if it starts with /Engine/ you are on an engine template (what new_level leaves behind) and a save_level without `filename` would overwrite the ENGINE's own map. Defaults to the EDITOR world; it also takes the standard `world` selector, so during PIE you can ask the play world ('pie'/'server'/'client'/'pie:N') instead of being told about the authoring map and having no way to know it.
+// MCP:get_current_level - Which map a world is sitting on: level_name, its package_name (/Game/... or /Engine/...), the resolved disk filename, whether the package is dirty, and a live actor count. package_name is the discriminator that catches the classic mistake -- if it starts with /Engine/ you are on an engine template (what load_level with default_template=true leaves behind) and a save_level without `filename` would overwrite the ENGINE's own map. Defaults to the EDITOR world; it also takes the standard `world` selector, so during PIE you can ask the play world ('pie'/'server'/'client'/'pie:N') instead of being told about the authoring map and having no way to know it.
 //   @param world - Optional world selector: absent/'editor' (default -- the authoring map even while PIE runs) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'game' (alias of 'pie') | 'server' (the PIE world with authority) | 'client' | 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent fallback to the editor world.
 //   @returns { level_name: string, package_name: string (the /Game or /Engine path -- read this one), filename: string, is_dirty: bool, actor_count: int, world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE, not in world_name), world_type: string ("Editor" | "PIE" | ...), net_mode: string, pie_instance: int }
 
@@ -2081,7 +2092,7 @@ TSharedPtr<FJsonObject> HandleGetCurrentLevel(const TSharedPtr<FJsonObject>& Par
 
 // Many actors in one undoable step
 
-// MCP:batch_set_actor_transform - Move/rotate/scale MANY actors in a single undoable transaction, each with its own optional location/rotation/scale, reporting success_count, failure_count and the names that did not resolve. Cheaper and atomically undoable versus N set_actor_transform calls. Calls Modify() per actor so their OFPA packages dirty and save_level actually writes them. Takes the same `world` selector as set_actor_transform, so it reaches a live PIE world too. WARNING: resolves the INTERNAL name only (no editor labels, unlike set_actor_transform); a name it cannot find is counted in failure_count, not raised as an error -- read that number.
+// MCP:set_actor_transforms - Move/rotate/scale MANY actors in a single undoable transaction, each with its own optional location/rotation/scale, reporting success_count, failure_count and the names that did not resolve. Cheaper and atomically undoable versus N set_actor_transform calls. Calls Modify() per actor so their OFPA packages dirty and save_level actually writes them. Takes the same `world` selector as set_actor_transform, so it reaches a live PIE world too. WARNING: resolves the INTERNAL name only (no editor labels, unlike set_actor_transform); a name it cannot find is counted in failure_count, not raised as an error -- read that number.
 //   @param actor_transforms - Array of objects {actor_name: internal GetName; location?: [x,y,z] array only; rotation?: [pitch,yaw,roll] or the safer {pitch,yaw,roll}; scale?: [x,y,z] array only}. Omitted components keep their current value; an entry with no actor_name just increments failure_count, and a malformed vector silently reads as zero.
 //   @param world - Optional: "editor" (default) | "pie" | "server" | "client" | "pie:N". The response stamps which world answered.
 //   @returns { success_count: int, failure_count: int (unresolved or malformed entries -- check it), updated_actors: [actor JSON re-read after the write], failed_actors?: [string], world_name, world_package, ... }
@@ -2160,7 +2171,7 @@ TSharedPtr<FJsonObject> HandleBatchSetActorTransform(const TSharedPtr<FJsonObjec
     return Reply;
 }
 
-// MCP:batch_delete_actors - Delete several editor-world actors at once through the editor's own delete path, in ONE undoable transaction (a single undo brings them all back), returning the count and the JSON of each actor captured before deletion. WARNING: matches INTERNAL names only -- editor labels do not resolve -- names it cannot find are skipped silently, so compare deleted_count against how many you asked for; and if NONE resolve it errors with "No actors found to delete". Editor world only, and the removal is in memory until save_level writes the .umap.
+// MCP:delete_actors - Delete several editor-world actors at once through the editor's own delete path, in ONE undoable transaction (a single undo brings them all back), returning the count and the JSON of each actor captured before deletion. WARNING: matches INTERNAL names only -- editor labels do not resolve -- names it cannot find are skipped silently, so compare deleted_count against how many you asked for; and if NONE resolve it errors with "No actors found to delete". Editor world only, and the removal is in memory until save_level writes the .umap.
 //   @param actor_names - Array of internal actor names (GetName), case-insensitive whole-string. Unmatched entries are dropped without an error; resolve labels first with find_actors_by_name.
 //   @returns { deleted_count: int (compare against your input length), deleted_actors: [actor JSON captured before the delete] }
 
@@ -2212,7 +2223,7 @@ TSharedPtr<FJsonObject> HandleBatchDeleteActors(const TSharedPtr<FJsonObject>& P
 
 // Grounding (trace or heightmap) and lining actors up
 
-// MCP:snap_actor_to_ground - Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use place_actor_on_terrain when the ground is definitely the landscape and you want no trace at all, batch_place_actors_on_terrain for many actors.
+// MCP:snap_actor_to_ground - Drop ONE editor-world actor straight down until its bounds bottom rests on whatever is below -- meshes, BSP or the landscape. It line-traces first and, because headless traces routinely MISS the landscape, falls back to sampling the heightmap so the actor still lands; sampled_from tells you which path answered. Use place_actor_on_terrain when the ground is definitely the landscape and you want no trace at all, place_actors_on_terrain for many actors.
 //   @param actor_name - Name of the actor to snap (editor world).
 //   @param trace_distance - Optional downward trace distance in cm; defaults to 10000
 //   @param align_to_surface - When true, rotate actor to match the surface normal (trace hits only; the heightmap fallback has no normal); defaults to false
@@ -2329,7 +2340,7 @@ TSharedPtr<FJsonObject> HandleSnapActorToGround(const TSharedPtr<FJsonObject>& P
     return Reply;
 }
 
-// MCP:align_actors - Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; batch_set_actor_transform is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
+// MCP:align_actors - Snap two or more editor-world actors onto a shared location, rotation and/or scale taken from a reference (the first, the last, their average, or a named actor). Use it to straighten a hand-placed row or make a set of props share an orientation, in one undoable step; set_actor_transforms is the tool when each actor needs a DIFFERENT transform. WARNING: aligning "location" collapses them onto the same point -- for a row, align only rotation/scale and set positions yourself.
 //   @param actor_names - Array of at least 2 INTERNAL actor names (GetName) in the editor world; fewer is an error, and editor labels do not resolve.
 //   @param align_type - "location" (default), "rotation", "scale" or "all" -- which transform components get copied from the reference.
 //   @param reference - Where the target values come from: "first" (default), "last", "average" (the componentwise mean of all of them), or the internal name of one of the listed actors.
@@ -2426,7 +2437,7 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
 
 // Instance components on a placed actor
 
-// MCP:add_component_to_actor - Attach a new component of a given class to an actor ALREADY PLACED in the level (an instance-level component, not a change to its Blueprint -- for that use add_component_to_blueprint, which affects every instance). Returns object_path, the full reflection path to feed straight into set_property_value / call_function to configure it, so no dedicated add_* wrapper is needed. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
+// MCP:add_component_to_actor - Attach a new component of a given class to an actor ALREADY PLACED in the level (an instance-level component, not a change to its Blueprint -- for that use add_component_to_blueprint, which affects every instance). Returns object_path, the full reflection path to feed straight into set_properties / call_function to configure it, so no dedicated add_* wrapper is needed. Pass idempotent=true to make re-running safe. Editor world only; the change dirties the actor's package, so save_level to keep it.
 //   @param actor_name - Name of the placed actor to add the component to (editor world).
 //   @param component_type - Component class name (e.g., 'StaticMeshComponent', 'BoxComponent', 'UStaticMeshComponent')
 //   @param component_name - Name to assign to the new component
@@ -2435,7 +2446,7 @@ TSharedPtr<FJsonObject> HandleAlignActors(const TSharedPtr<FJsonObject>& Params)
 //   @param scale - Optional [x, y, z] relative scale (for scene components)
 //   @param idempotent - Optional bool (default false). When true, if the actor already has a component of this class, return it instead of adding a duplicate (already_existed:true). Use for single-instance components.
 //   @returns { actor_name: string, component_name: string, object_path: string, requested_component_name: string, component_type: string, already_existed: bool, success: bool }
-//   Note: object_path is the full reflection path -- feed it to set_property_value / call_function to configure the component (no dedicated add_* wrapper needed).
+//   Note: object_path is the full reflection path -- feed it to set_properties / call_function to configure the component (no dedicated add_* wrapper needed).
 
 TSharedPtr<FJsonObject> HandleAddComponentToActor(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2753,7 +2764,7 @@ TSharedPtr<FJsonObject> HandleSetCurrentLevel(const TSharedPtr<FJsonObject>& Par
 }
 
 // MCP:move_actors_to_level - Relocate existing editor-world actors into another sub-level (persistent or a loaded streaming level) -- it rescues actors that got spawned into the wrong level, which set_current_level only prevents going forward. Idempotent: actors already there come back in already_in_level instead of being touched. WARNING: it is clipboard-backed, so the editor SELECTION is mutated as a side effect, and the destination must be loaded AND unlocked. Both levels' packages get dirty: save_level after.
-//   @param actor_names - Array of actor names OR editor labels in the editor world (this one does accept labels, unlike delete_actor/batch_delete_actors).
+//   @param actor_names - Array of actor names OR editor labels in the editor world (this one does accept labels, unlike delete_actor/delete_actors).
 //   @param target_level - "persistent" or the short name of a loaded streaming sub-level
 //   @param move_all_or_fail - When true, fail the whole move if any actor cannot be moved; defaults to false
 //   @returns { requested: int, moved_count: int, already_in_level: [string], target_level: string, success: bool, note: string }
@@ -2890,28 +2901,18 @@ namespace UEAgentEditorCommandsImpl
         return Trans->CanRedo() ? Trans->GetRedoContext().Title.ToString() : FString();
     }
 
-    // Undoes one transaction (redoes, when bUndo is false) and reports on Result what applied and what is next.
-    void StepUndoStack(UTransactor* Trans, bool bUndo, const TSharedPtr<FJsonObject>& Result)
-    {
-        const bool bApplied = bUndo ? Trans->Undo(/*bCanRedo=*/true) : Trans->Redo();
-        const bool bCanStepAgain = bUndo ? Trans->CanUndo() : Trans->CanRedo();
-
-        Result->SetBoolField(TEXT("applied"), bApplied);
-        Result->SetNumberField(TEXT("undo_count"), UndoableCount(Trans));
-        Result->SetBoolField(bUndo ? TEXT("can_undo") : TEXT("can_redo"), bCanStepAgain);
-        Result->SetStringField(bUndo ? TEXT("next_undo") : TEXT("next_redo"), NextLabel(Trans, bUndo));
-    }
-
-    // Undoes (redoes, when bUndo is false) up to `count` transactions, default and minimum 1, stopping
-    // when the stack runs out; reports on Result how many were asked for and how many applied.
-    void StepUndoStackRepeatedly(const TSharedPtr<FJsonObject>& Params, UTransactor* Trans, bool bUndo,
-                                 const TSharedPtr<FJsonObject>& Result)
+    // The reply of undo (redo, when bUndo is false): steps the stack back (forward) by the optional `count`
+    // transactions, default 1, stopping when the stack runs out (or an undo barrier stops it), and reports what
+    // applied and what is next. A count below 1 is refused before anything is undone.
+    TSharedPtr<FJsonObject> StepUndoStack(const TSharedPtr<FJsonObject>& Params, UTransactor* Trans, bool bUndo)
     {
         int32 Count = 1;
         Params->TryGetNumberField(TEXT("count"), Count);
         if (Count < 1)
         {
-            Count = 1;
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s: count must be at least 1 (got %d); nothing was %s"),
+                bUndo ? TEXT("undo") : TEXT("redo"), Count, bUndo ? TEXT("undone") : TEXT("redone")));
         }
 
         int32 Applied = 0;
@@ -2924,10 +2925,16 @@ namespace UEAgentEditorCommandsImpl
             }
             ++Applied;
         }
+        const bool bCanStepAgain = bUndo ? Trans->CanUndo() : Trans->CanRedo();
 
+        TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+        Result->SetBoolField(TEXT("applied"), Applied > 0);
         Result->SetNumberField(TEXT("requested"), Count);
         Result->SetNumberField(bUndo ? TEXT("actually_undone") : TEXT("actually_redone"), Applied);
         Result->SetNumberField(TEXT("undo_count"), UndoableCount(Trans));
+        Result->SetBoolField(bUndo ? TEXT("can_undo") : TEXT("can_redo"), bCanStepAgain);
+        Result->SetStringField(bUndo ? TEXT("next_undo") : TEXT("next_redo"), NextLabel(Trans, bUndo));
+        return Result;
     }
 }
 
@@ -3038,107 +3045,53 @@ TSharedPtr<FJsonObject> HandleCancelTransaction(const TSharedPtr<FJsonObject>& P
     return ResultObj;
 }
 
-// MCP:undo - Step the editor's undo stack back by one transaction and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and the honest verification is re-reading whatever you changed. Use undo_multiple for N steps and get_undo_state to look before you leap; an undo barrier will stop it.
-//   @returns { applied: bool (THE oracle -- false means nothing was undone), undo_count: int, can_undo: bool, next_undo: string (label of the next entry) }
+// MCP:undo - Step the editor's undo stack back by one transaction, or by `count` of them, and report what is left, including next_undo (the label of the entry now on top). WARNING: `success` is ALWAYS true, including when there was nothing to undo -- the real oracle is `applied`, and with a count compare actually_undone against requested (the stack ran out, or an undo barrier stopped it); the honest verification is re-reading whatever you changed. Read get_undo_state first to look before you leap.
+//   @param count - Optional. How many transactions to undo, at least 1 (default 1); stops early when the stack runs out or reaches an undo barrier. Below 1 is refused.
+//   @returns { applied: bool (THE oracle -- false means nothing was undone), requested: int, actually_undone: int (compare against requested), undo_count: int, can_undo: bool, next_undo: string (label of the next entry) }
 TSharedPtr<FJsonObject> HandleUndo(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
 
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    UEAgentEditorCommandsImpl::StepUndoStack(Trans, /*bUndo=*/true, ResultObj);
-    return ResultObj;
+    return UEAgentEditorCommandsImpl::StepUndoStack(Params, Trans, /*bUndo=*/true);
 }
 
-// MCP:redo - Re-apply the transaction that undo just reverted and report what remains, including next_redo. WARNING: `success` is ALWAYS true even with an empty redo stack -- read `applied` instead. Note the redo stack is discarded as soon as any NEW edit is made after an undo, so a redo that answers applied:false usually means something was changed in between, not that the command failed.
-//   @returns { applied: bool (THE oracle), undo_count: int, can_redo: bool, next_redo: string (label of the next redoable entry) }
+// MCP:redo - Re-apply the transaction that undo just reverted, or `count` of them, and report what remains, including next_redo. WARNING: `success` is ALWAYS true even with an empty redo stack -- read `applied` instead, and with a count compare actually_redone against requested. Note the redo stack is discarded as soon as any NEW edit is made after an undo, so a redo that answers applied:false usually means something was changed in between, not that the command failed.
+//   @param count - Optional. How many transactions to redo, at least 1 (default 1); stops early when the redo stack runs out. Below 1 is refused.
+//   @returns { applied: bool (THE oracle), requested: int, actually_redone: int (compare against requested), undo_count: int, can_redo: bool, next_redo: string (label of the next redoable entry) }
 TSharedPtr<FJsonObject> HandleRedo(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
 
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    UEAgentEditorCommandsImpl::StepUndoStack(Trans, /*bUndo=*/false, ResultObj);
-    return ResultObj;
+    return UEAgentEditorCommandsImpl::StepUndoStack(Params, Trans, /*bUndo=*/false);
 }
 
-// MCP:undo_multiple - Walk the undo stack back N transactions in one call, stopping early at the real stack depth (or at an undo barrier) instead of erroring. Use it to unwind a whole failed batch. WARNING: compare actually_undone against requested: a smaller number is the honest signal that the stack ran out, and it is the only oracle here.
-//   @param count - How many transactions to undo (>= 1). Silently capped at what the stack actually holds.
-//   @returns { requested: int (your input), actually_undone: int (compare against it), undo_count: int remaining }
-TSharedPtr<FJsonObject> HandleUndoMultiple(const TSharedPtr<FJsonObject>& Params)
-{
-    UTransactor* Trans = GetEditorTransactor();
-    if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    UEAgentEditorCommandsImpl::StepUndoStackRepeatedly(Params, Trans, /*bUndo=*/true, ResultObj);
-    return ResultObj;
-}
-
-// MCP:redo_multiple - Re-apply N undone transactions in one call, stopping early when the redo stack runs out rather than erroring. WARNING: compare actually_redone against requested -- that gap is the only honest signal. Remember any new edit made after an undo wipes the redo stack, so this can legitimately redo nothing.
-//   @param count - How many transactions to redo (>= 1). Silently capped at what the redo stack holds.
-//   @returns { requested: int (your input), actually_redone: int (compare against it), undo_count: int }
-TSharedPtr<FJsonObject> HandleRedoMultiple(const TSharedPtr<FJsonObject>& Params)
-{
-    UTransactor* Trans = GetEditorTransactor();
-    if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    UEAgentEditorCommandsImpl::StepUndoStackRepeatedly(Params, Trans, /*bUndo=*/false, ResultObj);
-    return ResultObj;
-}
-
-// MCP:can_undo - Cheap yes/no on whether anything is undoable right now, plus the LABEL of the entry undo would revert -- read that label before undoing so you do not roll back someone else's edit. Prefer get_undo_state when you also want counts and the redo side in the same call.
-//   @returns { can_undo: bool, label: string (title of the transaction undo would revert), reason?: string (why not, when can_undo is false) }
-TSharedPtr<FJsonObject> HandleCanUndo(const TSharedPtr<FJsonObject>& Params)
-{
-    UTransactor* Trans = GetEditorTransactor();
-    if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-    FText Reason;
-    const bool bCan = Trans->CanUndo(&Reason);
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("can_undo"), bCan);
-    ResultObj->SetStringField(TEXT("label"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/true));
-    if (!bCan && !Reason.IsEmpty())
-    {
-        ResultObj->SetStringField(TEXT("reason"), Reason.ToString());
-    }
-    return ResultObj;
-}
-
-// MCP:can_redo - Cheap yes/no on whether anything can be re-applied, plus the LABEL of the entry redo would restore. can_redo:false right after an undo normally means a new edit has since wiped the redo stack. Prefer get_undo_state for the whole picture in one call.
-//   @returns { can_redo: bool, label: string (title of the transaction redo would restore), reason?: string (why not, when can_redo is false) }
-TSharedPtr<FJsonObject> HandleCanRedo(const TSharedPtr<FJsonObject>& Params)
-{
-    UTransactor* Trans = GetEditorTransactor();
-    if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
-    FText Reason;
-    const bool bCan = Trans->CanRedo(&Reason);
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("can_redo"), bCan);
-    ResultObj->SetStringField(TEXT("label"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/false));
-    if (!bCan && !Reason.IsEmpty())
-    {
-        ResultObj->SetStringField(TEXT("reason"), Reason.ToString());
-    }
-    return ResultObj;
-}
-
-// MCP:get_undo_state - One call that answers everything you need before touching undo/redo: both counts, both next-entry LABELS, and whether a transaction is still OPEN (transaction_open -- the thing that silently swallows later edits into someone else's batch). Read this instead of chaining can_undo + can_redo, and read it BEFORE undo/undo_multiple so you know what you are about to revert.
-//   @returns { can_undo, can_redo, undo_count (entries undo can still revert), redo_count (undone entries redo can restore), next_undo, next_redo, transaction_open, transaction_index }
+// MCP:get_undo_state - One call that answers everything you need before touching undo/redo: both counts, both next-entry LABELS, why undo or redo is impossible right now, and whether a transaction is still OPEN (transaction_open -- the thing that silently swallows later edits into someone else's batch). Read it BEFORE undo so you know what you are about to revert.
+//   @returns { can_undo: bool, can_redo: bool, undo_reason?: string (why not, when can_undo is false), redo_reason?: string (why not, when can_redo is false), undo_count: int (entries undo can still revert), redo_count: int (undone entries redo can restore), next_undo: string, next_redo: string, transaction_open: bool, transaction_index: int }
 TSharedPtr<FJsonObject> HandleGetUndoState(const TSharedPtr<FJsonObject>& Params)
 {
     UTransactor* Trans = GetEditorTransactor();
     if (!Trans) { return mcp_common::MakeErrorReply(TEXT("GEditor->Trans unavailable")); }
 
-    const bool bCanUndo = Trans->CanUndo();
-    const bool bCanRedo = Trans->CanRedo();
+    FText UndoReason;
+    FText RedoReason;
+    const bool bCanUndo = Trans->CanUndo(&UndoReason);
+    const bool bCanRedo = Trans->CanRedo(&RedoReason);
     const int32 UndoCount = UEAgentEditorCommandsImpl::UndoableCount(Trans);
     const int32 RedoCount = Trans->GetUndoCount();  // the engine counts the undone entries
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("can_undo"), bCanUndo);
     ResultObj->SetBoolField(TEXT("can_redo"), bCanRedo);
+    if (!bCanUndo && !UndoReason.IsEmpty())
+    {
+        ResultObj->SetStringField(TEXT("undo_reason"), UndoReason.ToString());
+    }
+    if (!bCanRedo && !RedoReason.IsEmpty())
+    {
+        ResultObj->SetStringField(TEXT("redo_reason"), RedoReason.ToString());
+    }
     ResultObj->SetNumberField(TEXT("undo_count"), UndoCount);
     ResultObj->SetNumberField(TEXT("redo_count"), RedoCount);
     ResultObj->SetStringField(TEXT("next_undo"), UEAgentEditorCommandsImpl::NextLabel(Trans, /*bUndo=*/true));
@@ -3188,7 +3141,7 @@ TSharedPtr<FJsonObject> HandleGetTransactionHistory(const TSharedPtr<FJsonObject
     return ResultObj;
 }
 
-// MCP:reset_transaction_buffer - IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entries too, not just yours) and drops any open transaction. It does not revert anything -- edits already made stay made, they just stop being undoable. Use only to reclaim memory after a huge batch, or when a corrupt buffer is causing trouble; to undo work use undo/undo_multiple. undo_count_before vs after is the evidence.
+// MCP:reset_transaction_buffer - IRREVERSIBLE: wipes the editor's ENTIRE undo AND redo history (the human's entries too, not just yours) and drops any open transaction. It does not revert anything -- edits already made stay made, they just stop being undoable. Use only to reclaim memory after a huge batch, or when a corrupt buffer is causing trouble; to undo work use undo (with `count` for several steps). undo_count_before vs after is the evidence.
 //   @param reason - Human-readable reason, logged by the engine so the wipe is traceable. Defaults to 'MCP reset_transaction_buffer'.
 //   @returns { success: bool (hardcoded), undo_count_before: int, undo_count_after: int (0) }
 TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObject>& Params)
@@ -3211,7 +3164,7 @@ TSharedPtr<FJsonObject> HandleResetTransactionBuffer(const TSharedPtr<FJsonObjec
     return ResultObj;
 }
 
-// MCP:set_undo_barrier - Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier, or clear_undo_barriers for all of them.
+// MCP:set_undo_barrier - Drop a floor in the undo stack at the current position so no later undo can cross it -- the way to protect everything done SO FAR (yours or the human's) before starting a risky batch that you may want to unwind. Idempotent: a barrier already sitting at the cursor is not pushed twice (already_existed:true). Lift it with remove_undo_barrier (all=true lifts every barrier).
 //   @returns { success: bool (hardcoded), already_existed: bool (true = nothing new was pushed), undo_barrier: int (cursor it sits at), undo_count: int, queue_length: int }
 TSharedPtr<FJsonObject> HandleSetUndoBarrier(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3235,39 +3188,33 @@ TSharedPtr<FJsonObject> HandleSetUndoBarrier(const TSharedPtr<FJsonObject>& Para
     return ResultObj;
 }
 
-// MCP:remove_undo_barrier - Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished. WARNING: `success` is hardcoded true: `removed` is the oracle and comes back false as an honest no-op when there was no barrier. Use clear_undo_barriers to drop every barrier at once.
-//   @returns { success: bool (hardcoded), removed: bool (THE oracle -- false = there was nothing to pop), undo_barrier: int now in force, undo_count: int }
+// MCP:remove_undo_barrier - Lift the most recent undo barrier so undo can step past it again -- the counterpart of set_undo_barrier, for when the protected batch is finished -- or, with all=true, every barrier at once (including ones another session or the human placed to protect their work). Nothing is undone; it only lifts the floor. WARNING: `success` is hardcoded true: `removed` is the oracle and comes back false as an honest no-op when there was no barrier.
+//   @param all - Optional bool (default false). true clears ALL undo barriers instead of popping the most recent one.
+//   @returns { success: bool (hardcoded), removed: bool (THE oracle -- false = there was nothing to pop), all: bool (echo), undo_barrier: int now in force, undo_count: int, queue_length: int }
 TSharedPtr<FJsonObject> HandleRemoveUndoBarrier(const TSharedPtr<FJsonObject>& Params)
 {
+    bool bAll = false;
+    Params->TryGetBoolField(TEXT("all"), bAll);
+
     UTransBuffer* TransBuffer = Cast<UTransBuffer>(GetEditorTransactor());
     if (!TransBuffer) { return mcp_common::MakeErrorReply(TEXT("Editor trans buffer not available")); }
 
     const int32 Before = TransBuffer->GetCurrentUndoBarrier();
-    TransBuffer->RemoveUndoBarrier();
+    if (bAll)
+    {
+        TransBuffer->ClearUndoBarriers();
+    }
+    else
+    {
+        TransBuffer->RemoveUndoBarrier();
+    }
     const bool bRemoved = (Before != INDEX_NONE);
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
     ResultObj->SetBoolField(TEXT("removed"), bRemoved);
+    ResultObj->SetBoolField(TEXT("all"), bAll);
     ResultObj->SetNumberField(TEXT("undo_barrier"), TransBuffer->GetCurrentUndoBarrier());
-    ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
-    return ResultObj;
-}
-
-// MCP:clear_undo_barriers - Remove ALL undo barriers at once so undo can traverse the whole buffer again -- including barriers another session or the human placed to protect their work, so prefer remove_undo_barrier for just your own. Nothing is undone by this; it only lifts the floor. WARNING: `success` is hardcoded true: `had_barrier` is the oracle, false meaning there was nothing to clear.
-//   @returns { success: bool (hardcoded), had_barrier: bool (THE oracle -- false = honest no-op), undo_count: int, queue_length: int }
-TSharedPtr<FJsonObject> HandleClearUndoBarriers(const TSharedPtr<FJsonObject>& Params)
-{
-    UTransBuffer* TransBuffer = Cast<UTransBuffer>(GetEditorTransactor());
-    if (!TransBuffer) { return mcp_common::MakeErrorReply(TEXT("Editor trans buffer not available")); }
-
-    const int32 Before = TransBuffer->GetCurrentUndoBarrier();
-    TransBuffer->ClearUndoBarriers();
-    const bool bHadBarrier = (Before != INDEX_NONE);
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetBoolField(TEXT("success"), true);
-    ResultObj->SetBoolField(TEXT("had_barrier"), bHadBarrier);
     ResultObj->SetNumberField(TEXT("undo_count"), UEAgentEditorCommandsImpl::UndoableCount(TransBuffer));
     ResultObj->SetNumberField(TEXT("queue_length"), TransBuffer->GetQueueLength());
     return ResultObj;
@@ -3473,7 +3420,7 @@ TSharedPtr<FJsonObject> HandlePlaceActorOnTerrain(const TSharedPtr<FJsonObject>&
     return Reply;
 }
 
-// MCP:batch_place_actors_on_terrain - Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as place_actor_on_terrain, applied per actor.
+// MCP:place_actors_on_terrain - Ground many actors on the landscape in one call by sampling the heightmap at each actor's XY (no line trace; scatter without per-point python). Same grounding math as place_actor_on_terrain, applied per actor.
 //   @param actors - Array of { name (Actor->GetName()) OR label (Actor->GetActorLabel()), z_offset? (per-actor override), align? ('mesh_bbox_bottom'|'actor_origin', per-actor override) }
 //   @param align - Optional default align for entries without their own; 'mesh_bbox_bottom' (default; drops the lowest mesh point) or 'actor_origin'
 //   @param z_offset - Optional default extra world-Z above the sampled ground for entries without their own; defaults to 0
@@ -3656,14 +3603,11 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_component_to_actor"), &HandleAddComponentToActor },
     { TEXT("align_actors"), &HandleAlignActors },
-    { TEXT("batch_delete_actors"), &HandleBatchDeleteActors },
-    { TEXT("batch_place_actors_on_terrain"), &HandleBatchPlaceActorsOnTerrain },
-    { TEXT("batch_set_actor_transform"), &HandleBatchSetActorTransform },
+    { TEXT("delete_actors"), &HandleBatchDeleteActors },
+    { TEXT("place_actors_on_terrain"), &HandleBatchPlaceActorsOnTerrain },
+    { TEXT("set_actor_transforms"), &HandleBatchSetActorTransform },
     { TEXT("begin_transaction"), &HandleBeginTransaction },
-    { TEXT("can_redo"), &HandleCanRedo },
-    { TEXT("can_undo"), &HandleCanUndo },
     { TEXT("cancel_transaction"), &HandleCancelTransaction },
-    { TEXT("clear_undo_barriers"), &HandleClearUndoBarriers },
     { TEXT("copy_actors"), &HandleCopyActors },
     { TEXT("delete_actor"), &HandleDeleteActor },
     { TEXT("deselect_actors"), &HandleDeselectActors },
@@ -3678,11 +3622,9 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_undo_state"), &HandleGetUndoState },
     { TEXT("load_level"), &HandleLoadLevel },
     { TEXT("move_actors_to_level"), &HandleMoveActorsToLevel },
-    { TEXT("new_level"), &HandleNewLevel },
     { TEXT("paste_actors"), &HandlePasteActors },
     { TEXT("place_actor_on_terrain"), &HandlePlaceActorOnTerrain },
     { TEXT("redo"), &HandleRedo },
-    { TEXT("redo_multiple"), &HandleRedoMultiple },
     { TEXT("remove_component_from_actor"), &HandleRemoveComponentFromActor },
     { TEXT("remove_undo_barrier"), &HandleRemoveUndoBarrier },
     { TEXT("reset_transaction_buffer"), &HandleResetTransactionBuffer },
@@ -3694,6 +3636,5 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("snap_actor_to_ground"), &HandleSnapActorToGround },
     { TEXT("spawn_actor"), &HandleSpawnActor },
     { TEXT("undo"), &HandleUndo },
-    { TEXT("undo_multiple"), &HandleUndoMultiple },
 };
 } // namespace UEAgentEditorCommands

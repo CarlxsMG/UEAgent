@@ -587,8 +587,8 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 // get_viewport_state
 // ---------------------------------------------------------------------------
 
-// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_<index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag.
-//   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }
+// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_<index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. It also reads the perspective FOV, the near clip plane and far clip override, the exposure, the view type (perspective or an orthographic view) and whether cinematic tools may possess the viewport. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag, set_viewport_fov, set_near_clip_plane, set_far_clip_plane, set_viewport_exposure, set_view_type, set_allow_cinematic_control.
+//   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object, fov: number (current perspective FOV, degrees), near_clip_plane: number (effective, cm), far_clip_plane_override: number (< 0 when no override is engaged), exposure: { fixed: bool, ev100: number }, view_type: string, view_type_index: int, allows_cinematic_control: bool }
 TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Params)
 {
     FEditorViewportClient* Client = nullptr;
@@ -623,6 +623,18 @@ TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Pa
     Data->SetArrayField(TEXT("location"), LocArr);
     Data->SetArrayField(TEXT("rotation"), RotArr);
     Data->SetObjectField(TEXT("show_flags"), ShowFlagsObj);
+    Data->SetNumberField(TEXT("fov"), Client->ViewFOV);
+    Data->SetNumberField(TEXT("near_clip_plane"), Client->GetNearClipPlane());
+    // Far override is < 0 when no override is engaged (falls back to GFarClippingPlane).
+    Data->SetNumberField(TEXT("far_clip_plane_override"), Client->GetFarClipPlaneOverride());
+    TSharedPtr<FJsonObject> ExposureObj = MakeShared<FJsonObject>();
+    ExposureObj->SetBoolField(TEXT("fixed"), Client->ExposureSettings.bFixed);
+    ExposureObj->SetNumberField(TEXT("ev100"), Client->ExposureSettings.FixedEV100);
+    Data->SetObjectField(TEXT("exposure"), ExposureObj);
+    const ELevelViewportType ViewType = Client->GetViewportType();
+    Data->SetStringField(TEXT("view_type"), ViewportControl_ViewTypeName(ViewType));
+    Data->SetNumberField(TEXT("view_type_index"), (int32)ViewType);
+    Data->SetBoolField(TEXT("allows_cinematic_control"), Client->AllowsCinematicControl());
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -634,7 +646,7 @@ TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Pa
 // set_viewport_fov
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_fov; a camera actor's own FOV is set_camera_fov.
+// MCP:set_viewport_fov - Set the perspective field of view, in degrees, of the active level editor viewport, the focused one or else the first; no viewport is an error. fov must lie in 5..170, the range of the editor's Field of View control, and a value outside it is an error before anything changes. Like that control it sets both the current view FOV and the stored one that a camera reset or the end of a PIE session restores; fov and stored_fov are read back, and an orthographic view ignores them. There is no undo step and no asset is saved, and the previous FOV is not returned. A viewport piloting a camera actor keeps showing that camera's FOV until it stops piloting it. Read it with get_viewport_state (fov); a camera actor's own FOV is set_camera_fov.
 //   @param fov - Field of view in degrees, from 5 to 170 (the range of the editor's FOV slider)
 //   @returns { applied: bool, requested: number, fov: number, stored_fov: number }
 TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Params)
@@ -667,26 +679,10 @@ TSharedPtr<FJsonObject> HandleSetViewportFOV(const TSharedPtr<FJsonObject>& Para
 }
 
 // ---------------------------------------------------------------------------
-// get_viewport_fov
-// ---------------------------------------------------------------------------
-
-// MCP:get_viewport_fov - Read the current perspective FOV (in degrees) of the active editor viewport
-//   @returns { fov: number }
-TSharedPtr<FJsonObject> HandleGetViewportFOV(const TSharedPtr<FJsonObject>& Params)
-{
-    FEditorViewportClient* Client = nullptr;
-    if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetNumberField(TEXT("fov"), Client->ViewFOV);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // set_near_clip_plane
 // ---------------------------------------------------------------------------
 
-// MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_near_clip_plane reads both clip planes; the far plane is set_far_clip_plane.
+// MCP:set_near_clip_plane - Override the near clip plane distance, in cm, of the active level editor viewport, the focused one or else the first; no viewport is an error. A negative distance (-1 by convention) drops the override so the engine near plane, GNearClippingPlane, applies again; a distance of at least 0.001, the smallest the editor's Near View Plane control allows, becomes the override. 0 (a degenerate projection), anything else below 0.001 and a value too large for a float are errors before anything changes. It lasts for this editor session with no undo step and no save, and the previous value is not returned. near_clip_plane is the effective near plane read back and override_active says whether an override is now set. get_viewport_state reads both clip planes (near_clip_plane, far_clip_plane_override); the far plane is set_far_clip_plane.
 //   @param distance - Near clip distance in cm, at least 0.001; any negative value (-1 by convention) clears the override and falls back to GNearClippingPlane
 //   @returns { applied: bool, requested: number, near_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Params)
@@ -719,28 +715,10 @@ TSharedPtr<FJsonObject> HandleSetNearClipPlane(const TSharedPtr<FJsonObject>& Pa
 }
 
 // ---------------------------------------------------------------------------
-// get_near_clip_plane
-// ---------------------------------------------------------------------------
-
-// MCP:get_near_clip_plane - Read the near clip plane (and far clip override) of the active editor viewport
-//   @returns { near_clip_plane: number, far_clip_plane_override: number }
-TSharedPtr<FJsonObject> HandleGetNearClipPlane(const TSharedPtr<FJsonObject>& Params)
-{
-    FEditorViewportClient* Client = nullptr;
-    if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetNumberField(TEXT("near_clip_plane"), Client->GetNearClipPlane());
-    // Far override is < 0 when no override is engaged (falls back to GFarClippingPlane).
-    Data->SetNumberField(TEXT("far_clip_plane_override"), Client->GetFarClipPlaneOverride());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // set_far_clip_plane
 // ---------------------------------------------------------------------------
 
-// MCP:set_far_clip_plane - Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_near_clip_plane reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
+// MCP:set_far_clip_plane - Override the far clip plane distance, in cm, of the active level editor viewport, the focused one or else the first, so objects beyond it are culled from the view; no viewport is an error. 0 or a negative distance drops the override and the default far plane applies again. It lasts for this editor session with no undo step and no save, and the previous value is not returned. far_clip_plane is the stored override read back, which is the distance sent, and override_active is true only for a distance above 0. get_viewport_state reads the near plane together with this override (far_clip_plane_override); the near plane is set_near_clip_plane.
 //   @param distance - Far clip distance in cm; 0 or any negative value clears the override and the default far plane applies
 //   @returns { applied: bool, requested: number, far_clip_plane: number, override_active: bool }
 TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Params)
@@ -766,7 +744,7 @@ TSharedPtr<FJsonObject> HandleSetFarClipPlane(const TSharedPtr<FJsonObject>& Par
 // set_viewport_exposure
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_exposure - Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_exposure reads them.
+// MCP:set_viewport_exposure - Set the exposure of the active level editor viewport: fixed at ev100 when fixed is true, automatic eye adaptation when false. Affects the viewport only and saves nothing. Returns applied, fixed and ev100 as read back; get_viewport_state reads them (exposure).
 //   @param fixed - True for fixed exposure (use FixedEV100), false for automatic eye-adaptation
 //   @param ev100 - EV100 value to use when fixed=true (any float; typical range -3..20)
 //   @returns { applied: bool, fixed: bool, ev100: number }
@@ -787,23 +765,6 @@ TSharedPtr<FJsonObject> HandleSetViewportExposure(const TSharedPtr<FJsonObject>&
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("applied"), true);
-    Data->SetBoolField(TEXT("fixed"), Client->ExposureSettings.bFixed);
-    Data->SetNumberField(TEXT("ev100"), Client->ExposureSettings.FixedEV100);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// get_viewport_exposure
-// ---------------------------------------------------------------------------
-
-// MCP:get_viewport_exposure - Read the current exposure settings of the active editor viewport
-//   @returns { fixed: bool, ev100: number }
-TSharedPtr<FJsonObject> HandleGetViewportExposure(const TSharedPtr<FJsonObject>& Params)
-{
-    FEditorViewportClient* Client = nullptr;
-    if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("fixed"), Client->ExposureSettings.bFixed);
     Data->SetNumberField(TEXT("ev100"), Client->ExposureSettings.FixedEV100);
     return mcp_common::MakeOkReply(Data);
@@ -838,7 +799,7 @@ TSharedPtr<FJsonObject> HandleSetGameView(const TSharedPtr<FJsonObject>& Params)
 // set_allow_cinematic_control
 // ---------------------------------------------------------------------------
 
-// MCP:set_allow_cinematic_control - Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_allow_cinematic_control.
+// MCP:set_allow_cinematic_control - Set whether the active level editor viewport (the focused one, else the first) may be possessed by cinematic tools such as Sequencer to preview sequences (FEditorViewportClient::SetAllowCinematicControl). It sets the given value rather than toggling; it lasts for this editor session, nothing is saved or undoable, and no viewport is an error. allows_cinematic_control is read back from the viewport. Read the flag without changing it with get_viewport_state (allows_cinematic_control).
 //   @param allow - True to allow cinematic control, false to block it
 //   @returns { applied: bool, requested: bool, allows_cinematic_control: bool }
 TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObject>& Params)
@@ -860,26 +821,10 @@ TSharedPtr<FJsonObject> HandleSetAllowCinematicControl(const TSharedPtr<FJsonObj
 }
 
 // ---------------------------------------------------------------------------
-// get_allow_cinematic_control
-// ---------------------------------------------------------------------------
-
-// MCP:get_allow_cinematic_control - Read whether the active editor viewport allows cinematic control (Sequencer possession)
-//   @returns { allows_cinematic_control: bool }
-TSharedPtr<FJsonObject> HandleGetAllowCinematicControl(const TSharedPtr<FJsonObject>& Params)
-{
-    FEditorViewportClient* Client = nullptr;
-    if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("allows_cinematic_control"), Client->AllowsCinematicControl());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // set_view_type
 // ---------------------------------------------------------------------------
 
-// MCP:set_view_type - Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_view_type; render modes are set_viewport_view_mode, the camera position set_viewport_camera.
+// MCP:set_view_type - Switch the active level editor viewport, the focused one or else the first, to the perspective camera or one of the six orthographic views; no viewport is an error. type is matched without case, and any other name is an error before anything changes. Switching to an orthographic view unlocks an actor the viewport was piloting, and each projection re-applies the view mode it keeps for itself. It sets the given type, so a repeat call changes nothing; it lasts for this editor session with no undo step and no save. view_type and view_type_index are read back. Read it with get_viewport_state (view_type); render modes are set_viewport_view_mode, the camera position set_viewport_camera.
 //   @param type - View type name. One of: Perspective, Top, Bottom, Left, Right, Front, Back. Matched without case.
 //   @returns { applied: bool, requested: string, view_type: string, view_type_index: int }
 TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Params)
@@ -923,35 +868,8 @@ TSharedPtr<FJsonObject> HandleSetViewportType(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// get_view_type
-// ---------------------------------------------------------------------------
-
-// MCP:get_view_type - Read the current view type of the active level editor viewport
-//   @returns { view_type: string, view_type_index: int }
-TSharedPtr<FJsonObject> HandleGetViewportType(const TSharedPtr<FJsonObject>& Params)
-{
-    FLevelEditorViewportClient* LevelClient = ResolveViewportClient();
-    if (!LevelClient)
-    {
-        return mcp_common::MakeErrorReply(TEXT("No active level editor viewport available"));
-    }
-
-    const ELevelViewportType VT = LevelClient->GetViewportType();
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("view_type"), ViewportControl_ViewTypeName(VT));
-    Data->SetNumberField(TEXT("view_type_index"), (int32)VT);
-    return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("get_allow_cinematic_control"), &HandleGetAllowCinematicControl },
-    { TEXT("get_near_clip_plane"), &HandleGetNearClipPlane },
-    { TEXT("get_view_type"), &HandleGetViewportType },
-    { TEXT("get_viewport_exposure"), &HandleGetViewportExposure },
-    { TEXT("get_viewport_fov"), &HandleGetViewportFOV },
     { TEXT("get_viewport_state"), &HandleGetViewportState },
     { TEXT("set_allow_cinematic_control"), &HandleSetAllowCinematicControl },
     { TEXT("set_camera_speed"), &HandleSetCameraSpeed },

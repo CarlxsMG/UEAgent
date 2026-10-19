@@ -881,8 +881,7 @@ namespace
     // property-track lookup.
     // ------------------------------------------------------------------
 
-    // The BASIC widget palette (add_widget_to_blueprint). Single source of truth shared with
-    // ResolveWidgetClass and list_widget_types(family="basic").
+    // The BASIC widget palette: the core of the extended palette below, which starts from it.
     const TMap<FString, FString>& GetBasicWidgetTypeMap()
     {
         static const TMap<FString, FString> Map = {
@@ -895,9 +894,9 @@ namespace
         return Map;
     }
 
-    // The EXTENDED widget palette (add_widget_extended). Strict superset of the basic
+    // The EXTENDED widget palette (add_widget_to_blueprint). Strict superset of the basic
     // palette. Single source of truth shared with ResolveExtendedWidgetClass
-    // and list_widget_types(family="extended", the default).
+    // and list_widget_types.
     const TMap<FString, FString>& GetExtendedWidgetTypeMap()
     {
         static const TMap<FString, FString> Map = []
@@ -1134,7 +1133,7 @@ namespace
         return nullptr;
     }
 
-    /** A widget add_widget_to_blueprint / add_widget_extended put in the tree, or found there under its name. */
+    /** A widget add_widget_to_blueprint put in the tree, or found there under its name. */
     struct FAddedWidget_Widget
     {
         UWidget*      Widget = nullptr;
@@ -1144,7 +1143,7 @@ namespace
     };
 
     /**
-     * The tree edit of add_widget_to_blueprint and add_widget_extended: constructs WidgetClass as WidgetName under the
+     * The tree edit of add_widget_to_blueprint: constructs WidgetClass as WidgetName under the
      * panel ParentName (the root widget when empty) and registers it as a Blueprint variable. A widget already named
      * WidgetName is returned as it is when its class is WidgetClass. False with OutError when the widget cannot be
      * added, or the name is held by a widget of another class.
@@ -1243,7 +1242,7 @@ namespace
         return true;
     }
 
-    /** The add_widget_to_blueprint / add_widget_extended reply fields; bAdded says whether the tree holds the widget. */
+    /** The add_widget_to_blueprint reply fields; bAdded says whether the tree holds the widget. */
     TSharedPtr<FJsonObject> AddedWidgetJson_Widget(const FString& WidgetBPPath, const FString& WidgetType,
                                                   const FAddedWidget_Widget& Added, bool bAdded)
     {
@@ -1410,25 +1409,10 @@ UClass* ResolveAnyWidgetClass(const FString& WidgetType)
     return Resolved;
 }
 
-// Resolve a UMG widget type name ("TextBlock", "Button", ...) to its UClass.
-// A name of the basic palette is looked up by its fully qualified script path
-// /Script/UMG.<Name> (FindObject<UClass>(nullptr,"Name") returns null: there is
-// no ANY_PACKAGE); any other name falls through to ResolveAnyWidgetClass.
-UClass* ResolveWidgetClass(const FString& WidgetType)
-{
-    if (const FString* ClassPath = GetBasicWidgetTypeMap().Find(WidgetType))
-    {
-        return LoadObject<UClass>(nullptr, **ClassPath);
-    }
-
-    // Not a curated basic name -- fall through to the generic resolver (native class path,
-    // or a UserWidget-derived Widget Blueprint by /Game asset path) instead of hard-rejecting.
-    return ResolveAnyWidgetClass(WidgetType);
-}
-
-// Resolve the EXTENDED widget palette. Same /Script/UMG.<Name> lookup as
-// ResolveWidgetClass, but covers the broader supported set. The basic palette
-// types are included too so the extended endpoint is a strict superset.
+// Resolve a UMG widget type name ("TextBlock", "ProgressBar", ...) to its UClass.
+// A name of the curated (extended) palette is looked up by its fully qualified
+// script path /Script/UMG.<Name> (FindObject<UClass>(nullptr,"Name") returns null:
+// there is no ANY_PACKAGE); any other name falls through to ResolveAnyWidgetClass.
 UClass* ResolveExtendedWidgetClass(const FString& WidgetType)
 {
     if (const FString* ClassPath = GetExtendedWidgetTypeMap().Find(WidgetType))
@@ -1436,7 +1420,8 @@ UClass* ResolveExtendedWidgetClass(const FString& WidgetType)
         return LoadObject<UClass>(nullptr, **ClassPath);
     }
 
-    // Not a curated extended name -- fall through to the generic resolver.
+    // Not a curated name -- fall through to the generic resolver (native class path,
+    // or a UserWidget-derived Widget Blueprint by /Game asset path) instead of hard-rejecting.
     return ResolveAnyWidgetClass(WidgetType);
 }
 
@@ -1861,9 +1846,9 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 // add_widget_to_blueprint
 // ---------------------------------------------------------------------------
-// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+// MCP:add_widget_to_blueprint - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the curated palette of list_widget_types (TextBlock, Button, ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save is an error. Inspect: get_widget_blueprint_tree; inverse: remove_widget.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
-//   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel (the curated basic names; see list_widget_types), OR any native widget class path (e.g. /Script/UMG.Throbber), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
+//   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
 //   @param widget_name - unique name for the new widget
 //   @param parent_name - Optional name of a panel widget to host the new child; defaults to the root widget.
 //   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }
@@ -1890,11 +1875,17 @@ TSharedPtr<FJsonObject> HandleAddWidgetToBlueprint(const TSharedPtr<FJsonObject>
         return mcp_common::MakeErrorReply(Error);
     }
 
-    UClass* WidgetClass = ResolveWidgetClass(WidgetType);
+    UClass* WidgetClass = ResolveExtendedWidgetClass(WidgetType);
     if (!WidgetClass)
     {
+        TArray<FString> SupportedNames;
+        GetExtendedWidgetTypeMap().GetKeys(SupportedNames);
+        SupportedNames.Sort();
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unsupported widget_type '%s'. Supported: the curated basic names (TextBlock, Button, Image, VerticalBox, CanvasPanel -- see list_widget_types), a native widget class path (/Script/Module.ClassName), or a UserWidget-derived Widget Blueprint's /Game asset path"), *WidgetType));
+            FString::Printf(TEXT("Unsupported widget_type '%s'. Supported (see list_widget_types): %s -- ")
+                TEXT("or pass a native widget class path (/Script/Module.ClassName) or a UserWidget-derived Widget ")
+                TEXT("Blueprint's /Game asset path to embed a nested instance"),
+                *WidgetType, *FString::Join(SupportedNames, TEXT(", "))));
     }
 
     FAddedWidget_Widget Added;
@@ -2241,88 +2232,6 @@ TSharedPtr<FJsonObject> HandleGetWidgetBlueprintTree(const TSharedPtr<FJsonObjec
     }
 
     return mcp_common::MakeOkReply(Resp);
-}
-
-// ---------------------------------------------------------------------------
-// add_widget_extended
-//
-// Same authoring path as add_widget_to_blueprint (ConstructWidget under the
-// WidgetTree -> UPanelWidget::AddChild -> OnVariableAdded -> compile + save),
-// but supporting the EXTENDED widget-type set resolved via /Script/UMG.<Name>.
-// ---------------------------------------------------------------------------
-// MCP:add_widget_extended - Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the extended palette of list_widget_types (ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned with already_existed=true, compiled and saved only if the blueprint has unsaved changes (else saved=false); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save gives success false. Basic palette: add_widget_to_blueprint; inspect: get_widget_blueprint_tree; inverse: remove_widget.
-//   @param widget_bp_path - /Game path of the Widget Blueprint asset
-//   @param widget_type - one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C)
-//   @param widget_name - unique name for the new widget
-//   @param parent_name - Optional name of a panel widget to host the new child; defaults to the root widget.
-//   @returns { widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }
-
-TSharedPtr<FJsonObject> HandleAddWidgetExtended(const TSharedPtr<FJsonObject>& Params)
-{
-    FString WidgetBPPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_bp_path"), WidgetBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    FString WidgetType;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_type"), WidgetType)) { return Missing; }
-
-    FString WidgetName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("widget_name"), WidgetName)) { return Missing; }
-
-    FString ParentName;
-    Params->TryGetStringField(TEXT("parent_name"), ParentName); // optional
-
-    FString Error;
-    UWidgetBlueprint* WidgetBP = UMGWidgetUtils::LoadWidgetBlueprint(WidgetBPPath, Error);
-    UWidgetTree* WidgetTree = WidgetBP ? GetWidgetTree_Widget(WidgetBP, Error) : nullptr;
-    if (!WidgetTree)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    UClass* WidgetClass = ResolveExtendedWidgetClass(WidgetType);
-    if (!WidgetClass)
-    {
-        TArray<FString> SupportedNames;
-        GetExtendedWidgetTypeMap().GetKeys(SupportedNames);
-        SupportedNames.Sort();
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unsupported widget_type '%s'. Supported (extended, see list_widget_types): %s -- ")
-                TEXT("or pass a native widget class path (/Script/Module.ClassName) or a UserWidget-derived Widget ")
-                TEXT("Blueprint's /Game asset path to embed a nested instance"),
-                *WidgetType, *FString::Join(SupportedNames, TEXT(", "))));
-    }
-
-    FAddedWidget_Widget Added;
-    if (!AddWidgetToTree_Widget(WidgetBP, WidgetClass, WidgetType, WidgetName, ParentName, Added, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    if (Added.bAlreadyExisted)
-    {
-        // Nothing was added. A package with unsaved changes is compiled and saved like a fresh add, so the
-        // widget reaches disk; a clean one is already there, and nothing is saved (saved=false).
-        TSharedPtr<FJsonObject> Resp = AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, /*bAdded=*/ true);
-        Resp->SetBoolField(TEXT("already_existed"), true);
-        if (!WidgetBP->GetPackage()->IsDirty())
-        {
-            Resp->SetBoolField(TEXT("saved"), false);
-            Resp->SetStringField(TEXT("note"), TEXT("the widget already exists and the Widget Blueprint has no unsaved changes; nothing saved"));
-            return mcp_common::MakeOkReply(Resp);
-        }
-        FString SaveErr;
-        const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
-        return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_widget_extended"), SaveErr);
-    }
-
-    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
-
-    FString SaveErr;
-    const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
-
-    // Verify the widget is now findable in the tree.
-    UWidget* Verify = WidgetTree->FindWidget(FName(*WidgetName));
-    return mcp_common::MakeSavedReply(AddedWidgetJson_Widget(WidgetBPPath, WidgetType, Added, Verify != nullptr),
-                                      bSaved, TEXT("add_widget_extended"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2678,7 +2587,7 @@ TSharedPtr<FJsonObject> HandleStopWidgetAnimation(const TSharedPtr<FJsonObject>&
 // set_box_slot_properties
 // Configure the layout of a widget parented under a box-family panel
 // (HorizontalBox/VerticalBox/Overlay/Border/SizeBox/ScrollBox). Closes the
-// creator/configurer asymmetry: add_widget_extended can CREATE these panels and
+// creator/configurer asymmetry: add_widget_to_blueprint can CREATE these panels and
 // parent children under them, but set_widget_slot_properties only handles
 // CanvasPanelSlot. Dispatches by concrete slot type via the typed UMG_API setters
 // (the direct slot members are UE_DEPRECATED(5.1)); a prop a given slot does not
@@ -2834,10 +2743,10 @@ TSharedPtr<FJsonObject> HandleSetBoxSlotProperties(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // set_grid_slot_properties
 // Configure the UGridSlot of a widget parented under a GridPanel (create one via
-// add_widget_extended widget_type="GridPanel"). Uses the typed UMG_API setters
+// add_widget_to_blueprint widget_type="GridPanel"). Uses the typed UMG_API setters
 // (the direct members are UE_DEPRECATED(5.1)). Idempotent.
 // ---------------------------------------------------------------------------
-// MCP:set_grid_slot_properties - Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_extended widget_type="GridPanel"). Setting the same values again is idempotent.
+// MCP:set_grid_slot_properties - Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_to_blueprint widget_type="GridPanel"). Setting the same values again is idempotent.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the child widget whose grid slot to edit
 //   @param row - Optional int row index of the cell
@@ -3499,7 +3408,7 @@ TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params
 // (ExportPropertiesToText/ImportPropertiesFromText) where the new slot class accepts them, and
 // handles named-slot content correctly. This is strictly more correct than a hand-rolled sequence.
 // ---------------------------------------------------------------------------
-// MCP:reparent_widget - Move a widget to a new parent panel (optionally at a specific child index), via FWidgetBlueprintOperationUtils::MoveWidget -- the same primitive backing the Designer's drag-and-drop reparent. Validates the new parent is a panel widget and refuses to create a cycle. Optional slot_properties are applied to the widget's NEW slot afterward via the shared reflection setter (e.g. {"Row":1,"Column":2} for a GridSlot). THIS IS ALSO HOW YOU FILL A NAMED SLOT: a UNamedSlot is a UContentWidget (hence a panel), so add one with add_widget_extended widget_type="NamedSlot" and reparent the content into it -- there is no separate SetContentForSlot tool and none is needed (it answers reparented:true, new_slot_class:PanelSlot).
+// MCP:reparent_widget - Move a widget to a new parent panel (optionally at a specific child index), via FWidgetBlueprintOperationUtils::MoveWidget -- the same primitive backing the Designer's drag-and-drop reparent. Validates the new parent is a panel widget and refuses to create a cycle. Optional slot_properties are applied to the widget's NEW slot afterward via the shared reflection setter (e.g. {"Row":1,"Column":2} for a GridSlot). THIS IS ALSO HOW YOU FILL A NAMED SLOT: a UNamedSlot is a UContentWidget (hence a panel), so add one with add_widget_to_blueprint widget_type="NamedSlot" and reparent the content into it -- there is no separate SetContentForSlot tool and none is needed (it answers reparented:true, new_slot_class:PanelSlot).
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget to move
 //   @param new_parent_name - name of the panel widget to become the new parent
@@ -3674,26 +3583,12 @@ TSharedPtr<FJsonObject> HandleReorderWidgetChild(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // list_widget_types
 // ---------------------------------------------------------------------------
-// MCP:list_widget_types - List the CURATED widget_type names accepted by add_widget_to_blueprint (family="basic") / add_widget_extended (family="extended", the default -- a strict superset of basic), with each entry's resolved /Script/UMG.<Name> class path and whether LoadObject actually resolves it in this build (should always be true; reported for honesty rather than assumed). This list is a convenience shortlist, NOT the full set of accepted values -- both tools also accept any native widget class path (/Script/Module.ClassName) and any UserWidget-derived Widget Blueprint's /Game asset path (embeds a nested instance); see custom_class_note in the response.
-//   @param family - Optional "basic" | "extended" (default "extended")
-//   @returns { family: string, widget_types: [{ widget_type: string, class_path: string, resolvable: bool }], count: int, custom_class_note: string }
+// MCP:list_widget_types - List the CURATED widget_type names accepted by add_widget_to_blueprint, with each entry's resolved /Script/UMG.<Name> class path and whether LoadObject actually resolves it in this build (should always be true; reported for honesty rather than assumed). This list is a convenience shortlist, NOT the full set of accepted values -- add_widget_to_blueprint also accepts any native widget class path (/Script/Module.ClassName) and any UserWidget-derived Widget Blueprint's /Game asset path (embeds a nested instance); see custom_class_note in the response.
+//   @returns { widget_types: [{ widget_type: string, class_path: string, resolvable: bool }], count: int, custom_class_note: string }
 
 TSharedPtr<FJsonObject> HandleListWidgetTypes(const TSharedPtr<FJsonObject>& Params)
 {
-    FString Family = TEXT("extended");
-    if (Params.IsValid())
-    {
-        Params->TryGetStringField(TEXT("family"), Family);
-    }
-    Family = Family.ToLower();
-
-    if (Family != TEXT("basic") && Family != TEXT("extended"))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid family '%s' (use 'basic' or 'extended')"), *Family));
-    }
-
-    const TMap<FString, FString>& Map = (Family == TEXT("basic")) ? GetBasicWidgetTypeMap() : GetExtendedWidgetTypeMap();
+    const TMap<FString, FString>& Map = GetExtendedWidgetTypeMap();
 
     TArray<FString> Names;
     Map.GetKeys(Names);
@@ -3711,7 +3606,6 @@ TSharedPtr<FJsonObject> HandleListWidgetTypes(const TSharedPtr<FJsonObject>& Par
     }
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("family"), Family);
     Resp->SetArrayField(TEXT("widget_types"), TypesOut);
     Resp->SetNumberField(TEXT("count"), TypesOut.Num());
     Resp->SetStringField(TEXT("custom_class_note"),
@@ -3738,7 +3632,7 @@ TSharedPtr<FJsonObject> HandleListWidgetTypes(const TSharedPtr<FJsonObject>& Par
 // (auto-unique name from the engine), then renames via the SAME vetted primitives as rename_widget
 // (VerifyWidgetRename + RenameWidget) for an honest, engine-faithful collision diagnostic.
 // ---------------------------------------------------------------------------
-// MCP:duplicate_widget - Duplicate a widget (DuplicateObject<UWidget> outered to the WidgetTree) and add the clone under a target parent panel, copying the source's slot property values onto the new slot when the slot classes match. Refuses (clear error, no partial/broken result) to duplicate a panel widget that currently has children -- UE's object duplication would leave the clone's slots aliasing the SAME original child widgets rather than deep-copying them (see FDuplicateDataWriter); duplicate leaf widgets, or rebuild the panel's children individually with add_widget_extended. Name collisions on new_name are a clear error (not a silent alias of the pre-existing widget at that name).
+// MCP:duplicate_widget - Duplicate a widget (DuplicateObject<UWidget> outered to the WidgetTree) and add the clone under a target parent panel, copying the source's slot property values onto the new slot when the slot classes match. Refuses (clear error, no partial/broken result) to duplicate a panel widget that currently has children -- UE's object duplication would leave the clone's slots aliasing the SAME original child widgets rather than deep-copying them (see FDuplicateDataWriter); duplicate leaf widgets, or rebuild the panel's children individually with add_widget_to_blueprint. Name collisions on new_name are a clear error (not a silent alias of the pre-existing widget at that name).
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param widget_name - name of the widget to duplicate (must not be a panel widget with children)
 //   @param new_name - unique name for the duplicate
@@ -3774,7 +3668,7 @@ TSharedPtr<FJsonObject> HandleDuplicateWidget(const TSharedPtr<FJsonObject>& Par
                 TEXT("UE's object duplication only deep-copies objects outered to the source, and widget-tree ")
                 TEXT("children are outered to the WidgetTree (not to their parent panel), so the clone's slots ")
                 TEXT("would end up aliasing the SAME child widget instances as the original -- a broken tree, not ")
-                TEXT("a real copy. Duplicate leaf widgets, or build the panel's children individually with add_widget_extended."),
+                TEXT("a real copy. Duplicate leaf widgets, or build the panel's children individually with add_widget_to_blueprint."),
                 *WidgetName, *SourceWidget->GetClass()->GetName(), SourcePanel->GetChildrenCount()));
         }
     }
@@ -4351,7 +4245,7 @@ TSharedPtr<FJsonObject> HandleSetSlotProperties(const TSharedPtr<FJsonObject>& P
     {
         return mcp_common::MakeErrorReply(FString::Printf(
             TEXT("Widget '%s' has no slot: it is the tree root or has no parent panel. A slot only ")
-            TEXT("exists for a widget parented under a panel -- add it with add_widget_extended ")
+            TEXT("exists for a widget parented under a panel -- add it with add_widget_to_blueprint ")
             TEXT("(parent_name=...) or move it with reparent_widget first."), *WidgetName));
     }
 
@@ -5527,7 +5421,7 @@ TSharedPtr<FJsonObject> HandleSetPieWidgetFocus(const TSharedPtr<FJsonObject>& P
 //   @param widget_bp_path [string!] - /Game path of the OUTER Widget Blueprint (the one that owns both the nested instance and the content).
 //   @param host_widget_name [string!] - Name of the nested Widget Blueprint instance in the outer tree -- the widget that OWNS the slot.
 //   @param slot_name - Name of the named slot to fill. Omit to only enumerate what the host offers (nothing is written, available_slots is still returned).
-//   @param content_widget_name - Name of the widget in the OUTER tree to place in the slot. It must already exist there (add_widget_extended creates it). Omit together with clear=true to empty the slot.
+//   @param content_widget_name - Name of the widget in the OUTER tree to place in the slot. It must already exist there (add_widget_to_blueprint creates it). Omit together with clear=true to empty the slot.
 //   @param clear [bool] - Empty the slot instead of filling it (default false). Mutually exclusive with content_widget_name.
 //   @param save [bool] - Compile + save the Widget Blueprint when done (default true).
 //   @returns { widget_bp_path, host_widget_name, host_class, available_slots: [string], slot_name, content_widget_name, filled: bool, verified_content: string, saved, save_error } -- verified_content is what GetContentForSlot returns AFTER the write: empty when the engine dropped the binding, which is the only way to tell that from a success.
@@ -5601,7 +5495,7 @@ TSharedPtr<FJsonObject> HandleSetNamedSlotContent(const TSharedPtr<FJsonObject>&
         if (!Content)
             return mcp_common::MakeErrorReply(FString::Printf(
                 TEXT("content widget '%s' is not in this Widget Blueprint's tree. The content of a named "
-                     "slot must live in the OUTER tree -- create it first with add_widget_extended."),
+                     "slot must live in the OUTER tree -- create it first with add_widget_to_blueprint."),
                 *ContentName));
     }
 
@@ -6174,7 +6068,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_widget_animation"), &HandleAddWidgetAnimation },
     { TEXT("add_widget_animation_keyframe"), &HandleAddWidgetAnimationKeyframe },
     { TEXT("add_widget_animation_track"), &HandleAddWidgetAnimationTrack },
-    { TEXT("add_widget_extended"), &HandleAddWidgetExtended },
     { TEXT("add_widget_property_binding"), &HandleAddWidgetPropertyBinding },
     { TEXT("add_widget_to_blueprint"), &HandleAddWidgetToBlueprint },
     { TEXT("apply_widget_style_preset"), &HandleApplyWidgetStylePreset },

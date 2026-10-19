@@ -753,58 +753,6 @@ TSharedPtr<FJsonObject> HandleReleaseSmartObject(
 		TEXT("release_smart_object: FSmartObjectUserHandle is private in UE 5.7; the canonical release path is to pass actor_label so the subsystem can unregister the component (which releases any claim it holds). Pass claim_handle-only if you can supply a C++ extension that exposes USmartObjectSubsystem::ReleaseByHandle."));
 }
 
-// ---------------------------------------------------------------------------
-// get_smart_object_info
-// ---------------------------------------------------------------------------
-// MCP:get_smart_object_info - Get slot count, activity tag set, and the number of registered actors for a USmartObjectDefinition.
-//   @param definition_path - Path to the USmartObjectDefinition asset
-//   @returns { definition_path: string, slot_count: int, activity_tags: [string], registered_actor_count: int }
-
-TSharedPtr<FJsonObject> HandleGetSmartObjectInfo(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	TSharedPtr<FJsonObject> Err;
-	USmartObjectDefinition* Def = SmartObjects_LoadDefinition(Params, Err);
-	if (!Def) { return Err; }
-
-	TSet<FName> TagSet;
-	for (const FSmartObjectSlotDefinition& Slot : Def->GetSlots())
-	{
-		for (const FGameplayTag& T : Slot.ActivityTags)
-		{
-			TagSet.Add(T.GetTagName());
-		}
-	}
-	TArray<FString> ActivityTags;
-	ActivityTags.Reserve(TagSet.Num());
-	for (const FName& N : TagSet) { ActivityTags.Add(N.ToString()); }
-
-	int32 RegisteredActorCount = 0;
-	UWorld* World = mcp_common::GetEditorWorld();
-	if (World)
-	{
-		USmartObjectSubsystem* Sub = USmartObjectSubsystem::GetCurrent(World);
-		if (Sub)
-		{
-			const FSmartObjectContainer& Container = Sub->GetSmartObjectContainer();
-			for (const FSmartObjectCollectionEntry& Entry : Container.GetEntries())
-			{
-				USmartObjectComponent* C = Container.GetSmartObjectComponent(Entry.GetHandle());
-				if (C && C->GetDefinition() == Def)
-				{
-					++RegisteredActorCount;
-				}
-			}
-		}
-	}
-
-	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
-	Data->SetNumberField(TEXT("slot_count"), Def->GetSlots().Num());
-	Data->SetArrayField(TEXT("activity_tags"), mcp_common::StringsToJson(ActivityTags));
-	Data->SetNumberField(TEXT("registered_actor_count"), RegisteredActorCount);
-	return mcp_common::MakeOkReply(Data);
-}
-
 // ===========================================================================
 // SmartObject definition authoring (slot + object level + read-back)
 //   All operate on a loaded USmartObjectDefinition asset (no PIE). Slots are
@@ -1119,9 +1067,9 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectSlotsDetail(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_smart_object_definition_summary - Read the object-level state of a USmartObjectDefinition asset without changing it: its activity tags with their merging policy, the user-tag filtering policy and whether the object-level user filter is empty, the slot count, the default behavior count, and bounds around every slot in the object local space (slot offsets plus the default slot size, not world space). It also runs the engine Validate() pass: is_valid, and validation_errors with the messages of every severity. A missing definition_path, or one that does not load, is an error. Per-slot fields: get_smart_object_slots_detail; slot and registered-actor counts: get_smart_object_info; entrances: get_smart_object_slot_entrance_annotations; edit the object level with set_smart_object_definition_activity_tags or set_smart_object_definition_user_tag_filter.
+// MCP:get_smart_object_definition_summary - Read the object-level state of a USmartObjectDefinition asset without changing it: its activity tags with their merging policy, the user-tag filtering policy and whether the object-level user filter is empty, the slot count, the default behavior count, and bounds around every slot in the object local space (slot offsets plus the default slot size, not world space). It also runs the engine Validate() pass: is_valid, and validation_errors with the messages of every severity. It also gives slot_activity_tags, the union of the activity tags of every slot (object-level activity_tags excluded), and registered_actor_count, how many smart object components registered with the editor-world SmartObjectSubsystem use this definition (0 without that subsystem). A missing definition_path, or one that does not load, is an error. Per-slot fields: get_smart_object_slots_detail; entrances: get_smart_object_slot_entrance_annotations; edit the object level with set_smart_object_definition_activity_tags or set_smart_object_definition_user_tag_filter.
 //   @param definition_path - Object path of the USmartObjectDefinition asset, e.g. /Game/AI/SO_Bench.SO_Bench
-//   @returns { definition_path: string, slot_count: int, activity_tags: [string], merging_policy: string, filtering_policy: string, user_filter_is_empty: bool, bounds: { min: [number, number, number], max: [number, number, number] }, is_valid: bool, validation_errors: [string], default_behavior_count: int }
+//   @returns { definition_path: string, slot_count: int, activity_tags: [string], slot_activity_tags: [string], registered_actor_count: int, merging_policy: string, filtering_policy: string, user_filter_is_empty: bool, bounds: { min: [number, number, number], max: [number, number, number] }, is_valid: bool, validation_errors: [string], default_behavior_count: int }
 TSharedPtr<FJsonObject> HandleGetSmartObjectDefinitionSummary(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1148,9 +1096,42 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectDefinitionSummary(
 		ErrorsJson.Add(MakeShared<FJsonValueString>(E.Value.ToString()));
 	}
 
+	// The union of the slots' own activity tags, which the object-level activity_tags do not include.
+	TSet<FName> SlotTagSet;
+	for (const FSmartObjectSlotDefinition& Slot : Def->GetSlots())
+	{
+		for (const FGameplayTag& T : Slot.ActivityTags)
+		{
+			SlotTagSet.Add(T.GetTagName());
+		}
+	}
+	TArray<FString> SlotActivityTags;
+	SlotActivityTags.Reserve(SlotTagSet.Num());
+	for (const FName& N : SlotTagSet) { SlotActivityTags.Add(N.ToString()); }
+
+	// The smart object components the editor-world subsystem holds that use this definition.
+	int32 RegisteredActorCount = 0;
+	if (UWorld* World = mcp_common::GetEditorWorld())
+	{
+		if (USmartObjectSubsystem* Sub = USmartObjectSubsystem::GetCurrent(World))
+		{
+			const FSmartObjectContainer& Container = Sub->GetSmartObjectContainer();
+			for (const FSmartObjectCollectionEntry& Entry : Container.GetEntries())
+			{
+				const USmartObjectComponent* Comp = Container.GetSmartObjectComponent(Entry.GetHandle());
+				if (Comp && Comp->GetDefinition() == Def)
+				{
+					++RegisteredActorCount;
+				}
+			}
+		}
+	}
+
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetNumberField(TEXT("slot_count"), Def->GetSlots().Num());
 	Data->SetArrayField(TEXT("activity_tags"), mcp_common::GameplayTagsToJson(Def->GetActivityTags()));
+	Data->SetArrayField(TEXT("slot_activity_tags"), mcp_common::StringsToJson(SlotActivityTags));
+	Data->SetNumberField(TEXT("registered_actor_count"), RegisteredActorCount);
 	Data->SetStringField(TEXT("merging_policy"), MergingPolicyToString(Def->GetActivityTagsMergingPolicy()));
 	Data->SetStringField(TEXT("filtering_policy"), FilteringPolicyToString(Def->GetUserTagsFilteringPolicy()));
 	Data->SetBoolField(TEXT("user_filter_is_empty"), Def->GetUserTagFilter().IsEmpty());
@@ -1307,7 +1288,7 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectSlotEntranceAnnotations(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_component_definition - Set the USmartObjectDefinition that the USmartObjectComponent of an actor in the editor world references, found by actor_label, in one undo step when the component is transactional. The level is marked dirty and nothing is saved. A component that already references that definition is left as it is (changed false). A component bound to the Smart Object simulation is refused before anything changes, since the engine ignores the change then: unregister it with release_smart_object and actor_label first. set is read back from the component's reference and makes success false when it did not take. A missing actor, component or definition is an error. Read back with get_smart_object_component_definition; spawn one with register_smart_object_actor.
+// MCP:set_smart_object_component_definition - Set the USmartObjectDefinition that the USmartObjectComponent of an actor in the editor world references, found by actor_label, in one undo step when the component is transactional. The level is marked dirty and nothing is saved. A component that already references that definition is left as it is (changed false). A component bound to the Smart Object simulation is refused before anything changes, since the engine ignores the change then: unregister it with release_smart_object and actor_label first. set is read back from the component's reference and makes success false when it did not take. A missing actor, component or definition is an error. Read back with get_smart_object_component_definition; spawn one with register_smart_object_actor.
 //   @param actor_label - Editor label of the actor carrying the USmartObjectComponent
 //   @param definition_path - Path to the USmartObjectDefinition asset to assign
 //   @returns { actor_label: string, definition_path: string, definition: string, registered: bool, set: bool, changed: bool, note?: string }
@@ -1357,7 +1338,7 @@ TSharedPtr<FJsonObject> HandleSetComponentDefinition(
 	Data->SetBoolField(TEXT("registered"), Comp->GetRegisteredHandle().IsValid());
 	Data->SetBoolField(TEXT("set"), bSet);
 	Data->SetBoolField(TEXT("changed"), bSet);
-	return mcp_common::MakeOutcomeReply(Data, bSet, bSet ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_component_definition"), TEXT("set")));
+	return mcp_common::MakeOutcomeReply(Data, bSet, bSet ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_smart_object_component_definition"), TEXT("set")));
 }
 
 // MCP:get_smart_object_component_definition - Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and whether it is registered.
@@ -1850,7 +1831,6 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("find_smart_objects"), &HandleFindSmartObjects },
 	{ TEXT("get_smart_object_component_definition"), &HandleGetSmartObjectComponentDefinition },
 	{ TEXT("get_smart_object_definition_summary"), &HandleGetSmartObjectDefinitionSummary },
-	{ TEXT("get_smart_object_info"), &HandleGetSmartObjectInfo },
 	{ TEXT("get_smart_object_slot_entrance_annotations"), &HandleGetSmartObjectSlotEntranceAnnotations },
 	{ TEXT("get_smart_object_slots_detail"), &HandleGetSmartObjectSlotsDetail },
 	{ TEXT("register_smart_object_actor"), &HandleRegisterSmartObjectActor },
@@ -1859,7 +1839,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("remove_smart_object_slot"), &HandleRemoveSmartObjectSlot },
 	{ TEXT("remove_smart_object_slot_behavior_definition"), &HandleRemoveSmartObjectSlotBehaviorDefinition },
 	{ TEXT("remove_smart_object_slot_entrance_annotation"), &HandleRemoveSmartObjectSlotEntranceAnnotation },
-	{ TEXT("set_component_definition"), &HandleSetComponentDefinition },
+	{ TEXT("set_smart_object_component_definition"), &HandleSetComponentDefinition },
 	{ TEXT("set_smart_object_definition_activity_tags"), &HandleSetSmartObjectDefinitionActivityTags },
 	{ TEXT("set_smart_object_definition_user_tag_filter"), &HandleSetSmartObjectDefinitionUserTagFilter },
 	{ TEXT("set_smart_object_slot_activity_tags"), &HandleSetSmartObjectSlotActivityTags },

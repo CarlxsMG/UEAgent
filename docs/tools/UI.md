@@ -2,50 +2,24 @@
 
 # UI
 
-53 tools. Back to the [index](README.md).
+49 tools. Back to the [index](README.md).
 
 ## `add_list_view`
 
 *Additive, idempotent.*
 
-Construct a UListView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UListView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Tiles: add_tile_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
+Construct a list-type view -- a UListView, a UTileView (view_type=Tile) or a UTreeView (view_type=Tree) -- named list_view_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a view of the requested class already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint, an unknown view_type or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: a tree view's items and their children are supplied at runtime; fill a list or tile view in PIE with set_pie_list_view_items.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint |
-| `list_view_name` | string | yes | FName of the new UListView widget |
-| `entry_widget_class` | string | no | Optional entry widget class (asset or /Script path) |
+| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory" |
+| `list_view_name` | string | yes | FName of the new view widget in the tree; also the idempotency key |
+| `widget_name` | string | no | Alias of list_view_name, read only when list_view_name is absent |
+| `entry_widget_class` | string | no | Optional entry widget class for each row, tile or tree node (asset path such as "/Game/UI/WBP_ItemTile", or a /Script path) |
+| `view_type` | string | no | Optional "List" (default, UListView), "Tile" (UTileView) or "Tree" (UTreeView), case-insensitive; anything else is an error |
+| `parent_widget_name` | string | no | Optional name of an existing panel widget (UPanelWidget) in the tree to insert the new view under; omitted = the root canvas or panel (in an empty tree the view becomes the root) |
 
-**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }`
-
-## `add_tile_view`
-
-*Additive, idempotent.*
-
-Construct a UTileView named list_view_name in the tree of a Widget Blueprint loaded by asset path, with its EntryWidgetClass set when entry_widget_class is given, add it to the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTileView already called list_view_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error, and so is a missing Blueprint or a non-UUserWidget entry class. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. A list: add_list_view; a tree: add_tree_view; fill it in PIE: set_pie_list_view_items.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint, e.g. "/Game/UI/WBP_Inventory". |
-| `list_view_name` | string | yes | Name of the new UTileView widget in the tree, e.g. "ItemTiles"; also the idempotency key. |
-| `entry_widget_class` | string | no | Optional UUserWidget class for each tile: an asset path such as "/Game/UI/WBP_ItemTile" or a /Script path. |
-
-**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, already_existed, entry_widget_class, widget_added, saved, save_error?, note? }`
-
-## `add_tree_view`
-
-*Additive, idempotent.*
-
-Construct a UTreeView named widget_name in the tree of a Widget Blueprint loaded by asset path, with EntryWidgetClass from entry_widget_class when given, under the panel parent_widget_name or else the root canvas or panel, then compile and save the Blueprint in one undo step. In an empty tree it becomes the root; a parent or root that is not a panel, or a full single-child panel, is an error. Idempotent by name: a UTreeView already called widget_name is left untouched (already_existed=true, widget_added=false, saved=false, a note, its own entry_widget_class), nothing compiled or saved; that name held by anything else is an error. A failed save makes success false with saved=false and save_error, the edit kept in memory. Refused during PIE unless force=true. Authoring only: the tree items and their children are supplied at runtime. A list: add_list_view; tiles: add_tile_view.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_blueprint_name` | string | yes | /Game path of the Widget Blueprint |
-| `widget_name` | string | yes | FName of the new UTreeView widget |
-| `entry_widget_class` | string | no | Optional entry widget class (asset or /Script path) |
-| `parent_widget_name` | string | no | Optional: name of an existing panel widget (UPanelWidget) in the tree to insert the new UTreeView under. Omitted = same root-insertion behavior as add_list_view/add_tile_view (canvas/panel root; in an empty tree the view becomes the root; a non-panel root is an error). |
-
-**Returns:** `{ widget_blueprint_name, widget_name, tree_view_class, already_existed, entry_widget_class, parent_widget_name?, widget_added, saved, save_error?, note }`
+**Returns:** `{ widget_blueprint_name, list_view_name, list_view_class, view_type, already_existed, entry_widget_class, parent_widget_name?, widget_added, saved, save_error?, note? }`
 
 ## `add_viewmodel`
 
@@ -111,21 +85,6 @@ Add (or reuse) a MovieScene property track for a widget's property inside a UWid
 
 **Returns:** `{ widget_bp_path: string, animation_name: string, widget_name: string, property_path: string, track_type: string, possessable_guid: string, binding_reused: bool, track_class: string, track_reused: bool, section_class: string, section_created: bool, saved: bool, save_error: string }`
 
-## `add_widget_extended`
-
-*Additive, idempotent.*
-
-Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the extended palette of list_widget_types (ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned with already_existed=true, compiled and saved only if the blueprint has unsaved changes (else saved=false); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save gives success false. Basic palette: add_widget_to_blueprint; inspect: get_widget_blueprint_tree; inverse: remove_widget.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
-| `widget_type` | string | yes | one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C) |
-| `widget_name` | string | yes | unique name for the new widget |
-| `parent_name` | string | no | Optional name of a panel widget to host the new child; defaults to the root widget. |
-
-**Returns:** `{ widget_bp_path: string, added_widget_name: string, widget_type: string, widget_class: string, parent_name: string, slot_class: string, added: bool, already_existed: bool, saved: bool, save_error: string, note: string? }`
-
 ## `add_widget_property_binding`
 
 *Destructive.*
@@ -146,12 +105,12 @@ Bind a widget PROPERTY to a function of the Widget Blueprint -- the Designer's "
 
 *Additive, idempotent.*
 
-Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; nesting a Widget Blueprint that contains this one is an error. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); a widget of another class under that name is an error. Refused while PIE runs unless force=true; a failed save is an error. add_widget_extended takes the larger palette of list_widget_types.
+Add a widget to the tree of a Widget Blueprint asset as the last child of the panel parent_name (default the root, which must then be a panel), register it as a variable, then compile and save the blueprint; no undo step. widget_type takes the curated palette of list_widget_types (TextBlock, Button, ProgressBar, Slider, ScrollBox...), any native widget class path, or a Widget Blueprint to nest, which must not contain this one. Idempotent by name: a widget already called widget_name with the same class is returned as is (already_existed true), and the blueprint is compiled and saved only when it has unsaved changes (otherwise saved=false, nothing saved); another class under that name, an unknown widget_type or a bad parent is an error. Refused while PIE runs unless force=true; a failed save is an error. Inspect: get_widget_blueprint_tree; inverse: remove_widget.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `widget_bp_path` | string | yes | /Game path of the Widget Blueprint asset |
-| `widget_type` | string | yes | one of TextBlock, Button, Image, VerticalBox, CanvasPanel (the curated basic names; see list_widget_types), OR any native widget class path (e.g. /Script/UMG.Throbber), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C) |
+| `widget_type` | string | yes | one of TextBlock, Button, Image, VerticalBox, CanvasPanel, ProgressBar, Slider, CheckBox, ComboBoxString, ScrollBox, Border, Overlay, SizeBox, WidgetSwitcher, HorizontalBox, EditableTextBox, Spacer, GridPanel, RichTextBlock, EditableText, MultiLineEditableText, ComboBox, SpinBox, ScaleBox, SafeZone, UniformGridPanel, WrapBox, MenuAnchor (the curated names; see list_widget_types), OR any other native widget class path (e.g. /Script/UMG.Throbber, /Script/UMG.ListView), OR a UserWidget-derived Widget Blueprint to embed as a nested instance, by its /Game asset path (e.g. /Game/UI/WBP_HealthBar) or generated-class path (/Game/UI/WBP_HealthBar.WBP_HealthBar_C) |
 | `widget_name` | string | yes | unique name for the new widget |
 | `parent_name` | string | no | Optional name of a panel widget to host the new child; defaults to the root widget. |
 
@@ -255,7 +214,7 @@ Create a UWidgetBlueprint at package_path/name with the editor Widget Blueprint 
 
 *Additive.*
 
-Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and add the clone under a target parent panel, copying the source's slot property values onto the new slot when the slot classes match. Refuses (clear error, no partial/broken result) to duplicate a panel widget that currently has children -- UE's object duplication would leave the clone's slots aliasing the SAME original child widgets rather than deep-copying them (see FDuplicateDataWriter); duplicate leaf widgets, or rebuild the panel's children individually with add_widget_extended. Name collisions on new_name are a clear error (not a silent alias of the pre-existing widget at that name).
+Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and add the clone under a target parent panel, copying the source's slot property values onto the new slot when the slot classes match. Refuses (clear error, no partial/broken result) to duplicate a panel widget that currently has children -- UE's object duplication would leave the clone's slots aliasing the SAME original child widgets rather than deep-copying them (see FDuplicateDataWriter); duplicate leaf widgets, or rebuild the panel's children individually with add_widget_to_blueprint. Name collisions on new_name are a clear error (not a silent alias of the pre-existing widget at that name).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -265,6 +224,18 @@ Duplicate a widget (DuplicateObject&lt;UWidget> outered to the WidgetTree) and a
 | `target_parent_name` | string | no | Optional name of the panel widget to host the duplicate; defaults to the source widget's own current parent (sibling placement). |
 
 **Returns:** `{ widget_bp_path: string, source_widget_name: string, new_widget_name: string, widget_class: string, target_parent_name: string, slot_class: string, slot_class_matched_source: bool, slot_properties_copied: int, duplicated: bool, saved: bool, save_error: string }`
+
+## `get_level_widget_properties`
+
+*Read-only.*
+
+Retrieve detailed properties and state information for a UUserWidget hosted on a UWidgetComponent in the current editor level, by name: class, validity, visibility, placement of the hosting component, parent, focus, and the direct children of its root panel (one level, each with name, class, depth, valid, enabled and visibility). list_level_widget_components gives the names.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `widget_name` | string | yes | Name of the widget to query |
+
+**Returns:** `{ widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, children: [{ name: string, class: string, depth: number (1), valid: bool, enabled: bool, visibility: string }], is_enabled: bool, has_focus: bool }`
 
 ## `get_pie_focused_widget`
 
@@ -308,35 +279,11 @@ Return a Widget Blueprint's widget tree as nested {name, class, children[]} AND,
 
 **Returns:** `{ widget_bp_path: string, asset_path: string, widget_count: int, root_widget: string, dumped_root: string, include_properties: bool, include_slot: bool, include_navigation: bool, property_paths: [string], tree: {name, class, properties?, unresolved_property_paths?, non_default_properties?, slot?, children: [...], children_omitted?} }`
 
-## `get_widget_hierarchy`
-
-*Read-only.*
-
-Retrieve the widget hierarchy tree including parent, children, and nested structure information.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_name` | string | yes | Name of the widget to query |
-
-**Returns:** `{ widget_name: string, hierarchy: { name: string, class: string, depth: number, valid: bool, enabled: bool, visibility: string, size?: { width, height }, position?: { x, y, z }, children: [object], child_count: number }, widget_valid: bool }`
-
-## `get_widget_properties`
-
-*Read-only.*
-
-Retrieve detailed properties and state information for a widget by name.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_name` | string | yes | Name of the widget to query |
-
-**Returns:** `{ widget_name: string, widget_class: string, widget_valid: bool, widget_visible: bool, visibility: string, size?: { width: number, height: number }, position?: { x: number, y: number, z: number }, rotation?: { pitch: number, yaw: number, roll: number }, scale?: { x: number, y: number, z: number }, parent_widget?: string, parent_class?: string, child_count: number, is_enabled: bool, has_focus: bool }`
-
 ## `list_level_widget_components`
 
 *Read-only.*
 
-CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_widget_properties / set_widget_visibility / get_widget_hierarchy search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
+CALL THIS FIRST to discover valid widget_name values instead of guessing: it enumerates ALL UWidgetComponents on ALL actors of the current EDITOR level, which is the EXACT population that get_level_widget_properties / set_level_widget_visibility search by widget_name (remove_widget searches it too). It reads GEditor's world and never a running PIE session (use read_pie_widgets for that), and it lists every widget component on an actor, not just the first. WARNING: THIS POPULATION IS NOT WIDGET BLUEPRINTS, and that is the trap the name does not warn you about: these are world-space UWidgetComponents hosted on actors. To author the CONTENT of a Widget Blueprint asset -- its tree, styles or layout -- you want get_widget_blueprint_tree / set_widget_property / set_widget_slot_properties instead. In particular ANCHORS live on a UCanvasPanelSlot inside a Widget Blueprint's tree and have no meaning at all on a level UWidgetComponent: set them with set_widget_slot_properties(widget_bp_path, widget_name, anchors=[min_x,min_y,max_x,max_y]).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -361,13 +308,11 @@ List the UMG PROPERTY BINDINGS of a Widget Blueprint -- the "Bind" dropdown next
 
 *Read-only.*
 
-List the CURATED widget_type names accepted by add_widget_to_blueprint (family="basic") / add_widget_extended (family="extended", the default -- a strict superset of basic), with each entry's resolved /Script/UMG.&lt;Name> class path and whether LoadObject actually resolves it in this build (should always be true; reported for honesty rather than assumed). This list is a convenience shortlist, NOT the full set of accepted values -- both tools also accept any native widget class path (/Script/Module.ClassName) and any UserWidget-derived Widget Blueprint's /Game asset path (embeds a nested instance); see custom_class_note in the response.
+List the CURATED widget_type names accepted by add_widget_to_blueprint, with each entry's resolved /Script/UMG.&lt;Name> class path and whether LoadObject actually resolves it in this build (should always be true; reported for honesty rather than assumed). This list is a convenience shortlist, NOT the full set of accepted values -- add_widget_to_blueprint also accepts any native widget class path (/Script/Module.ClassName) and any UserWidget-derived Widget Blueprint's /Game asset path (embeds a nested instance); see custom_class_note in the response.
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `family` | string | no | Optional "basic" \| "extended" (default "extended") |
+No parameters.
 
-**Returns:** `{ family: string, widget_types: [{ widget_type: string, class_path: string, resolvable: bool }], count: int, custom_class_note: string }`
+**Returns:** `{ widget_types: [{ widget_type: string, class_path: string, resolvable: bool }], count: int, custom_class_note: string }`
 
 ## `play_widget_animation`
 
@@ -540,7 +485,7 @@ Change a widget's index among its parent panel's children via UPanelWidget::Shif
 
 *Destructive.*
 
-Move a widget to a new parent panel (optionally at a specific child index), via FWidgetBlueprintOperationUtils::MoveWidget -- the same primitive backing the Designer's drag-and-drop reparent. Validates the new parent is a panel widget and refuses to create a cycle. Optional slot_properties are applied to the widget's NEW slot afterward via the shared reflection setter (e.g. {"Row":1,"Column":2} for a GridSlot). THIS IS ALSO HOW YOU FILL A NAMED SLOT: a UNamedSlot is a UContentWidget (hence a panel), so add one with add_widget_extended widget_type="NamedSlot" and reparent the content into it -- there is no separate SetContentForSlot tool and none is needed (it answers reparented:true, new_slot_class:PanelSlot).
+Move a widget to a new parent panel (optionally at a specific child index), via FWidgetBlueprintOperationUtils::MoveWidget -- the same primitive backing the Designer's drag-and-drop reparent. Validates the new parent is a panel widget and refuses to create a cycle. Optional slot_properties are applied to the widget's NEW slot afterward via the shared reflection setter (e.g. {"Row":1,"Column":2} for a GridSlot). THIS IS ALSO HOW YOU FILL A NAMED SLOT: a UNamedSlot is a UContentWidget (hence a panel), so add one with add_widget_to_blueprint widget_type="NamedSlot" and reparent the content into it -- there is no separate SetContentForSlot tool and none is needed (it answers reparented:true, new_slot_class:PanelSlot).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -602,7 +547,7 @@ Configure a widget's box-family slot layout (alignment/padding/size).  Applies w
 
 *Destructive, idempotent.*
 
-Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_extended widget_type="GridPanel"). Setting the same values again is idempotent.
+Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/nudge).  Applies when the widget is parented under a GridPanel (create one with add_widget_to_blueprint widget_type="GridPanel"). Setting the same values again is idempotent.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -620,6 +565,19 @@ Configure a widget's UGridSlot layout (row/column/spans/alignment/padding/layer/
 
 **Returns:** `{ widget_bp_path: string, widget_name: string, slot_type: string, settings_applied: object, applied_count: int, saved: bool, save_error: string }`
 
+## `set_level_widget_visibility`
+
+*Destructive, idempotent.*
+
+Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_level_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `widget_name` | string | yes | Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name |
+| `visibility` | string | yes | Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case) |
+
+**Returns:** `{ widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }`
+
 ## `set_named_slot_content`
 
 *Destructive, idempotent.*
@@ -631,7 +589,7 @@ Put a widget into a NAMED SLOT of a NESTED Widget Blueprint instance -- the "tem
 | `widget_bp_path` | string | yes | /Game path of the OUTER Widget Blueprint (the one that owns both the nested instance and the content). |
 | `host_widget_name` | string | yes | Name of the nested Widget Blueprint instance in the outer tree -- the widget that OWNS the slot. |
 | `slot_name` | string | yes | Name of the named slot to fill. Omit to only enumerate what the host offers (nothing is written, available_slots is still returned). |
-| `content_widget_name` | string | no | Name of the widget in the OUTER tree to place in the slot. It must already exist there (add_widget_extended creates it). Omit together with clear=true to empty the slot. |
+| `content_widget_name` | string | no | Name of the widget in the OUTER tree to place in the slot. It must already exist there (add_widget_to_blueprint creates it). Omit together with clear=true to empty the slot. |
 | `clear` | boolean | no | Empty the slot instead of filling it (default false). Mutually exclusive with content_widget_name. |
 | `save` | boolean | no | Compile + save the Widget Blueprint when done (default true). |
 
@@ -641,7 +599,7 @@ Put a widget into a NAMED SLOT of a NESTED Widget Blueprint instance -- the "tem
 
 *Destructive, idempotent.*
 
-Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_name (optionally drilling into child_name) among the active viewport UserWidgets using the same walk click_pie_widget uses, resolves each entry in items[] to a UObject* (an actor name/label in the PIE world, else a /Game asset path via FSoftObjectPath::TryLoad), then calls SetListItems (or AddItems when append=true). Companion to add_list_view/add_tile_view, which only construct an EMPTY view.
+Populate a LIVE UListView/UTileView in the running PIE session. Resolves widget_name (optionally drilling into child_name) among the active viewport UserWidgets using the same walk click_pie_widget uses, resolves each entry in items[] to a UObject* (an actor name/label in the PIE world, else a /Game asset path via FSoftObjectPath::TryLoad), then calls SetListItems (or AddItems when append=true). Companion to add_list_view (view_type List or Tile), which only constructs an EMPTY view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -721,7 +679,7 @@ Create a fresh instance of view_model_class and give it to a live UUserWidget th
 
 *Destructive, idempotent.*
 
-Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view, add_tile_view or add_tree_view.
+Set DragDropOperationClass on a widget found by name in the tree of a Widget Blueprint, then compile and save the Blueprint in one undo step (set=true, changed=true, property_set); a failed save makes success false with saved=false and save_error, the class kept in memory. A widget already holding that class is left as it is (changed=false, saved=false, a note), nothing compiled or saved. Only list, tile and tree views (UListViewBase) have that property; any other widget gets set=false and a note, nothing written: its drag and drop is the OnDragDetected and OnDrop events of a User Widget graph, authored with build_blueprint_graph after list_overridable_functions. operation_class defaults to /Script/UMG.DragDropOperation; a class that does not load or is no UDragDropOperation, or a missing Blueprint or widget, is an error, nothing written. Refused during PIE unless force=true. Make the view with add_list_view (view_type List, Tile or Tree).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -782,19 +740,6 @@ Set the CanvasPanelSlot layout of a widget inside a CanvasPanel of a Widget Blue
 | `auto_size` | boolean | no | Optional bool: when true, the slot sizes itself to the widget's desired size instead of `size`. |
 
 **Returns:** `{ widget_bp_path: string, widget_name: string, anchors_set: bool, offsets_set: bool, position_set: bool, size_set: bool, z_order_set: bool, auto_size_set: bool, current_anchors: [float], current_offsets: [float], current_position: [float], current_size: [float], current_z_order: int, current_auto_size: bool, saved: bool, save_error: string }`
-
-## `set_widget_visibility`
-
-*Destructive, idempotent.*
-
-Set the Slate visibility of a UUserWidget hosted on a UWidgetComponent in the current editor level, found by the widget's object name (list_level_widget_components gives the names; a running PIE session is never searched). visibility is matched without case, and an invalid value is an error before the lookup; a widget not found is an error too. The change goes to the live widget instance only: no undo step, nothing marked dirty or saved, and a widget the component rebuilds, after a level reload for instance, starts from its class default again. A repeat call changes nothing. previous_visibility and actual_visibility are read around the write, and visibility_set compares the result with the request. Read it with get_widget_properties; live PIE UI is read_pie_widgets; a Widget Blueprint's own widgets are set_widget_property.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `widget_name` | string | yes | Object name of the UUserWidget a UWidgetComponent in the editor level hosts, as list_level_widget_components reports it in widget_name |
-| `visibility` | string | yes | Target visibility state: Visible, Collapsed, Hidden, HitTestInvisible, or SelfHitTestInvisible (matched without case) |
-
-**Returns:** `{ widget_name: string, visibility_set: bool, previous_visibility: string, requested_visibility: string, actual_visibility: string, widget_valid: bool }`
 
 ## `stop_widget_animation`
 

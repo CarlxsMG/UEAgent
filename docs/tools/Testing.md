@@ -2,7 +2,7 @@
 
 # Testing
 
-13 tools. Back to the [index](README.md).
+9 tools. Back to the [index](README.md).
 
 ## `check_blueprint_errors`
 
@@ -20,13 +20,16 @@ Check a blueprint for compilation errors, warnings, structural issues, and orpha
 
 *Read-only.*
 
-Retrieve comprehensive debug information about a blueprint including structure, metadata, and complexity analysis. Read-only: it does NOT recompile the Blueprint.
+Read a Blueprint's structure, metadata and complexity in one static report: cached compile status, file size, function/event/variable/component/node counts, function names, variables, components, a heuristic complexity score with its level, a performance rating and advice; with function_name, one function graph's node and pin counts; with include_graph_listing, every graph's nodes listed. An asset that resolves but is not a Blueprint is not an error: the reply is its identity with is_blueprint false. Read-only: nothing is compiled (compile_blueprint compiles), and nothing is executed or traced at runtime: observe runtime with set_blueprint_breakpoint (+ PIE) or watch_pie_property; the cached compile errors and structural problems are check_blueprint_errors.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
+| `function_name` | string | no | Optional name of one of the Blueprint's own function graphs (case-insensitive) to analyze statically: adds function_name and function_exists and, when it exists, function_node_count, function_pin_count, function_rating (Good, Moderate over 20 nodes, Complex over 50) and function_issues. The function is never executed; an unknown name is function_exists false, not an error. |
+| `include_graph_listing` | boolean | no | Optional (default false): add a static listing of every function and event graph with its nodes, in array order rather than execution order: execution_flow, function_calls (function graph names), event_calls (event graph names), graphs_analyzed, includes_composite_subgraphs and limitations. |
+| `include_composites` | boolean | no | Optional (default false), used with include_graph_listing: also descend into collapsed composite subgraphs (UEdGraph::SubGraphs). Macro-instance graphs are never followed. |
 
-**Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, debug_status: string, debug_level: string, debug_message: string, file_size_bytes: int, file_size_mb: number, function_count: int, event_count: int, variable_count: int, component_count: int, total_nodes: int, parent_class: string, blueprint_compiled: bool, compilation_status: string, function_names: [string], variable_info: [{ name, type, category, is_public, is_editable }], component_info: [{ name, class, is_root }], complexity_score: number, complexity_level: string }`
+**Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, debug_status: string, debug_level: string, debug_message: string, file_size_bytes: int, file_size_mb: number, function_count: int, event_count: int, variable_count: int, component_count: int, total_nodes: int, parent_class: string, blueprint_compiled: bool, compilation_status: string, function_names: [string], variable_info: [{ name, type, category, is_public, is_editable }], component_info: [{ name, class, is_root }], complexity_score: number, complexity_level: string, performance_rating: string, recommendations: [string], function_name?: string, function_exists?: bool, function_node_count?: int, function_pin_count?: int, function_rating?: string, function_issues?: [string], execution_flow?: [string], function_calls?: [string], event_calls?: [string], graphs_analyzed?: int, includes_composite_subgraphs?: bool, limitations?: [string] }`
 
 ## `list_validators`
 
@@ -37,19 +40,6 @@ List the editor data validators the DataValidation subsystem has enabled (ForEac
 No parameters.
 
 **Returns:** `{ validators: [{ class_name: string, class_path: string, enabled: bool }], validator_count: number }`
-
-## `profile_blueprint_execution`
-
-*Destructive.*
-
-STATIC complexity analysis of a blueprint (node/function/variable counts + heuristic score). It does NOT profile any runtime execution. WARNING, SIDE EFFECT: by default it RECOMPILES the Blueprint purely to time the compile, which marks the asset dirty and can surface new compile errors on an asset you only meant to READ -- pass compile_for_timing=false for a genuinely read-only analysis. Three response fields are misnamed and each is flagged as such in the payload: `execution_time` is the COMPILE time in ms, `cpu_usage` is the heuristic complexity score (not CPU), and `memory_usage` is the .uasset size on disk (not memory).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
-| `compile_for_timing` | boolean | no | Optional (default true): recompile the Blueprint to measure compile time. Pass false for a pure read-only analysis (execution_time/compilation_score_ms then report 0). |
-
-**Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, execution_time: number, memory_usage: int, cpu_usage: number, performance_rating: string, profile_status: string, total_nodes: int, function_count: int, event_count: int, variable_count: int, component_count: int, complexity_score: number, memory_score_mb: number, compilation_score_ms: number, blueprint_compiled: bool, is_static_analysis: bool, runtime_profiled: bool, recompiled_blueprint: bool, execution_time_is_compile_time_ms: bool, cpu_usage_is_complexity_score: bool, memory_usage_is_disk_file_size_bytes: bool, under_readonly_root: bool, side_effects: [string], recommendations?: [string] }`
 
 ## `remove_blueprint_breakpoint`
 
@@ -90,33 +80,6 @@ Set a real debugging breakpoint on a specific node within a blueprint graph via 
 
 **Returns:** `{ blueprint_path: string, node_name: string, breakpoint_set: bool, already_existed: bool, found_in_graph: bool, node_class?: string, node_title?: string }`
 
-## `test_blueprint_function`
-
-*Destructive.*
-
-Static analysis of one function graph of a blueprint (node/pin counts + heuristics). WARNING: it does NOT execute the function; it RECOMPILES the Blueprint (FKismetEditorUtilities::CompileBlueprint) and reports the COMPILE time as `execution_time`.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
-| `function_name` | string | yes | Name of the function graph to analyze within the blueprint |
-| `compile_for_timing` | boolean | no | Optional (default true): recompile the Blueprint to measure compile time. Pass false to skip the recompile side effect (execution_time then reports 0). |
-
-**Returns:** `{ blueprint_path: string, resolved_object_path: string, function_name: string, test_success: bool, test_result: string, execution_time: number, memory_usage: int, node_count: int, connection_count: int, performance_rating: string, function_exists: bool, blueprint_compiled: bool, is_static_analysis: bool, function_was_executed: bool, recompiled_blueprint: bool, execution_time_is_compile_time_ms: bool, memory_usage_is_disk_file_size_bytes: bool, connection_count_is_pin_count: bool, under_readonly_root: bool, issues?: [string] }`
-
-## `trace_blueprint_execution`
-
-*Read-only.*
-
-STATIC listing of a blueprint's graphs and their nodes. It does NOT trace anything at runtime, despite the name: `trace_status` reports "StaticAnalysisOnly", and `total_execution_paths` does NOT count execution paths -- it counts GRAPHS, kept under that name only for compatibility, alongside the honest alias `graphs_analyzed` and the flag `total_execution_paths_is_graph_count`. Collapsed composite subgraphs are invisible unless you pass include_composites=true. TO ACTUALLY OBSERVE RUNTIME use set_blueprint_breakpoint (+ PIE) or watch_pie_property instead.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the blueprint (resolved via mcp_common::ResolveAssetFlexible; ambiguity errors out listing candidates) |
-| `include_composites` | boolean | no | Optional (default false): also descend into collapsed composite subgraphs (UEdGraph::SubGraphs). Macro-instance graphs are NOT followed (they usually live in another Blueprint / an engine macro library). |
-
-**Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, trace_status: string, trace_level: string, trace_message: string, file_size_bytes: int, file_size_mb: number, total_execution_paths: int, graphs_analyzed: int, total_execution_paths_is_graph_count: bool, is_static_analysis: bool, traced_runtime: bool, includes_composite_subgraphs: bool, limitations: [string], function_count: int, event_count: int, execution_flow: [string], function_calls: [string], event_calls: [string], blueprint_compiled: bool, compilation_status: string }`
-
 ## `validate_asset`
 
 *Read-only.*
@@ -142,18 +105,6 @@ Run the enabled editor data validators (Script use case, as validate_asset does)
 | `max_results` | number | no | Maximum number of assets to validate (optional, default 1000, valid 1-100000) |
 
 **Returns:** `{ path: string, recursive: bool, num_assets: number, num_valid: number, num_invalid: number, num_not_validated: number, total_found: number, truncated: bool, results: [{ asset_path: string, asset_name: string, asset_class: string, validation_result: string, is_valid: bool, error_count: number, warning_count: number, errors: [string], warnings: [string] }] }`
-
-## `validate_blueprint`
-
-*Read-only.*
-
-Validate a blueprint asset by checking its structure, file size, and validity. Static (asset-registry + on-disk) check only: it does NOT compile the Blueprint.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `blueprint_path` | string | yes | Object path, package path, or bare short name of the asset (resolved via mcp_common::ResolveAssetFlexible; an ambiguous short name errors out listing every candidate instead of picking one silently) |
-
-**Returns:** `{ blueprint_path: string, resolved_object_path: string, blueprint_class: string, is_blueprint: bool, validation_status: string, validation_message: string, is_static_analysis: bool, file_size_bytes?: int, file_size_mb?: number }`
 
 ## `watch_pie_property`
 

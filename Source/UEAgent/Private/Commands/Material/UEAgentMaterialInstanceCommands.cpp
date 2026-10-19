@@ -17,7 +17,8 @@
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
 #include "EditorAssetLibrary.h"
-#include "AssetRegistry/AssetRegistryModule.h"   // FAssetRegistryModule::AssetCreated
+#include "Materials/MaterialInstanceDynamic.h"   // get_material_parameters on a live MID
+#include "UObject/UObjectIterator.h"   // FindLiveMid
 
 namespace UEAgentMaterialInstanceCommands
 {
@@ -107,109 +108,7 @@ namespace UEAgentMaterialInstanceImpl
 	}
 }
 
-// MCP:get_material_instance_params - List the parameter values a material instance has actually OVERRIDDEN (scalars, vectors, textures) -- it walks the instance's own override arrays, so it answers "what has been calibrated here", NOT "what can I tune". Two omissions to keep in mind: it never returns STATIC SWITCH parameters, which are the flags that switch whole shader branches on or off (an instance can read perfectly green and still render without a layer because a switch is false in the parent), and it hides every parameter the parent exposes but this instance has not touched -- those are not hard-wired, they keep the parent's value. For the full tunable contract use get_material_all_parameters, and for the switches get_material_static_switch_parameters / get_material_instance_static_switch.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @returns { material_instance_path: string, parent_material: string, scalar_params: [{name, value}], scalar_count: int, vector_params: [{name, r, g, b, a}], vector_count: int, texture_params: [{name, texture_path}], texture_count: int }
-
-TSharedPtr<FJsonObject> HandleGetMaterialInstanceParams(const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath;
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::ReadInstance(Params, MIPath, MIC)) { return Error; }
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-
-	// Parent material name
-	if (MIC->Parent)
-	{
-		Data->SetStringField(TEXT("parent_material"), MIC->Parent->GetName());
-	}
-	else
-	{
-		Data->SetStringField(TEXT("parent_material"), TEXT("None"));
-	}
-
-	// Scalar parameters
-	TArray<TSharedPtr<FJsonValue>> ScalarArray;
-	for (const FScalarParameterValue& SPV : MIC->ScalarParameterValues)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), SPV.ParameterInfo.Name.ToString());
-		ParamObj->SetNumberField(TEXT("value"), SPV.ParameterValue);
-		ScalarArray.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-	Data->SetArrayField(TEXT("scalar_params"), ScalarArray);
-	Data->SetNumberField(TEXT("scalar_count"), MIC->ScalarParameterValues.Num());
-
-	// Vector parameters
-	TArray<TSharedPtr<FJsonValue>> VectorArray;
-	for (const FVectorParameterValue& VPV : MIC->VectorParameterValues)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), VPV.ParameterInfo.Name.ToString());
-		ParamObj->SetNumberField(TEXT("r"), VPV.ParameterValue.R);
-		ParamObj->SetNumberField(TEXT("g"), VPV.ParameterValue.G);
-		ParamObj->SetNumberField(TEXT("b"), VPV.ParameterValue.B);
-		ParamObj->SetNumberField(TEXT("a"), VPV.ParameterValue.A);
-		VectorArray.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-	Data->SetArrayField(TEXT("vector_params"), VectorArray);
-	Data->SetNumberField(TEXT("vector_count"), MIC->VectorParameterValues.Num());
-
-	// Texture parameters
-	TArray<TSharedPtr<FJsonValue>> TextureArray;
-	for (const FTextureParameterValue& TPV : MIC->TextureParameterValues)
-	{
-		TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
-		ParamObj->SetStringField(TEXT("name"), TPV.ParameterInfo.Name.ToString());
-		if (TPV.ParameterValue)
-		{
-			ParamObj->SetStringField(TEXT("texture_path"), TPV.ParameterValue->GetPathName());
-		}
-		else
-		{
-			ParamObj->SetStringField(TEXT("texture_path"), TEXT("None"));
-		}
-		TextureArray.Add(MakeShared<FJsonValueObject>(ParamObj));
-	}
-	Data->SetArrayField(TEXT("texture_params"), TextureArray);
-	Data->SetNumberField(TEXT("texture_count"), MIC->TextureParameterValues.Num());
-
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_material_instance_parent - Which material is this instance derived from: the parent's asset path, name and class. Use it to trace an instance back to the base material whose graph and parameter contract actually govern it -- the parent is where static switch defaults and unexposed values live, so it is the next asset to inspect when an instance behaves unexpectedly. set_material_instance_parent changes it.
-//   @param material_instance_path - Content path to the material instance.
-//   @returns { material_instance_path: string, parent_material_path: string, parent_material_name: string, parent_material_class: string }
-
-TSharedPtr<FJsonObject> HandleGetMaterialInstanceParent(const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-	UMaterialInstance* MI = LoadObject<UMaterialInstance>(nullptr, *MIPath);
-	if (!MI)
-		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material instance not found: %s"), *MIPath));
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-
-	if (MI->Parent)
-	{
-		Data->SetStringField(TEXT("parent_material_path"), MI->Parent->GetPathName());
-		Data->SetStringField(TEXT("parent_material_name"), MI->Parent->GetName());
-		Data->SetStringField(TEXT("parent_material_class"), MI->Parent->GetClass()->GetName());
-	}
-	else
-	{
-		Data->SetStringField(TEXT("parent_material_path"), TEXT("None"));
-		Data->SetStringField(TEXT("parent_material_name"), TEXT("None"));
-		Data->SetStringField(TEXT("parent_material_class"), TEXT("None"));
-	}
-
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_material_instance_parent - Re-parent a material instance onto a different base material -- how you swap an instance from a vendor master to your own without recreating it and re-pointing every referencer. Overrides whose parameter names do not exist on the new parent become orphaned and silently stop applying, so re-read with get_material_all_parameters afterwards and expect to re-check the static switches, whose defaults come from the new parent.
+// MCP:set_material_instance_parent - Re-parent a material instance onto a different base material -- how you swap an instance from a vendor master to your own without recreating it and re-pointing every referencer. Overrides whose parameter names do not exist on the new parent become orphaned and silently stop applying, so re-read with get_material_parameters afterwards and expect to re-check the static switches, whose defaults come from the new parent.
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
 //   @param new_parent_path - Content path of the new parent UMaterialInterface.
 //   @returns { material_instance_path: string, old_parent: string, new_parent: string, changed: bool }
@@ -244,7 +143,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParent(const TSharedPtr<FJsonOb
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:copy_material_instance_params - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_static_switch). Read the copied counts in the reply and verify with get_material_all_parameters; diff_material_instances shows what still differs.
+// MCP:copy_material_instance_parameters - Bulk-copy every scalar, vector and texture OVERRIDE from one material instance to another -- the way to clone a calibration onto a sibling instance instead of re-setting parameters one by one. Copies overrides only, so anything the source inherited untouched is not carried, and STATIC SWITCHES are not copied at all (set those with set_material_instance_static_switch). Read the copied counts in the reply and verify with get_material_parameters; diff_material_instances shows what still differs.
 //   @param source_path - Content path of the source UMaterialInstanceConstant.
 //   @param destination_path - Content path of the destination UMaterialInstanceConstant.
 //   @returns { source_path: string, destination_path: string, scalars_copied: int, vectors_copied: int, textures_copied: int }
@@ -302,81 +201,6 @@ TSharedPtr<FJsonObject> HandleCopyMaterialInstanceParams(const TSharedPtr<FJsonO
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_material_param_info - Read ONE named parameter's effective value off a material instance (param_type scalar | vector | texture), with a found flag so a misspelled name is distinguishable from a zero value. The cheap targeted read-back after set_material_instance_param_override -- use get_material_all_parameters when you want the whole list, and get_material_instance_param_overridden to tell "inherited from the parent" from "locally overridden", which this does not.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @param param_name - Name of the parameter to read.
-//   @param param_type - One of "scalar", "vector", "texture".
-//   @returns { param_name: string, param_type: string, found: bool, value: float | {r,g,b,a} | string }
-
-TSharedPtr<FJsonObject> HandleGetMaterialParamInfo(const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath, ParamName, ParamType;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_name"), ParamName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("param_type"), ParamType, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindInstance(MIPath, MIC)) { return Error; }
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("param_name"), ParamName);
-	Data->SetStringField(TEXT("param_type"), ParamType);
-
-	const FName ParamFName(*ParamName);
-
-	if (ParamType.Equals(TEXT("scalar"), ESearchCase::IgnoreCase))
-	{
-		for (const FScalarParameterValue& SPV : MIC->ScalarParameterValues)
-		{
-			if (SPV.ParameterInfo.Name == ParamFName)
-			{
-				Data->SetNumberField(TEXT("value"), SPV.ParameterValue);
-				Data->SetBoolField(TEXT("found"), true);
-				return mcp_common::MakeOkReply(Data);
-			}
-		}
-	}
-	else if (ParamType.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
-	{
-		for (const FVectorParameterValue& VPV : MIC->VectorParameterValues)
-		{
-			if (VPV.ParameterInfo.Name == ParamFName)
-			{
-				Data->SetObjectField(TEXT("value"), mcp_common::LinearColorToJsonObject(VPV.ParameterValue));
-				Data->SetBoolField(TEXT("found"), true);
-				return mcp_common::MakeOkReply(Data);
-			}
-		}
-	}
-	else if (ParamType.Equals(TEXT("texture"), ESearchCase::IgnoreCase))
-	{
-		for (const FTextureParameterValue& TPV : MIC->TextureParameterValues)
-		{
-			if (TPV.ParameterInfo.Name == ParamFName)
-			{
-				if (TPV.ParameterValue)
-				{
-					Data->SetStringField(TEXT("value"), TPV.ParameterValue->GetPathName());
-				}
-				else
-				{
-					Data->SetStringField(TEXT("value"), TEXT("None"));
-				}
-				Data->SetBoolField(TEXT("found"), true);
-				return mcp_common::MakeOkReply(Data);
-			}
-		}
-	}
-	else
-	{
-		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Unknown param_type: %s (expected scalar/vector/texture)"), *ParamType));
-	}
-
-	// Not found
-	Data->SetBoolField(TEXT("found"), false);
-	return mcp_common::MakeOkReply(Data);
-}
-
 // ============================================================================
 // Material Parameter Overrides
 // ============================================================================
@@ -409,7 +233,7 @@ namespace
 // ---------------------------------------------------------------------------
 // set_material_layer_parameter
 // ---------------------------------------------------------------------------
-// MCP:set_material_layer_parameter - Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_param_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_layer_parameter.
+// MCP:set_material_layer_parameter - Write a scalar / vector / texture parameter scoped to ONE layer of a layered material instance (addressed by zero-based layer_index), so each layer of a blend keeps its own tiling, tint or texture. Different from set_material_instance_parameter_override, which targets the Global association and would hit the wrong slot on a layered material. Do not trust the success flag -- the engine's setters are known to report failure while doing the work; re-read with get_material_parameters (parameter_name, association Layer, layer_index).
 //   @param material_instance_path - Content path to the MIC, e.g. /Game/MyGame/MI_Example
 //   @param parameter_name - Name of the parameter to set
 //   @param parameter_type - One of "scalar", "vector", "texture"
@@ -480,89 +304,9 @@ TSharedPtr<FJsonObject> HandleSetMaterialLayerParameter(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// get_material_layer_parameter
-// ---------------------------------------------------------------------------
-// MCP:get_material_layer_parameter - Read one parameter's value scoped to a specific LAYER of a layered material instance (by zero-based layer_index), with a found flag. The read-back oracle for set_material_layer_parameter, and the way to tell which layer a value actually belongs to -- get_material_all_parameters lists every layer's parameters together with their association, which is broader but noisier when you already know the slot.
-//   @param material_instance_path - Content path to the MIC
-//   @param parameter_name - Name of the parameter to read
-//   @param parameter_type - One of "scalar", "vector", "texture"
-//   @param layer_index - Zero-based layer index
-//   @returns { material_instance_path: string, parameter_name: string, layer_index: int, found: bool, value: float | {r,g,b,a} | string }
-
-TSharedPtr<FJsonObject> HandleGetMaterialLayerParameter(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath, ParamName, ParamType;
-	int32 LayerIndex = 0;
-
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parameter_name"), ParamName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parameter_type"), ParamType, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("layer_index"), LayerIndex)) { return Missing; }
-
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindInstance(MIPath, MIC)) { return Error; }
-
-	const FName ParamFName(*ParamName);
-	const FMaterialParameterInfo ParamInfo = MakeLayerParamInfo(ParamFName, LayerIndex);
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-	Data->SetStringField(TEXT("parameter_name"), ParamName);
-	Data->SetNumberField(TEXT("layer_index"), LayerIndex);
-
-	if (ParamType.Equals(TEXT("scalar"), ESearchCase::IgnoreCase))
-	{
-		float Value = 0.0f;
-		if (MIC->GetScalarParameterValue(ParamInfo, Value))
-		{
-			Data->SetNumberField(TEXT("value"), Value);
-			Data->SetBoolField(TEXT("found"), true);
-		}
-		else
-		{
-			Data->SetBoolField(TEXT("found"), false);
-		}
-	}
-	else if (ParamType.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
-	{
-		FLinearColor Value;
-		if (MIC->GetVectorParameterValue(ParamInfo, Value))
-		{
-			TSharedPtr<FJsonObject> VecObj = mcp_common::LinearColorToJsonObject(Value);
-			Data->SetObjectField(TEXT("value"), VecObj);
-			Data->SetBoolField(TEXT("found"), true);
-		}
-		else
-		{
-			Data->SetBoolField(TEXT("found"), false);
-		}
-	}
-	else if (ParamType.Equals(TEXT("texture"), ESearchCase::IgnoreCase))
-	{
-		UTexture* Value = nullptr;
-		if (MIC->GetTextureParameterValue(ParamInfo, Value))
-		{
-			Data->SetStringField(TEXT("value"), Value ? Value->GetPathName() : TEXT("None"));
-			Data->SetBoolField(TEXT("found"), true);
-		}
-		else
-		{
-			Data->SetBoolField(TEXT("found"), false);
-		}
-	}
-	else
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Unknown parameter_type: %s (expected scalar/vector/texture)"), *ParamType));
-	}
-
-	return mcp_common::MakeOkReply(Data);
-}
-
 namespace UEAgentMaterialInstanceImpl
 {
-	// name / type / association / layer_index head shared by every get_material_all_parameters entry.
+	// name / type / association / layer_index head shared by every get_material_parameters entry.
 	TSharedPtr<FJsonObject> MakeParameterEntry(const FMaterialParameterInfo& Info, const TCHAR* Kind)
 	{
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
@@ -598,94 +342,6 @@ namespace UEAgentMaterialInstanceImpl
 		}
 		return true;
 	}
-}
-
-// ---------------------------------------------------------------------------
-// get_material_all_parameters
-// ---------------------------------------------------------------------------
-// MCP:get_material_all_parameters - What can I tune on this material without recompiling it: EVERY scalar, vector and texture parameter the material or its parent exposes, each with its effective value, layer association and layer index. This is the contract, and the one to prefer over get_material_instance_params, which only shows the subset an instance already overrode and so makes untouched parameters look unavailable. Works on a base material or an instance. Covers scalar/vector/texture ONLY -- static switches are a separate list (get_material_static_switch_parameters) and they are what decide whether whole shader branches run at all.
-//   @param material_instance_path - Content path to the material (UMaterialInterface)
-//   @param parameter_type - Optional filter: "scalar", "vector", or "texture" (omit for all).
-//   @returns { material_instance_path: string, parameters: [{name, type, association, layer_index, value?}], parameter_count: int }
-
-TSharedPtr<FJsonObject> HandleGetMaterialAllParameters(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-	// Optional filter by type
-	FString TypeFilter;
-	Params->TryGetStringField(TEXT("parameter_type"), TypeFilter);
-
-	UMaterialInterface* Mat = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindMaterial(MIPath, Mat)) { return Error; }
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-
-	TArray<TSharedPtr<FJsonValue>> ParametersArray;
-
-	const bool bIncludeScalar = TypeFilter.IsEmpty() || TypeFilter.Equals(TEXT("scalar"), ESearchCase::IgnoreCase);
-	const bool bIncludeVector = TypeFilter.IsEmpty() || TypeFilter.Equals(TEXT("vector"), ESearchCase::IgnoreCase);
-	const bool bIncludeTexture = TypeFilter.IsEmpty() || TypeFilter.Equals(TEXT("texture"), ESearchCase::IgnoreCase);
-
-	// Every entry starts with the same name/type/association/layer_index head; "value" is only added
-	// when the material reports a value for that parameter. Kinds are listed scalar, vector, texture.
-	if (bIncludeScalar)
-	{
-		TArray<FMaterialParameterInfo> ScalarInfo;
-		TArray<FGuid> ScalarIds;
-		Mat->GetAllScalarParameterInfo(ScalarInfo, ScalarIds);
-		for (const FMaterialParameterInfo& Info : ScalarInfo)
-		{
-			TSharedPtr<FJsonObject> Entry = UEAgentMaterialInstanceImpl::MakeParameterEntry(Info, TEXT("scalar"));
-			float Scalar = 0.0f;
-			if (Mat->GetScalarParameterValue(Info, Scalar))
-			{
-				Entry->SetNumberField(TEXT("value"), Scalar);
-			}
-			ParametersArray.Add(MakeShared<FJsonValueObject>(Entry));
-		}
-	}
-
-	if (bIncludeVector)
-	{
-		TArray<FMaterialParameterInfo> VectorInfo;
-		TArray<FGuid> VectorIds;
-		Mat->GetAllVectorParameterInfo(VectorInfo, VectorIds);
-		for (const FMaterialParameterInfo& Info : VectorInfo)
-		{
-			TSharedPtr<FJsonObject> Entry = UEAgentMaterialInstanceImpl::MakeParameterEntry(Info, TEXT("vector"));
-			FLinearColor Color;
-			if (Mat->GetVectorParameterValue(Info, Color))
-			{
-				Entry->SetObjectField(TEXT("value"), mcp_common::LinearColorToJsonObject(Color));
-			}
-			ParametersArray.Add(MakeShared<FJsonValueObject>(Entry));
-		}
-	}
-
-	if (bIncludeTexture)
-	{
-		TArray<FMaterialParameterInfo> TexInfo;
-		TArray<FGuid> TexIds;
-		Mat->GetAllTextureParameterInfo(TexInfo, TexIds);
-		for (const FMaterialParameterInfo& Info : TexInfo)
-		{
-			TSharedPtr<FJsonObject> Entry = UEAgentMaterialInstanceImpl::MakeParameterEntry(Info, TEXT("texture"));
-			UTexture* Texture = nullptr;
-			if (Mat->GetTextureParameterValue(Info, Texture))
-			{
-				Entry->SetStringField(TEXT("value"), Texture ? Texture->GetPathName() : TEXT("None"));
-			}
-			ParametersArray.Add(MakeShared<FJsonValueObject>(Entry));
-		}
-	}
-
-	Data->SetArrayField(TEXT("parameters"), ParametersArray);
-	Data->SetNumberField(TEXT("parameter_count"), ParametersArray.Num());
-
-	return mcp_common::MakeOkReply(Data);
 }
 
 // ---------------------------------------------------------------------------
@@ -835,29 +491,6 @@ TSharedPtr<FJsonObject> HandleSwapMaterialLayerParameters(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// clear_material_parameter_overrides
-// ---------------------------------------------------------------------------
-// MCP:clear_material_parameter_overrides - Clear all parameter overrides on a Material Instance Constant.  Resets all scalar, vector, and texture parameter values to their defaults (inherited from the parent material).
-//   @param material_instance_path - Content path to the MIC
-//   @returns { material_instance_path: string, cleared: bool }
-
-TSharedPtr<FJsonObject> HandleClearMaterialParameterOverrides(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath;
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::ReadInstance(Params, MIPath, MIC)) { return Error; }
-
-	MIC->Modify();
-	MIC->ClearParameterValuesEditorOnly();
-	if (TSharedPtr<FJsonObject> SaveFailed = UEAgentMaterialInstanceImpl::CommitInstance(MIC)) { return SaveFailed; }
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-	Data->SetBoolField(TEXT("cleared"), true);
-	return mcp_common::MakeOkReply(Data);
-}
-
 // ============================================================================
 // Material Instance Base Property Overrides
 // ============================================================================
@@ -1004,25 +637,6 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceBaseOverrides(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_material_instance_base_overrides"));
 }
 
-// ---------------------------------------------------------------------------
-// get_material_instance_base_overrides
-// ---------------------------------------------------------------------------
-// MCP:get_material_instance_base_overrides - Read a material instance's base property overrides: blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. These are the surface-level settings that decide whether something renders opaque, masked or translucent, and they are separate from parameters -- so a material that looks wrong despite correct parameters is often a blend-mode override. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored. set_material_instance_base_overrides writes them.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @returns { material_instance_path: string, override_blend_mode: bool, blend_mode: string, override_two_sided: bool, two_sided: bool, override_shading_model: bool, shading_model: string, override_opacity_mask_clip_value: bool, opacity_mask_clip_value: float }
-
-TSharedPtr<FJsonObject> HandleGetMaterialInstanceBaseOverrides(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath;
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::ReadInstance(Params, MIPath, MIC)) { return Error; }
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-	EmitBaseOverrides(MIC->BasePropertyOverrides, Data);
-	return mcp_common::MakeOkReply(Data);
-}
-
 // ============================================================================
 // Static-parameter surface (static switch / component mask / override flags)
 // ----------------------------------------------------------------------------
@@ -1119,15 +733,17 @@ namespace UEAgentMaterialInstanceImpl
 		return Data;
 	}
 
-	// The static component mask ParamInfo names on MIC as { r, g, b, a } (all false when bOutFound is false).
-	TSharedPtr<FJsonObject> ReadStaticComponentMask(UMaterialInstanceConstant* MIC, const FMaterialParameterInfo& ParamInfo, bool& bOutFound)
+	// The static component mask ParamInfo names on Material as { r, g, b, a } (all false when bOutFound is false).
+	// Read through GetParameterValue with the StaticComponentMask type: the engine's
+	// GetStaticComponentMaskParameterValue asks for the StaticSwitch type instead and never finds a mask.
+	TSharedPtr<FJsonObject> ReadStaticComponentMask(const UMaterialInterface* Material, const FMaterialParameterInfo& ParamInfo, bool& bOutFound)
 	{
 		// AsStaticComponentMask() has an internal check(Type==StaticComponentMask),
 		// so guard on the metadata Type before touching it.
 		bOutFound = false;
 		FStaticComponentMaskValue ReadMask;
 		FMaterialParameterMetadata Meta;
-		if (MIC->GetParameterValue(EMaterialParameterType::StaticComponentMask, ParamInfo, Meta)
+		if (Material->GetParameterValue(EMaterialParameterType::StaticComponentMask, ParamInfo, Meta)
 			&& Meta.Value.Type == EMaterialParameterType::StaticComponentMask)
 		{
 			ReadMask = Meta.Value.AsStaticComponentMask();
@@ -1141,37 +757,326 @@ namespace UEAgentMaterialInstanceImpl
 		ValueObj->SetBoolField(TEXT("a"), ReadMask.A);
 		return ValueObj;
 	}
+
+	// A live Material Instance Dynamic whose object path or object name is PathOrName -- the mid_object_path / mid_name
+	// create_material_instance_dynamic and create_dynamic_material_on_actor return -- or nullptr. Such a MID is no
+	// asset (it lives in the transient package or inside a level), so the asset loader cannot find it by name.
+	UMaterialInstanceDynamic* FindLiveMid(const FString& PathOrName)
+	{
+		for (TObjectIterator<UMaterialInstanceDynamic> It; It; ++It)
+		{
+			UMaterialInstanceDynamic* Candidate = *It;
+			if (Candidate != nullptr && (Candidate->GetPathName() == PathOrName || Candidate->GetName() == PathOrName))
+			{
+				return Candidate;
+			}
+		}
+		return nullptr;
+	}
+
+	// One kind get_material_parameters lists: the label it reports and the engine parameter type.
+	struct FListedParameterKind
+	{
+		const TCHAR* Label;
+		EMaterialParameterType Type;
+	};
+
+	// Every listed kind, in listing order; the first DefaultListedKindCount are listed when parameter_type is omitted.
+	const FListedParameterKind ListedParameterKinds[] = {
+		{ TEXT("scalar"), EMaterialParameterType::Scalar },
+		{ TEXT("vector"), EMaterialParameterType::Vector },
+		{ TEXT("texture"), EMaterialParameterType::Texture },
+		{ TEXT("static_switch"), EMaterialParameterType::StaticSwitch },
+		{ TEXT("static_component_mask"), EMaterialParameterType::StaticComponentMask },
+	};
+	constexpr int32 ListedKindCount = 5;
+	constexpr int32 DefaultListedKindCount = 3;
+
+	// The request's name / association / layer_index filters; a filter that was not sent accepts everything.
+	struct FParameterFilter
+	{
+		FName Name;
+		bool bHasAssociation = false;
+		EMaterialParameterAssociation Association = EMaterialParameterAssociation::GlobalParameter;
+		bool bHasLayerIndex = false;
+		int32 LayerIndex = INDEX_NONE;
+
+		bool Matches(const FMaterialParameterInfo& Info) const
+		{
+			return (Name.IsNone() || Info.Name == Name)
+				&& (!bHasAssociation || Info.Association == Association)
+				&& (!bHasLayerIndex || Info.Index == LayerIndex);
+		}
+	};
+
+	// The EFFECTIVE value of parameter Info of kind Type on Material -- the instance's own override, else what it
+	// inherits, else the base material's default -- or an invalid pointer when the material reports no value.
+	TSharedPtr<FJsonValue> ReadEffectiveParameterValue(const UMaterialInterface* Material, EMaterialParameterType Type, const FMaterialParameterInfo& Info)
+	{
+		switch (Type)
+		{
+		case EMaterialParameterType::Scalar:
+		{
+			float Scalar = 0.0f;
+			if (Material->GetScalarParameterValue(Info, Scalar))
+			{
+				return MakeShared<FJsonValueNumber>(Scalar);
+			}
+			break;
+		}
+		case EMaterialParameterType::Vector:
+		{
+			FLinearColor Color;
+			if (Material->GetVectorParameterValue(Info, Color))
+			{
+				return MakeShared<FJsonValueObject>(mcp_common::LinearColorToJsonObject(Color));
+			}
+			break;
+		}
+		case EMaterialParameterType::Texture:
+		{
+			UTexture* Texture = nullptr;
+			if (Material->GetTextureParameterValue(Info, Texture))
+			{
+				return MakeShared<FJsonValueString>(Texture ? Texture->GetPathName() : FString(TEXT("None")));
+			}
+			break;
+		}
+		case EMaterialParameterType::StaticSwitch:
+		{
+			bool bSwitch = false;
+			FGuid ExpressionGuid;
+			if (Material->GetStaticSwitchParameterValue(Info, bSwitch, ExpressionGuid))
+			{
+				return MakeShared<FJsonValueBoolean>(bSwitch);
+			}
+			break;
+		}
+		case EMaterialParameterType::StaticComponentMask:
+		{
+			bool bMaskFound = false;
+			TSharedPtr<FJsonObject> Mask = ReadStaticComponentMask(Material, Info, bMaskFound);
+			if (bMaskFound)
+			{
+				return MakeShared<FJsonValueObject>(Mask);
+			}
+			break;
+		}
+		default:
+			break;
+		}
+		return TSharedPtr<FJsonValue>();
+	}
+
+	// Whether Material is an instance that overrides parameter Info of kind Type itself instead of inheriting it.
+	bool IsParameterOverridden(const UMaterialInterface* Material, EMaterialParameterType Type, const FMaterialParameterInfo& Info)
+	{
+		const UMaterialInstance* Instance = Cast<UMaterialInstance>(Material);
+		FMaterialParameterMetadata Override;
+		return Instance != nullptr && Instance->GetParameterOverrideValue(Type, Info, Override);
+	}
+
+	// Appends the overrides an instance stores in one of its override arrays for parameters its material no longer
+	// exposes (kept on the asset, applied to nothing), as get_material_parameters entries that pass Filter.
+	template <typename OverrideType, typename ValueFn>
+	void AppendOrphanedOverrides(const UMaterialInterface* Material, const FListedParameterKind& Kind, const TArray<OverrideType>& Overrides,
+		const FParameterFilter& Filter, ValueFn ToValue, TArray<TSharedPtr<FJsonValue>>& OutOrphans)
+	{
+		TArray<FMaterialParameterInfo> Exposed;
+		TArray<FGuid> ExposedIds;
+		Material->GetAllParameterInfoOfType(Kind.Type, Exposed, ExposedIds);
+		for (const OverrideType& Override : Overrides)
+		{
+			if (Exposed.Contains(Override.ParameterInfo) || !Filter.Matches(Override.ParameterInfo))
+			{
+				continue;
+			}
+			TSharedPtr<FJsonObject> Entry = MakeParameterEntry(Override.ParameterInfo, Kind.Label);
+			Entry->SetField(TEXT("value"), ToValue(Override));
+			OutOrphans.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
-// get_material_static_switch_parameters
+// get_material_parameters
 // ---------------------------------------------------------------------------
-// MCP:get_material_static_switch_parameters - List the STATIC SWITCH parameter names a material or instance exposes -- the on/off flags that compile whole branches of the shader in or out (beach, snow, detail normals, grass output). Always check these when a material looks correctly configured and still renders wrong: get_material_instance_params does not show them at all, so an instance with every texture and scalar right can still be missing a feature because a switch is false in the parent. Names only; read a value with get_material_instance_static_switch and write it with set_material_instance_static_switch. Editor-only.
-//   @param material_instance_path - Content path to a UMaterialInterface (base material or instance).
-//   @returns { material_instance_path: string, static_switch_parameters: [string], static_switch_count: int }
+// MCP:get_material_parameters - What can I tune on this material without recompiling it: EVERY parameter the material or its parent exposes, each with its EFFECTIVE value (the instance's own override, else what it inherits), whether this instance overrides it, its layer association and layer index. This is the contract -- untouched parameters are listed too, with the value they inherit. Works on a base material, a material instance, or a live Material Instance Dynamic found by object path or name. By default it lists scalar, vector and texture parameters; parameter_type static_switch, static_component_mask or all adds the STATIC parameters, the switches and channel masks that decide whether whole shader branches run at all. Narrow it to one parameter with parameter_name (found tells a misspelled name from a value; when exactly one entry matches its value and overridden are also copied to the top level), to one layer slot with association + layer_index, and to the instance's own overrides with overridden_only. orphaned_overrides lists overrides an instance still stores for parameters its parent no longer exposes: they are kept on the asset and apply to nothing.
+//   @param material_instance_path - Content path to the material (a base material or an instance), or the object path or name of a live Material Instance Dynamic (as create_material_instance_dynamic returns it)
+//   @param parameter_type - Optional kind filter: "scalar", "vector", "texture", "static_switch", "static_component_mask", or "all" for every kind. Omitted: scalar, vector and texture. Any other value is an error
+//   @param param_type - Alias of parameter_type
+//   @param parameter_name - Optional: list only the parameter(s) with this name (case-insensitive) and report found
+//   @param param_name - Alias of parameter_name
+//   @param association - Optional association filter: "Global", "Layer" or "Blend". Any other value is an error
+//   @param layer_index - Optional layer index filter (a Layer/Blend parameter's slot; Global parameters have -1)
+//   @param overridden_only - Optional bool (default false): list only the parameters this instance overrides itself
+//   @returns { material_instance_path: string, object_path: string, parent_material: string (parent's object path, "None" for a base material), parent_material_name: string, mid_name?: string (when the target is a Material Instance Dynamic), parameters: [{name, type, association, layer_index, value?, overridden}], parameter_count: int, orphaned_overrides: [{name, type, association, layer_index, value}], orphaned_override_count: int, found?: bool (with parameter_name), value?: number|{r,g,b,a}|string|bool, overridden?: bool }
 
-TSharedPtr<FJsonObject> HandleGetMaterialStaticSwitchParameters(
+TSharedPtr<FJsonObject> HandleGetMaterialAllParameters(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString MIPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-	UMaterialInterface* Mat = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindMaterial(MIPath, Mat)) { return Error; }
-
-	TArray<FName> Names;
-	UMaterialEditingLibrary::GetStaticSwitchParameterNames(Mat, Names);
-	UE_LOG(LogTemp, Verbose, TEXT("get_material_static_switch_parameters: %s -> %d switch(es)"), *MIPath, Names.Num());
-
-	TArray<TSharedPtr<FJsonValue>> NamesArray;
-	for (const FName& N : Names)
+	// Optional filters, read up front.
+	FString TypeFilter;
+	if (!Params->TryGetStringField(TEXT("parameter_type"), TypeFilter))
 	{
-		NamesArray.Add(MakeShared<FJsonValueString>(N.ToString()));
+		Params->TryGetStringField(TEXT("param_type"), TypeFilter);
+	}
+	FString NameFilter;
+	if (!Params->TryGetStringField(TEXT("parameter_name"), NameFilter))
+	{
+		Params->TryGetStringField(TEXT("param_name"), NameFilter);
+	}
+	FString AssociationName;
+	const bool bHasAssociation = Params->TryGetStringField(TEXT("association"), AssociationName);
+	int32 LayerIndexFilter = INDEX_NONE;
+	const bool bHasLayerIndex = Params->TryGetNumberField(TEXT("layer_index"), LayerIndexFilter);
+	bool bOverriddenOnly = false;
+	Params->TryGetBoolField(TEXT("overridden_only"), bOverriddenOnly);
+
+	// Which kinds are listed: scalar/vector/texture by default, every kind for "all", else the one named.
+	using UEAgentMaterialInstanceImpl::ListedParameterKinds;
+	int32 FirstKind = 0;
+	int32 EndKind = UEAgentMaterialInstanceImpl::DefaultListedKindCount;
+	if (TypeFilter.Equals(TEXT("all"), ESearchCase::IgnoreCase))
+	{
+		EndKind = UEAgentMaterialInstanceImpl::ListedKindCount;
+	}
+	else if (!TypeFilter.IsEmpty())
+	{
+		FirstKind = INDEX_NONE;
+		for (int32 KindIndex = 0; KindIndex < UEAgentMaterialInstanceImpl::ListedKindCount; ++KindIndex)
+		{
+			if (TypeFilter.Equals(ListedParameterKinds[KindIndex].Label, ESearchCase::IgnoreCase))
+			{
+				FirstKind = KindIndex;
+			}
+		}
+		if (FirstKind == INDEX_NONE)
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("Unknown parameter_type: %s (expected scalar, vector, texture, static_switch, static_component_mask or all)"), *TypeFilter));
+		}
+		EndKind = FirstKind + 1;
 	}
 
+	UEAgentMaterialInstanceImpl::FParameterFilter Filter;
+	Filter.Name = FName(*NameFilter);
+	if (bHasAssociation)
+	{
+		if (!ResolveAssociation(AssociationName, Filter.Association))
+		{
+			return mcp_common::MakeErrorReply(
+				FString::Printf(TEXT("Unrecognized association: %s (expected Global/Layer/Blend)"), *AssociationName));
+		}
+		Filter.bHasAssociation = true;
+	}
+	Filter.bHasLayerIndex = bHasLayerIndex;
+	Filter.LayerIndex = LayerIndexFilter;
+
+	// A material asset (base or instance), else a live Material Instance Dynamic by object path or name.
+	UMaterialInterface* Mat = mcp_common::LoadAssetOrSoftPath<UMaterialInterface>(MIPath);
+	if (Mat == nullptr)
+	{
+		Mat = UEAgentMaterialInstanceImpl::FindLiveMid(MIPath);
+	}
+	if (Mat == nullptr)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Material not found: %s (no material asset at that path and no live Material Instance Dynamic with that object path or name)"), *MIPath));
+	}
+	const UMaterialInstance* AsInstance = Cast<UMaterialInstance>(Mat);
+	const UMaterialInterface* ParentMaterial = AsInstance != nullptr ? AsInstance->Parent.Get() : nullptr;
+
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
-	Data->SetArrayField(TEXT("static_switch_parameters"), NamesArray);
-	Data->SetNumberField(TEXT("static_switch_count"), Names.Num());
+	Data->SetStringField(TEXT("object_path"), Mat->GetPathName());
+	Data->SetStringField(TEXT("parent_material"), ParentMaterial != nullptr ? ParentMaterial->GetPathName() : FString(TEXT("None")));
+	Data->SetStringField(TEXT("parent_material_name"), ParentMaterial != nullptr ? ParentMaterial->GetName() : FString(TEXT("None")));
+	if (Mat->IsA<UMaterialInstanceDynamic>())
+	{
+		Data->SetStringField(TEXT("mid_name"), Mat->GetName());
+	}
+
+	// Every entry starts with the same name/type/association/layer_index head; "value" is only added when the
+	// material reports a value for that parameter. Kinds are listed in ListedParameterKinds order.
+	TArray<TSharedPtr<FJsonValue>> ParametersArray;
+	for (int32 KindIndex = FirstKind; KindIndex < EndKind; ++KindIndex)
+	{
+		const UEAgentMaterialInstanceImpl::FListedParameterKind& Kind = ListedParameterKinds[KindIndex];
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Mat->GetAllParameterInfoOfType(Kind.Type, Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			if (!Filter.Matches(Info))
+			{
+				continue;
+			}
+			const bool bOverridden = UEAgentMaterialInstanceImpl::IsParameterOverridden(Mat, Kind.Type, Info);
+			if (bOverriddenOnly && !bOverridden)
+			{
+				continue;
+			}
+			TSharedPtr<FJsonObject> Entry = UEAgentMaterialInstanceImpl::MakeParameterEntry(Info, Kind.Label);
+			if (TSharedPtr<FJsonValue> Value = UEAgentMaterialInstanceImpl::ReadEffectiveParameterValue(Mat, Kind.Type, Info))
+			{
+				Entry->SetField(TEXT("value"), Value);
+			}
+			Entry->SetBoolField(TEXT("overridden"), bOverridden);
+			ParametersArray.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+	}
+
+	// Overrides an instance still stores for parameters its material no longer exposes (scalar/vector/texture).
+	TArray<TSharedPtr<FJsonValue>> Orphans;
+	if (AsInstance != nullptr)
+	{
+		for (int32 KindIndex = FirstKind; KindIndex < FMath::Min(EndKind, UEAgentMaterialInstanceImpl::DefaultListedKindCount); ++KindIndex)
+		{
+			const UEAgentMaterialInstanceImpl::FListedParameterKind& Kind = ListedParameterKinds[KindIndex];
+			if (Kind.Type == EMaterialParameterType::Scalar)
+			{
+				UEAgentMaterialInstanceImpl::AppendOrphanedOverrides(Mat, Kind, AsInstance->ScalarParameterValues, Filter,
+					[](const FScalarParameterValue& P) -> TSharedPtr<FJsonValue> { return MakeShared<FJsonValueNumber>(P.ParameterValue); }, Orphans);
+			}
+			else if (Kind.Type == EMaterialParameterType::Vector)
+			{
+				UEAgentMaterialInstanceImpl::AppendOrphanedOverrides(Mat, Kind, AsInstance->VectorParameterValues, Filter,
+					[](const FVectorParameterValue& P) -> TSharedPtr<FJsonValue> { return MakeShared<FJsonValueObject>(mcp_common::LinearColorToJsonObject(P.ParameterValue)); }, Orphans);
+			}
+			else if (Kind.Type == EMaterialParameterType::Texture)
+			{
+				UEAgentMaterialInstanceImpl::AppendOrphanedOverrides(Mat, Kind, AsInstance->TextureParameterValues, Filter,
+					[](const FTextureParameterValue& P) -> TSharedPtr<FJsonValue>
+					{
+						const UTexture* Texture = P.ParameterValue;
+						return MakeShared<FJsonValueString>(Texture ? Texture->GetPathName() : FString(TEXT("None")));
+					}, Orphans);
+			}
+		}
+	}
+
+	Data->SetArrayField(TEXT("parameters"), ParametersArray);
+	Data->SetNumberField(TEXT("parameter_count"), ParametersArray.Num());
+	Data->SetArrayField(TEXT("orphaned_overrides"), Orphans);
+	Data->SetNumberField(TEXT("orphaned_override_count"), Orphans.Num());
+
+	// A name filter reports whether anything matched; a single match is also copied to the top level.
+	if (!NameFilter.IsEmpty())
+	{
+		Data->SetBoolField(TEXT("found"), ParametersArray.Num() > 0);
+		if (ParametersArray.Num() == 1)
+		{
+			const TSharedPtr<FJsonObject>& OnlyEntry = ParametersArray[0]->AsObject();
+			if (TSharedPtr<FJsonValue> OnlyValue = OnlyEntry->TryGetField(TEXT("value")))
+			{
+				Data->SetField(TEXT("value"), OnlyValue);
+			}
+			Data->SetBoolField(TEXT("overridden"), OnlyEntry->GetBoolField(TEXT("overridden")));
+		}
+	}
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -1230,37 +1135,6 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceStaticSwitch(
 	Data->SetBoolField(TEXT("value"), bReadValue);
 	Data->SetBoolField(TEXT("found"), bFound);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_material_instance_static_switch"));
-}
-
-// ---------------------------------------------------------------------------
-// get_material_instance_static_switch
-// ---------------------------------------------------------------------------
-// MCP:get_material_instance_static_switch - Read a static-switch (static bool) parameter value from a Material Instance Constant (via UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue). Editor-only.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @param parameter_name - Name of the static-switch parameter.
-//   @param association - Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend".
-//   @param layer_index - Optional zero-based index for Layer/Blend association (ignored for Global).
-//   @returns { material_instance_path: string, parameter_name: string, association: string, value: bool, overridden: bool }
-
-TSharedPtr<FJsonObject> HandleGetMaterialInstanceStaticSwitch(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath, ParamName;
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::ReadInstanceParameter(Params, MIPath, ParamName, MIC)) { return Error; }
-
-	const FName ParamFName(*ParamName);
-	FMaterialParameterInfo ParamInfo;
-	EMaterialParameterAssociation Assoc;
-	if (TSharedPtr<FJsonObject> Error = BuildStaticParamInfo(Params, ParamFName, ParamInfo, Assoc)) { return Error; }
-
-	const bool bValue = UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(MIC, ParamFName, Assoc);
-	const bool bOverridden = UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, ParamFName, Assoc);
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewParameterPayload(MIPath, ParamName, Assoc);
-	Data->SetBoolField(TEXT("value"), bValue);
-	Data->SetBoolField(TEXT("overridden"), bOverridden);
-	return mcp_common::MakeOkReply(Data);
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,59 +1202,67 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceStaticComponentMask(
 }
 
 // ---------------------------------------------------------------------------
-// get_material_instance_static_component_mask
+// set_material_instance_parameter_override
 // ---------------------------------------------------------------------------
-// MCP:get_material_instance_static_component_mask - Read a static component-mask parameter (the R/G/B/A channel checkboxes) on a material instance -- which channels of a packed mask/ORM texture the shader actually samples. Reading the wrong channel is a classic silent look bug: nothing errors, the surface is just uniformly wrong. Supports Global / Layer / Blend association with a layer index. set_material_instance_static_component_mask writes it. Editor-only.
+// MCP:set_material_instance_parameter_override - Toggle the per-parameter override flag on a Material Instance Constant (any of the 11 parameter types, including static switch), or with all=true clear EVERY parameter override at once. bOverride=true keeps/enables the local override; bOverride=false REVERTS the parameter to the parent material's value (removes the override). Runs UpdateMaterialInstance and persists. Returns honestly: success=false when the parameter is not found on the instance. all=true with override=false resets every scalar, vector and texture value to what the parent gives (ClearParameterValuesEditorOnly) and persists, reporting cleared. Editor-only.
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @param parameter_name - Name of the static component-mask parameter.
+//   @param parameter_name - Name of the parameter whose override flag to toggle. Required unless all is true.
+//   @param override - Bool: true = keep local override; false = revert to parent (remove the value). Must be false with all=true.
 //   @param association - Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend".
-//   @param layer_index - Optional zero-based index for Layer/Blend association (ignored for Global).
-//   @returns { material_instance_path: string, parameter_name: string, association: string, value: {r,g,b,a}, found: bool }
-
-TSharedPtr<FJsonObject> HandleGetMaterialInstanceStaticComponentMask(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString MIPath, ParamName;
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::ReadInstanceParameter(Params, MIPath, ParamName, MIC)) { return Error; }
-
-	const FName ParamFName(*ParamName);
-	FMaterialParameterInfo ParamInfo;
-	EMaterialParameterAssociation Assoc;
-	if (TSharedPtr<FJsonObject> Error = BuildStaticParamInfo(Params, ParamFName, ParamInfo, Assoc)) { return Error; }
-
-	bool bFound = false;
-	TSharedPtr<FJsonObject> ValueObj = UEAgentMaterialInstanceImpl::ReadStaticComponentMask(MIC, ParamInfo, bFound);
-
-	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewParameterPayload(MIPath, ParamName, Assoc);
-	Data->SetObjectField(TEXT("value"), ValueObj);
-	Data->SetBoolField(TEXT("found"), bFound);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// set_material_instance_param_override
-// ---------------------------------------------------------------------------
-// MCP:set_material_instance_param_override - Toggle the per-parameter override flag on a Material Instance Constant (any of the 11 parameter types, including static switch). bOverride=true keeps/enables the local override; bOverride=false REVERTS the parameter to the parent material's value (removes the override). Runs UpdateMaterialInstance and persists. Returns honestly: success=false when the parameter is not found on the instance. Editor-only.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @param parameter_name - Name of the parameter whose override flag to toggle.
-//   @param override - Bool: true = keep local override; false = revert to parent (remove the value).
-//   @param association - Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend".
-//   @returns { material_instance_path: string, parameter_name: string, association: string, requested_override: bool, applied: bool, overridden: bool, saved: bool }
+//   @param all - Optional bool (default false): with override=false, clear every parameter override of the instance instead of one; parameter_name is then not used and must be omitted.
+//   @returns { material_instance_path: string, parameter_name?: string, association?: string, requested_override: bool, applied?: bool, overridden?: bool, cleared?: bool (all=true), saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetMaterialInstanceParamOverride(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString MIPath, ParamName;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parameter_name"), ParamName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+	// parameter_name is required unless all=true, so it is read as optional and checked below.
+	Params->TryGetStringField(TEXT("parameter_name"), ParamName);
+	bool bAll = false;
+	Params->TryGetBoolField(TEXT("all"), bAll);
 
 	bool bOverride = false;
 	if (!Params->TryGetBoolField(TEXT("override"), bOverride))
 		return mcp_common::MakeErrorReply(TEXT("Missing required parameter: override (bool)"));
 
+	if (bAll)
+	{
+		if (bOverride)
+		{
+			return mcp_common::MakeErrorReply(TEXT("all=true clears every parameter override; pass override=false with it"));
+		}
+		if (!ParamName.IsEmpty())
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("all=true clears every parameter override; omit parameter_name ('%s') or drop all to revert just that one"), *ParamName));
+		}
+	}
+	else if (ParamName.IsEmpty())
+	{
+		return mcp_common::MissingParameterReply(TEXT("parameter_name"));
+	}
+
 	UMaterialInstanceConstant* MIC = nullptr;
 	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindInstance(MIPath, MIC)) { return Error; }
+
+	if (bAll)
+	{
+		// Every scalar / vector / texture value the instance stores goes; each then reads what the parent gives.
+		MIC->Modify();
+		MIC->ClearParameterValuesEditorOnly();
+		MIC->PostEditChange();
+
+		FString ClearSaveError;
+		const bool bClearSaved = SaveMICPackage(MIC, ClearSaveError);
+		if (!bClearSaved)
+			return mcp_common::MakeErrorReply(ClearSaveError);
+
+		TSharedPtr<FJsonObject> Cleared = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
+		Cleared->SetBoolField(TEXT("requested_override"), false);
+		Cleared->SetBoolField(TEXT("cleared"), true);
+		return mcp_common::MakeSavedReply(Cleared, bClearSaved, TEXT("set_material_instance_parameter_override"));
+	}
 
 	EMaterialParameterAssociation Assoc;
 	if (TSharedPtr<FJsonObject> Error = MaterialInstance_ReadAssociation(Params, Assoc)) { return Error; }
@@ -1393,7 +1275,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParamOverride(
 	// false honestly when the parameter is not found on the instance.
 	const bool bApplied = UMaterialEditingLibrary::SetMaterialInstanceParameterOverride(MIC, ParamFName, bOverride, Assoc);
 	MIC->PostEditChange();
-	UE_LOG(LogTemp, Verbose, TEXT("set_material_instance_param_override: %s.%s [%s] override=%d -> applied=%d"),
+	UE_LOG(LogTemp, Verbose, TEXT("set_material_instance_parameter_override: %s.%s [%s] override=%d -> applied=%d"),
 		*MIPath, *ParamName, *AssociationToString(Assoc), bOverride ? 1 : 0, bApplied ? 1 : 0);
 
 	if (!bApplied)
@@ -1415,13 +1297,13 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParamOverride(
 	Data->SetBoolField(TEXT("requested_override"), bOverride);
 	Data->SetBoolField(TEXT("applied"), bApplied);
 	Data->SetBoolField(TEXT("overridden"), bOverridden);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_material_instance_param_override"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_material_instance_parameter_override"));
 }
 
 // ---------------------------------------------------------------------------
-// get_material_instance_param_overridden
+// get_material_instance_parameter_overridden
 // ---------------------------------------------------------------------------
-// MCP:get_material_instance_param_overridden - Is this parameter set on the INSTANCE, or just inherited from the parent? Returns the override flag for one named parameter -- the discriminator that a plain value read cannot give you, since an inherited value and a locally-set identical value read the same. Use it to confirm a write actually landed on the child (and, in a read-only vendor material, to prove you edited your instance and not the library asset). Editor-only.
+// MCP:get_material_instance_parameter_overridden - Is this parameter set on the INSTANCE, or just inherited from the parent? Returns the override flag for one named parameter -- the discriminator that a plain value read cannot give you, since an inherited value and a locally-set identical value read the same. Use it to confirm a write actually landed on the child (and, in a read-only vendor material, to prove you edited your instance and not the library asset). Editor-only.
 //   @param material_instance_path - Content path to the UMaterialInstanceConstant.
 //   @param parameter_name - Name of the parameter to query.
 //   @param association - Optional EMaterialParameterAssociation: "Global" (default), "Layer", or "Blend".
@@ -1446,91 +1328,22 @@ TSharedPtr<FJsonObject> HandleGetMaterialInstanceParamOverridden(
 }
 
 // ---------------------------------------------------------------------------
-// Create + inspect composition.
+// Inspect composition.
 // ---------------------------------------------------------------------------
-// MCP:create_material_instance_constant - Create a material instance (MIC) asset under a /Game path, optionally parented to a base material on creation. The right way to re-skin a vendor or engine material: the instance is yours, the parent stays untouched and updatable, and only the parameters you override are stored. Idempotent -- an existing asset comes back with already_existed=true. Same operation as create_material_instance, which addresses the target by folder plus name instead of a full path.
-//   @param name - Name of the new material instance asset.
-//   @param package_path - Target content folder; defaults to /Game/MCP.
-//   @param parent_material_path - Optional content path of a UMaterialInterface to set as Parent (InitialParent on the factory).
-//   @returns { material_instance_path: string, material_instance_name: string, parent_material_path: string, created: bool, already_existed: bool, saved: bool, save_error?: string }
-TSharedPtr<FJsonObject> HandleCreateMaterialInstanceConstant(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString Name;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
-	FString PackagePath = mcp_common::DefaultAssetFolder();
-	Params->TryGetStringField(TEXT("package_path"), PackagePath);
-	while (PackagePath.EndsWith(TEXT("/"))) { PackagePath.LeftChopInline(1, EAllowShrinking::No); }
-
-	FString ParentMaterialPath;
-	Params->TryGetStringField(TEXT("parent_material_path"), ParentMaterialPath);
-
-	const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
-	if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-	const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *FullPath, *Name);
-
-	// Idempotent load-or-create.
-	if (UMaterialInstanceConstant* Existing = LoadMICFlexible(ObjectPath))
-	{
-		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-		Data->SetStringField(TEXT("material_instance_path"), Existing->GetPathName());
-		Data->SetStringField(TEXT("material_instance_name"), Existing->GetName());
-		Data->SetStringField(TEXT("parent_material_path"), Existing->Parent ? Existing->Parent->GetPathName() : TEXT("None"));
-		Data->SetBoolField(TEXT("created"), false);
-		Data->SetBoolField(TEXT("already_existed"), true);
-		return mcp_common::MakeOkReply(Data);
-	}
-
-	FString CreateError;
-	UMaterialInstanceConstant* MIC = mcp_common::NewAssetInPackage<UMaterialInstanceConstant>(FullPath, Name,
-		*FString::Printf(TEXT("Failed to create UMaterialInstanceConstant: %s"), *Name), CreateError);
-	if (!MIC)
-	{
-		return mcp_common::MakeErrorReply(CreateError);
-	}
-
-	// Seed parent if requested — use the editor-only setter; this also triggers an
-	// internal recompile so that the parameter lists resolve from the parent.
-	if (!ParentMaterialPath.IsEmpty())
-	{
-		UMaterialInterface* Parent = mcp_common::LoadAssetOrSoftPath<UMaterialInterface>(ParentMaterialPath);
-		if (!Parent)
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Parent material not found: %s"), *ParentMaterialPath));
-		}
-		MIC->SetParentEditorOnly(Parent, /*RecacheShader=*/ true);
-	}
-
-	FAssetRegistryModule::AssetCreated(MIC);
-	MIC->MarkPackageDirty();
-
-	FString SaveError;
-	const bool bSaved = mcp_common::SaveAssetPackage(MIC->GetPackage(), MIC, SaveError);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("material_instance_path"), MIC->GetPathName());
-	Data->SetStringField(TEXT("material_instance_name"), MIC->GetName());
-	Data->SetStringField(TEXT("parent_material_path"), MIC->Parent ? MIC->Parent->GetPathName() : TEXT("None"));
-	Data->SetBoolField(TEXT("created"), true);
-	Data->SetBoolField(TEXT("already_existed"), false);
-	if (!SaveError.IsEmpty())
-	{
-		Data->SetStringField(TEXT("save_error"), SaveError);
-	}
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_material_instance_constant"));
-}
-
-// MCP:inspect_material_instance_constant - One-call overview of a material instance: parent material and class, plus COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks. A triage read that tells you which of the detailed tools to reach for next -- it returns counts, not values, so it can say "there are 14 static switches here" but never which ones are on. For values use get_material_all_parameters, get_material_instance_static_switch and get_material_instance_base_overrides.
-//   @param material_instance_path - Content path to the UMaterialInstanceConstant.
-//   @returns { material_instance_path: string, material_instance_class: string, parent_material_path: string, parent_material_class: string, scalar_param_count: int, vector_param_count: int, texture_param_count: int, base_override_count: int, static_switch_count: int, static_component_mask_count: int, asset_registry_path: string }
+// MCP:get_material_instance_info - One-call overview of a material instance (constant, or any other UMaterialInstance): parent material path, name and class, COUNTS of scalar/vector/texture overrides, base property overrides, static switches and static component masks, and the base property overrides themselves -- blend mode, two-sided, shading model and opacity mask clip value, each with its own bOverride_ flag. The flag matters as much as the value: an override that is false means the parent's setting wins whatever value is stored, and a material that looks wrong despite correct parameters is often a blend-mode override. A triage read for parameters -- counts, not values, so it can say "there are 14 static switches here" but never which ones are on: for parameter values use get_material_parameters (parameter_type all includes the static switches). set_material_instance_parent and set_material_instance_base_overrides write what it reports.
+//   @param material_instance_path - Content path to the material instance (UMaterialInstanceConstant, or any UMaterialInstance).
+//   @returns { material_instance_path: string, material_instance_class: string, parent_material_path: string, parent_material_name: string, parent_material_class: string, scalar_param_count: int, vector_param_count: int, texture_param_count: int, base_override_count: int, static_switch_count: int, static_component_mask_count: int, override_blend_mode: bool, blend_mode: string, override_two_sided: bool, two_sided: bool, override_shading_model: bool, shading_model: string, override_opacity_mask_clip_value: bool, opacity_mask_clip_value: float, asset_registry_path: string }
 TSharedPtr<FJsonObject> HandleInspectMaterialInstanceConstant(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString MIPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_instance_path"), MIPath)) { return Missing; }
-	UMaterialInstanceConstant* MIC = nullptr;
-	if (TSharedPtr<FJsonObject> Error = UEAgentMaterialInstanceImpl::FindInstance(MIPath, MIC)) { return Error; }
+	// Any instance: every field read here lives on UMaterialInstance, not only on the constant.
+	UMaterialInstance* MIC = LoadObject<UMaterialInstance>(nullptr, *MIPath);
+	if (!MIC)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material instance not found: %s"), *MIPath));
+	}
 
 	int32 ScalarCount = MIC->ScalarParameterValues.Num();
 	int32 VectorCount = MIC->VectorParameterValues.Num();
@@ -1569,6 +1382,7 @@ TSharedPtr<FJsonObject> HandleInspectMaterialInstanceConstant(
 	TSharedPtr<FJsonObject> Data = UEAgentMaterialInstanceImpl::NewPayload(MIPath);
 	Data->SetStringField(TEXT("material_instance_class"), MIC->GetClass()->GetName());
 	Data->SetStringField(TEXT("parent_material_path"), MIC->Parent ? MIC->Parent->GetPathName() : TEXT("None"));
+	Data->SetStringField(TEXT("parent_material_name"), MIC->Parent ? MIC->Parent->GetName() : TEXT("None"));
 	Data->SetStringField(TEXT("parent_material_class"), MIC->Parent ? MIC->Parent->GetClass()->GetName() : TEXT("None"));
 	Data->SetNumberField(TEXT("scalar_param_count"), ScalarCount);
 	Data->SetNumberField(TEXT("vector_param_count"), VectorCount);
@@ -1576,6 +1390,7 @@ TSharedPtr<FJsonObject> HandleInspectMaterialInstanceConstant(
 	Data->SetNumberField(TEXT("static_switch_count"), StaticSwitchCount);
 	Data->SetNumberField(TEXT("static_component_mask_count"), StaticComponentMaskCount);
 	Data->SetNumberField(TEXT("base_override_count"), BaseOverrideCount);
+	EmitBaseOverrides(MIC->BasePropertyOverrides, Data);
 	Data->SetStringField(TEXT("asset_registry_path"), MIC->GetPathName());
 	return mcp_common::MakeOkReply(Data);
 }
@@ -1795,24 +1610,14 @@ TSharedPtr<FJsonObject> HandleDiffMaterialInstances(
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-	{ TEXT("clear_material_parameter_overrides"), &HandleClearMaterialParameterOverrides },
-	{ TEXT("copy_material_instance_params"), &HandleCopyMaterialInstanceParams },
-	{ TEXT("create_material_instance_constant"), &HandleCreateMaterialInstanceConstant },
+	{ TEXT("copy_material_instance_parameters"), &HandleCopyMaterialInstanceParams },
 	{ TEXT("diff_material_instances"), &HandleDiffMaterialInstances },
-	{ TEXT("get_material_all_parameters"), &HandleGetMaterialAllParameters },
-	{ TEXT("get_material_instance_base_overrides"), &HandleGetMaterialInstanceBaseOverrides },
-	{ TEXT("get_material_instance_param_overridden"), &HandleGetMaterialInstanceParamOverridden },
-	{ TEXT("get_material_instance_params"), &HandleGetMaterialInstanceParams },
-	{ TEXT("get_material_instance_parent"), &HandleGetMaterialInstanceParent },
-	{ TEXT("get_material_instance_static_component_mask"), &HandleGetMaterialInstanceStaticComponentMask },
-	{ TEXT("get_material_instance_static_switch"), &HandleGetMaterialInstanceStaticSwitch },
-	{ TEXT("get_material_layer_parameter"), &HandleGetMaterialLayerParameter },
+	{ TEXT("get_material_parameters"), &HandleGetMaterialAllParameters },
+	{ TEXT("get_material_instance_parameter_overridden"), &HandleGetMaterialInstanceParamOverridden },
 	{ TEXT("get_material_layer_stack"), &HandleGetMaterialLayerStack },
-	{ TEXT("get_material_param_info"), &HandleGetMaterialParamInfo },
-	{ TEXT("get_material_static_switch_parameters"), &HandleGetMaterialStaticSwitchParameters },
-	{ TEXT("inspect_material_instance_constant"), &HandleInspectMaterialInstanceConstant },
+	{ TEXT("get_material_instance_info"), &HandleInspectMaterialInstanceConstant },
 	{ TEXT("set_material_instance_base_overrides"), &HandleSetMaterialInstanceBaseOverrides },
-	{ TEXT("set_material_instance_param_override"), &HandleSetMaterialInstanceParamOverride },
+	{ TEXT("set_material_instance_parameter_override"), &HandleSetMaterialInstanceParamOverride },
 	{ TEXT("set_material_instance_parent"), &HandleSetMaterialInstanceParent },
 	{ TEXT("set_material_instance_static_component_mask"), &HandleSetMaterialInstanceStaticComponentMask },
 	{ TEXT("set_material_instance_static_switch"), &HandleSetMaterialInstanceStaticSwitch },

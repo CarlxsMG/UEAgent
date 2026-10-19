@@ -12,7 +12,6 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
-#include "HAL/FileManager.h"             // IFileManager::FileExists (delete_level_sequence: is the file still on disk)
 // Level sequence asset model: the movie scene, its tracks and its object bindings
 #include "MovieScene.h"
 #include "MovieSceneTrack.h"
@@ -39,6 +38,12 @@
  * - Editor: inspect a sequence's timeline and tracks, and drive the open Sequencer
  *   (play, pause, move the playhead).
  */
+// A Level Sequence by /Game path or bare asset name, as the Sequencer commands resolve it (UEAgentSequencerCommands.cpp).
+namespace UEAgentSequencerCommands
+{
+    ULevelSequence* LoadSequenceByPathOrName(const FString& PathOrName);
+}
+
 namespace UEAgentTimelineCommands
 {
 
@@ -177,12 +182,6 @@ namespace UEAgentTimelineImpl
         return Settings;
     }
 
-    // Seconds spanned by a frame range at Rate, measured as upper bound minus lower bound.
-    double RangeSeconds(const TRange<FFrameNumber>& Range, const FFrameRate& Rate)
-    {
-        return (Range.GetUpperBoundValue() - Range.GetLowerBoundValue()).Value / Rate.AsDecimal();
-    }
-
     // Finds SequenceName and makes it the sequence the Sequencer editor shows, opening it when
     // another (or none) is open. The error reply when it does not exist or cannot be shown.
     TSharedPtr<FJsonObject> FocusSequencerOn(const FString& SequenceName)
@@ -284,7 +283,7 @@ namespace UEAgentTimelineImpl
 
 // --- Level Sequence assets ----------------------------------------------------------
 
-// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_duration; list sequences with get_level_sequences.
+// MCP:create_level_sequence - Creates a Level Sequence asset at package_path/sequence_name and saves it, with playback range [0, duration) and frame_rate, truncated to whole fps, as both tick resolution and display rate; the end frame is duration times that whole rate, to the nearest frame. If that asset already exists it is loaded and those settings are overwritten, its keys, sections and ranges migrated to the new rate so nothing moves in time; sequence_created tells a new asset from an existing one. Not undoable; another asset class at the path, or a duration shorter than one frame, is an error. To retime an existing sequence use set_sequence_frame_rate or set_sequence_playback_range (duration); list sequences with get_level_sequences.
 //   @param sequence_name - Name of the new sequence to create
 //   @param package_path - Target content path, defaults to /Game/Sequences
 //   @param duration - Playback duration in seconds, above 0 and at most 3600, default 10
@@ -425,129 +424,7 @@ TSharedPtr<FJsonObject> HandleGetLevelSequences(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:delete_level_sequence - Deletes a Level Sequence asset permanently, choosing the first sequence under /Game whose asset name matches sequence_name (case-insensitive). Succeeds only when actually_deleted: the delete reported success, the asset is no longer registered and its file is gone from disk (a read-only file, or one another process holds open, stays behind and fails the call).
-//   @param sequence_name - Asset name of the Level Sequence to delete, not its path (e.g. "LS_Intro")
-//   @returns { sequence_name: string, asset_path: string, delete_attempted: bool, asset_still_exists: bool, file_still_exists: bool, actually_deleted: bool }
-TSharedPtr<FJsonObject> HandleDeleteLevelSequence(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentTimelineImpl;
-
-    FString SequenceName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sequence_name"), SequenceName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (SequenceName.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("sequence_name cannot be empty"));
-    }
-
-    const Impl::FResolvedSequence Target = Impl::ResolveSequence(SequenceName);
-    if (Target.Error.IsValid())
-    {
-        return Target.Error;
-    }
-
-    // Delete through the editor asset library, then ask again whether the asset exists:
-    // only a delete that reported success AND left nothing behind is actually_deleted. The
-    // registry forgets the asset even when its file could not be removed, so the file on disk
-    // is checked too: a file left behind brings the sequence back when the editor restarts. It is
-    // asked of the file system, not of FPackageName::DoesPackageExist, which answers from the
-    // registry first and can still list a package whose file was just deleted.
-    const FString AssetPath = Target.Sequence->GetPathName();
-    FString PackageFile;
-    mcp_common::FindPackageFileOnDisk(Target.Sequence->GetPackage()->GetName(), PackageFile);
-    const bool bDeleteReported = UEditorAssetLibrary::DeleteAsset(AssetPath);
-    const bool bStillThere = UEditorAssetLibrary::DoesAssetExist(AssetPath);
-    const bool bFileStillThere = !PackageFile.IsEmpty() && IFileManager::Get().FileExists(*PackageFile);
-    const bool bActuallyDeleted = bDeleteReported && !bStillThere && !bFileStillThere;
-
-    TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
-    Report->SetStringField(TEXT("asset_path"), AssetPath);
-    Report->SetBoolField(TEXT("delete_attempted"), bDeleteReported);
-    Report->SetBoolField(TEXT("asset_still_exists"), bStillThere);
-    Report->SetBoolField(TEXT("file_still_exists"), bFileStillThere);
-    Report->SetBoolField(TEXT("actually_deleted"), bActuallyDeleted);
-    return mcp_common::MakeOutcomeReply(Report, bActuallyDeleted, bActuallyDeleted ? FString() : FString::Printf(
-        TEXT("delete_level_sequence: '%s' was not deleted: %s."), *AssetPath,
-        bFileStillThere ? TEXT("its file is still on disk (read-only, or held open by another process)")
-            : bStillThere ? TEXT("the asset is still registered (it may be open in an editor)")
-            : TEXT("the delete reported failure")));
-}
-
 // --- Playback length and frame rate stored in an asset ------------------------------
-
-// MCP:set_sequence_duration - Sets the playback range of a Level Sequence (found by asset name under /Game) to [0, duration) and marks the package dirty without saving; not undoable. Returns previous_duration, actual_duration, duration_set (within 0.01 s), and start_frame and end_frame in tick-resolution frames.
-//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
-//   @param duration - New length in seconds, greater than 0 and at most 3600 (0 is refused)
-//   @returns { sequence_name: string, requested_duration: number, previous_duration: number, actual_duration: number, duration_set: bool, start_frame: int, end_frame: int }
-TSharedPtr<FJsonObject> HandleSetSequenceDuration(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentTimelineImpl;
-
-    FString SequenceName;
-    double Duration = 0.0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sequence_name"), SequenceName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("duration"), Duration)) { return Missing; }
-    if (SequenceName.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("sequence_name cannot be empty"));
-    }
-    if (Duration <= 0.0 || Duration > 3600.0)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Duration must be between 0.0 and 3600.0 seconds"));
-    }
-
-    const Impl::FResolvedSequence Target = Impl::ResolveSequence(SequenceName, TEXT("Movie scene not found in level sequence"));
-    if (Target.Error.IsValid())
-    {
-        return Target.Error;
-    }
-
-    // The range becomes [0, duration), counted in ticks of the scene's own resolution,
-    // which itself is left alone.
-    const FFrameRate TickRate = Target.MovieScene->GetTickResolution();
-    const double PreviousSeconds = Impl::RangeSeconds(Target.MovieScene->GetPlaybackRange(), TickRate);
-
-    const FFrameNumber LastTick(static_cast<int32>(Duration * TickRate.AsDecimal()));
-    Target.MovieScene->SetPlaybackRange(TRange<FFrameNumber>(FFrameNumber(0), LastTick));
-    Target.Sequence->MarkPackageDirty();
-
-    const TRange<FFrameNumber> StoredRange = Target.MovieScene->GetPlaybackRange();
-    const double StoredSeconds = Impl::RangeSeconds(StoredRange, TickRate);
-
-    TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
-    Report->SetNumberField(TEXT("requested_duration"), Duration);
-    Report->SetNumberField(TEXT("previous_duration"), PreviousSeconds);
-    Report->SetNumberField(TEXT("actual_duration"), StoredSeconds);
-    // Whole ticks cannot hit every duration exactly; a hundredth of a second is close enough.
-    Report->SetBoolField(TEXT("duration_set"), FMath::IsNearlyEqual(StoredSeconds, Duration, 0.01));
-    Report->SetNumberField(TEXT("start_frame"), StoredRange.GetLowerBoundValue().Value);
-    Report->SetNumberField(TEXT("end_frame"), StoredRange.GetUpperBoundValue().Value);
-    return mcp_common::MakeOkReply(Report);
-}
-
-// MCP:get_sequence_duration - Reads the playback range of a Level Sequence, the first under /Game whose asset name matches (case-insensitive), without changing it. Returns duration in seconds, and start_frame and end_frame in tick-resolution frames, not display frames; get_timeline_info also gives both rates.
-//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
-//   @returns { sequence_name: string, duration: number, start_frame: int, end_frame: int }
-TSharedPtr<FJsonObject> HandleGetSequenceDuration(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentTimelineImpl;
-
-    FString SequenceName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sequence_name"), SequenceName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    const Impl::FResolvedSequence Target = Impl::ResolveSequence(SequenceName, TEXT("Movie scene not found"));
-    if (Target.Error.IsValid())
-    {
-        return Target.Error;
-    }
-
-    const TRange<FFrameNumber> Range = Target.MovieScene->GetPlaybackRange();
-
-    TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
-    Report->SetNumberField(TEXT("duration"), Impl::RangeSeconds(Range, Target.MovieScene->GetTickResolution()));
-    Report->SetNumberField(TEXT("start_frame"), Range.GetLowerBoundValue().Value);
-    Report->SetNumberField(TEXT("end_frame"), Range.GetUpperBoundValue().Value);
-    return mcp_common::MakeOkReply(Report);
-}
 
 // MCP:set_sequence_frame_rate - Change the frame rate of a Level Sequence: its tick resolution AND its display rate, as create_level_sequence sets them (one tick per frame). Every key, section and range is migrated to the new rate, so nothing moves in time. To change only the display rate, use set_sequence_display_rate.
 //   @param sequence_name - Name of the sequence to modify
@@ -604,32 +481,6 @@ TSharedPtr<FJsonObject> HandleSetSequenceFrameRate(const TSharedPtr<FJsonObject>
     Report->SetBoolField(TEXT("frame_rate_set"), bSet);
     return mcp_common::MakeOutcomeReply(Report, bSet,
         bSet ? FString() : FString(TEXT("set_sequence_frame_rate: the movie scene does not read back the requested rate.")));
-}
-
-// MCP:get_sequence_frame_rate - Reads the tick resolution of a Level Sequence (found by asset name under /Game), NOT its display rate, without changing it. Returns frame_rate as a decimal plus numerator and denominator. Read the display rate with get_timeline_info; change both with set_sequence_frame_rate.
-//   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
-//   @returns { sequence_name: string, frame_rate: number, numerator: int, denominator: int }
-TSharedPtr<FJsonObject> HandleGetSequenceFrameRate(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentTimelineImpl;
-
-    FString SequenceName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sequence_name"), SequenceName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    const Impl::FResolvedSequence Target = Impl::ResolveSequence(SequenceName, TEXT("Movie scene not found"));
-    if (Target.Error.IsValid())
-    {
-        return Target.Error;
-    }
-
-    // The reported rate is the tick resolution, not the display rate.
-    const FFrameRate TickRate = Target.MovieScene->GetTickResolution();
-
-    TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
-    Report->SetNumberField(TEXT("frame_rate"), TickRate.AsDecimal());
-    Report->SetNumberField(TEXT("numerator"), TickRate.Numerator);
-    Report->SetNumberField(TEXT("denominator"), TickRate.Denominator);
-    return mcp_common::MakeOkReply(Report);
 }
 
 // ---------------------------------------------------------------------------
@@ -863,9 +714,9 @@ TSharedPtr<FJsonObject> HandleGetLevelSequenceStatusRuntime(const TSharedPtr<FJs
 // result describing why, never a fake success.
 // ---------------------------------------------------------------------------
 
-// MCP:get_timeline_info - Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks, duration in seconds, tick_resolution, display_rate with numerator and denominator, and track, binding, possessable and spawnable counts. master_track_count counts the root tracks, the camera cut track included, as get_sequence_tracks lists them.
+// MCP:get_timeline_info - Reads the timeline summary of a Level Sequence asset (first asset-name match under /Game); needs no open Sequencer and changes nothing. Returns asset_path, start_frame and end_frame in ticks (the playback range), duration in seconds, tick_resolution and display_rate each with numerator and denominator, and track, binding, possessable and spawnable counts. master_track_count counts the root tracks, the camera cut track included, as get_sequence_tracks lists them.
 //   @param sequence_name - Asset name of the Level Sequence, not its path (e.g. "LS_Intro"); the first match under /Game is used
-//   @returns { sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int }
+//   @returns { sequence_name: string, asset_path: string, start_frame: int, end_frame: int, duration: number, tick_resolution: number, tick_resolution_numerator: int, tick_resolution_denominator: int, display_rate: number, display_rate_numerator: int, display_rate_denominator: int, master_track_count: int, binding_count: int, possessable_count: int, spawnable_count: int } -- start_frame/end_frame are tick-resolution frames, not display frames; tick_resolution is the rate set_sequence_frame_rate changes together with display_rate.
 TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentTimelineImpl;
@@ -905,6 +756,8 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     Report->SetNumberField(TEXT("end_frame"), EndFrame.Value);
     Report->SetNumberField(TEXT("duration"), TicksPerSecond > 0.0 ? (EndFrame - StartFrame).Value / TicksPerSecond : 0.0);
     Report->SetNumberField(TEXT("tick_resolution"), TicksPerSecond);
+    Report->SetNumberField(TEXT("tick_resolution_numerator"), TickResolution.Numerator);
+    Report->SetNumberField(TEXT("tick_resolution_denominator"), TickResolution.Denominator);
     Report->SetNumberField(TEXT("display_rate"), DisplayRate.AsDecimal());
     Report->SetNumberField(TEXT("display_rate_numerator"), DisplayRate.Numerator);
     Report->SetNumberField(TEXT("display_rate_denominator"), DisplayRate.Denominator);
@@ -915,24 +768,44 @@ TSharedPtr<FJsonObject> HandleGetTimelineInfo(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, the first asset under /Game whose name matches sequence_name (case-insensitive): root (master) tracks, the camera cut track included, with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For flat lists carrying binding_guid use get_sequence_master_tracks; for spawnable/possessable flags use get_sequence_bindings; for one binding use get_binding_tracks.
-//   @param sequence_name - Name of the target level sequence
-//   @returns { sequence_name: string, master_tracks: [object], bindings: [object], master_track_count: int, binding_count: int, total_track_count: int }
+// MCP:get_sequence_tracks - Lists the tracks of a Level Sequence, given as a bare asset name (the first asset under /Game whose name matches, case-insensitive) or a /Game path: root (master) tracks, the camera cut track included, with display name, track name, class and section count, then each object binding (guid, display name) with its own tracks nested, plus totals -- track counts, section count and a per-class breakdown. Read-only; needs no open Sequencer. total_track_count is the number of tracks listed: root tracks plus every binding's tracks. For spawnable/possessable flags and one binding's tracks use get_sequence_bindings.
+//   @param sequence_name - Name of the target level sequence, or its /Game path
+//   @param sequence_path - Alias of sequence_name
+//   @returns { sequence_name: string, sequence_path: string, master_tracks: [{display_name, track_name, class, section_count}], bindings: [{guid, display_name, tracks: [{display_name, track_name, class, section_count}]}], master_track_count: int, binding_count: int, binding_track_count: int, total_track_count: int, total_section_count: int, distinct_class_count: int, class_breakdown: [{class, count}] } -- class_breakdown counts every listed track by class, most frequent first.
 TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& Params)
 {
-    namespace Impl = UEAgentTimelineImpl;
-
     FString SequenceName;
-    if (TSharedPtr<FJsonObject> Missing = Impl::ReadTimelineTarget(Params, SequenceName)) { return Missing; }
-
-    const Impl::FResolvedSequence Target = Impl::ResolveSequence(SequenceName, TEXT("Movie scene not found"));
-    if (Target.Error.IsValid())
+    if (!Params->TryGetStringField(TEXT("sequence_name"), SequenceName) && !Params->TryGetStringField(TEXT("sequence_path"), SequenceName))
     {
-        return Target.Error;
+        return mcp_common::MissingParameterReply(TEXT("sequence_name"));
+    }
+    if (SequenceName.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("sequence_name cannot be empty"));
     }
 
-    // Const view, again for the non-deprecated GetBindings().
-    const UMovieScene* Scene = Target.MovieScene;
+    // A bare name or a /Game path, resolved like the Sequencer commands do.
+    const ULevelSequence* Sequence = UEAgentSequencerCommands::LoadSequenceByPathOrName(SequenceName);
+    if (Sequence == nullptr)
+    {
+        return UEAgentTimelineImpl::SequenceNotFound(SequenceName);
+    }
+    // Const view, for the non-deprecated GetBindings().
+    const UMovieScene* Scene = Sequence->GetMovieScene();
+    if (Scene == nullptr)
+    {
+        return mcp_common::MakeErrorReply(TEXT("Movie scene not found"));
+    }
+
+    // Every listed track also counts into the totals.
+    TMap<FString, int32> ClassCounts;
+    int32 TotalSections = 0;
+    const auto Describe = [&ClassCounts, &TotalSections](const UMovieSceneTrack& Track)
+    {
+        ++ClassCounts.FindOrAdd(Track.GetClass()->GetName());
+        TotalSections += Track.GetAllSections().Num();
+        return MakeShared<FJsonValueObject>(UEAgentTimelineImpl::DescribeTrack(Track, /*bIncludeTrackName*/ true));
+    };
 
     // Root tracks, not bound to any object.
     TArray<TSharedPtr<FJsonValue>> RootTracks;
@@ -940,13 +813,13 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
     {
         if (Track != nullptr)
         {
-            RootTracks.Add(MakeShared<FJsonValueObject>(Impl::DescribeTrack(*Track, /*bIncludeTrackName*/ true)));
+            RootTracks.Add(Describe(*Track));
         }
     }
     // The camera cut track is a root track too, but the movie scene keeps it apart from GetTracks().
     if (const UMovieSceneTrack* CameraCutTrack = Scene->GetCameraCutTrack())
     {
-        RootTracks.Add(MakeShared<FJsonValueObject>(Impl::DescribeTrack(*CameraCutTrack, /*bIncludeTrackName*/ true)));
+        RootTracks.Add(Describe(*CameraCutTrack));
     }
 
     // Object bindings (possessables and spawnables), each with its own tracks.
@@ -961,7 +834,7 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
         {
             if (Track != nullptr)
             {
-                BoundTracks.Add(MakeShared<FJsonValueObject>(Impl::DescribeTrack(*Track, /*bIncludeTrackName*/ false)));
+                BoundTracks.Add(Describe(*Track));
             }
         }
 
@@ -974,13 +847,34 @@ TSharedPtr<FJsonObject> HandleGetSequenceTracks(const TSharedPtr<FJsonObject>& P
         Bindings.Add(MakeShared<FJsonValueObject>(BindingEntry));
     }
 
+    // The per-class breakdown, most frequent first.
+    TArray<TPair<FString, int32>> Sorted;
+    for (const TPair<FString, int32>& Pair : ClassCounts)
+    {
+        Sorted.Add(Pair);
+    }
+    Sorted.Sort([](const TPair<FString, int32>& A, const TPair<FString, int32>& B) { return A.Value > B.Value; });
+    TArray<TSharedPtr<FJsonValue>> ClassArr;
+    for (const TPair<FString, int32>& Pair : Sorted)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("class"), Pair.Key);
+        Obj->SetNumberField(TEXT("count"), Pair.Value);
+        ClassArr.Add(MakeShared<FJsonValueObject>(Obj));
+    }
+
     TSharedPtr<FJsonObject> Report = LevelSequenceUtils::NewNamePayload(SequenceName);
+    Report->SetStringField(TEXT("sequence_path"), Sequence->GetPathName());
     Report->SetArrayField(TEXT("master_tracks"), RootTracks);
     Report->SetArrayField(TEXT("bindings"), Bindings);
     Report->SetNumberField(TEXT("master_track_count"), RootTracks.Num());
     Report->SetNumberField(TEXT("binding_count"), Bindings.Num());
+    Report->SetNumberField(TEXT("binding_track_count"), BoundTrackCount);
     // Every track listed above: the root tracks plus the tracks of every binding.
     Report->SetNumberField(TEXT("total_track_count"), RootTracks.Num() + BoundTrackCount);
+    Report->SetNumberField(TEXT("total_section_count"), TotalSections);
+    Report->SetNumberField(TEXT("distinct_class_count"), ClassCounts.Num());
+    Report->SetArrayField(TEXT("class_breakdown"), ClassArr);
     return mcp_common::MakeOkReply(Report);
 }
 
@@ -1063,11 +957,8 @@ TSharedPtr<FJsonObject> HandlePauseTimeline(const TSharedPtr<FJsonObject>& Param
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("create_level_sequence"), &HandleCreateLevelSequence },
-    { TEXT("delete_level_sequence"), &HandleDeleteLevelSequence },
     { TEXT("get_level_sequence_status_runtime"), &HandleGetLevelSequenceStatusRuntime },
     { TEXT("get_level_sequences"), &HandleGetLevelSequences },
-    { TEXT("get_sequence_duration"), &HandleGetSequenceDuration },
-    { TEXT("get_sequence_frame_rate"), &HandleGetSequenceFrameRate },
     { TEXT("get_sequence_tracks"), &HandleGetSequenceTracks },
     { TEXT("get_timeline_info"), &HandleGetTimelineInfo },
     { TEXT("pause_level_sequence_runtime"), &HandlePauseLevelSequenceRuntime },
@@ -1075,7 +966,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("play_level_sequence_runtime"), &HandlePlayLevelSequenceRuntime },
     { TEXT("play_timeline"), &HandlePlayTimeline },
     { TEXT("set_level_sequence_time_runtime"), &HandleSetLevelSequenceTimeRuntime },
-    { TEXT("set_sequence_duration"), &HandleSetSequenceDuration },
     { TEXT("set_sequence_frame_rate"), &HandleSetSequenceFrameRate },
     { TEXT("set_timeline_time"), &HandleSetTimelineTime },
     { TEXT("stop_level_sequence_runtime"), &HandleStopLevelSequenceRuntime },

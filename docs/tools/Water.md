@@ -2,7 +2,7 @@
 
 # Water
 
-20 tools. Back to the [index](README.md).
+18 tools. Back to the [index](README.md).
 
 ## `add_water_body_to_zone`
 
@@ -108,23 +108,11 @@ Spawn a new AWaterZone actor in the editor world at location, unrotated, and lab
 
 **Returns:** `{ actor_label: string, actor_name: string, has_water_mesh: bool }`
 
-## `get_river_spline_points`
-
-*Read-only.*
-
-Read the spline control points of any water body -- river, lake, ocean or custom, found by actor label in the editor world -- as world-space [x, y, z] positions in cm, in spline order. Only point locations come back: no tangents, widths, depths or closed-loop flag. Read-only. An unknown label, or a body without a water spline, is an error. Write them with set_river_spline_points; per-point river width and depth: set_river_width_depth_at_point; a generic actor's USplineComponent in local space, with its closed-loop flag: get_spline_points; body type, zone and material: get_water_body_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `water_body_label` | string | yes | Actor label of the AWaterBody in the editor world (case-insensitive; the object name does not match). |
-
-**Returns:** `{ water_body_label: string, point_count: int, points: [[number, number, number]] }`
-
 ## `get_water_body_gerstner_wave_detail`
 
 *Read-only.*
 
-Read the individual Gerstner waves a water body holds (found by actor label in the editor world), as last generated and cached on its waves object: per wave the wavelength and amplitude in cm, the steepness, and the horizontal direction vector. A body without Gerstner waves -- a river, a body with another waves class, or one whose generator produced none (as after set_water_body_gerstner_waves_spectrum) -- is a success with wave_count 0 and an empty list. Read-only; an unknown label is an error. For the summary (waves class, count, max height) use get_water_body_wave_info; author waves with set_water_body_gerstner_waves.
+Read the individual Gerstner waves a water body holds (found by actor label in the editor world), as last generated and cached on its waves object: per wave the wavelength and amplitude in cm, the steepness, and the horizontal direction vector. A body without Gerstner waves -- a river, a body with another waves class, or one whose generator produced none -- is a success with wave_count 0 and an empty list. Read-only; an unknown label is an error. For the summary (waves class, count, max height) use get_water_body_info; author waves with set_water_body_gerstner_waves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -136,25 +124,25 @@ Read the individual Gerstner waves a water body holds (found by actor label in t
 
 *Read-only.*
 
-Read back a water body's type, linked zone, surface material, and max wave height.
+Read back a water body's type, linked zone, surface material and wave state: whether waves are supported and present, the max wave height, the active waves class with its wave count and, for Gerstner waves, the generator class. Read-only; an unknown label is an error. Per-wave detail is get_water_body_gerstner_wave_detail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `water_body_label` | string | yes | Label of the AWaterBody actor |
 
-**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, material: string, max_wave_height: number }`
+**Returns:** `{ actor_label: string, actor_name: string, body_type: string, water_zone_label: string, material: string, max_wave_height: number, wave_supported: bool, has_waves: bool, waves_class: string, num_waves: int, generator_class: string }`
 
-## `get_water_body_wave_info`
+## `get_water_body_spline_points`
 
 *Read-only.*
 
-Read a water body's wave state: whether waves are supported, whether they are present, the max wave height, and the active waves class + wave count.
+Read the spline control points of any water body -- river, lake, ocean or custom, found by actor label in the editor world -- as world-space [x, y, z] positions in cm, in spline order. Only point locations come back: no tangents, widths, depths or closed-loop flag. Read-only. An unknown label, or a body without a water spline, is an error. Write them with set_water_body_spline_points; per-point river width and depth: set_river_width_depth_at_point; a generic actor's USplineComponent in local space, with its closed-loop flag: get_spline_points; body type, zone and material: get_water_body_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `water_body_label` | string | yes | Label of the AWaterBody actor |
+| `water_body_label` | string | yes | Actor label of the AWaterBody in the editor world (case-insensitive; the object name does not match). |
 
-**Returns:** `{ water_body_label: string, wave_supported: bool, has_waves: bool, max_wave_height: number, waves_class: string, num_waves: int, generator_class: string }`
+**Returns:** `{ water_body_label: string, point_count: int, points: [[number, number, number]] }`
 
 ## `get_water_zone_info`
 
@@ -181,24 +169,11 @@ Unlink an existing water body actor from an existing AWaterZone (inverse of add_
 
 **Returns:** `{ water_body_label: string, water_zone_label: string, removed: bool, note: string }`
 
-## `set_river_spline_points`
-
-*Destructive, idempotent.*
-
-Set ANY water body's spline path from world points, then synchronize the water spline metadata and RE-READ the spline (point count + closed-loop) to prove it landed.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `water_body_label` | string | yes | Label of the AWaterBody actor. DESPITE THE COMMAND NAME THIS IS NOT RIVER-ONLY: it works on any water body that has a UWaterSplineComponent -- lake, ocean, river, custom -- and it is the only way to give a LAKE its real shoreline, because the spline the actor factory creates is an arbitrary CLOSED triangle (3 points) that has nothing to do with the basin. `closed_loop` is a property of the spline and is NOT touched here: set 12 points on a factory-made lake and you get 12 points still closed. |
-| `points` | array | yes | Array of [X, Y, Z] WORLD points (>= 2) defining the spline. Entries that are not a >= 3-element numeric array are skipped silently; `requested_point_count` reports how many survived parsing. |
-
-**Returns:** `{ water_body_label: string, point_count: int (RE-READ), spline_point_count_actual: int (RE-READ, same value, unambiguously named), closed_loop_actual: bool (RE-READ), requested_point_count: int, applied: bool (DERIVED: read-back count == requested count) }`
-
 ## `set_river_width_depth_at_point`
 
 *Destructive, idempotent.*
 
-Set the width and/or depth of a river water body, found by actor label in the editor world, at the spline point at or before input_key (point i sits at key i; past the last point, the last one), then synchronize the spline so the river rebuilds; nothing is saved. A value below 0.0001 is stored as 0.0001, as the engine's sync does. width and depth are read back from that point, named by point_index. A value already held is not written: applied is false with a note and nothing changes; otherwise the call is one undo step that dirties the actor's package. Neither width nor depth, a non-river body, an unknown label, a spline without points or a key before the first point is an error and nothing changes. All points at once: set_river_widths_depths; point positions: get_river_spline_points.
+Set the width and/or depth of a river water body, found by actor label in the editor world, at the spline point at or before input_key (point i sits at key i; past the last point, the last one), then synchronize the spline so the river rebuilds; nothing is saved. A value below 0.0001 is stored as 0.0001, as the engine's sync does. width and depth are read back from that point, named by point_index. A value already held is not written: applied is false with a note and nothing changes; otherwise the call is one undo step that dirties the actor's package. Neither width nor depth, a non-river body, an unknown label, a spline without points or a key before the first point is an error and nothing changes. All points at once: set_river_widths_depths; point positions: get_water_body_spline_points.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -244,20 +219,6 @@ Build a Gerstner wave set (UGerstnerWaterWaves + simple parametric generator) an
 
 **Returns:** `{ water_body_label: string, wave_supported: bool, has_waves: bool, num_waves: int, max_wave_height: number, total_steepness: number, applied: bool }`
 
-## `set_water_body_gerstner_waves_spectrum`
-
-*Destructive, idempotent.*
-
-Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. One undo step restores the waves it had; nothing is saved. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `water_body_label` | string | yes | Actor label of a Lake or Ocean AWaterBody in the editor world (case-insensitive); a river is refused. |
-| `spectrum_type` | string | no | Wave spectrum: Phillips (default), PiersonMoskowitz, or JONSWAP; any other name is an error. |
-| `octaves` | array | no | Optional array of octave objects { num_waves (>= 1, default 16), amplitude_scale (default 1), main_direction (default 0), spread_angle (default 0), uniform_spread (default false) }; entries that are not objects are skipped, and one default octave is used when none is given. |
-
-**Returns:** `{ water_body_label: string, wave_supported: bool, has_waves: bool, num_waves: int, max_wave_height: number, total_steepness: number, spectrum_type: string, octave_count: int, applied: bool, note: string }`
-
 ## `set_water_body_material`
 
 *Destructive, idempotent.*
@@ -292,3 +253,16 @@ Set only the given settings of a lake, ocean or river water body, found by actor
 | `water_height_offset` | number | no | Ocean-only additional water height (errors on non-ocean bodies) |
 
 **Returns:** `{ water_body_label: string, body_type: string, applied: [string], fields: { <name>: { value, already_set } } }`
+
+## `set_water_body_spline_points`
+
+*Destructive, idempotent.*
+
+Set ANY water body's spline path from world points, then synchronize the water spline metadata and RE-READ the spline (point count + closed-loop) to prove it landed.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `water_body_label` | string | yes | Label of the AWaterBody actor. DESPITE THE COMMAND NAME THIS IS NOT RIVER-ONLY: it works on any water body that has a UWaterSplineComponent -- lake, ocean, river, custom -- and it is the only way to give a LAKE its real shoreline, because the spline the actor factory creates is an arbitrary CLOSED triangle (3 points) that has nothing to do with the basin. `closed_loop` is a property of the spline and is NOT touched here: set 12 points on a factory-made lake and you get 12 points still closed. |
+| `points` | array | yes | Array of [X, Y, Z] WORLD points (>= 2) defining the spline. Entries that are not a >= 3-element numeric array are skipped silently; `requested_point_count` reports how many survived parsing. |
+
+**Returns:** `{ water_body_label: string, point_count: int (RE-READ), spline_point_count_actual: int (RE-READ, same value, unambiguously named), closed_loop_actual: bool (RE-READ), requested_point_count: int, applied: bool (DERIVED: read-back count == requested count) }`

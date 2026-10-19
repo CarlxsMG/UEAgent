@@ -2,7 +2,7 @@
 
 # Camera
 
-31 tools. Back to the [index](README.md).
+29 tools. Back to the [index](README.md).
 
 ## `add_camera_component`
 
@@ -188,18 +188,6 @@ Reports a UCameraAsset's director and, for a SingleCameraDirector, the rig it ru
 
 **Returns:** `{ camera_asset_path, has_director, director_class, camera_rig_path }`
 
-## `get_camera_fov`
-
-*Read-only.*
-
-Retrieve the current field of view (FOV) of a camera.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_name` | string | yes | Name of the camera to query (matches actor name or label). |
-
-**Returns:** `{ camera_name: string, fov: number }`
-
 ## `get_camera_post_process`
 
 *Read-only.*
@@ -224,29 +212,18 @@ Reports a camera rig's RootNode class and its camera-parameter fields (name + va
 
 **Returns:** `{ camera_rig_path, has_root_node, root_node_class, parameters:[{name, value}], children:[{index, class}] }`
 
-## `get_camera_transform`
-
-*Read-only.*
-
-Read the world location and rotation of a camera actor (ACameraActor or CineCameraActor) in the editor world, found by object name or label (case-insensitive, first match). Returns location [X, Y, Z] and rotation [Pitch, Yaw, Roll] in degrees; set_camera_transform is the writer.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `camera_name` | string | yes | Name of the camera to query (matches actor name or label). |
-
-**Returns:** `{ camera_name: string, location: [number, number, number], rotation: [number, number, number] }`
-
 ## `get_cameras`
 
 *Read-only.*
 
-List all camera actors in the editor world with their transform and FOV.
+List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_camera_transform is the writer of the transform.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `max_results` | number | no | Maximum number of cameras to return (optional, default 1000, valid 1-10000) |
+| `camera_name` | string | no | Optional camera to report alone, matched by actor name or label; a camera without a camera component reports fov 90 |
 
-**Returns:** `{ cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool }`
+**Returns:** `{ cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool, camera_name?: string }`
 
 ## `get_cine_camera_settings`
 
@@ -287,7 +264,7 @@ Wires a new USingleCameraDirector on a UCameraAsset, pointing it at a UCameraRig
 
 *Destructive, idempotent.*
 
-Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_camera_fov reads it.
+Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_cameras with camera_name reads it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

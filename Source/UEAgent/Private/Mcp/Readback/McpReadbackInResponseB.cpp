@@ -123,22 +123,15 @@ namespace McpReadbackInResponseB
 		return Finding;
 	}
 
-	/** add_data_table_row returned `saved:false`: the row lives only in memory. `saved` is the proof, not `success`. */
-	static FO CheckRowInMemory(const FO& Params, const FO& Result)
+	// ------------------------------------------------------------------ pins and functions
+	/** A node disabled by the editor, input pins left bare (no link, no default), or a non-standard exec pin name.
+	 *  Data is the ONE node a get_graph_nodes read by node_id answers (nodes[0]). */
+	static FO CheckPinInfo(const FO& Data)
 	{
-		if (!IsFalse(Get(Payload(Result), TEXT("saved"))))
+		if (!Data.IsValid())
 		{
 			return nullptr;
 		}
-		return DegradingFindingWithError(TEXT("row_only_in_memory"), Get(Params, TEXT("row_name")), B(false), TEXT("in-response:saved"), RB_check_row_in_memory_0,
-			TEXT("Read `saved`, not `success`."));
-	}
-
-	// ------------------------------------------------------------------ pins and functions
-	/** A node disabled by the editor, input pins left bare (no link, no default), or a non-standard exec pin name. */
-	static FO CheckPinInfo(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
 		const FV Comment = Get(Data, TEXT("comment"));
 		if (IsStr(Comment) && Contains(Lower(AsStr(Comment)), TEXT("is disabled")))
 		{
@@ -286,60 +279,6 @@ namespace McpReadbackInResponseB
 		return WarningFinding(TEXT("objects_are_not_files"), None(),
 			O(Dict({ { TEXT("objects"), L(TArray<FV>{ ObjF, ObjD }) }, { TEXT("files"), L(TArray<FV>{ PkgF, PkgD }) } })),
 			TEXT("in-response:redirectors_vs_redirector_packages"), Percent(RB_check_redirectors_2, { S(Join(Parts, TEXT("; "))), S(Suffix) }));
-	}
-
-	/** Struct arguments and object paths that do not marshal through call_component_function. */
-	static FO CheckBridgeArguments(const FO& Params, const FO& Result)
-	{
-		const FV Args = Get(Params, TEXT("params"));
-		if (!IsDict(Args) || Len(Args) == 0)
-		{
-			return nullptr;
-		}
-		TArray<FString> Structs;
-		TArray<FString> Paths;
-		for (const auto& Field : Args->AsObject()->Values)
-		{
-			const FString Key(Field.Key);
-			if (IsDict(Field.Value))
-			{
-				// A struct whose only key is TagName is a GameplayTag, and that one does cross.
-				const FO Value = Field.Value->AsObject();
-				bool bOnlyTag = Value->Values.Num() > 0;
-				for (const auto& Sub : Value->Values)
-				{
-					bOnlyTag &= StrEq(Lower(Strip(FString(Sub.Key))), TEXT("tagname"));
-				}
-				if (!bOnlyTag)
-				{
-					Structs.Add(Key);
-				}
-			}
-			else if (IsStr(Field.Value))
-			{
-				const FString Value = Lower(Strip(Field.Value->AsString()));
-				if (StartsWith(Value, TEXT("/game/")) || StartsWith(Value, TEXT("/script/")) || StartsWith(Value, TEXT("/engine/"))) // object paths
-				{
-					Paths.Add(Key);
-				}
-			}
-		}
-		if (Structs.Num() == 0 && Paths.Num() == 0)
-		{
-			return nullptr;
-		}
-		TArray<FString> Warnings;
-		if (Structs.Num() > 0)
-		{
-			Warnings.Add(Percent(RB_check_bridge_arguments_0, { S(Join(Sorted(Structs), TEXT(", "))) }));
-		}
-		if (Paths.Num() > 0)
-		{
-			Warnings.Add(Percent(RB_check_bridge_arguments_1, { S(Join(Sorted(Paths), TEXT(", "))) }));
-		}
-		TArray<FString> AllArgs = Structs;
-		AllArgs.Append(Paths);
-		return JoinedWarningFinding(TEXT("argument_not_marshaled"), L(Sorted(AllArgs)), None(), TEXT("params:types_that_do_not_marshal"), Warnings);
 	}
 
 	/** Reloading is not reverting: big batches stall the editor, on_dirty=discard does not revert the disk, OFPA
@@ -939,37 +878,6 @@ namespace McpReadbackInResponseB
 		return nullptr;
 	}
 
-	/** applied:false reads as "no headless way", which only holds for the legacy spatial hash; a runtime hash set
-	 *  keeps its numbers elsewhere. */
-	static FO CheckWorldPartitionHash(const FO& Params, const FO& Result)
-	{
-		if (!IsFalse(Get(Payload(Result), TEXT("applied"))))
-		{
-			return nullptr;
-		}
-		const FO RequestedGrid = Dict({
-			{ TEXT("cell_size"), Get(Params, TEXT("cell_size")) },
-			{ TEXT("loading_range"), Get(Params, TEXT("loading_range")) },
-			{ TEXT("grid_name"), Get(Params, TEXT("grid_name")) },
-		});
-		return WarningFinding(TEXT("applied_false_not_impossible"), O(RequestedGrid), TextField(Payload(Result), TEXT("runtime_hash_type")),
-			TEXT("response:applied"), RB_check_world_partition_hash_0);
-	}
-
-	/** The material instance parameter list is incomplete (static switches, among others, are not listed). */
-	static FO CheckMaterialInstanceParams(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
-		if (!IsList(Get(Data, TEXT("scalar_params"))) && !IsList(Get(Data, TEXT("vector_params"))) && !IsList(Get(Data, TEXT("texture_params"))))
-		{
-			return nullptr;
-		}
-		const FV ScalarCount = Get(Data, TEXT("scalar_count"));
-		const FString Suffix = IsIntOrBool(ScalarCount) ? Percent(TEXT(" (it returned %d scalars)"), { ScalarCount }) : FString();
-		return WarningFinding(TEXT("parameter_list_incomplete_by_default"), TextField(Params, TEXT("material_instance_path")),
-			TextField(Data, TEXT("parent_material")), TEXT("response:scalar_params"), Percent(RB_check_material_instance_params_0, { S(Suffix) }));
-	}
-
 	/** pie_active is not a PIE oracle, and dirty library packages may have been dirtied by the engine itself. */
 	static FO CheckDirtyPackages(const FO& Params, const FO& Result)
 	{
@@ -1154,24 +1062,6 @@ namespace McpReadbackInResponseB
 			TEXT("response:set"), RB_check_water_material_0);
 	}
 
-	/** The polygroup does not exist (ids start at 1), or the paint was dropped (no MaterialID attribute). */
-	static FO CheckPolygroupPaint(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
-		TArray<FString> Warnings;
-		if (IsFalse(Get(Data, TEXT("polygroup_id_valid"))))
-		{
-			Warnings.Add(Percent(RB_check_polygroup_paint_0, { Get(Params, TEXT("polygroup_id")) }));
-		}
-		const FV DistinctIds = Get(Data, TEXT("distinct_material_ids_after"));
-		if (IsTrue(Get(Data, TEXT("applied"))) && Equals(DistinctIds, N(1)))
-		{
-			Warnings.Add(RB_check_polygroup_paint_1);
-		}
-		return JoinedWarningFinding(TEXT("material_id_paint_no_effect"), Get(Params, TEXT("material_id")), DistinctIds, RB_check_polygroup_paint_2,
-			Warnings);
-	}
-
 	/** The bake kept the static mesh's existing material slots (replaced_materials:false). */
 	static FO CheckBakeWithoutMaterials(const FO& Params, const FO& Result)
 	{
@@ -1286,12 +1176,9 @@ void McpReadbackChecks::RegisterInResponseB(McpReadback::FTables& Tables)
 	TMap<FString, McpReadback::FInResponse>& T = Tables.InResponse;
 	T.Add(TEXT("set_data_table_row_fields"), &CheckTableRow);
 	T.Add(TEXT("set_data_table_row_from_json"), &CheckTableRowJson);
-	T.Add(TEXT("add_data_table_row"), &CheckRowInMemory);
-	T.Add(TEXT("get_node_pin_info"), &CheckPinInfo);
 	T.Add(TEXT("get_function_pins"), &CheckFunctionPins);
 	T.Add(TEXT("get_landscape_height_at"), &CheckTerrainProbe);
 	T.Add(TEXT("fixup_redirectors"), &CheckRedirectors);
-	T.Add(TEXT("call_component_function"), &CheckBridgeArguments);
 	T.Add(TEXT("reload_asset_package"), &CheckPackageReload);
 	T.Add(TEXT("get_enum_info"), &CheckEnumInternalNames);
 	T.Add(TEXT("get_texture_info"), &CheckTextureSize);
@@ -1300,34 +1187,41 @@ void McpReadbackChecks::RegisterInResponseB(McpReadback::FTables& Tables)
 	T.Add(TEXT("set_default_game_map"), &CheckDefaultMap);
 	T.Add(TEXT("lint_blueprint_graph"), &CheckGraphLint);
 	T.Add(TEXT("get_material_graph_info"), &CheckMaterialWalker);
-	T.Add(TEXT("get_material_function_graph"), &CheckMaterialWalker);
 	T.Add(TEXT("render_widget_preview"), &CheckWidgetPreview);
-	for (const TCHAR* Command : { TEXT("set_game_mode_default_pawn"), TEXT("set_game_mode_game_state_class"), TEXT("set_game_mode_hud_class"),
-		TEXT("set_game_mode_player_state_class"), TEXT("set_player_controller_class") })
+	for (const TCHAR* Command : { TEXT("set_game_mode_classes"), TEXT("set_player_controller_class") })
 	{
 		T.Add(Command, &CheckGameModeClass);
 	}
-	T.Add(TEXT("get_graph_nodes"), &CheckGraphRead);
-	T.Add(TEXT("set_property_value"), &CheckWriteToPieActor);
+	// A read of ONE node (node_id) gets the pin checks first; any read, the graph-read caveats.
+	T.Add(TEXT("get_graph_nodes"), [](const McpPy::FO& Params, const McpPy::FO& Result) -> McpPy::FO
+	{
+		if (McpPy::Truthy(McpPy::Get(Params, TEXT("node_id"))))
+		{
+			const TArray<McpPy::FV> Nodes = McpPy::AsList(McpPy::Get(McpPy::Payload(Result), TEXT("nodes")));
+			if (const McpPy::FO PinFinding = CheckPinInfo(Nodes.Num() > 0 ? McpPy::AsDict(Nodes[0]) : nullptr))
+			{
+				return PinFinding;
+			}
+		}
+		return CheckGraphRead(Params, Result);
+	});
+	T.Add(TEXT("set_properties"), &CheckWriteToPieActor);
 	T.Add(TEXT("get_blueprint_functions"), &CheckBlueprintFunctions);
 	T.Add(TEXT("get_blueprint_variables"), &CheckInstanceEditableVariables);
 	T.Add(TEXT("build_blueprint_graph"), &CheckBatchWithoutCompile);
 	T.Add(TEXT("rename_enum_entry"), &CheckRenamedEnumEntry);
 	T.Add(TEXT("delete_asset"), &CheckAssetDelete);
-	T.Add(TEXT("set_world_partition_runtime_hash"), &CheckWorldPartitionHash);
-	T.Add(TEXT("get_material_instance_params"), &CheckMaterialInstanceParams);
 	T.Add(TEXT("list_dirty_packages"), &CheckDirtyPackages);
 	T.Add(TEXT("save_level"), &CheckLevelSave);
 	T.Add(TEXT("create_material"), &CheckNewMaterial);
 	T.Add(TEXT("audit_widget_text"), &CheckWidgetTexts);
 	T.Add(TEXT("get_blueprint_component_property"), &CheckComponentPropertyRead);
-	T.Add(TEXT("create_rvt_asset"), &CheckRvtExponents);
+	T.Add(TEXT("create_runtime_virtual_texture"), &CheckRvtExponents);
 	T.Add(TEXT("create_data_layer_asset"), &CheckDataLayerColor);
 	T.Add(TEXT("set_water_body_gerstner_waves"), &CheckGerstnerSteepness);
 	T.Add(TEXT("configure_water_zone"), &CheckWaterInfoDensity);
 	T.Add(TEXT("get_water_zone_info"), &CheckZoneLinkedBodies);
 	T.Add(TEXT("set_water_body_material"), &CheckWaterMaterial);
-	T.Add(TEXT("set_polygroup_material_id"), &CheckPolygroupPaint);
 	T.Add(TEXT("copy_dynamic_mesh_to_static_mesh"), &CheckBakeWithoutMaterials);
 	T.Add(TEXT("set_dynamic_mesh_material"), &CheckDynamicMeshMaterial);
 	T.Add(TEXT("get_material_stats"), &CheckMaterialStats);

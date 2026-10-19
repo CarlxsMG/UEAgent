@@ -106,7 +106,8 @@ namespace UEAgentNetworkingImpl
         return false;
     }
 
-    // The editor-world actor whose object name is Name: null once OutActor holds it, otherwise the error reply.
+    // The editor-world actor whose object name or label is Name (first match): null once OutActor holds it,
+    // otherwise the error reply.
     TSharedPtr<FJsonObject> FindEditorActorOrError(const FString& Name, AActor*& OutActor)
     {
         UWorld* const Level = mcp_common::GetEditorWorld();
@@ -114,7 +115,7 @@ namespace UEAgentNetworkingImpl
         {
             return mcp_common::MakeErrorReply(TEXT("No world found"));
         }
-        OutActor = mcp_common::FindActorByObjectName(Level, Name);
+        OutActor = mcp_common::FindActorByName(Level, Name);
         if (OutActor == nullptr)
         {
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Actor '%s' not found"), *Name));
@@ -169,8 +170,9 @@ namespace UEAgentNetworkingImpl
         return Config;
     }
 
-    // Every valid actor of World that replicates, with its local net role.
-    TArray<TSharedPtr<FJsonValue>> DescribeReplicatedActors(UWorld& World)
+    // Every valid actor of World that replicates, with its local and remote net roles and its dormancy; only the
+    // actors whose local role is *RoleFilter when RoleFilter is set.
+    TArray<TSharedPtr<FJsonValue>> DescribeReplicatedActors(UWorld& World, const ENetRole* RoleFilter)
     {
         TArray<TSharedPtr<FJsonValue>> Entries;
         for (TActorIterator<AActor> Cursor(&World); Cursor; ++Cursor)
@@ -180,11 +182,17 @@ namespace UEAgentNetworkingImpl
             {
                 continue;
             }
+            if (RoleFilter != nullptr && Actor->GetLocalRole() != *RoleFilter)
+            {
+                continue;
+            }
             TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
             Entry->SetStringField(TEXT("name"), Actor->GetName());
             Entry->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
             Entry->SetStringField(TEXT("local_role"), NetRoleLabel(Actor->GetLocalRole()));
+            Entry->SetStringField(TEXT("remote_role"), NetRoleLabel(Actor->GetRemoteRole()));
             Entry->SetBoolField(TEXT("is_replicated"), Actor->GetIsReplicated());
+            Entry->SetStringField(TEXT("net_dormancy"), mcp_common::NetDormancyLabel(Actor->NetDormancy.GetValue()));
             Entries.Add(MakeShared<FJsonValueObject>(Entry));
         }
         return Entries;
@@ -207,70 +215,29 @@ namespace UEAgentNetworkingImpl
 
 // Replication and net roles
 
-// MCP:get_network_settings - Retrieves current network configuration and settings for the world including NetDriver, GameState, players, and config file settings.
-//   @returns { world_name: string, world_valid: bool, net_mode: string, has_net_driver: bool, net_driver_class: string?, net_driver_settings: { max_net_tick_rate: number, net_server_max_tick_rate: number }?, has_replication_driver: bool, replication_driver_class: string, has_game_state: bool, game_state_class: string?, player_count: number?, players: [{ player_name: string, player_id: number, is_valid: bool, player_class: string }]?, config_settings: { default_platform_service: string?, default_identity_interface: string?, max_players: number, use_dedicated_server: bool } }
-
-TSharedPtr<FJsonObject> HandleGetNetworkSettings(const TSharedPtr<FJsonObject>& Params)
-{
-    // Reads the editor world; GEditor is taken as present.
-    UWorld* const Level = GEditor->GetEditorWorldContext().World();
-    if (Level == nullptr)
-    {
-        return mcp_common::MakeErrorReply("No world found");
-    }
-
-    TSharedPtr<FJsonObject> Settings = MakeShared<FJsonObject>();
-    Settings->SetStringField(TEXT("world_name"), Level->GetName());
-    Settings->SetBoolField(TEXT("world_valid"), IsValid(Level));
-    Settings->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(Level->GetNetMode()));
-
-    // The driver block only exists while the world has a net driver.
-    const UNetDriver* const Driver = Level->GetNetDriver();
-    Settings->SetBoolField(TEXT("has_net_driver"), Driver != nullptr);
-    if (Driver != nullptr)
-    {
-        Settings->SetStringField(TEXT("net_driver_class"), Driver->GetClass()->GetName());
-        TSharedPtr<FJsonObject> TickRates = MakeShared<FJsonObject>();
-        TickRates->SetNumberField(TEXT("max_net_tick_rate"), Driver->MaxNetTickRate);
-        TickRates->SetNumberField(TEXT("net_server_max_tick_rate"), Driver->GetNetServerMaxTickRate());
-        Settings->SetObjectField(TEXT("net_driver_settings"), TickRates);
-    }
-
-    // No replication driver is inspected; both fields are fixed answers.
-    Settings->SetBoolField(TEXT("has_replication_driver"), false);
-    Settings->SetStringField(TEXT("replication_driver_class"), TEXT("Not Available in UE 5.6"));
-
-    const AGameStateBase* const State = Level->GetGameState();
-    Settings->SetBoolField(TEXT("has_game_state"), State != nullptr);
-    if (State != nullptr)
-    {
-        Settings->SetStringField(TEXT("game_state_class"), State->GetClass()->GetName());
-        Settings->SetNumberField(TEXT("player_count"), State->PlayerArray.Num());
-        Settings->SetArrayField(TEXT("players"), UEAgentNetworkingImpl::DescribePlayers(*State));
-    }
-
-    Settings->SetObjectField(TEXT("config_settings"), UEAgentNetworkingImpl::ReadOnlineSubsystemConfig());
-    return mcp_common::MakeOkReply(Settings);
-}
-
-// MCP:configure_replication - Configures the replication of an editor-world actor: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Both are read back. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied.
-//   @param actor_name - The name of the actor to configure replication for
-//   @param replicate_movement - Whether to replicate movement (optional, default true; always applied)
-//   @param replicate_physics - Whether to replicate physics (optional; NOT applied, see the description; listed in not_applied when sent)
-//   @param replicate_lifecycle - Whether the actor replicates at all, i.e. exists on clients (optional; applied only when sent). Movement replication does nothing without it.
-//   @returns { actor_name: string, replication_configured: bool, message: string, previous_settings: { replicate_movement: bool, replicate_lifecycle: bool }, new_settings: { replicate_movement: bool, replicate_lifecycle?: bool }, actual_settings: { replicate_movement: bool, replicate_lifecycle: bool }, not_applied?: [string], actor_valid: bool, actor_class: string }
+// MCP:configure_replication - Configure the replication of an editor-world actor found by object name or label: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Only the settings sent are applied, inside one undoable transaction, and each is read back: a call that sends neither replicate_movement nor replicate_lifecycle changes nothing and is an error. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied. Only that placed instance changes, not its class defaults; nothing is saved. Read every replication setting with get_actor_replication_info.
+//   @param actor_name - Object name or label of the actor in the editor world (first match)
+//   @param replicate_movement - Optional: whether to replicate movement (bReplicateMovement); applied only when sent
+//   @param replicate_physics - Optional; NOT applied, see the description; listed in not_applied when sent
+//   @param replicate_lifecycle - Optional: whether the actor replicates at all, i.e. exists on clients (bReplicates, set through AActor::SetReplicates); applied only when sent. Movement replication does nothing without it.
+//   @returns { actor_name: string, replication_configured: bool, message: string, previous_settings: { replicate_movement: bool, replicate_lifecycle: bool }, new_settings: { replicate_movement?: bool, replicate_lifecycle?: bool }, actual_settings: { replicate_movement: bool, replicate_lifecycle: bool }, not_applied?: [string], actor_valid: bool, actor_class: string }
 
 TSharedPtr<FJsonObject> HandleConfigureReplication(const TSharedPtr<FJsonObject>& Params)
 {
     FString Target;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), Target, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    bool bMovement = true;
-    Params->TryGetBoolField(TEXT("replicate_movement"), bMovement);
+    // Each setting is applied only when the call sends it, so a lifecycle-only call never touches movement.
+    bool bMovement = false;
+    const bool bMovementSent = Params->TryGetBoolField(TEXT("replicate_movement"), bMovement);
     bool bLifecycle = false;
     const bool bLifecycleSent = Params->TryGetBoolField(TEXT("replicate_lifecycle"), bLifecycle);
     bool bPhysics = false;
     const bool bPhysicsSent = Params->TryGetBoolField(TEXT("replicate_physics"), bPhysics);
+    if (!bMovementSent && !bLifecycleSent)
+    {
+        return mcp_common::MakeErrorReply(TEXT("configure_replication: nothing to apply -- send replicate_movement and/or replicate_lifecycle (replicate_physics has no engine switch of its own)."));
+    }
 
     AActor* Actor = nullptr;
     if (TSharedPtr<FJsonObject> NotFound = UEAgentNetworkingImpl::FindEditorActorOrError(Target, Actor)) { return NotFound; }
@@ -290,16 +257,22 @@ TSharedPtr<FJsonObject> HandleConfigureReplication(const TSharedPtr<FJsonObject>
         {
             Actor->SetReplicates(bLifecycle);
         }
-        Actor->SetReplicateMovement(bMovement);
+        if (bMovementSent)
+        {
+            Actor->SetReplicateMovement(bMovement);
+        }
     }
     const TSharedPtr<FJsonObject> After = Snapshot();
 
     // Configured = every applied setting reads back as requested.
-    const bool bConfigured = Actor->IsReplicatingMovement() == bMovement
+    const bool bConfigured = (!bMovementSent || Actor->IsReplicatingMovement() == bMovement)
         && (!bLifecycleSent || Actor->GetIsReplicated() == bLifecycle);
 
     TSharedPtr<FJsonObject> Requested = MakeShared<FJsonObject>();
-    Requested->SetBoolField(TEXT("replicate_movement"), bMovement);
+    if (bMovementSent)
+    {
+        Requested->SetBoolField(TEXT("replicate_movement"), bMovement);
+    }
     if (bLifecycleSent)
     {
         Requested->SetBoolField(TEXT("replicate_lifecycle"), bLifecycle);
@@ -331,7 +304,7 @@ TSharedPtr<FJsonObject> HandleConfigureReplication(const TSharedPtr<FJsonObject>
         bConfigured ? FString() : FString(TEXT("configure_replication: the actor does not read back the requested replication settings.")));
 }
 
-// MCP:set_network_authority - Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_net_role (by label) or list_replicated_actors; choose what replicates with configure_replication or set_actor_replicates.
+// MCP:set_network_authority - Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with configure_replication.
 //   @param actor_name - Object name of the editor-world actor (case-insensitive); labels are not matched
 //   @param authority - The network authority role to set; valid values: Authority, SimulatedProxy, AutonomousProxy, None
 //   @returns { actor_name: string, authority_set: bool, previous_authority: string, requested_authority: string, actual_authority: string, actor_valid: bool, actor_class: string }
@@ -379,11 +352,22 @@ TSharedPtr<FJsonObject> HandleSetNetworkAuthority(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(Report);
 }
 
-// MCP:get_network_info - Read a network snapshot of the editor world, never a PIE world: its net mode; the net driver class, tick rates and client connection count; every replicating actor with its class and local role; and, when they exist, the GameState (class, player count) and the first PlayerController. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. Online subsystem config and the player list: get_network_settings; one actor in detail: get_replication_info; replicated actors filtered by role, with remote role and dormancy: list_replicated_actors; the net mode alone: get_world_net_mode.
-//   @returns { world_name: string, world_valid: bool, net_mode: string, net_driver_info: { class?: string, max_net_tick_rate?: number, net_server_max_tick_rate?: number, connection_count?: number }, replicated_actors: [{ name: string, class: string, local_role: string, is_replicated: bool }], replicated_actor_count: number, game_state_info?: { class: string, player_count: number, is_valid: bool }, player_controller_info?: { class: string, is_valid: bool, is_local_player: bool } }
+// MCP:get_network_info - Read a network snapshot of the editor world, never a PIE world: its net mode (with its code and the server/client flags); whether it has a net driver, and the driver's class, tick rates and client connection count; every replicating actor with its class, local and remote role and dormancy, optionally only those with one local role; when they exist, the GameState (class, player count, each player) and the first PlayerController; and the session keys of the [OnlineSubsystem] engine config. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. One actor in detail: get_actor_replication_info; a whole-project Blueprint sweep: audit_replication.
+//   @param role_filter - Optional local role to keep in replicated_actors: Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive); omitted lists every replicating actor. Any other value is an error.
+//   @returns { world_name: string, world_valid: bool, net_mode: string, net_mode_code: int, is_server: bool, is_client: bool, has_net_driver: bool, net_driver_info: { class?: string, max_net_tick_rate?: number, net_server_max_tick_rate?: number, connection_count?: number }, replicated_actors: [{ name: string, class: string, local_role: string, remote_role: string, is_replicated: bool, net_dormancy: string }], replicated_actor_count: number, role_filter?: string, has_game_state: bool, game_state_info?: { class: string, player_count: number, is_valid: bool, players: [{ player_name: string, player_id: number, is_valid: bool, player_class: string }] }, player_controller_info?: { class: string, is_valid: bool, is_local_player: bool }, config_settings: { default_platform_service?: string, default_identity_interface?: string, max_players: number, use_dedicated_server: bool } }
 
 TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Params)
 {
+    // The role filter is validated before the world is read.
+    FString RoleFilter;
+    Params->TryGetStringField(TEXT("role_filter"), RoleFilter);
+    ENetRole FilterRole = ROLE_None;
+    if (!RoleFilter.IsEmpty() && !UEAgentNetworkingImpl::ParseNetRole(RoleFilter, FilterRole))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Invalid role_filter: %s. Valid: Authority, SimulatedProxy, AutonomousProxy, None"), *RoleFilter));
+    }
+
     // Reads the editor world; GEditor is taken as present.
     UWorld* const Level = GEditor->GetEditorWorldContext().World();
     if (Level == nullptr)
@@ -394,11 +378,17 @@ TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Para
     TSharedPtr<FJsonObject> Info = MakeShared<FJsonObject>();
     Info->SetStringField(TEXT("world_name"), Level->GetName());
     Info->SetBoolField(TEXT("world_valid"), IsValid(Level));
-    Info->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(Level->GetNetMode()));
+    const ENetMode Mode = Level->GetNetMode();
+    Info->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(Mode));
+    Info->SetNumberField(TEXT("net_mode_code"), static_cast<int32>(Mode));
+    Info->SetBoolField(TEXT("is_server"), Mode == NM_DedicatedServer || Mode == NM_ListenServer);
+    Info->SetBoolField(TEXT("is_client"), Mode == NM_Client);
 
     // Without a net driver the block is still there, just empty.
     TSharedPtr<FJsonObject> DriverInfo = MakeShared<FJsonObject>();
-    if (const UNetDriver* const Driver = Level->GetNetDriver())
+    const UNetDriver* const Driver = Level->GetNetDriver();
+    Info->SetBoolField(TEXT("has_net_driver"), Driver != nullptr);
+    if (Driver != nullptr)
     {
         DriverInfo->SetStringField(TEXT("class"), Driver->GetClass()->GetName());
         DriverInfo->SetNumberField(TEXT("max_net_tick_rate"), Driver->MaxNetTickRate);
@@ -407,17 +397,25 @@ TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Para
     }
     Info->SetObjectField(TEXT("net_driver_info"), DriverInfo);
 
-    const TArray<TSharedPtr<FJsonValue>> Replicated = UEAgentNetworkingImpl::DescribeReplicatedActors(*Level);
+    const TArray<TSharedPtr<FJsonValue>> Replicated = UEAgentNetworkingImpl::DescribeReplicatedActors(
+        *Level, RoleFilter.IsEmpty() ? nullptr : &FilterRole);
     Info->SetNumberField(TEXT("replicated_actor_count"), Replicated.Num());
     Info->SetArrayField(TEXT("replicated_actors"), Replicated);
+    if (!RoleFilter.IsEmpty())
+    {
+        Info->SetStringField(TEXT("role_filter"), UEAgentNetworkingImpl::NetRoleLabel(FilterRole));
+    }
 
     // The GameState and first PlayerController blocks are omitted when those do not exist.
-    if (const AGameStateBase* const State = Level->GetGameState())
+    const AGameStateBase* const State = Level->GetGameState();
+    Info->SetBoolField(TEXT("has_game_state"), State != nullptr);
+    if (State != nullptr)
     {
         TSharedPtr<FJsonObject> StateInfo = MakeShared<FJsonObject>();
         StateInfo->SetStringField(TEXT("class"), State->GetClass()->GetName());
         StateInfo->SetNumberField(TEXT("player_count"), State->PlayerArray.Num());
         StateInfo->SetBoolField(TEXT("is_valid"), IsValid(State));
+        StateInfo->SetArrayField(TEXT("players"), UEAgentNetworkingImpl::DescribePlayers(*State));
         Info->SetObjectField(TEXT("game_state_info"), StateInfo);
     }
     if (const APlayerController* const Controller = Level->GetFirstPlayerController())
@@ -429,117 +427,8 @@ TSharedPtr<FJsonObject> HandleGetNetworkInfo(const TSharedPtr<FJsonObject>& Para
         Info->SetObjectField(TEXT("player_controller_info"), ControllerInfo);
     }
 
+    Info->SetObjectField(TEXT("config_settings"), UEAgentNetworkingImpl::ReadOnlineSubsystemConfig());
     return mcp_common::MakeOkReply(Info);
-}
-
-// ---------------------------------------------------------------------------
-// Read side of configure_replication + dormancy control + replicated-actor enumeration.
-// ---------------------------------------------------------------------------
-
-// MCP:get_replication_info - Read one actor's current replication settings -- the exact read-side of configure_replication, returning the same fields it can write (replicate_movement, replicate_physics, net_load_on_client, net_use_owner_relevancy...), so a read-check-write round trip lines up field for field. For a whole-project sweep use audit_replication; to enumerate the replicated actors in the world, list_replicated_actors.
-//   @param actor_name - Engine actor name (matches GetName())
-//   @returns { actor_name, actor_class, replicate_movement, replicate_physics, net_load_on_client, net_use_owner_relevancy, always_relevant, bReplicateMovement?, bReplicates?, dormancy?, net_dormancy_int? }
-
-TSharedPtr<FJsonObject> HandleGetReplicationInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Target;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), Target)) { return Missing; }
-    AActor* Actor = nullptr;
-    if (TSharedPtr<FJsonObject> NotFound = UEAgentNetworkingImpl::FindEditorActorOrError(Target, Actor)) { return NotFound; }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("actor_name"), Actor->GetName());
-    Data->SetStringField(TEXT("actor_class"), Actor->GetClass()->GetName());
-    // bReplicateMovement is private in UE 5.8 — use the public IsReplicatingMovement() helper.
-    Data->SetBoolField(TEXT("replicate_movement"), Actor->IsReplicatingMovement());
-    Data->SetBoolField(TEXT("replicate_physics"),
-        Actor->GetRootComponent() ? Actor->GetRootComponent()->IsSimulatingPhysics() : false);
-    Data->SetBoolField(TEXT("net_load_on_client"), Actor->bNetLoadOnClient);
-    Data->SetBoolField(TEXT("net_use_owner_relevancy"), Actor->bNetUseOwnerRelevancy);
-    Data->SetBoolField(TEXT("always_relevant"), Actor->bAlwaysRelevant);
-    Data->SetBoolField(TEXT("replicates"), Actor->GetIsReplicated());
-    // Dormancy comes through as TEnumAsByte<ENetDormancy>.
-    const int32 DormInt = Actor->NetDormancy.GetValue();
-    Data->SetNumberField(TEXT("net_dormancy_int"), DormInt);
-    Data->SetStringField(TEXT("net_dormancy"), mcp_common::NetDormancyLabel(static_cast<ENetDormancy>(DormInt)));
-    Data->SetStringField(TEXT("local_role"), UEnum::GetValueAsString(Actor->GetLocalRole()));
-    Data->SetStringField(TEXT("remote_role"), UEnum::GetValueAsString(Actor->GetRemoteRole()));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:list_replicated_actors - Enumerate the actors with bReplicates=true in the EDITOR world, optionally filtered by local_role (Authority | SimulatedProxy | AutonomousProxy | None). It reports each actor's local and remote role, so it is the cheap way to find what is even eligible to replicate before spending a PIE session on it; for a per-actor detail read use get_replication_info, and for a project-wide Blueprint sweep audit_replication.
-//   @param role_filter - Optional ENetRole string (case-insensitive); omit for all replicated actors.
-//   @returns { world_name, total, role_filter?, actors:[{ actor_name, actor_class, local_role, remote_role, is_replicated, net_dormancy }] }
-
-TSharedPtr<FJsonObject> HandleListReplicatedActors(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RoleFilter;
-    Params->TryGetStringField(TEXT("role_filter"), RoleFilter);
-
-    ENetRole FilterRole = ROLE_None;
-    bool bHasRoleFilter = false;
-    if (!RoleFilter.IsEmpty())
-    {
-        if (RoleFilter.Equals(TEXT("Authority"), ESearchCase::IgnoreCase)) { FilterRole = ROLE_Authority; bHasRoleFilter = true; }
-        else if (RoleFilter.Equals(TEXT("SimulatedProxy"), ESearchCase::IgnoreCase)) { FilterRole = ROLE_SimulatedProxy; bHasRoleFilter = true; }
-        else if (RoleFilter.Equals(TEXT("AutonomousProxy"), ESearchCase::IgnoreCase)) { FilterRole = ROLE_AutonomousProxy; bHasRoleFilter = true; }
-        else if (RoleFilter.Equals(TEXT("None"), ESearchCase::IgnoreCase)) { FilterRole = ROLE_None; bHasRoleFilter = true; }
-        else
-        {
-            return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("Invalid role_filter: %s. Valid: Authority, SimulatedProxy, AutonomousProxy, None"), *RoleFilter));
-        }
-    }
-
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World, TEXT("No world found"))) { return NoWorld; }
-
-    TArray<TSharedPtr<FJsonValue>> Entries;
-    for (TActorIterator<AActor> It(World); It; ++It)
-    {
-        AActor* A = *It;
-        if (!A || !A->GetIsReplicated()) { continue; }
-        if (bHasRoleFilter && A->GetLocalRole() != FilterRole) { continue; }
-
-        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-        E->SetStringField(TEXT("actor_name"), A->GetName());
-        E->SetStringField(TEXT("actor_class"), A->GetClass()->GetName());
-        E->SetStringField(TEXT("local_role"), UEnum::GetValueAsString(A->GetLocalRole()));
-        E->SetStringField(TEXT("remote_role"), UEnum::GetValueAsString(A->GetRemoteRole()));
-        E->SetBoolField(TEXT("is_replicated"), true);
-        E->SetStringField(TEXT("net_dormancy"), mcp_common::NetDormancyLabel(A->NetDormancy.GetValue()));
-        Entries.Add(MakeShared<FJsonValueObject>(E));
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("world_name"), World->GetName());
-    Data->SetNumberField(TEXT("total"), Entries.Num());
-    if (bHasRoleFilter)
-    {
-        Data->SetStringField(TEXT("role_filter"), RoleFilter);
-    }
-    Data->SetArrayField(TEXT("actors"), Entries);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_world_net_mode - Read the net mode of the editor world as a string ("Standalone", "ListenServer", "Client" or "DedicatedServer") with net_mode_code, is_server and is_client. Read-only, no parameters; PIE worlds are not read, so this normally reports "Standalone".
-//   @returns { net_mode: string, net_mode_code: int, is_server: bool, is_client: bool }
-//   Read-only, headless-safe. Values: "Standalone"|"ListenServer"|"Client"|"DedicatedServer".
-TSharedPtr<FJsonObject> HandleGetWorldNetMode(const TSharedPtr<FJsonObject>& Params)
-{
-    if (!GEditor)
-    {
-        return mcp_common::MakeErrorReply(TEXT("GEditor unavailable (headless build?)"));
-    }
-    UWorld* World = nullptr;
-    if (TSharedPtr<FJsonObject> NoWorld = mcp_common::RequireEditorWorld(World, TEXT("Editor world unavailable"))) { return NoWorld; }
-    const ENetMode Mode = World->GetNetMode();
-    TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
-    R->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(Mode));
-    R->SetNumberField(TEXT("net_mode_code"), static_cast<int32>(Mode));
-    R->SetBoolField(TEXT("is_server"), Mode == NM_DedicatedServer || Mode == NM_ListenServer);
-    R->SetBoolField(TEXT("is_client"), Mode == NM_Client);
-    return mcp_common::MakeOkReply(R);
 }
 
 // Dedicated-server test launch. The async job runs on FMonitoredProcess, like Packaging's
@@ -707,11 +596,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("configure_replication"), &HandleConfigureReplication },
     { TEXT("get_dedicated_server_status"), &HandleGetDedicatedServerStatus },
     { TEXT("get_network_info"), &HandleGetNetworkInfo },
-    { TEXT("get_network_settings"), &HandleGetNetworkSettings },
-    { TEXT("get_replication_info"), &HandleGetReplicationInfo },
-    { TEXT("get_world_net_mode"), &HandleGetWorldNetMode },
     { TEXT("launch_dedicated_server"), &HandleLaunchDedicatedServer },
-    { TEXT("list_replicated_actors"), &HandleListReplicatedActors },
     { TEXT("set_network_authority"), &HandleSetNetworkAuthority },
     { TEXT("stop_dedicated_server"), &HandleStopDedicatedServer },
 };

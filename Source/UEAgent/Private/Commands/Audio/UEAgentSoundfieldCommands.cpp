@@ -32,7 +32,7 @@
  *
  * IMPORTANT, engine stock constraint: USoundfieldEffectBase ships as `abstract` and stock UE 5.8 has NO
  * concrete subclass, so the effect chain of a freshly created soundfield submix is always empty. The
- * add / set-settings / remove effect commands still implement the FULL path, so they work WITHOUT touching
+ * add / remove effect commands still implement the FULL path, so they work WITHOUT touching
  * this code the moment a third-party audio plugin (Resonance Audio, Steam Audio, Oculus Audio, ...)
  * provides a concrete subclass; until then they return an honest `note` payload explaining the constraint.
  */
@@ -133,8 +133,8 @@ namespace
 
     /**
      * Returns the standardized honest-gate note for the "no concrete soundfield
-     * effect subclasses shipped in stock UE 5.8" case. Same text used by cmds 2,
-     * 3, and 5 so the wire-level behavior is consistent.
+     * effect subclasses shipped in stock UE 5.8" case. Same text used by the add,
+     * info and remove commands so the wire-level behavior is consistent.
      */
     FString SoundfieldHonestGateNote()
     {
@@ -334,59 +334,6 @@ TSharedPtr<FJsonObject> HandleAddSoundfieldEffectToSubmix(const TSharedPtr<FJson
 }
 
 // ---------------------------------------------------------------------------
-// MCP:set_soundfield_effect_settings - Cannot write soundfield effect settings in this engine version, so every call fails and nothing is changed: USoundfieldEffectBase::GetSettingsClass is protected, so the settings class an effect needs cannot be found. The submix and the effect slot are still checked first (a missing submix or an out-of-range effect_index gets its own error); a valid slot fails with applied_count 0 and a note.
-//   @param submix_path - Full path to the USoundfieldSubmix (required).
-//   @param effect_index - Zero-based index into SoundfieldEffectChain (required).
-//   @param settings - JSON object {property_name: value, ...}; validated as an object but never written
-//   @returns { success: false, error, data: { submix_path, effect_index, settings_class, applied_count, applied_fields, saved, note } }
-// ---------------------------------------------------------------------------
-// 3. set_soundfield_effect_settings — would resolve the concrete Settings class via
-//    Effect->GetSettingsClass() (protected), NewObject it, reflection-write the fields and save.
-//    Until that class can be found, the command validates the slot and fails.
-TSharedPtr<FJsonObject> HandleSetSoundfieldEffectSettings(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SubmixPath;
-    int32 EffectIndex = -1;
-    if (TSharedPtr<FJsonObject> Error = Soundfield_ReadEffectSlot(Params, SubmixPath, EffectIndex)) { return Error; }
-    const TSharedPtr<FJsonObject>* SettingsObjPtr = nullptr;
-    if (!Params->TryGetObjectField(TEXT("settings"), SettingsObjPtr) || !SettingsObjPtr || !SettingsObjPtr->IsValid())
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Missing or invalid 'settings' object (must be {property_name: value, ...})"));
-    }
-
-    // The submix must resolve and effect_index must be in range: a wrong slot gets its own error
-    // rather than the API gate below.
-    USoundfieldSubmix* Submix = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Soundfield_LoadSubmix(SubmixPath, Submix)) { return Error; }
-    if (!Submix->SoundfieldEffectChain.IsValidIndex(EffectIndex))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("effect_index %d out of range (chain length %d)"),
-                EffectIndex, Submix->SoundfieldEffectChain.Num()));
-    }
-
-    // The gate: writing the settings needs USoundfieldEffectBase::GetSettingsClass() to find the
-    // concrete Settings class of the effect at chain[effect_index]. That method is PROTECTED in
-    // ISoundfieldFormat.h, with no UFUNCTION() wrapper, so it cannot be called from outside the
-    // class hierarchy, and nothing else says which Settings class to instantiate. Nothing is
-    // written, so the call fails; the payload keeps the shape a working setter would answer with.
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("submix_path"), SubmixPath);
-    ResultObj->SetNumberField(TEXT("effect_index"), EffectIndex);
-    ResultObj->SetNumberField(TEXT("applied_count"), 0);
-    TArray<TSharedPtr<FJsonValue>> EmptyArr;
-    ResultObj->SetArrayField(TEXT("applied_fields"), EmptyArr);
-    ResultObj->SetBoolField(TEXT("saved"), false);
-    ResultObj->SetStringField(TEXT("settings_class"), TEXT(""));
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("USoundfieldEffectBase::GetSettingsClass is protected (ISoundfieldFormat.h), with no public accessor ")
-        TEXT("and no UFUNCTION wrapper, so the Settings class of the effect cannot be found and no setting is written."));
-    return mcp_common::MakeOutcomeReply(ResultObj, false,
-        TEXT("set_soundfield_effect_settings cannot write soundfield effect settings in this engine version; nothing was changed (see note)."));
-}
-
-// ---------------------------------------------------------------------------
 // MCP:get_soundfield_submix_info - Read a USoundfieldSubmix asset without changing it: its soundfield_encoding_format and resolved_format, encoding_settings {class, path}, and effect_chain entries {index, class, path, settings_class, settings_path} with chain_length. Adds a note when no concrete soundfield effect class is loaded.
 //   @param submix_path - Full path to the USoundfieldSubmix (required).
 //   @returns { submix_path, soundfield_encoding_format, resolved_format, encoding_settings_class, encoding_settings: { class, path }, effect_chain: [{ index, class, path, settings_class, settings_path }], chain_length, note? }
@@ -511,6 +458,5 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_soundfield_submix"), &HandleCreateSoundfieldSubmix },
     { TEXT("get_soundfield_submix_info"), &HandleGetSoundfieldSubmixInfo },
     { TEXT("remove_soundfield_effect"), &HandleRemoveSoundfieldEffect },
-    { TEXT("set_soundfield_effect_settings"), &HandleSetSoundfieldEffectSettings },
 };
 } // namespace UEAgentSoundfieldCommands

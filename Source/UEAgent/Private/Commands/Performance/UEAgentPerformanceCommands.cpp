@@ -1,7 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
 #include "Commands/Common/McpEnumLabels.h"
-#include "Commands/Asset/AssetCommandHelpers.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "GameFramework/Actor.h"
@@ -58,17 +57,24 @@
 #include "ActorFactories/ActorFactory.h"      // UActorFactory (Place Actors spawn path)
 #include "ScopedTransaction.h"                 // FScopedTransaction
 #include "Landscape.h"
-// assign_rvt_to_landscape has to reach the STREAMING PROXIES, not just the
+// assign_runtime_virtual_texture_to_landscape has to reach the STREAMING PROXIES, not just the
 // ALandscape -- in World Partition the proxies are what render (see the handler's
 // comment block). ULandscapeInfo::ForEachLandscapeProxy + ALandscapeStreamingProxy
 // are the enumeration route; both are LANDSCAPE_API / StaticClass()-reachable.
 #include "LandscapeInfo.h"
 #include "LandscapeProxy.h"
 #include "LandscapeStreamingProxy.h"
-#include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
 #include "HAL/IConsoleManager.h"
+#include "UObject/UObjectArray.h"   // GUObjectArray (get_fps_info object_count)
+#include "Misc/EngineVersion.h"
+#include "Scalability.h"            // Scalability::Min/MaxResolutionScale (get_fps_info screen_percentage)
+
+// GAverageFPS / GAverageMS (get_fps_info) are exported ENGINE_API globals defined in Engine/Private/UnrealEngine.cpp
+// and declared only in engine-private code, so the exported symbols are declared here to link against them.
+extern ENGINE_API float GAverageFPS;
+extern ENGINE_API float GAverageMS;
 
 namespace UEAgentPerformanceCommands
 {
@@ -271,8 +277,8 @@ namespace UEAgentPerformanceImpl
     }
 }
 
-// MCP:get_fps_info - Retrieves current and target FPS along with performance settings and world network mode.
-//   @returns { current_fps: float, target_fps: float, fps_variance: float, engine_version: string, is_editor: bool, is_dedicated_server: bool, performance_settings: {vsync_enabled (r.VSync), smooth_frame_rate, max_fps (0 = uncapped), min_fps (lower bound of frame-rate smoothing; 0 without it)}, world_name: string, net_mode: string }
+// MCP:get_fps_info - Retrieves current and target FPS along with performance settings and world network mode, plus the engine-wide rolling frame averages, the live UObject count, byte-precise process memory and the scalability screen percentage. Read-only.
+//   @returns { current_fps: float, target_fps: float, fps_variance: float, average_fps: float (GAverageFPS), average_ms: float (GAverageMS), engine_version: string, is_editor: bool, is_dedicated_server: bool, performance_settings: {vsync_enabled (r.VSync), smooth_frame_rate, max_fps (0 = uncapped), min_fps (lower bound of frame-rate smoothing; 0 without it)}, screen_percentage: float (r.ScreenPercentage within the scalability range), object_count: int, memory: { used_physical_bytes, peak_used_physical_bytes, available_physical_bytes, total_physical_bytes, used_physical_mb, peak_used_physical_mb, available_physical_mb }, world_name: string, net_mode: string }
 
 TSharedPtr<FJsonObject> HandleGetFPSInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -292,12 +298,33 @@ TSharedPtr<FJsonObject> HandleGetFPSInfo(const TSharedPtr<FJsonObject>& Params)
     Payload->SetNumberField(TEXT("current_fps"), MeasuredRate);
     Payload->SetNumberField(TEXT("target_fps"), GoalRate);
     Payload->SetNumberField(TEXT("fps_variance"), FMath::Abs(MeasuredRate - GoalRate));
+    // The engine-wide rolling averages (smoothed over frames), next to the last tick's instant rate above.
+    Payload->SetNumberField(TEXT("average_fps"), GAverageFPS);
+    Payload->SetNumberField(TEXT("average_ms"), GAverageMS);
 
     Payload->SetStringField(TEXT("engine_version"), FEngineVersion::Current().ToString());
     Payload->SetBoolField(TEXT("is_editor"), GIsEditor);
     Payload->SetBoolField(TEXT("is_dedicated_server"),
         IsRunningDedicatedServer() || EditorWorld->GetNetMode() == NM_DedicatedServer);
     Payload->SetObjectField(TEXT("performance_settings"), Impl::FramePacingReport());
+    // r.ScreenPercentage within the scalability range, as Scalability::GetResolutionScreenPercentage reads it.
+    const IConsoleVariable* ScreenPercentage = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
+    Payload->SetNumberField(TEXT("screen_percentage"), ScreenPercentage
+        ? FMath::Clamp(ScreenPercentage->GetFloat(), Scalability::MinResolutionScale, Scalability::MaxResolutionScale) : 0.0f);
+    Payload->SetNumberField(TEXT("object_count"), GUObjectArray.GetObjectArrayNumMinusAvailable());
+
+    // Process memory to the byte (get_memory_usage rounds to whole megabytes).
+    const FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    const double BytesPerMB = 1024.0 * 1024.0;
+    TSharedPtr<FJsonObject> Memory = MakeShared<FJsonObject>();
+    Memory->SetNumberField(TEXT("used_physical_bytes"), static_cast<double>(MemStats.UsedPhysical));
+    Memory->SetNumberField(TEXT("peak_used_physical_bytes"), static_cast<double>(MemStats.PeakUsedPhysical));
+    Memory->SetNumberField(TEXT("available_physical_bytes"), static_cast<double>(MemStats.AvailablePhysical));
+    Memory->SetNumberField(TEXT("total_physical_bytes"), static_cast<double>(MemStats.TotalPhysical));
+    Memory->SetNumberField(TEXT("used_physical_mb"), MemStats.UsedPhysical / BytesPerMB);
+    Memory->SetNumberField(TEXT("peak_used_physical_mb"), MemStats.PeakUsedPhysical / BytesPerMB);
+    Memory->SetNumberField(TEXT("available_physical_mb"), MemStats.AvailablePhysical / BytesPerMB);
+    Payload->SetObjectField(TEXT("memory"), Memory);
 
     Payload->SetStringField(TEXT("world_name"), EditorWorld->GetName());
     Payload->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(EditorWorld->GetNetMode()));
@@ -352,7 +379,7 @@ TSharedPtr<FJsonObject> HandleGetMemoryUsage(const TSharedPtr<FJsonObject>& Para
 // payload so callers can distinguish "frame is 0 ms" from "no thread timing data".
 // =========================================================================
 
-// MCP:frame_timing - Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bottleneck verdict with an actionable hint.
+// MCP:get_frame_timing - Read the current frame's Game/Render/GPU/RHI thread times plus a CPU-vs-GPU bottleneck verdict with an actionable hint.
 //   @returns { frame_ms: float, game_thread_ms: float, render_thread_ms: float, rhi_thread_ms: float, game_thread_wait_ms: float, render_thread_wait_ms: float, gpu_ms: float, cpu_busy_ms: float, verdict: "GPU-bound"|"CPU-bound (game thread)"|"CPU-bound (render thread)"|"VSync/present bound"|"balanced"|"no-data", hint: string, null_rhi: bool, note: string } -- cpu_busy_ms is game + render + rhi; null_rhi is true with -nullrhi or in a commandlet, where the timings read 0 (verdict "no-data" when they all do) and note warns of it; otherwise note is empty.
 //   @hints read-only
 //   NOTE (impl): frame_ms is FApp::GetDeltaTime() * 1000, and gpu_ms is RHIGetGPUFrameCycles converted to ms.
@@ -408,7 +435,7 @@ TSharedPtr<FJsonObject> HandleFrameTiming(const TSharedPtr<FJsonObject>& Params)
     else
     {
         Verdict = TEXT("balanced");
-        Hint    = TEXT("CPU and GPU loads are roughly balanced. Look for hitches via bookmark() "
+        Hint    = TEXT("CPU and GPU loads are roughly balanced. Look for hitches via add_trace_bookmark "
                        "around suspect sections and re-inspect with the .utrace.");
     }
 
@@ -503,7 +530,7 @@ TSharedPtr<FJsonObject> HandleStartTrace(const TSharedPtr<FJsonObject>& Params)
     Resp->SetStringField(TEXT("destination"),     OutputPath);
     Resp->SetStringField(TEXT("channels"),        Channels);
     Resp->SetNumberField(TEXT("started_at_s"),    TraceStartTime);
-    Resp->SetStringField(TEXT("note"),            TEXT("Trace active. Use bookmark() and region_start/end() to annotate, then stop_trace to flush."));
+    Resp->SetStringField(TEXT("note"),            TEXT("Trace active. Use add_trace_bookmark and start_timing_region/end_timing_region to annotate, then stop_trace to flush."));
     return mcp_common::MakeOkReply(Resp);
 }
 
@@ -596,7 +623,7 @@ TSharedPtr<FJsonObject> HandleGetTraceStatus(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:bookmark - Emit a TRACE_BOOKMARK into the active .utrace at the current frame. The bookmark channel must be enabled in the trace (default start_trace channels include it). The text is dynamic via printf-style formatting, but the Format token itself is a TEXT() literal as required by the macro's static_assert.
+// MCP:add_trace_bookmark - Emit a TRACE_BOOKMARK into the active .utrace at the current frame. The bookmark channel must be enabled in the trace (default start_trace channels include it). The text is dynamic via printf-style formatting, but the Format token itself is a TEXT() literal as required by the macro's static_assert.
 //   @param text - The bookmark text. Becomes the bookmark label in UnrealInsights.
 //   @returns { bookmarked: bool, text: string, frame: int, note: string }
 TSharedPtr<FJsonObject> HandleBookmark(const TSharedPtr<FJsonObject>& Params)
@@ -607,11 +634,11 @@ TSharedPtr<FJsonObject> HandleBookmark(const TSharedPtr<FJsonObject>& Params)
     if (!FTraceAuxiliary::IsConnected())
     {
         // Honest error — a bookmark without a trace is a no-op, so reject
-        // instead of silently swallowing the call. Caller can fall back to region_start/end
+        // instead of silently swallowing the call. Caller can fall back to start_timing_region/end
         // for in-process timing.
         return mcp_common::MakeErrorReply(
             TEXT("No active trace -- bookmarks require an active Insights recording. "
-                 "Call start_trace first (or use region_start/end for in-process timing)."));
+                 "Call start_trace first (or use start_timing_region/end for in-process timing)."));
     }
 
     // TRACE_BOOKMARK enforces via static_assert that the Format parameter is a literal
@@ -628,7 +655,7 @@ TSharedPtr<FJsonObject> HandleBookmark(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:region_start - Begin tracking an in-process named region. Region start time is stored in this bridge instance and matched by region_end for duration calculation. Idempotent — calling region_start twice with the same name returns already_started:true.
+// MCP:start_timing_region - Begin tracking an in-process named region. Region start time is stored in this bridge instance and matched by end_timing_region for duration calculation. Idempotent — calling start_timing_region twice with the same name returns already_started:true.
 //   @param name - Region identifier. Required.
 //   @returns { started: bool, already_started: bool, name: string, started_at_s: float }
 TSharedPtr<FJsonObject> HandleRegionStart(const TSharedPtr<FJsonObject>& Params)
@@ -637,7 +664,7 @@ TSharedPtr<FJsonObject> HandleRegionStart(const TSharedPtr<FJsonObject>& Params)
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
 
     // Idempotency — if the region already exists, return its current start
-    // time instead of overwriting. region_end will compute the duration against the
+    // time instead of overwriting. end_timing_region will compute the duration against the
     // original start.
     if (const double* Existing = ActiveRegions.Find(Name))
     {
@@ -646,7 +673,7 @@ TSharedPtr<FJsonObject> HandleRegionStart(const TSharedPtr<FJsonObject>& Params)
         Resp->SetBoolField  (TEXT("already_started"), true);
         Resp->SetStringField(TEXT("name"),            Name);
         Resp->SetNumberField(TEXT("started_at_s"),    *Existing);
-        Resp->SetStringField(TEXT("note"),            TEXT("Region was already started; original start time preserved. Call region_end to close."));
+        Resp->SetStringField(TEXT("note"),            TEXT("Region was already started; original start time preserved. Call end_timing_region to close."));
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -661,7 +688,7 @@ TSharedPtr<FJsonObject> HandleRegionStart(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:region_end - Close an open named region and return its duration in ms. Removes the region from the active set; subsequent region_end with the same name returns an error.
+// MCP:end_timing_region - Close an open named region and return its duration in ms. Removes the region from the active set; subsequent end_timing_region with the same name returns an error.
 //   @param name - Region identifier. Must match an open region.
 //   @returns { ended: bool, name: string, duration_ms: float, duration_s: float }
 TSharedPtr<FJsonObject> HandleRegionEnd(const TSharedPtr<FJsonObject>& Params)
@@ -673,7 +700,7 @@ TSharedPtr<FJsonObject> HandleRegionEnd(const TSharedPtr<FJsonObject>& Params)
     if (!StartTime)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Region '%s' was not started. Call region_start first."), *Name));
+            FString::Printf(TEXT("Region '%s' was not started. Call start_timing_region first."), *Name));
     }
 
     const double DurationS = FPlatformTime::Seconds() - *StartTime;
@@ -726,7 +753,7 @@ TSharedPtr<FJsonObject> HandleListTraces(const TSharedPtr<FJsonObject>& Params)
 // Headless-friendly (no Slate / no render).
 // ===========================================================================
 
-// MCP:create_rvt_asset - Create a URuntimeVirtualTexture asset at directory_path/asset_name with the given material type, tile count and tile size (both exponents, clamped silently), and save it; the save result is not checked. Returns asset_path, tile_count, tile_size and size in texels. Then use create_rvt_volume and assign_rvt_to_landscape.
+// MCP:create_runtime_virtual_texture - Create a URuntimeVirtualTexture asset at directory_path/asset_name with the given material type, tile count and tile size (both exponents, clamped silently), and save it; the save result is not checked. Returns asset_path, tile_count, tile_size and size in texels. Then use create_runtime_virtual_texture_volume and assign_runtime_virtual_texture_to_landscape.
 //   @param asset_name - Name of the new RVT asset (e.g. "RVT_Landscape"), without a folder.
 //   @param directory_path - Content folder as a long package path (e.g. "/Game/VirtualTextures"), not a relative one (default /Game).
 //   @param material_type - One of "BaseColor_Normal_Specular", "BaseColor_Normal_Roughness" or "WorldHeight", case-insensitive (default "BaseColor_Normal_Specular"); any other value, BaseColor_YCoCg included, is refused.
@@ -807,7 +834,7 @@ TSharedPtr<FJsonObject> HandleCreateRVTAsset(const TSharedPtr<FJsonObject>& Para
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_rvt_info - Read a URuntimeVirtualTexture asset without changing it: material_type (full enum name, e.g. "ERuntimeVirtualTextureMaterialType::WorldHeight"), tile_count in tiles, tile_size and size in texels (not the exponents create_rvt_asset takes), and continuous_update.
+// MCP:get_runtime_virtual_texture_info - Read a URuntimeVirtualTexture asset without changing it: material_type (full enum name, e.g. "ERuntimeVirtualTextureMaterialType::WorldHeight"), tile_count in tiles, tile_size and size in texels (not the exponents create_runtime_virtual_texture takes), and continuous_update.
 //   @param asset_path - Object or package path of the RVT asset (e.g. "/Game/VirtualTextures/RVT_Landscape").
 //   @returns { asset_path, material_type, tile_count, tile_size, size, continuous_update }
 TSharedPtr<FJsonObject> HandleGetRVTInfo(const TSharedPtr<FJsonObject>& Params)
@@ -829,7 +856,7 @@ TSharedPtr<FJsonObject> HandleGetRVTInfo(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Data);
 }
 
-// create_rvt_volume — the headless crash to avoid when spawning an
+// create_runtime_virtual_texture_volume — the headless crash to avoid when spawning an
 // ARuntimeVirtualTextureVolume in the non-PIE editor is the VT producer init
 // dereferencing a null AllocatedVirtualTexture inside ENQUEUE_RENDER_COMMAND.
 // It is a matter of order, not a fundamental block:
@@ -846,16 +873,16 @@ TSharedPtr<FJsonObject> HandleGetRVTInfo(const TSharedPtr<FJsonObject>& Params)
 //     -- the alloc command is enqueued before the readback command (FIFO).
 // So the headless-safe order is: spawn with VT null (via the Place-Actors factory,
 // which also sets a non-degenerate default scale) -> SetVirtualTexture on a valid
-// RVT -> the producer allocates cleanly. create_rvt_volume below follows that order, and
-// set_rvt_volume_bounds refuses a volume whose RVT is not bound yet.
+// RVT -> the producer allocates cleanly. create_runtime_virtual_texture_volume below follows that order, and
+// set_runtime_virtual_texture_volume_bounds refuses a volume whose RVT is not bound yet.
 //
-// Why the volume matters: assign_rvt_to_landscape only wires the landscape as a
+// Why the volume matters: assign_runtime_virtual_texture_to_landscape only wires the landscape as a
 // WRITER into its RuntimeVirtualTextures array. Without an ARuntimeVirtualTextureVolume
 // (the URuntimeVirtualTextureComponent that registers the producer + defines the
 // world-space region) nothing PRODUCES the RVT -- the chain is incomplete.
 
-// MCP:create_rvt_volume - Spawn an ARuntimeVirtualTextureVolume (the RVT producer that registers the runtime virtual texture into the scene and defines its world-space region) bound to an RVT asset. Without a volume, assign_rvt_to_landscape only wires the landscape as a writer -- nothing produces the RVT. Optionally fits the volume bounds to an actor (usually the landscape) in the same call. Headless-safe: spawns with a null VirtualTexture (no render-state) then binds a valid RVT. Idempotent: returns the existing volume if one already targets this RVT.
-//   @param rvt_asset_path - Required. /Game path to the URuntimeVirtualTexture asset (create_rvt_asset).
+// MCP:create_runtime_virtual_texture_volume - Spawn an ARuntimeVirtualTextureVolume (the RVT producer that registers the runtime virtual texture into the scene and defines its world-space region) bound to an RVT asset. Without a volume, assign_runtime_virtual_texture_to_landscape only wires the landscape as a writer -- nothing produces the RVT. Optionally fits the volume bounds to an actor (usually the landscape) in the same call. Headless-safe: spawns with a null VirtualTexture (no render-state) then binds a valid RVT. Idempotent: returns the existing volume if one already targets this RVT.
+//   @param rvt_asset_path - Required. /Game path to the URuntimeVirtualTexture asset (create_runtime_virtual_texture).
 //   @param bounds_align_actor - Optional. Name/label of an actor (usually the ALandscape) to fit the volume bounds to; runs the engine "Set Bounds" after binding.
 //   @param volume_name - Optional. Actor label for the spawned volume.
 //   @param location - Optional [x,y,z] spawn location (default [0,0,0]; overridden by the bounds-align when bounds_align_actor is given).
@@ -971,7 +998,7 @@ TSharedPtr<FJsonObject> HandleCreateRVTVolume(const TSharedPtr<FJsonObject>& Par
     return mcp_common::MakeOkReply(D);
 }
 
-// MCP:set_rvt_volume_bounds - Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine "Set Bounds" button (RuntimeVirtualTexture::SetBounds). Sets the volume's BoundsAlignActor and recomputes its transform to cover that actor (a landscape uses its complete bounds) plus any primitives writing to the volume's RVT. The volume must already have its RVT bound (create_rvt_volume). Optional landscape texel-snap + bounds expansion.
+// MCP:set_runtime_virtual_texture_volume_bounds - Fit an existing ARuntimeVirtualTextureVolume's bounds to an actor -- the engine "Set Bounds" button (RuntimeVirtualTexture::SetBounds). Sets the volume's BoundsAlignActor and recomputes its transform to cover that actor (a landscape uses its complete bounds) plus any primitives writing to the volume's RVT. The volume must already have its RVT bound (create_runtime_virtual_texture_volume). Optional landscape texel-snap + bounds expansion.
 //   @param volume_name - Required. Actor name/label of the ARuntimeVirtualTextureVolume.
 //   @param bounds_align_actor - Required. Name/label of the actor (usually the ALandscape) to fit the bounds to.
 //   @param snap_to_landscape - Optional bool. Snap virtual-texture texels to landscape vertices (only meaningful when the align actor is a landscape).
@@ -1006,7 +1033,7 @@ TSharedPtr<FJsonObject> HandleSetRVTVolumeBounds(const TSharedPtr<FJsonObject>& 
     if (!Comp->GetVirtualTexture())
     {
         return mcp_common::MakeErrorReply(
-            TEXT("RVT volume has no VirtualTexture bound; call create_rvt_volume first (RuntimeVirtualTexture::SetBounds requires it)"));
+            TEXT("RVT volume has no VirtualTexture bound; call create_runtime_virtual_texture_volume first (RuntimeVirtualTexture::SetBounds requires it)"));
     }
 
     AActor* AlignActor = mcp_common::FindActorByName(World, AlignName);
@@ -1070,7 +1097,7 @@ namespace UEAgentPerformanceImpl
 }
 
 // ===========================================================================
-// assign_rvt_to_landscape -- THE PROXIES ARE WHAT RENDER
+// assign_runtime_virtual_texture_to_landscape -- THE PROXIES ARE WHAT RENDER
 //
 // Writing ONLY the ALandscape actor puts the RVT in `Landscape.RuntimeVirtualTextures`
 // and writes NOTHING to the RVT cache: on a World Partition landscape every
@@ -1089,7 +1116,7 @@ namespace UEAgentPerformanceImpl
 // because in practice it is one.
 // ===========================================================================
 
-// MCP:assign_rvt_to_landscape - Add a URuntimeVirtualTexture to the landscape's RuntimeVirtualTextures array (slot-index based) AND propagate it to every ALandscapeStreamingProxy of that landscape, because in World Partition the proxies are the actors that render. Every proxy is re-read after the write; `applied` and the envelope `success` are DERIVED from that re-read (proxies_with_rvt == proxies_total), never asserted.
+// MCP:assign_runtime_virtual_texture_to_landscape - Add a URuntimeVirtualTexture to the landscape's RuntimeVirtualTextures array (slot-index based) AND propagate it to every ALandscapeStreamingProxy of that landscape, because in World Partition the proxies are the actors that render. Every proxy is re-read after the write; `applied` and the envelope `success` are DERIVED from that re-read (proxies_with_rvt == proxies_total), never asserted.
 //   @param landscape_name_or_label - Actor label/name of the target ALandscape
 //   @param rvt_asset_path - /Game path to the RVT asset
 //   @param slot_index - 0-based index into LandscapeProxy::RuntimeVirtualTextures (default 0)
@@ -1253,55 +1280,10 @@ TSharedPtr<FJsonObject> HandleAssignRVTToLandscape(const TSharedPtr<FJsonObject>
 }
 
 // ---------------------------------------------------------------------------
-// Typed delete RVT + unassign + region introspection.
+// Unassign RVT + region introspection.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_rvt_asset - Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
-//   @param asset_path - Full /Game/... asset path of the RVT.
-//   @returns { asset_path, deleted, already_existed, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
-
-TSharedPtr<FJsonObject> HandleRemoveRVTAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
-    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
-    {
-        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-        Resp->SetStringField(TEXT("asset_path"), AssetPath);
-        Resp->SetBoolField(TEXT("deleted"), false);
-        Resp->SetBoolField(TEXT("already_existed"), false);
-        Resp->SetStringField(TEXT("note"), TEXT("asset_path does not exist; nothing to remove"));
-        return mcp_common::MakeOkReply(Resp);
-    }
-
-    UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-    if (!Asset)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("remove_rvt_asset: could not load asset at %s"), *AssetPath));
-    }
-
-    // URuntimeVirtualTexture is the typed-delete target (the same UClass that
-    // create_rvt_asset returns). Anything else (e.g. a UTexture2D accidentally
-    // passed) is refused: success false, nothing deleted.
-    if (!Asset->IsA<URuntimeVirtualTexture>())
-    {
-        return AssetCommandHelpers::WrongTypeRefusal(TEXT("remove_rvt_asset"), AssetPath, *Asset, TEXT("URuntimeVirtualTexture"));
-    }
-
-    const FString AssetClassName = Asset->GetClass()->GetName();
-    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), AssetPath);
-    Resp->SetStringField(TEXT("asset_class"), AssetClassName);
-    Resp->SetBoolField(TEXT("deleted"), bDeleted);
-    Resp->SetBoolField(TEXT("already_existed"), true);
-    return AssetCommandHelpers::DeleteOutcomeReply(TEXT("remove_rvt_asset"), Resp, bDeleted, AssetPath);
-}
-
-// MCP:unassign_rvt_from_landscape - Inverse of assign_rvt_to_landscape: clears ONE slot of a landscape's RuntimeVirtualTextures array, breaking the binding without leaving a dangling entry behind. It unbinds only -- the RVT asset itself survives (remove_rvt_asset destroys that). Reports the asset path that was in the slot, so the operation is reversible.
+// MCP:unassign_runtime_virtual_texture_from_landscape - Inverse of assign_runtime_virtual_texture_to_landscape: clears ONE slot of a landscape's RuntimeVirtualTextures array, breaking the binding without leaving a dangling entry behind. It unbinds only -- the RVT asset itself survives (delete_asset with expected_class "RuntimeVirtualTexture" destroys that). Reports the asset path that was in the slot, so the operation is reversible.
 //   @param landscape_name - Actor name (or label) of the ALandscape actor (omit for first landscape in world)
 //   @param slot_index - 0-based index to clear (default 0)
 //   @returns { cleared, slot_index, previous_rvt_asset_path?, landscape }
@@ -1370,7 +1352,7 @@ TSharedPtr<FJsonObject> HandleUnassignRVTFromLandscape(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:list_active_regions - Read-side of region_start: the named timing regions still OPEN in this bridge instance, each with how long it has been running. Use it to spot a region you forgot to close, or to read an elapsed time without ending the region. Entries disappear when region_end closes them, one name at a time; the state is per bridge instance and does not survive a restart.
+// MCP:list_timing_regions - Read-side of start_timing_region: the named timing regions still OPEN in this bridge instance, each with how long it has been running. Use it to spot a region you forgot to close, or to read an elapsed time without ending the region. Entries disappear when end_timing_region closes them, one name at a time; the state is per bridge instance and does not survive a restart.
 //   @returns { total, regions:[{ name, started_at_s, elapsed_s }] }
 
 TSharedPtr<FJsonObject> HandleListActiveRegions(const TSharedPtr<FJsonObject>& Params)
@@ -1392,37 +1374,24 @@ TSharedPtr<FJsonObject> HandleListActiveRegions(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Resp);
 }
 
-// MCP:get_frame_count - Read the engine frame counters without side effects: frame_count (GFrameCounter, game thread) and frame_count_render_thread (GFrameCounterRenderThread). Read it before and after another call to measure how many frames ticked; for frame times use frame_timing or get_fps_info.
-//   @returns { frame_count: uint64, frame_count_render_thread: uint64 }
-//   Read-only, headless-safe. Single-int sync anchor for dead-reckoning / asset-load timing.
-TSharedPtr<FJsonObject> HandleGetFrameCount(const TSharedPtr<FJsonObject>& Params)
-{
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetNumberField(TEXT("frame_count"), static_cast<double>(GFrameCounter));
-    Resp->SetNumberField(TEXT("frame_count_render_thread"), static_cast<double>(GFrameCounterRenderThread));
-    return mcp_common::MakeOkReply(Resp);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("assign_rvt_to_landscape"), &HandleAssignRVTToLandscape },
-    { TEXT("bookmark"), &HandleBookmark },
-    { TEXT("create_rvt_asset"), &HandleCreateRVTAsset },
-    { TEXT("create_rvt_volume"), &HandleCreateRVTVolume },
-    { TEXT("frame_timing"), &HandleFrameTiming },
+    { TEXT("assign_runtime_virtual_texture_to_landscape"), &HandleAssignRVTToLandscape },
+    { TEXT("add_trace_bookmark"), &HandleBookmark },
+    { TEXT("create_runtime_virtual_texture"), &HandleCreateRVTAsset },
+    { TEXT("create_runtime_virtual_texture_volume"), &HandleCreateRVTVolume },
+    { TEXT("get_frame_timing"), &HandleFrameTiming },
     { TEXT("get_fps_info"), &HandleGetFPSInfo },
-    { TEXT("get_frame_count"), &HandleGetFrameCount },
     { TEXT("get_memory_usage"), &HandleGetMemoryUsage },
-    { TEXT("get_rvt_info"), &HandleGetRVTInfo },
+    { TEXT("get_runtime_virtual_texture_info"), &HandleGetRVTInfo },
     { TEXT("get_trace_status"), &HandleGetTraceStatus },
-    { TEXT("list_active_regions"), &HandleListActiveRegions },
+    { TEXT("list_timing_regions"), &HandleListActiveRegions },
     { TEXT("list_traces"), &HandleListTraces },
-    { TEXT("region_end"), &HandleRegionEnd },
-    { TEXT("region_start"), &HandleRegionStart },
-    { TEXT("remove_rvt_asset"), &HandleRemoveRVTAsset },
-    { TEXT("set_rvt_volume_bounds"), &HandleSetRVTVolumeBounds },
+    { TEXT("end_timing_region"), &HandleRegionEnd },
+    { TEXT("start_timing_region"), &HandleRegionStart },
+    { TEXT("set_runtime_virtual_texture_volume_bounds"), &HandleSetRVTVolumeBounds },
     { TEXT("start_trace"), &HandleStartTrace },
     { TEXT("stop_trace"), &HandleStopTrace },
-    { TEXT("unassign_rvt_from_landscape"), &HandleUnassignRVTFromLandscape },
+    { TEXT("unassign_runtime_virtual_texture_from_landscape"), &HandleUnassignRVTFromLandscape },
 };
 } // namespace UEAgentPerformanceCommands

@@ -47,7 +47,7 @@ No parameters.
 
 *Destructive.*
 
-Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_replication_info / get_actor_replication_info.
+Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

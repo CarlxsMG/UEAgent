@@ -3,6 +3,10 @@
 
 #include "HAL/IConsoleManager.h"
 #include "Scalability.h"
+#include "Interfaces/IPluginManager.h"   // set_engine_ini_value plugin_name
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/Paths.h"
+#include "PluginDescriptor.h"
 
 #define LOCTEXT_NAMESPACE "UEAgentCVar"
 
@@ -28,6 +32,23 @@ namespace UEAgentCVarCommands
 // ---------------------------------------------------------------------------
 namespace
 {
+    /** The plugin identity set_engine_ini_value reports with plugin_name. FPluginDescriptor has no bEnabled and IPlugin
+     *  no IsLoaded(), so "loaded" and "enabled" both report IsEnabled(). */
+    void AddPluginIdentity(const TSharedPtr<FJsonObject>& Out, const IPlugin& Plugin)
+    {
+        const FPluginDescriptor& Descriptor = Plugin.GetDescriptor();
+        const bool bEnabled = Plugin.IsEnabled();
+        Out->SetStringField(TEXT("plugin_status"), bEnabled ? TEXT("Enabled") : TEXT("Disabled"));
+        Out->SetStringField(TEXT("plugin_version"), Descriptor.VersionName);
+        Out->SetStringField(TEXT("plugin_description"), Descriptor.Description);
+        Out->SetStringField(TEXT("plugin_author"), Descriptor.CreatedBy);
+        Out->SetStringField(TEXT("plugin_category"), Descriptor.Category);
+        Out->SetBoolField(TEXT("plugin_loaded"), bEnabled);
+        Out->SetBoolField(TEXT("plugin_enabled"), bEnabled);
+        Out->SetStringField(TEXT("plugin_path"), Plugin.GetBaseDir());
+        Out->SetStringField(TEXT("plugin_file"), Plugin.GetDescriptorFileName());
+    }
+
     /** Build a JSON payload describing a single console variable's live state. */
     void FillCVarState(const TSharedPtr<FJsonObject>& Out, const FString& Name, IConsoleVariable* CVar)
     {
@@ -181,15 +202,21 @@ TSharedPtr<FJsonObject> HandleGetCVar(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // list_cvars
 // ---------------------------------------------------------------------------
-// MCP:list_cvars - Lists registered console variables whose name contains a substring.  Iterates IConsoleManager::Get().ForEachConsoleObjectThatContains(filter), collecting only console *variables* (commands are skipped), capped at max_results.
-//   @param filter - Substring filter for cvar names (empty matches all).
+// MCP:list_cvars - Lists registered console variables whose name contains a substring, or starts with prefix.  Iterates IConsoleManager::Get().ForEachConsoleObjectThatContains(filter) (ForEachConsoleObjectThatStartsWith(prefix) when prefix is given), collecting only console *variables* unless include_commands also lists console commands, capped at max_results. Read-only.
+//   @param filter - Substring filter for cvar names (empty matches all); with prefix, a name must match both.
+//   @param prefix - Optional name prefix, case-insensitive, e.g. "r.Shadow." or "t."; when given only names starting with it are listed.
+//   @param include_commands - Optional bool (default false): also list console commands, entries with a name and help but no value.
 //   @param max_results - Cap on results (default 200, min 1).
-//   @returns { filter: string, cvars: [{name, value, help}], count: int, total_matches: int, max_results: int, truncated: bool }
+//   @returns { filter: string, prefix?: string, include_commands: bool, cvars: [{name, value?, help}], count: int, total_matches: int, max_results: int, truncated: bool }
 
 TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
 {
     FString Filter;
     Params->TryGetStringField(TEXT("filter"), Filter); // empty allowed -> matches "" substring
+    FString Prefix;
+    Params->TryGetStringField(TEXT("prefix"), Prefix);
+    bool bIncludeCommands = false;
+    Params->TryGetBoolField(TEXT("include_commands"), bIncludeCommands);
 
     int32 MaxResults = 200;
     double MaxNumber = 0.0;
@@ -202,11 +229,19 @@ TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
     bool bTruncated = false;
     int32 TotalMatches = 0;
 
-    auto Visitor = [&CVarArray, &bTruncated, &TotalMatches, MaxResults](const TCHAR* VarName, IConsoleObject* Obj)
+    auto Visitor = [&CVarArray, &bTruncated, &TotalMatches, &Filter, &Prefix, bIncludeCommands, MaxResults](
+        const TCHAR* VarName, IConsoleObject* Obj)
     {
-        // Only collect console *variables* (skip commands / unregistered objects).
+        // Console *variables*, plus commands when asked (unregistered objects are skipped).
         IConsoleVariable* AsVar = Obj ? Obj->AsVariable() : nullptr;
-        if (!AsVar)
+        if (!AsVar && !(bIncludeCommands && Obj && Obj->AsCommand()))
+        {
+            return;
+        }
+        // With a prefix the engine walks the names starting with it, so the filter is applied here.
+        const FString Name(VarName);
+        if (!Prefix.IsEmpty() && (!Name.StartsWith(Prefix, ESearchCase::IgnoreCase)
+            || (!Filter.IsEmpty() && !Name.Contains(Filter, ESearchCase::IgnoreCase))))
         {
             return;
         }
@@ -217,18 +252,36 @@ TSharedPtr<FJsonObject> HandleListCVars(const TSharedPtr<FJsonObject>& Params)
             return;
         }
         TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), VarName);
-        Entry->SetStringField(TEXT("value"), AsVar->GetString());
-        const TCHAR* Help = AsVar->GetHelp();
+        Entry->SetStringField(TEXT("name"), Name);
+        if (AsVar)
+        {
+            Entry->SetStringField(TEXT("value"), AsVar->GetString());
+        }
+        const TCHAR* Help = Obj->GetHelp();
         Entry->SetStringField(TEXT("help"), Help ? FString(Help) : FString());
         CVarArray.Add(MakeShared<FJsonValueObject>(Entry));
     };
 
-    IConsoleManager::Get().ForEachConsoleObjectThatContains(
-        FConsoleObjectVisitor::CreateLambda(Visitor), *Filter);
+    // The engine's "contains" walk matches nothing for an empty string, so no filter and no prefix walks every name
+    // (an empty prefix matches all).
+    if (Prefix.IsEmpty() && !Filter.IsEmpty())
+    {
+        IConsoleManager::Get().ForEachConsoleObjectThatContains(
+            FConsoleObjectVisitor::CreateLambda(Visitor), *Filter);
+    }
+    else
+    {
+        IConsoleManager::Get().ForEachConsoleObjectThatStartsWith(
+            FConsoleObjectVisitor::CreateLambda(Visitor), *Prefix);
+    }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("filter"), Filter);
+    if (!Prefix.IsEmpty())
+    {
+        Data->SetStringField(TEXT("prefix"), Prefix);
+    }
+    Data->SetBoolField(TEXT("include_commands"), bIncludeCommands);
     Data->SetArrayField(TEXT("cvars"), CVarArray);
     Data->SetNumberField(TEXT("count"), CVarArray.Num());
     Data->SetNumberField(TEXT("total_matches"), TotalMatches);
@@ -317,79 +370,7 @@ TSharedPtr<FJsonObject> HandleGetScalabilityLevels(const TSharedPtr<FJsonObject>
 }
 
 // ===========================================================================
-// Engine settings: cvar search, bulk cvar set and direct INI access.
-
-// ---------------------------------------------------------------------------
-// search_cvars
-// ---------------------------------------------------------------------------
-
-// MCP:search_cvars - Search console variables and commands whose name contains term (case-insensitive); each hit has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a prefix listing use list_cvars_with_prefix; for one cvar in full, get_cvar.
-//   @param term - Substring to search (case-insensitive)
-//   @param max - Maximum number of entries to return (default 50, minimum 1).
-//   @returns { count, cvars: [{name, value?}] }
-TSharedPtr<FJsonObject> HandleSearchCVars(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Term;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("term"), Term)) { return Missing; }
-    int32 Max = 50;
-    Params->TryGetNumberField(TEXT("max"), Max);
-    Max = FMath::Max(1, Max);
-
-    TArray<TSharedPtr<FJsonValue>> Out;
-    IConsoleManager& CM = IConsoleManager::Get();
-    CM.ForEachConsoleObjectThatContains(FConsoleObjectVisitor::CreateLambda(
-        [&](const TCHAR* Name, IConsoleObject* Obj)
-        {
-            if (Out.Num() >= Max) { return; }
-            const FString N(Name);
-            if (!N.Contains(Term, ESearchCase::IgnoreCase)) { return; }
-            TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-            O->SetStringField(TEXT("name"), N);
-            if (IConsoleVariable* V = CM.FindConsoleVariable(Name))
-            {
-                O->SetStringField(TEXT("value"), V->GetString());
-            }
-            Out.Add(MakeShared<FJsonValueObject>(O));
-        }), *Term);
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetNumberField(TEXT("count"), Out.Num());
-    Data->SetArrayField(TEXT("cvars"), Out);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:list_cvars_with_prefix - List console variables and commands whose name starts with prefix (case-insensitive); each entry has its name and, for a variable, its current value. Read-only. Stops at max, so count is what was returned, not the total. For a substring search use search_cvars.
-//   @param prefix - Name prefix to match, case-insensitive, e.g. "r.Shadow." or "t.".
-//   @param max - Maximum number of entries to return (default 100, minimum 1).
-//   @returns { count, cvars: [...] }
-TSharedPtr<FJsonObject> HandleListCVarsWithPrefix(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Prefix;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("prefix"), Prefix)) { return Missing; }
-    int32 Max = 100;
-    Params->TryGetNumberField(TEXT("max"), Max);
-    Max = FMath::Max(1, Max);
-
-    TArray<TSharedPtr<FJsonValue>> Out;
-    IConsoleManager& CM = IConsoleManager::Get();
-    CM.ForEachConsoleObjectThatStartsWith(FConsoleObjectVisitor::CreateLambda(
-        [&](const TCHAR* Name, IConsoleObject* Obj)
-        {
-            if (Out.Num() >= Max) { return; }
-            const FString N(Name);
-            if (!N.StartsWith(Prefix, ESearchCase::IgnoreCase)) { return; }
-            TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-            O->SetStringField(TEXT("name"), N);
-            if (IConsoleVariable* V = CM.FindConsoleVariable(Name))
-            {
-                O->SetStringField(TEXT("value"), V->GetString());
-            }
-            Out.Add(MakeShared<FJsonValueObject>(O));
-        }), *Prefix);
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetNumberField(TEXT("count"), Out.Num());
-    Data->SetArrayField(TEXT("cvars"), Out);
-    return mcp_common::MakeOkReply(Data);
-}
+// Engine settings: bulk cvar set and direct INI access.
 
 // MCP:set_cvars_from_json - Apply many cvars in one call. JSON shape: {"name":"value", ...}
 //   @param cvars - JSON object string {"cvar":"value", ...}
@@ -501,19 +482,78 @@ TSharedPtr<FJsonObject> HandleGetEngineIniValue(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_engine_ini_value - Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/<Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded.
-//   @param section - INI section, e.g. "/Script/Engine.RendererSettings"; created when missing.
+// MCP:set_engine_ini_value - Write one key into the GConfig copy of an INI (Engine by default), flush it to the saved config under Saved/Config/<Platform>/, and verify by reading it back (applied). It does not edit Config/Default*.ini, and objects that already loaded their config are not reloaded. The value may be text, a bool or a number; with plugin_name it writes a plugin's setting, the section defaulting to the plugin's /Script/<Plugin>.<Plugin>.
+//   @param section - INI section, e.g. "/Script/Engine.RendererSettings"; created when missing; surrounding brackets are dropped. Required unless plugin_name is given.
 //   @param key - Key inside the section, e.g. "r.DefaultFeature.AntiAliasing"; its current value is replaced.
-//   @param value - Value as text, written verbatim; an empty string is allowed.
+//   @param value - Value to write: a string written verbatim (an empty string is allowed), a JSON bool written as GConfig writes one ("True"/"False"), or a JSON number written as its text (an integer without decimals).
 //   @param config_file - Config base name without extension, e.g. "Engine" (default), "Game", "Input"; "Engine.ini" is not resolved.
-//   @returns { applied, section, key, value, readback_value }
+//   @param plugin_name - Optional plugin, as its .uplugin is named: an unknown one fails with nothing written; a known one adds its identity to the reply and makes section default to /Script/<Plugin>.<Plugin>.
+//   @returns { applied, section, key, value, value_type: "string"|"bool"|"number", readback_value, config_file, config_file_path, plugin_name?, plugin_status?, plugin_version?, plugin_description?, plugin_author?, plugin_category?, plugin_loaded?, plugin_enabled?, plugin_path?, plugin_file? }
 TSharedPtr<FJsonObject> HandleSetEngineIniValue(const TSharedPtr<FJsonObject>& Params)
 {
-    FString Section, Key, Value, ConfigFile = TEXT("Engine");
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("section"), Section)) { return Missing; }
+    if (!Params->HasField(TEXT("value")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'value' (a string, bool or number)"));
+    }
+    FString Section, Key, ConfigFile = TEXT("Engine"), PluginName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("key"), Key)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("value"), Value, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    Params->TryGetStringField(TEXT("section"), Section);
     Params->TryGetStringField(TEXT("config_file"), ConfigFile);
+    Params->TryGetStringField(TEXT("plugin_name"), PluginName);
+
+    // The value as the INI text it becomes. The JSON type is read, not guessed from the text, so the
+    // string "true" is still written verbatim.
+    const TSharedPtr<FJsonValue> ValueField = Params->TryGetField(TEXT("value"));
+    FString Value;
+    const TCHAR* ValueType = TEXT("string");
+    switch (ValueField.IsValid() ? ValueField->Type : EJson::None)
+    {
+    case EJson::String:
+        Value = ValueField->AsString();
+        break;
+    case EJson::Boolean:
+        // What GConfig->SetBool writes.
+        Value = ValueField->AsBool() ? TEXT("True") : TEXT("False");
+        ValueType = TEXT("bool");
+        break;
+    case EJson::Number:
+    {
+        // An integral number is written without a decimal part, so an int setting parses back.
+        const double Number = ValueField->AsNumber();
+        const bool bIntegral = FMath::IsFinite(Number) && FMath::Abs(Number) < 9.0e15 && FMath::FloorToDouble(Number) == Number;
+        Value = bIntegral ? FString::Printf(TEXT("%lld"), static_cast<int64>(Number)) : FString::SanitizeFloat(Number);
+        ValueType = TEXT("number");
+        break;
+    }
+    default:
+        return mcp_common::MakeErrorReply(TEXT("Parameter 'value' must be a string, bool or number; nothing was written"));
+    }
+
+    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    if (!PluginName.IsEmpty())
+    {
+        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
+        Data->SetStringField(TEXT("plugin_name"), PluginName);
+        if (!Plugin.IsValid())
+        {
+            Data->SetBoolField(TEXT("applied"), false);
+            Data->SetStringField(TEXT("plugin_status"), TEXT("Not Found"));
+            return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(
+                TEXT("set_engine_ini_value: no plugin named '%s' is known to the plugin manager; nothing was written."), *PluginName));
+        }
+        AddPluginIdentity(Data, *Plugin);
+        if (Section.IsEmpty())
+        {
+            Section = FString::Printf(TEXT("/Script/%s.%s"), *PluginName, *PluginName);
+        }
+    }
+    // GConfig wants the section bare; a bracketed "[...]" form is tolerated.
+    Section.RemoveFromStart(TEXT("["));
+    Section.RemoveFromEnd(TEXT("]"));
+    if (Section.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'section' (it defaults only when plugin_name is given)"));
+    }
 
     if (!GConfig)
     {
@@ -531,12 +571,16 @@ TSharedPtr<FJsonObject> HandleSetEngineIniValue(const TSharedPtr<FJsonObject>& P
     const bool bApplied = GConfig->GetString(*Section, *Key, ReadBackValue, ConfigFile)
         && ReadBackValue == Value;
 
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetBoolField(TEXT("applied"), bApplied);
     Data->SetStringField(TEXT("section"), Section);
     Data->SetStringField(TEXT("key"), Key);
     Data->SetStringField(TEXT("value"), Value);
+    Data->SetStringField(TEXT("value_type"), ValueType);
     Data->SetStringField(TEXT("readback_value"), ReadBackValue);
+    Data->SetStringField(TEXT("config_file"), ConfigFile);
+    // Where the flush writes: the saved (generated) config of this platform.
+    Data->SetStringField(TEXT("config_file_path"),
+        FConfigCacheIni::GetDestIniFilename(*ConfigFile, nullptr, *FPaths::GeneratedConfigDir()));
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -546,9 +590,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("get_engine_ini_value"), &HandleGetEngineIniValue },
     { TEXT("get_scalability_levels"), &HandleGetScalabilityLevels },
     { TEXT("list_cvars"), &HandleListCVars },
-    { TEXT("list_cvars_with_prefix"), &HandleListCVarsWithPrefix },
     { TEXT("list_engine_ini_sections"), &HandleListEngineIniSections },
-    { TEXT("search_cvars"), &HandleSearchCVars },
     { TEXT("set_cvar"), &HandleSetCVar },
     { TEXT("set_cvars_from_json"), &HandleSetCVarsFromJson },
     { TEXT("set_engine_ini_value"), &HandleSetEngineIniValue },

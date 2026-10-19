@@ -57,7 +57,7 @@ public:
 
 	// Dispatches ONE command by name on the CALLING thread (no thread hop, no queueing) and
 	// returns the {"status":"success"|"error", ...} envelope. Game thread only: it runs from a
-	// queued work item, or in a loop for `batch`. A handler must never wait on the queue: the
+	// queued work item, or in a loop for `execute_batch`. A handler must never wait on the queue: the
 	// queue is drained by the very call stack that is running the handler.
 	TSharedPtr<FJsonObject> DispatchSingleCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 
@@ -110,7 +110,7 @@ private:
 	//
 	// Returns the refusal envelope, or null to PROCEED. `force:true` bypasses it -- the same
 	// escape hatch as the ownership guard. It sits at the start of DispatchSingleCommand, not in
-	// the queued work item: `batch` calls DispatchSingleCommand directly, so a gate in the work
+	// the queued work item: `execute_batch` calls DispatchSingleCommand directly, so a gate in the work
 	// item would be skipped by a batch -- which is exactly how a bulk compile gets triggered.
 	TSharedPtr<FJsonObject> CheckPIESafetyGuard(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 

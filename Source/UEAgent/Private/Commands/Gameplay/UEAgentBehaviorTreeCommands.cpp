@@ -173,11 +173,11 @@ namespace
         return KeysArr;
     }
 
-    /** { <PathField>, name, parent?, keys, key_count } of a blackboard asset, its inherited keys included. */
-    TSharedPtr<FJsonObject> BehaviorTree_BlackboardAssetData(const UBlackboardData* BBData, const TCHAR* PathField)
+    /** { blackboard_asset, name, parent?, keys, key_count } of a blackboard asset, its inherited keys included. */
+    TSharedPtr<FJsonObject> BehaviorTree_BlackboardAssetData(const UBlackboardData* BBData)
     {
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-        Result->SetStringField(PathField, BBData->GetPathName());
+        Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
         Result->SetStringField(TEXT("name"), BBData->GetName());
         if (BBData->Parent)
         {
@@ -559,7 +559,7 @@ UBlackboardComponent* ReadBlackboardKey(const TSharedPtr<FJsonObject>& Params, F
 // Asset-based reads
 //----------------------------------------------------------------------//
 
-// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_keys_asset; build the tree with set_behavior_tree_root, add_bt_composite_child, add_bt_task_child, add_bt_decorator and add_bt_service.
+// MCP:get_behavior_tree_info - Read a UBehaviorTree asset found by content path: its name, its blackboard asset with every key it holds in key-ID order, parent blackboard keys first (name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the blackboard that declares the key), and the node tree from RootNode -- each node's name and class, a composite's services and children, and the decorators on each child edge, nested up to 64 levels. Nothing is written. A missing path, or one that does not load as a behavior tree, is an error; a tree with no root gives root_node null. The runtime state of a tree running on an AI actor is get_behavior_tree_status; blackboard asset details: get_blackboard_data; build the tree with set_behavior_tree_root, add_behavior_tree_child, add_behavior_tree_decorator and add_behavior_tree_service.
 //   @param behavior_tree_path - Content path of the UBehaviorTree asset, e.g. "/Game/AI/BT_Enemy"; a bare asset name is not resolved
 //   @returns { behavior_tree_path: string, name: string, blackboard_asset: string|null, blackboard_keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], root_node: object|null }
 
@@ -722,40 +722,6 @@ TSharedPtr<FJsonObject> HandleStopBehaviorTree(const TSharedPtr<FJsonObject>& Pa
 //----------------------------------------------------------------------//
 // Runtime blackboard
 //----------------------------------------------------------------------//
-
-// MCP:get_blackboard_component - Read the UBlackboardComponent of an editor-world actor (its AIController blackboard, else one on the actor): component_name, has_valid_asset, num_keys and the key list. The list holds every key num_keys counts, in key-ID order: the keys inherited from parent blackboards first, each with inherited and defined_in naming the blackboard asset that declares it. Read-only, nothing is written. Editor world only, never PIE, where pawns are not auto-possessed; an actor not found by object name or label, or one with no blackboard component, is an error. Current values: get_blackboard_data; one key: get_blackboard_value; asset keys: get_blackboard_keys_asset.
-//   @param actor_name - Object name or label of the pawn, its AIController, or an actor with its own UBlackboardComponent, in the editor world (first match).
-//   @returns { actor_name: string, component_name: string, has_valid_asset: bool, num_keys: number, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }]? }
-
-TSharedPtr<FJsonObject> HandleGetBlackboardComponent(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ActorName;
-    if (!Params.IsValid() || !Params->TryGetStringField(TEXT("actor_name"), ActorName) || ActorName.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'actor_name'"));
-    }
-
-    TSharedPtr<FJsonObject> LookupError;
-    UBlackboardComponent* BB = FindLiveBlackboard(ActorName, LookupError);
-    if (!BB)
-    {
-        return LookupError;
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("actor_name"), ActorName);
-    Result->SetStringField(TEXT("component_name"), BB->GetName());
-    Result->SetBoolField(TEXT("has_valid_asset"), BB->HasValidAsset());
-    Result->SetNumberField(TEXT("num_keys"), BB->GetNumKeys());
-
-    if (UBlackboardData* BBData = BB->GetBlackboardAsset())
-    {
-        Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
-        Result->SetArrayField(TEXT("keys"), BehaviorTree_AllKeysToJson(BBData));
-    }
-
-    return mcp_common::MakeOkReply(Result);
-}
 
 // MCP:set_blackboard_value - Write one key of the running blackboard of an editor-world actor, converting the value string by key type. Not read back: set is always true, and an unparsable number or vector is written as 0. Runtime state only, nothing saved; editor world only, never PIE. Verify with get_blackboard_value.
 //   @param actor_name - Name of the actor whose blackboard to modify
@@ -926,68 +892,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardValue(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:get_blackboard_keys - List blackboard key definitions (name, type, instance_synced, base_class or enum subsettings): of the running blackboard of an editor-world actor when actor_name is given, else of the UBlackboardData asset at blackboard_path. Every key the blackboard holds is listed in key-ID order, the keys inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. Editor world only, never PIE. Neither param, an actor or asset not found, or an actor with no blackboard component is an error; a component with no asset gives an empty list. Current values: get_blackboard_data; asset name and parent: get_blackboard_keys_asset.
-//   @param actor_name - Object name or label of an editor-world actor whose live blackboard to read; takes precedence over blackboard_path.
-//   @param blackboard_path - Path to a UBlackboardData asset (alternative to actor_name)
-//   @returns { actor_name: string?, blackboard_asset: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }
-
-TSharedPtr<FJsonObject> HandleGetBlackboardKeys(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ActorName;
-    Params.IsValid() ? Params->TryGetStringField(TEXT("actor_name"), ActorName) : false;
-
-    // Allow blackboard-data-asset path as an alternative source for keys.
-    FString BBPath;
-    const bool bHasPath = Params.IsValid() && Params->TryGetStringField(TEXT("blackboard_path"), BBPath) && !BBPath.IsEmpty();
-
-    UBlackboardData* BBData = nullptr;
-
-    if (!ActorName.IsEmpty())
-    {
-        TSharedPtr<FJsonObject> LookupError;
-        UBlackboardComponent* BB = FindLiveBlackboard(ActorName, LookupError);
-        if (!BB)
-        {
-            return LookupError;
-        }
-        BBData = BB->GetBlackboardAsset();
-    }
-    else if (bHasPath)
-    {
-        BBData = mcp_common::LoadAssetOrSoftPath<UBlackboardData>(BBPath);
-        if (!BBData)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("BlackboardData asset not found: %s"), *BBPath));
-        }
-    }
-    else
-    {
-        return mcp_common::MakeErrorReply(TEXT("Provide 'actor_name' (running blackboard) or 'blackboard_path' (asset)"));
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    if (!ActorName.IsEmpty())
-    {
-        Result->SetStringField(TEXT("actor_name"), ActorName);
-    }
-
-    TArray<TSharedPtr<FJsonValue>> KeysArr;
-    if (BBData)
-    {
-        Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
-        KeysArr = BehaviorTree_AllKeysToJson(BBData);
-    }
-    Result->SetArrayField(TEXT("keys"), KeysArr);
-    Result->SetNumberField(TEXT("key_count"), KeysArr.Num());
-
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor), as entries with each key's name, type and current value as text. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; definitions only: get_blackboard_keys; component state: get_blackboard_component; write a value: set_blackboard_value.
-//   @param actor_name - Object name or label of the editor-world pawn or AIController whose running blackboard to dump; ignored when blackboard_path is given
+// MCP:get_blackboard_data - Dump a blackboard from its asset or from a running component. With blackboard_path, which wins when both are given, it reads the UBlackboardData asset: name, parent and key definitions (name, type, instance_synced, base class or enum subsettings). With actor_name, it reads the running UBlackboardComponent of that actor in the editor world, never PIE (its AIController blackboard, else one on the actor): the component's name, has_valid_asset and num_keys, the key definitions of its blackboard asset as keys, and entries with each key's name, type and current value as text; a component with no asset gives empty lists. Either way every key is listed in key-ID order, those inherited from parent blackboards first, each with inherited and defined_in naming the asset that declares it. Nothing is written. No parameter, an asset that does not load, an actor not found by object name or label, or no running blackboard is an error. One key: get_blackboard_value; write a value: set_blackboard_value; add a key: add_blackboard_key.
+//   @param actor_name - Object name or label of the editor-world pawn, its AIController, or an actor with its own UBlackboardComponent, whose running blackboard to dump (first match); ignored when blackboard_path is given
 //   @param blackboard_path - Content path of a UBlackboardData asset to read instead, e.g. "/Game/AI/BB_Enemy"; takes precedence over actor_name
-//   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, keys: [{ name, type, instance_synced, inherited, defined_in }]?, entries: [{ name, type, value, inherited, defined_in }]?, key_count: number }
+//   @returns { actor_name: string?, blackboard_asset: string?, name: string?, parent: string?, component_name: string? (actor mode), has_valid_asset: bool? (actor mode), num_keys: number? (actor mode), keys: [{ name, type, instance_synced, base_class?, enum_type?, enum_name?, inherited, defined_in }], entries: [{ name, type, value, inherited, defined_in }]? (actor mode), key_count: number }
 
 TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1006,7 +914,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
                 FString::Printf(TEXT("BlackboardData asset not found: %s"), *BBPath));
         }
 
-        return mcp_common::MakeOkReply(BehaviorTree_BlackboardAssetData(BBData, TEXT("blackboard_asset")));
+        return mcp_common::MakeOkReply(BehaviorTree_BlackboardAssetData(BBData));
     }
 
     // Live mode. actor_name is needed only here, so it is read as an optional param: blackboard_path alone is
@@ -1027,12 +935,17 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("actor_name"), ActorName);
+    Result->SetStringField(TEXT("component_name"), BB->GetName());
+    Result->SetBoolField(TEXT("has_valid_asset"), BB->HasValidAsset());
+    Result->SetNumberField(TEXT("num_keys"), BB->GetNumKeys());
 
+    // The key definitions (instance_synced, base class or enum subsettings), which entries do not carry.
     UBlackboardData* BBData = BB->GetBlackboardAsset();
     if (BBData)
     {
         Result->SetStringField(TEXT("blackboard_asset"), BBData->GetPathName());
     }
+    Result->SetArrayField(TEXT("keys"), BBData ? BehaviorTree_AllKeysToJson(BBData) : TArray<TSharedPtr<FJsonValue>>());
 
     // Every key the component holds, in key-ID order: the parent chain's keys first, then the asset's own.
     TArray<TSharedPtr<FJsonValue>> EntriesArr;
@@ -1061,7 +974,7 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
 // Asset authoring (Blackboard + BehaviorTree)
 //----------------------------------------------------------------------//
 
-// MCP:create_blackboard_data - Create an empty UBlackboardData asset, with no keys and no parent, at package_path/name (default folder /Game/AI), register it and save it; no undo step. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_keys_asset; bind it to a tree with create_behavior_tree.
+// MCP:create_blackboard_data - Create a UBlackboardData asset with no parent at package_path/name (default folder /Game/AI), register it and save it; no undo step. Its only key is the one the engine seeds every new blackboard with, the SelfActor Object key (while AISystem bAddBlackboardSelfKey is on, the default), counted in key_count. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_data; bind it to a tree with create_behavior_tree.
 //   @param name - Asset name (e.g. "BB_Enemy").
 //   @param package_path - Target /Game package path (optional, default "/Game/AI")
 //   @returns { name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string?, message: string? }
@@ -1125,7 +1038,7 @@ TSharedPtr<FJsonObject> HandleCreateBlackboardData(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_blackboard_data"), SaveError);
 }
 
-// MCP:add_blackboard_key - Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_keys_asset; create the asset: create_blackboard_data.
+// MCP:add_blackboard_key - Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_data; create the asset: create_blackboard_data.
 //   @param blackboard_path - Path to the UBlackboardData asset.
 //   @param key_name - New key name (must be unique on the asset).
 //   @param key_type - One of Bool|Int|Float|Vector|Rotator|String|Name|Object|Class|Enum.
@@ -1361,28 +1274,6 @@ TSharedPtr<FJsonObject> HandleRemoveBlackboardKey(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("remove_blackboard_key"), SaveError);
 }
 
-// MCP:get_blackboard_keys_asset - Read the key definitions of a UBlackboardData asset found by content path, with no live component needed: its name, its parent blackboard when it has one, and every key it holds in key-ID order, the keys inherited from the parent chain first. Each key has name, type, instance_synced, the base class or enum subsettings, inherited, and defined_in naming the asset that declares it; key_count counts them all. Read-only, nothing is written. A missing path, or one that does not load as a blackboard, is an error. A running blackboard: get_blackboard_keys or get_blackboard_data; add a key: add_blackboard_key; remove one: remove_blackboard_key.
-//   @param blackboard_path - Path to the UBlackboardData asset.
-//   @returns { blackboard_path: string, name: string, parent: string?, keys: [{ name: string, type: string, instance_synced: bool, inherited: bool, defined_in: string }], key_count: number }
-
-TSharedPtr<FJsonObject> HandleGetBlackboardKeysAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BBPath;
-    if (!Params.IsValid() || !Params->TryGetStringField(TEXT("blackboard_path"), BBPath) || BBPath.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'blackboard_path'"));
-    }
-
-    UBlackboardData* BBData = mcp_common::LoadAssetOrSoftPath<UBlackboardData>(BBPath);
-    if (!BBData)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("BlackboardData asset not found: %s"), *BBPath));
-    }
-
-    return mcp_common::MakeOkReply(BehaviorTree_BlackboardAssetData(BBData, TEXT("blackboard_path")));
-}
-
 // MCP:set_blackboard_key_subsettings - Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type. A value already in place is a no-op: already_set=true and saved=false, nothing saved.
 //   @param blackboard_path - Path to the UBlackboardData asset.
 //   @param key_name - Name of the existing key to constrain.
@@ -1570,7 +1461,7 @@ TSharedPtr<FJsonObject> HandleSetBlackboardKeySubsettings(const TSharedPtr<FJson
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_behavior_tree - Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_bt_composite_child and add_bt_task_child.
+// MCP:create_behavior_tree - Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_behavior_tree_child.
 //   @param name - Asset name (e.g. "BT_Enemy").
 //   @param package_path - Target /Game package path (optional, default "/Game/AI")
 //   @param blackboard_path - Path to a UBlackboardData asset to bind to the new BT (optional)
@@ -1761,24 +1652,29 @@ TSharedPtr<FJsonObject> HandleSetBehaviorTreeRoot(const TSharedPtr<FJsonObject>&
 // ===========================================================================
 namespace
 {
-    // Shared implementation for add_bt_composite_child / add_bt_task_child.
-    TSharedPtr<FJsonObject> AddBTChildImpl(const TSharedPtr<FJsonObject>& Params, bool bComposite)
+    // add_behavior_tree_child: a composite child when 'composite' is given, a task child when 'task_class' is.
+    TSharedPtr<FJsonObject> AddBTChildImpl(const TSharedPtr<FJsonObject>& Params)
     {
-        const TCHAR* ClassParam = bComposite ? TEXT("composite") : TEXT("task_class");
-        UClass* Base = bComposite ? UBTCompositeNode::StaticClass() : UBTTaskNode::StaticClass();
-        const TCHAR* Prefix = bComposite ? TEXT("BTComposite_") : TEXT("BTTask_");
-
         FString BTPath;
         if (!Params.IsValid() || !Params->TryGetStringField(TEXT("behavior_tree_path"), BTPath) || BTPath.IsEmpty())
         {
             return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'behavior_tree_path'"));
         }
-        FString NodeClassStr;
-        if (!Params->TryGetStringField(ClassParam, NodeClassStr) || NodeClassStr.IsEmpty())
+        // Exactly one of the two class params: it decides the kind of the child edge.
+        FString CompositeStr;
+        Params->TryGetStringField(TEXT("composite"), CompositeStr);
+        FString TaskClassStr;
+        Params->TryGetStringField(TEXT("task_class"), TaskClassStr);
+        if (CompositeStr.IsEmpty() == TaskClassStr.IsEmpty())
         {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Missing required parameter '%s'"), ClassParam));
+            return mcp_common::MakeErrorReply(CompositeStr.IsEmpty()
+                ? TEXT("Provide 'composite' (a composite child, e.g. Selector) or 'task_class' (a task child, e.g. Wait)")
+                : TEXT("Provide only one of 'composite' and 'task_class': a child is either a composite or a task"));
         }
+        const bool bComposite = !CompositeStr.IsEmpty();
+        const FString NodeClassStr = bComposite ? CompositeStr : TaskClassStr;
+        UClass* Base = bComposite ? UBTCompositeNode::StaticClass() : UBTTaskNode::StaticClass();
+        const TCHAR* Prefix = bComposite ? TEXT("BTComposite_") : TEXT("BTTask_");
         FString ParentName;
         Params->TryGetStringField(TEXT("parent_name"), ParentName);
         FString ChildName;
@@ -1857,52 +1753,64 @@ namespace
     }
 }
 
-// MCP:add_bt_composite_child - Add a child composite (Selector/Sequence/SimpleParallel) under a BehaviorTree composite.  The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent. The returned child_name is how you address this composite as a parent for further children.
+// MCP:add_behavior_tree_child - Add a child under a BehaviorTree composite: a composite (Selector/Sequence/SimpleParallel) when composite is given, or a leaf task (Wait/MoveTo/PlaySound/RunBehavior/...) when task_class is given; exactly one of the two. The child is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by child_name within the parent, whatever its kind. The returned child_name is how you address a composite as a parent for further children.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
-//   @param composite [string!] - Concrete composite class: "Selector" | "Sequence" | "SimpleParallel" (or a BTComposite_* class name).
+//   @param composite [string] - Concrete composite class: "Selector" | "Sequence" | "SimpleParallel" (or a BTComposite_* class name). Give this or task_class, not both.
+//   @param task_class [string] - Concrete task class: "Wait" | "MoveTo" | "PlaySound" | "RunBehavior" | "FinishWithResult" (or a BTTask_* class name). Give this or composite, not both.
 //   @param parent_name - Optional parent composite name (a child_name from a prior add); "Root" or omitted targets the RootNode.
-//   @param child_name - Optional stable name for the new node (its identity for idempotency/addressing); defaults to the composite type.
-//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: string, already_exists: bool, child_count: int, saved: bool, save_error?: string }
+//   @param child_name - Optional stable name for the new node (its identity for idempotency/addressing); defaults to the class type without its BTComposite_/BTTask_ prefix.
+//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: "composite"|"task", already_exists: bool, child_count: int, saved: bool, save_error?: string }
 
-TSharedPtr<FJsonObject> HandleAddBTCompositeChild(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> HandleAddBehaviorTreeChild(const TSharedPtr<FJsonObject>& Params)
 {
-    return AddBTChildImpl(Params, /*bComposite=*/true);
-}
-
-// MCP:add_bt_task_child - Add a leaf task node (Wait/MoveTo/PlaySound/RunBehavior/...) under a BehaviorTree composite.  The task is appended to the parent's Children (array order = execution order). Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load. Idempotent by child_name within the parent.
-//   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
-//   @param task_class [string!] - Concrete task class: "Wait" | "MoveTo" | "PlaySound" | "RunBehavior" | "FinishWithResult" (or a BTTask_* class name).
-//   @param parent_name - Optional parent composite name; "Root" or omitted targets the RootNode.
-//   @param child_name - Optional stable name for the new node; defaults to the task type.
-//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_class: string, child_kind: string, already_exists: bool, child_count: int, saved: bool, save_error?: string }
-
-TSharedPtr<FJsonObject> HandleAddBTTaskChild(const TSharedPtr<FJsonObject>& Params)
-{
-    return AddBTChildImpl(Params, /*bComposite=*/false);
+    return AddBTChildImpl(Params);
 }
 
 // ===========================================================================
-// Inverse CRUD of add_bt_composite_child / add_bt_task_child. Removes one entry
-// from the parent composite's Children (a TArray<FBTCompositeChild>) — the exact
-// array the add_* twins append to. Addressing mirrors the add path: parent_name
-// (empty/"Root" -> RootNode) resolves the composite; the child is then located by
-// its stable child_name (a returned identity from a prior add) or by index. Only
-// the matching KIND is removed (bComposite -> ChildComposite set; !bComposite ->
-// ChildTask set) so remove_bt_task_child never drops a composite edge and vice
-// versa. Idempotent: a missing child reports removed:false / already_absent:true.
+// Inverse CRUD of add_behavior_tree_child. Removes one entry from the parent
+// composite's Children (a TArray<FBTCompositeChild>) — the exact array the add
+// appends to. Addressing mirrors the add path: parent_name (empty/"Root" ->
+// RootNode) resolves the composite; the child is then located by its stable
+// child_name (a returned identity from a prior add) or by index. An optional kind
+// (composite -> ChildComposite set; task -> ChildTask set) restricts the match to
+// that edge kind; omitted, an edge of either kind matches.
+// Idempotent: a missing child reports removed:false / already_absent:true.
 // The freed node is a plain UObject (not a UEdGraphNode) held only by the dropped
 // FBTCompositeChild wrapper, so RemoveAt is sufficient — GC reclaims it, mirroring
-// the data-only NewObject+.Add of the add twins (no DestroyNode to mirror).
+// the data-only NewObject+.Add of the add (no DestroyNode to mirror).
 // ===========================================================================
 namespace
 {
-    // Shared implementation for remove_bt_composite_child / remove_bt_task_child.
-    TSharedPtr<FJsonObject> RemoveBTChildImpl(const TSharedPtr<FJsonObject>& Params, bool bComposite)
+    // The node an edge holds when it is of the wanted kind (any kind when KindFilter is empty), else null.
+    const UBTNode* EdgeNodeOfKind(const FBTCompositeChild& Edge, const FString& KindFilter)
+    {
+        if (Edge.ChildComposite && (KindFilter.IsEmpty() || KindFilter == TEXT("composite")))
+        {
+            return Edge.ChildComposite;
+        }
+        if (Edge.ChildTask && (KindFilter.IsEmpty() || KindFilter == TEXT("task")))
+        {
+            return Edge.ChildTask;
+        }
+        return nullptr;
+    }
+
+    // remove_behavior_tree_child.
+    TSharedPtr<FJsonObject> RemoveBTChildImpl(const TSharedPtr<FJsonObject>& Params)
     {
         FString BTPath;
         if (!Params.IsValid() || !Params->TryGetStringField(TEXT("behavior_tree_path"), BTPath) || BTPath.IsEmpty())
         {
             return mcp_common::MakeErrorReply(TEXT("Missing required parameter 'behavior_tree_path'"));
+        }
+        // Optional edge kind: "composite" or "task" (any case); omitted, either kind matches.
+        FString KindFilter;
+        Params->TryGetStringField(TEXT("kind"), KindFilter);
+        KindFilter = KindFilter.ToLower();
+        if (!KindFilter.IsEmpty() && KindFilter != TEXT("composite") && KindFilter != TEXT("task"))
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("kind must be 'composite' or 'task' (or omitted for either), got '%s'"), *KindFilter));
         }
         FString ChildName;
         Params->TryGetStringField(TEXT("child_name"), ChildName);
@@ -1924,13 +1832,12 @@ namespace
         }
 
         const FString ResolvedParentName = (Parent == BTAsset->RootNode) ? FString(TEXT("Root")) : Parent->GetNodeName();
-        const TCHAR* KindStr = bComposite ? TEXT("composite") : TEXT("task");
 
-        // Locate the matching child edge. By index the edge kind must match; by name we
-        // scan only edges of the requested kind so remove_bt_composite_child and
-        // remove_bt_task_child stay non-overlapping.
+        // Locate the matching child edge. By index the edge kind must match kind when it is given;
+        // by name only edges of that kind are scanned, so a node of the other kind is untouched.
         int32 FoundIndex = INDEX_NONE;
         FString FoundName;
+        FString FoundKind;
         if (ChildIndex >= 0)
         {
             if (!Parent->Children.IsValidIndex(ChildIndex))
@@ -1939,29 +1846,27 @@ namespace
                     FString::Printf(TEXT("index %d out of range (parent '%s' has %d children)"), ChildIndex, *ResolvedParentName, Parent->Children.Num()));
             }
             const FBTCompositeChild& Edge = Parent->Children[ChildIndex];
-            const UBTNode* AtIdx = bComposite
-                ? static_cast<const UBTNode*>(Edge.ChildComposite)
-                : static_cast<const UBTNode*>(Edge.ChildTask);
+            const UBTNode* AtIdx = EdgeNodeOfKind(Edge, KindFilter);
             if (!AtIdx)
             {
-                return mcp_common::MakeErrorReply(
-                    FString::Printf(TEXT("Child at index %d under '%s' is not a %s"), ChildIndex, *ResolvedParentName, KindStr));
+                return mcp_common::MakeErrorReply(KindFilter.IsEmpty()
+                    ? FString::Printf(TEXT("Child at index %d under '%s' holds no node"), ChildIndex, *ResolvedParentName)
+                    : FString::Printf(TEXT("Child at index %d under '%s' is not a %s"), ChildIndex, *ResolvedParentName, *KindFilter));
             }
             FoundIndex = ChildIndex;
             FoundName = AtIdx->GetNodeName();
+            FoundKind = AtIdx->IsA<UBTCompositeNode>() ? TEXT("composite") : TEXT("task");
         }
         else
         {
             for (int32 i = 0; i < Parent->Children.Num(); ++i)
             {
-                const FBTCompositeChild& Edge = Parent->Children[i];
-                const UBTNode* Node = bComposite
-                    ? static_cast<const UBTNode*>(Edge.ChildComposite)
-                    : static_cast<const UBTNode*>(Edge.ChildTask);
+                const UBTNode* Node = EdgeNodeOfKind(Parent->Children[i], KindFilter);
                 if (Node && Node->GetNodeName() == ChildName)
                 {
                     FoundIndex = i;
                     FoundName = ChildName;
+                    FoundKind = Node->IsA<UBTCompositeNode>() ? TEXT("composite") : TEXT("task");
                     break;
                 }
             }
@@ -1971,7 +1876,10 @@ namespace
         if (FoundIndex == INDEX_NONE)
         {
             TSharedPtr<FJsonObject> R = BehaviorTree_NodeReply(BTAsset, ResolvedParentName, TEXT("child_name"), ChildName);
-            R->SetStringField(TEXT("child_kind"), KindStr);
+            if (!KindFilter.IsEmpty())
+            {
+                R->SetStringField(TEXT("child_kind"), KindFilter);
+            }
             R->SetBoolField(TEXT("removed"), false);
             R->SetBoolField(TEXT("already_absent"), true);
             R->SetNumberField(TEXT("child_count"), Parent->Children.Num());
@@ -1987,7 +1895,7 @@ namespace
         const bool bSaved = mcp_common::SaveAssetPackage(Package, BTAsset, SaveError);
 
         TSharedPtr<FJsonObject> R = BehaviorTree_NodeReply(BTAsset, ResolvedParentName, TEXT("child_name"), FoundName);
-        R->SetStringField(TEXT("child_kind"), KindStr);
+        R->SetStringField(TEXT("child_kind"), FoundKind);
         R->SetBoolField(TEXT("removed"), true);
         R->SetBoolField(TEXT("already_absent"), false);
         R->SetNumberField(TEXT("child_count"), Parent->Children.Num());
@@ -1996,28 +1904,17 @@ namespace
     }
 }
 
-// MCP:remove_bt_composite_child - Remove a child composite (Selector/Sequence/...) from a BehaviorTree composite.  Inverse of add_bt_composite_child: drops the matching entry from the parent's Children array. Only composite child-edges are considered, so a task with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
+// MCP:remove_behavior_tree_child - Remove a child, composite or task, from a BehaviorTree composite.  Inverse of add_behavior_tree_child: drops the matching entry from the parent's Children array and saves. With kind, only child-edges of that kind are considered (a node of the other kind with the same name is untouched, and an index pointing at the other kind is an error); omitted, an edge of either kind matches. child_kind reports the kind of the edge removed. Idempotent: a missing child returns removed:false / already_absent:true.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
-//   @param child_name - Name of the composite child to remove (a child_name from a prior add_bt_composite_child); provide this or 'index'.
-//   @param index [number] - Alternative to child_name: 0-based position in the parent's Children array (the edge at that index must be a composite).
+//   @param child_name - Name of the child to remove (a child_name from a prior add_behavior_tree_child); provide this or 'index'.
+//   @param index [number] - Alternative to child_name: 0-based position in the parent's Children array.
+//   @param kind [string] - Optional edge kind to match: "composite" or "task"; omitted matches either. Any other value is an error.
 //   @param parent_name - Optional parent composite name owning the child; "Root" or omitted targets the RootNode.
-//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_kind: string, removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }
+//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_kind: "composite"|"task" (the edge removed; the requested kind, or absent, when nothing matched), removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }
 
-TSharedPtr<FJsonObject> HandleRemoveBTCompositeChild(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> HandleRemoveBehaviorTreeChild(const TSharedPtr<FJsonObject>& Params)
 {
-    return RemoveBTChildImpl(Params, /*bComposite=*/true);
-}
-
-// MCP:remove_bt_task_child - Remove a leaf task node (Wait/MoveTo/...) from a BehaviorTree composite.  Inverse of add_bt_task_child: drops the matching entry from the parent's Children array. Only task child-edges are considered, so a composite with the same name is untouched. Idempotent: a missing child returns removed:false / already_absent:true.
-//   @param behavior_tree_path - Path to the UBehaviorTree asset.
-//   @param child_name - Name of the task child to remove (a child_name from a prior add_bt_task_child); provide this or 'index'.
-//   @param index [number] - Alternative to child_name: 0-based position in the parent's Children array (the edge at that index must be a task).
-//   @param parent_name - Optional parent composite name owning the child; "Root" or omitted targets the RootNode.
-//   @returns { behavior_tree_path: string, parent_name: string, child_name: string, child_kind: string, removed: bool, already_absent: bool, child_count: int, saved: bool, save_error?: string }
-
-TSharedPtr<FJsonObject> HandleRemoveBTTaskChild(const TSharedPtr<FJsonObject>& Params)
-{
-    return RemoveBTChildImpl(Params, /*bComposite=*/false);
+    return RemoveBTChildImpl(Params);
 }
 
 // ===========================================================================
@@ -2029,9 +1926,9 @@ TSharedPtr<FJsonObject> HandleRemoveBTTaskChild(const TSharedPtr<FJsonObject>& P
 // while ONE composite is active (UBTCompositeNode::Services). Idempotent by NodeName.
 // ===========================================================================
 
-// MCP:add_bt_decorator - Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge.
+// MCP:add_behavior_tree_decorator - Attach a decorator (execution condition) to a specific child-edge of a BehaviorTree composite.  The decorator is appended to that child's Decorators array and gates whether the child may run. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by decorator_name within the child-edge.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set, with the target child added).
-//   @param child_name [string!] - Name of the existing child (a child_name from a prior add_bt_task_child/add_bt_composite_child) whose edge the decorator gates.
+//   @param child_name [string!] - Name of the existing child (a child_name from a prior add_behavior_tree_child) whose edge the decorator gates.
 //   @param decorator_class [string!] - Concrete decorator class: "Cooldown" | "Loop" | "TimeLimit" | "Blackboard" | ... (or a BTDecorator_* class name).
 //   @param parent_name - Optional parent composite name owning the child-edge; "Root" or omitted targets the RootNode.
 //   @param decorator_name - Optional stable name for the new decorator (its identity for idempotency); defaults to the decorator type.
@@ -2070,7 +1967,7 @@ TSharedPtr<FJsonObject> HandleAddBTDecorator(const TSharedPtr<FJsonObject>& Para
     if (!Edge)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Child '%s' not found under parent composite (add it via add_bt_task_child/add_bt_composite_child first)"), *ChildName));
+            FString::Printf(TEXT("Child '%s' not found under parent composite (add it via add_behavior_tree_child first)"), *ChildName));
     }
 
     UClass* DecoratorClass = ResolveBTNodeClass(DecoratorClassStr, UBTDecorator::StaticClass(), TEXT("BTDecorator_"));
@@ -2124,13 +2021,13 @@ TSharedPtr<FJsonObject> HandleAddBTDecorator(const TSharedPtr<FJsonObject>& Para
     R->SetStringField(TEXT("decorator_class"), DecoratorClass->GetName());
     R->SetBoolField(TEXT("already_exists"), false);
     R->SetNumberField(TEXT("decorator_count"), Edge->Decorators.Num());
-    return mcp_common::MakeSavedReply(R, bSaved, TEXT("add_bt_decorator"), SaveError);
+    return mcp_common::MakeSavedReply(R, bSaved, TEXT("add_behavior_tree_decorator"), SaveError);
 }
 
-// MCP:remove_bt_decorator - Remove a decorator (execution condition) from a specific child-edge of a BehaviorTree composite.  Inverse of add_bt_decorator: drops the matching entry from that child's Decorators array (FBTCompositeChild::Decorators). Idempotent: a missing decorator returns removed:false / already_absent:true.
+// MCP:remove_behavior_tree_decorator - Remove a decorator (execution condition) from a specific child-edge of a BehaviorTree composite.  Inverse of add_behavior_tree_decorator: drops the matching entry from that child's Decorators array (FBTCompositeChild::Decorators). Idempotent: a missing decorator returns removed:false / already_absent:true.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
 //   @param child_name [string!] - Name of the existing child (a child_name from a prior add) whose edge the decorator gates.
-//   @param decorator_name - Name of the decorator to remove (a decorator_name from a prior add_bt_decorator); provide this or 'index'.
+//   @param decorator_name - Name of the decorator to remove (a decorator_name from a prior add_behavior_tree_decorator); provide this or 'index'.
 //   @param index [number] - Alternative to decorator_name: 0-based position in the child-edge's Decorators array.
 //   @param parent_name - Optional parent composite name owning the child-edge; "Root" or omitted targets the RootNode.
 //   @returns { behavior_tree_path: string, parent_name: string, child_name: string, decorator_name: string, removed: bool, already_absent: bool, decorator_count: int, saved: bool, save_error?: string }
@@ -2209,10 +2106,10 @@ TSharedPtr<FJsonObject> HandleRemoveBTDecorator(const TSharedPtr<FJsonObject>& P
     R->SetBoolField(TEXT("removed"), true);
     R->SetBoolField(TEXT("already_absent"), false);
     R->SetNumberField(TEXT("decorator_count"), Edge->Decorators.Num());
-    return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_bt_decorator"), SaveError);
+    return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_behavior_tree_decorator"), SaveError);
 }
 
-// MCP:add_bt_service - Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite.
+// MCP:add_behavior_tree_service - Attach a service (background tick) to a BehaviorTree composite.  The service is appended to the composite's Services array and ticks while that composite branch is active. Authoring is data-only: ParentNode/ExecutionIndex are assigned by the BT runtime at load (run_behavior_tree). Idempotent by service_name within the composite.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset (its RootNode must already be set via set_behavior_tree_root).
 //   @param service_class [string!] - Concrete service class: "DefaultFocus" | "RunEQS" | ... (or a BTService_* class name).
 //   @param parent_name - Optional composite name to attach the service to; "Root" or omitted targets the RootNode.
@@ -2292,12 +2189,12 @@ TSharedPtr<FJsonObject> HandleAddBTService(const TSharedPtr<FJsonObject>& Params
     R->SetStringField(TEXT("service_class"), ServiceClass->GetName());
     R->SetBoolField(TEXT("already_exists"), false);
     R->SetNumberField(TEXT("service_count"), Composite->Services.Num());
-    return mcp_common::MakeSavedReply(R, bSaved, TEXT("add_bt_service"), SaveError);
+    return mcp_common::MakeSavedReply(R, bSaved, TEXT("add_behavior_tree_service"), SaveError);
 }
 
-// MCP:remove_bt_service - Remove a service (background tick) from a BehaviorTree composite.  Inverse of add_bt_service: drops the matching entry from the composite's Services array (UBTCompositeNode::Services). Idempotent: a missing service returns removed:false / already_absent:true.
+// MCP:remove_behavior_tree_service - Remove a service (background tick) from a BehaviorTree composite.  Inverse of add_behavior_tree_service: drops the matching entry from the composite's Services array (UBTCompositeNode::Services). Idempotent: a missing service returns removed:false / already_absent:true.
 //   @param behavior_tree_path - Path to the UBehaviorTree asset.
-//   @param service_name - Name of the service to remove (a service_name from a prior add_bt_service); provide this or 'index'.
+//   @param service_name - Name of the service to remove (a service_name from a prior add_behavior_tree_service); provide this or 'index'.
 //   @param index [number] - Alternative to service_name: 0-based position in the composite's Services array.
 //   @param parent_name - Optional composite name the service is attached to; "Root" or omitted targets the RootNode.
 //   @returns { behavior_tree_path: string, parent_name: string, service_name: string, removed: bool, already_absent: bool, service_count: int, saved: bool, save_error?: string }
@@ -2362,7 +2259,7 @@ TSharedPtr<FJsonObject> HandleRemoveBTService(const TSharedPtr<FJsonObject>& Par
     R->SetBoolField(TEXT("removed"), true);
     R->SetBoolField(TEXT("already_absent"), false);
     R->SetNumberField(TEXT("service_count"), Composite->Services.Num());
-    return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_bt_service"), SaveError);
+    return mcp_common::MakeSavedReply(R, bSaved, TEXT("remove_behavior_tree_service"), SaveError);
 }
 
 // ============================================================================
@@ -2461,25 +2358,20 @@ TSharedPtr<FJsonObject> HandleGetBehaviorTreeStatus(const TSharedPtr<FJsonObject
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_blackboard_key"), &HandleAddBlackboardKey },
-    { TEXT("add_bt_composite_child"), &HandleAddBTCompositeChild },
-    { TEXT("add_bt_decorator"), &HandleAddBTDecorator },
-    { TEXT("add_bt_service"), &HandleAddBTService },
-    { TEXT("add_bt_task_child"), &HandleAddBTTaskChild },
+    { TEXT("add_behavior_tree_child"), &HandleAddBehaviorTreeChild },
+    { TEXT("add_behavior_tree_decorator"), &HandleAddBTDecorator },
+    { TEXT("add_behavior_tree_service"), &HandleAddBTService },
     { TEXT("create_behavior_tree"), &HandleCreateBehaviorTree },
     { TEXT("create_blackboard_data"), &HandleCreateBlackboardData },
     { TEXT("get_behavior_tree_info"), &HandleGetBehaviorTreeInfo },
     { TEXT("get_behavior_tree_status"), &HandleGetBehaviorTreeStatus },
-    { TEXT("get_blackboard_component"), &HandleGetBlackboardComponent },
     { TEXT("get_blackboard_data"), &HandleGetBlackboardData },
-    { TEXT("get_blackboard_keys"), &HandleGetBlackboardKeys },
-    { TEXT("get_blackboard_keys_asset"), &HandleGetBlackboardKeysAsset },
     { TEXT("get_blackboard_value"), &HandleGetBlackboardValue },
     { TEXT("pause_behavior_tree"), &HandlePauseBehaviorTree },
     { TEXT("remove_blackboard_key"), &HandleRemoveBlackboardKey },
-    { TEXT("remove_bt_composite_child"), &HandleRemoveBTCompositeChild },
-    { TEXT("remove_bt_decorator"), &HandleRemoveBTDecorator },
-    { TEXT("remove_bt_service"), &HandleRemoveBTService },
-    { TEXT("remove_bt_task_child"), &HandleRemoveBTTaskChild },
+    { TEXT("remove_behavior_tree_child"), &HandleRemoveBehaviorTreeChild },
+    { TEXT("remove_behavior_tree_decorator"), &HandleRemoveBTDecorator },
+    { TEXT("remove_behavior_tree_service"), &HandleRemoveBTService },
     { TEXT("restart_behavior_tree"), &HandleRestartBehaviorTree },
     { TEXT("resume_behavior_tree"), &HandleResumeBehaviorTree },
     { TEXT("run_behavior_tree"), &HandleRunBehaviorTree },

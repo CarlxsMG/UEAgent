@@ -146,7 +146,7 @@ TSharedPtr<FJsonObject> HandleSetAssetMetadataTag(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_asset_metadata_tag"));
 }
 
-// MCP:get_asset_metadata_tags - Reads all editor metadata tags (UMetaData) of an asset.  Wraps UEditorAssetLibrary::GetMetadataTagValues and returns each tag as a {key, value} pair. (Distinct from get_asset_metadata, which reads asset registry data instead of the asset's stored metadata tags.)
+// MCP:get_asset_metadata_tags - Reads all editor metadata tags (UMetaData) of an asset.  Wraps UEditorAssetLibrary::GetMetadataTagValues and returns each tag as a {key, value} pair. (Distinct from get_asset_by_name with include_tags, which reads Asset Registry tags instead of the asset's stored metadata tags.)
 //   @param asset_path - /Game path to the asset.
 //   @returns { asset_path: string, tags: [{ key: string, value: string }], tag_count: number }
 

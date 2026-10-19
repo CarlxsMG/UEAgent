@@ -369,13 +369,16 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableEntry(const TSharedPtr<FJsonObjec
 // --------------------------------------------------------------------------- //
 // get_string_table_entries
 // --------------------------------------------------------------------------- //
-// MCP:get_string_table_entries - Lists every entry of a UStringTable asset without changing it. Returns string_table_name, string_table_id, namespace, count and entries, each with key, source (the source string) and its metadata as an id to value object with metadata_count. Edit entries with set_string_table_entry.
+// MCP:get_string_table_entries - Lists every entry of a UStringTable asset, or with key only that entry, without changing it. Returns string_table_name, string_table_id, namespace, count and entries, each with key, source (the source string) and its metadata (FStringTable::EnumerateMetaData) as an id to value object with metadata_count; with key, entry_exists says whether the table has it (a missing key is a success with entry_exists=false and no entries). Edit entries with set_string_table_entry and metadata with set_string_table_metadata.
 //   @param string_table_path - Full asset path to the UStringTable
-//   @returns { string_table_path: string, string_table_name: string, string_table_id: string, namespace: string, entries: [object], count: int }
+//   @param key - Optional entry key: list only that entry and report entry_exists
+//   @returns { string_table_path: string, string_table_name: string, string_table_id: string, namespace: string, entries: [{ key: string, source: string, metadata: object, metadata_count: int }], count: int, key?: string, entry_exists?: bool }
 TSharedPtr<FJsonObject> HandleGetStringTableEntries(const TSharedPtr<FJsonObject>& Params)
 {
     FString TablePath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("string_table_path"), TablePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    FString FilterKey;
+    const bool bHasKey = Params->TryGetStringField(TEXT("key"), FilterKey);
 
     UStringTable* Table = LoadStringTableAt(TablePath);
     if (!Table)
@@ -384,21 +387,44 @@ TSharedPtr<FJsonObject> HandleGetStringTableEntries(const TSharedPtr<FJsonObject
     }
 
     TArray<TSharedPtr<FJsonValue>> EntriesArr;
-    Table->GetStringTable()->EnumerateSourceStrings(
-        [&EntriesArr, Table](const FString& Key, const FString& Source) -> bool
+    auto AddEntry = [&EntriesArr, Table](const FString& Key, const FString& Source)
+    {
+        TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
+        EntryObj->SetStringField(TEXT("key"), Key);
+        EntryObj->SetStringField(TEXT("source"), Source);
+        // Per-entry metadata.
+        int32 MetaCount = 0;
+        EntryObj->SetObjectField(TEXT("metadata"), EnumerateEntryMetadata(Table, Key, MetaCount));
+        EntryObj->SetNumberField(TEXT("metadata_count"), MetaCount);
+        EntriesArr.Add(MakeShared<FJsonValueObject>(EntryObj));
+    };
+
+    bool bEntryExists = false;
+    if (bHasKey)
+    {
+        FString Source;
+        bEntryExists = Table->GetStringTable()->GetSourceString(FilterKey, Source);
+        if (bEntryExists)
         {
-            TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
-            EntryObj->SetStringField(TEXT("key"), Key);
-            EntryObj->SetStringField(TEXT("source"), Source);
-            // Per-entry metadata.
-            int32 MetaCount = 0;
-            EntryObj->SetObjectField(TEXT("metadata"), EnumerateEntryMetadata(Table, Key, MetaCount));
-            EntryObj->SetNumberField(TEXT("metadata_count"), MetaCount);
-            EntriesArr.Add(MakeShared<FJsonValueObject>(EntryObj));
-            return true; // continue enumeration
-        });
+            AddEntry(FilterKey, Source);
+        }
+    }
+    else
+    {
+        Table->GetStringTable()->EnumerateSourceStrings(
+            [&AddEntry](const FString& Key, const FString& Source) -> bool
+            {
+                AddEntry(Key, Source);
+                return true; // continue enumeration
+            });
+    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    if (bHasKey)
+    {
+        ResultObj->SetStringField(TEXT("key"), FilterKey);
+        ResultObj->SetBoolField(TEXT("entry_exists"), bEntryExists);
+    }
     ResultObj->SetStringField(TEXT("string_table_path"), TablePath);
     ResultObj->SetStringField(TEXT("string_table_name"), Table->GetName());
     ResultObj->SetStringField(TEXT("string_table_id"), Table->GetStringTableId().ToString());
@@ -471,42 +497,9 @@ TSharedPtr<FJsonObject> HandleSetStringTableMetadata(const TSharedPtr<FJsonObjec
 }
 
 // --------------------------------------------------------------------------- //
-// get_string_table_metadata
-// --------------------------------------------------------------------------- //
-// MCP:get_string_table_metadata - Read all metadata (id->value) attached to a UStringTable entry (FStringTable::EnumerateMetaData).  The reader that pairs with set_string_table_metadata.
-//   @param string_table_path - Full asset path to the UStringTable.
-//   @param key - Entry key to read metadata from.
-//   @returns { string_table_path: string, key: string, entry_exists: bool, metadata: object, metadata_count: int, namespace: string }
-TSharedPtr<FJsonObject> HandleGetStringTableMetadata(const TSharedPtr<FJsonObject>& Params)
-{
-    FString TablePath, Key;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("string_table_path"), TablePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("key"), Key, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    UStringTable* Table = LoadStringTableAt(TablePath);
-    if (!Table)
-    {
-        return StringTable_NotFound(TablePath);
-    }
-
-    FString SourceValue;
-    const bool bEntryExists = Table->GetStringTable()->GetSourceString(Key, SourceValue);
-
-    int32 MetaCount = 0;
-    TSharedPtr<FJsonObject> Meta = EnumerateEntryMetadata(Table, Key, MetaCount);
-
-    TSharedPtr<FJsonObject> ResultObj = StringTable_EntryReply(TablePath, Key);
-    ResultObj->SetBoolField(TEXT("entry_exists"), bEntryExists);
-    ResultObj->SetObjectField(TEXT("metadata"), Meta);
-    ResultObj->SetNumberField(TEXT("metadata_count"), MetaCount);
-    ResultObj->SetStringField(TEXT("namespace"), Table->GetStringTable()->GetNamespace());
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// --------------------------------------------------------------------------- //
 // remove_string_table_metadata
 // --------------------------------------------------------------------------- //
-// MCP:remove_string_table_metadata - Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). Idempotent (no-op if the id is absent). Pairs with set/get_string_table_metadata.
+// MCP:remove_string_table_metadata - Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). Idempotent (no-op if the id is absent). Pairs with set_string_table_metadata; read it back with get_string_table_entries.
 //   @param string_table_path - Full asset path to the UStringTable.
 //   @param key - Entry key the metadata is attached to.
 //   @param metadata_id - Metadata id (an FName, e.g. 'Comment') to remove.
@@ -564,24 +557,7 @@ TSharedPtr<FJsonObject> HandleRemoveStringTableMetadata(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_string_table_metadata"), SaveError);
 }
 
-// ---------------------------------------------------------------------------
-// get_active_culture
-// ---------------------------------------------------------------------------
 // Culture read/write — FInternationalization, Core module.
-
-// MCP:get_active_culture - Read the editor's current active culture/locale (FInternationalization::GetCurrentCulture).
-//   @returns { culture_name: string, display_name: string, native_name: string, iso_two_letter_name: string }
-TSharedPtr<FJsonObject> HandleGetActiveCulture(const TSharedPtr<FJsonObject>& Params)
-{
-    const FCultureRef Culture = FInternationalization::Get().GetCurrentCulture();
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("culture_name"), Culture->GetName());
-    ResultObj->SetStringField(TEXT("display_name"), Culture->GetDisplayName());
-    ResultObj->SetStringField(TEXT("native_name"), Culture->GetNativeName());
-    ResultObj->SetStringField(TEXT("iso_two_letter_name"), Culture->GetTwoLetterISOLanguageName());
-    return mcp_common::MakeOkReply(ResultObj);
-}
 
 // ---------------------------------------------------------------------------
 // set_active_culture
@@ -613,19 +589,23 @@ TSharedPtr<FJsonObject> HandleSetActiveCulture(const TSharedPtr<FJsonObject>& Pa
 // ---------------------------------------------------------------------------
 // get_culture_info
 // ---------------------------------------------------------------------------
-// MCP:get_culture_info - Look up a culture by name without switching the active one (FInternationalization::GetCulture).
-//   @param culture_name - Required culture identifier, e.g. "en", "es-ES", "ja".
-//   @returns { culture_name: string, found: bool, display_name: string, native_name: string, iso_two_letter_name: string }
+// MCP:get_culture_info - Look up a culture by name, or with no name read the editor's current active culture/locale (FInternationalization::GetCurrentCulture), without switching the active one (FInternationalization::GetCulture). is_active says whether the reported culture is the current one. An unknown name is a success with found=false.
+//   @param culture_name - Optional culture identifier, e.g. "en", "es-ES", "ja"; omitted or empty reports the current active culture.
+//   @returns { culture_name: string, found: bool, is_active: bool, display_name?: string, native_name?: string, iso_two_letter_name?: string }
 TSharedPtr<FJsonObject> HandleGetCultureInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString CultureName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("culture_name"), CultureName)) { return Missing; }
+    Params->TryGetStringField(TEXT("culture_name"), CultureName);
+    CultureName.TrimStartAndEndInline();
 
-    const FCulturePtr Culture = FInternationalization::Get().GetCulture(CultureName);
+    FInternationalization& I18N = FInternationalization::Get();
+    const FCultureRef Current = I18N.GetCurrentCulture();
+    const FCulturePtr Culture = CultureName.IsEmpty() ? FCulturePtr(Current) : I18N.GetCulture(CultureName);
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("culture_name"), CultureName);
+    ResultObj->SetStringField(TEXT("culture_name"), CultureName.IsEmpty() ? Current->GetName() : CultureName);
     ResultObj->SetBoolField(TEXT("found"), Culture.IsValid());
+    ResultObj->SetBoolField(TEXT("is_active"), Culture.IsValid() && Culture->GetName() == Current->GetName());
     if (Culture.IsValid())
     {
         ResultObj->SetStringField(TEXT("display_name"), Culture->GetDisplayName());
@@ -827,10 +807,8 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("compile_text_for_target"), &HandleCompileTextForTarget },
     { TEXT("create_string_table"), &HandleCreateStringTable },
     { TEXT("gather_text_for_target"), &HandleGatherTextForTarget },
-    { TEXT("get_active_culture"), &HandleGetActiveCulture },
     { TEXT("get_culture_info"), &HandleGetCultureInfo },
     { TEXT("get_string_table_entries"), &HandleGetStringTableEntries },
-    { TEXT("get_string_table_metadata"), &HandleGetStringTableMetadata },
     { TEXT("list_localization_targets"), &HandleListLocalizationTargets },
     { TEXT("remove_string_table_entry"), &HandleRemoveStringTableEntry },
     { TEXT("remove_string_table_metadata"), &HandleRemoveStringTableMetadata },

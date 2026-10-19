@@ -134,6 +134,35 @@ namespace
 		}
 		return SettingsObj;
 	}
+
+	/** Maps a case-insensitive LFO waveform name (Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random or
+	 *  RandomSampleHold) to its shape; false for any other name. */
+	bool AudioMod_ParseLFOShape(const FString& Waveform, ESoundModulationLFOShape& OutShape)
+	{
+		const FString Wf = Waveform.ToLower();
+		if      (Wf == TEXT("sine"))        { OutShape = ESoundModulationLFOShape::Sine; }
+		else if (Wf == TEXT("upsaw"))       { OutShape = ESoundModulationLFOShape::UpSaw; }
+		else if (Wf == TEXT("downsaw"))     { OutShape = ESoundModulationLFOShape::DownSaw; }
+		else if (Wf == TEXT("square"))      { OutShape = ESoundModulationLFOShape::Square; }
+		else if (Wf == TEXT("triangle"))    { OutShape = ESoundModulationLFOShape::Triangle; }
+		else if (Wf == TEXT("exponential")) { OutShape = ESoundModulationLFOShape::Exponential; }
+		else if (Wf == TEXT("random") || Wf == TEXT("randomsamplehold") || Wf == TEXT("random_sample_hold"))
+		{ OutShape = ESoundModulationLFOShape::RandomSampleHold; }
+		else { return false; }
+		return true;
+	}
+
+	/** Writes the LFO numbers present in Params (frequency, amplitude, offset, phase) onto the LFO; true when any was. */
+	bool AudioMod_WriteLFONumbers(const TSharedPtr<FJsonObject>& Params, USoundModulationGeneratorLFO* LFO)
+	{
+		bool bAny = false;
+		double Value = 0.0;
+		if (Params->TryGetNumberField(TEXT("frequency"), Value)) { LFO->Params.Frequency = (float)Value; bAny = true; }
+		if (Params->TryGetNumberField(TEXT("amplitude"), Value)) { LFO->Params.Amplitude = (float)Value; bAny = true; }
+		if (Params->TryGetNumberField(TEXT("offset"),    Value)) { LFO->Params.Offset    = (float)Value; bAny = true; }
+		if (Params->TryGetNumberField(TEXT("phase"),     Value)) { LFO->Params.Phase     = (float)Value; bAny = true; }
+		return bAny;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +245,7 @@ TSharedPtr<FJsonObject> HandleCreateControlBusMix(
 // ---------------------------------------------------------------------------
 // set_control_bus_value  (push a value into the bus at runtime via statics)
 // ---------------------------------------------------------------------------
-// MCP:set_control_bus_value - Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_modulation_info.
+// MCP:set_control_bus_value - Pushes a runtime value into a USoundControlBus through a global bus mix of the editor world (UAudioModulationStatics::SetGlobalBusMixValue), fading over fade_time. Transient: the asset is not modified or saved, and applied is always true, not read back; read the live value with get_control_bus_info.
 //   @param bus_path - Asset path to the USoundControlBus
 //   @param value - New runtime bus value to push (required float)
 //   @param fade_time - Fade time in seconds; a negative value reuses the last fade time of the global stage, or 0.1 s if none was set (default -1.0)
@@ -317,76 +346,9 @@ TSharedPtr<FJsonObject> HandleAddBusToMix(
 }
 
 // ---------------------------------------------------------------------------
-// create_modulation_generator_lfo
+// get_control_bus_info
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_generator_lfo - Creates a USoundModulationGeneratorLFO asset at package_path/generator_name (or loads the one there), writes waveform, frequency, amplitude and offset, enables looping and saves it, overwriting an existing LFO. An unknown waveform silently becomes Sine but is echoed as sent. Returns generator_path, the written values, created, saved.
-//   @param generator_name - Name of the modulation generator asset
-//   @param package_path - Target content package path where the asset is created (default /Game/MCP)
-//   @param frequency - LFO frequency in Hz (default 1.0)
-//   @param amplitude - LFO amplitude (default 1.0)
-//   @param offset - LFO output offset (default 0.0)
-//   @param waveform - LFO shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (default Sine; any other value also gives Sine)
-//   @returns { generator_path, generator_name, waveform, frequency, amplitude, offset, created, saved }
-TSharedPtr<FJsonObject> HandleCreateModulationGeneratorLFO(
-	const TSharedPtr<FJsonObject>& Params)
-{
-	FString GeneratorName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("generator_name"), GeneratorName)) { return Missing; }
-	FString PackagePath = mcp_common::DefaultAssetFolder();
-	Params->TryGetStringField(TEXT("package_path"), PackagePath);
-	double FrequencyD = 1.0, AmplitudeD = 1.0, OffsetD = 0.0;
-	Params->TryGetNumberField(TEXT("frequency"), FrequencyD);
-	Params->TryGetNumberField(TEXT("amplitude"), AmplitudeD);
-	Params->TryGetNumberField(TEXT("offset"), OffsetD);
-	FString Waveform = TEXT("Sine");
-	Params->TryGetStringField(TEXT("waveform"), Waveform);
-
-	const FString FullPath = PackagePath / GeneratorName;
-	FString CreateError;
-	bool bCreated = false;
-	USoundModulationGeneratorLFO* LFO = mcp_common::CreateOrLoadAsset<USoundModulationGeneratorLFO>(FullPath, CreateError, &bCreated);
-	if (!LFO)
-	{
-		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("Failed to create or load LFO generator: %s"), *CreateError));
-	}
-
-	// Map the friendly waveform string to the engine's ESoundModulationLFOShape.
-	ESoundModulationLFOShape Shape = ESoundModulationLFOShape::Sine;
-	const FString Wf = Waveform.ToLower();
-	if      (Wf == TEXT("sine"))        { Shape = ESoundModulationLFOShape::Sine; }
-	else if (Wf == TEXT("upsaw"))       { Shape = ESoundModulationLFOShape::UpSaw; }
-	else if (Wf == TEXT("downsaw"))     { Shape = ESoundModulationLFOShape::DownSaw; }
-	else if (Wf == TEXT("square"))      { Shape = ESoundModulationLFOShape::Square; }
-	else if (Wf == TEXT("triangle"))    { Shape = ESoundModulationLFOShape::Triangle; }
-	else if (Wf == TEXT("exponential")) { Shape = ESoundModulationLFOShape::Exponential; }
-	else if (Wf == TEXT("random") || Wf == TEXT("random_sample_hold"))
-	{ Shape = ESoundModulationLFOShape::RandomSampleHold; }
-
-	// Direct public field writes (generator Params is a UPROPERTY struct).
-	LFO->Params.Shape = Shape;
-	LFO->Params.Frequency = (float)FrequencyD;
-	LFO->Params.Amplitude = (float)AmplitudeD;
-	LFO->Params.Offset = (float)OffsetD;
-	LFO->Params.bLooping = true;
-
-	const bool bSaved = mcp_common::SaveAssetPackage(LFO->GetPackage(), LFO);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("generator_path"), LFO->GetPathName());
-	Data->SetStringField(TEXT("generator_name"), LFO->GetName());
-	Data->SetStringField(TEXT("waveform"), Waveform);
-	Data->SetNumberField(TEXT("frequency"), FrequencyD);
-	Data->SetNumberField(TEXT("amplitude"), AmplitudeD);
-	Data->SetNumberField(TEXT("offset"), OffsetD);
-	Data->SetBoolField(TEXT("created"), bCreated);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_modulation_generator_lfo"));
-}
-
-// ---------------------------------------------------------------------------
-// get_modulation_info
-// ---------------------------------------------------------------------------
-// MCP:get_modulation_info - Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
+// MCP:get_control_bus_info - Read a USoundControlBus asset and its live value in the editor world without changing anything. default_value is the bus default normalized value; current_value is what UAudioModulationStatics::GetModulatorValue returns for the bus in the editor world, and the engine answers 1.0 for a bus that is not active there, so 1.0 alone does not prove a mix is applied; with no editor world it equals default_value. subsystem_active says whether the editor world has an audio modulation manager. A bus that cannot be loaded is an error. Push a value with set_control_bus_value; mix stages: get_control_bus_mix_info; patches: get_sound_modulation_patch_info; parameters and generators: get_modulation_parameter_info, get_modulation_generator_info.
 //   @param bus_path - Asset path to the USoundControlBus, e.g. "/Game/Audio/Bus_Music.Bus_Music"
 //   @returns { bus_path, default_value, current_value, subsystem_active }
 TSharedPtr<FJsonObject> HandleGetModulationInfo(
@@ -847,7 +809,7 @@ TSharedPtr<FJsonObject> HandleSetModulationPatchOutputParameter(
 // ---------------------------------------------------------------------------
 // get_sound_modulation_patch_info
 // ---------------------------------------------------------------------------
-// MCP:get_sound_modulation_patch_info - Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_modulation_info and the output parameter with get_modulation_parameter_info.
+// MCP:get_sound_modulation_patch_info - Read a USoundModulationPatch asset without changing it: bBypass (a bypassed patch outputs the default value of its output parameter), output_parameter with its path and class (null when none is set), and one inputs entry per input, in order, holding the bus path (empty when that input has no bus) and a name that is always empty because the engine input struct has no name. A patch that cannot be loaded is an error. Change it with set_modulation_patch_bypass, set_modulation_patch_output_parameter, add_modulation_input_to_patch and remove_modulation_input_from_patch; make one with create_sound_modulation_patch; read an input bus with get_control_bus_info and the output parameter with get_modulation_parameter_info.
 //   @param patch_path - Asset path to the USoundModulationPatch, e.g. "/Game/Audio/Patch_Duck.Patch_Duck"
 //   @returns { patch_path, bBypass, output_parameter: { path, class } | null, inputs: [{ bus: { path }, name }], input_count }
 TSharedPtr<FJsonObject> HandleGetSoundModulationPatchInfo(
@@ -1046,26 +1008,38 @@ TSharedPtr<FJsonObject> HandleGetModulationParameterInfo(
 // ---------------------------------------------------------------------------
 // create_modulation_generator
 // ---------------------------------------------------------------------------
-// MCP:create_modulation_generator - Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path, with engine default settings, and saves it. An existing generator there is returned untouched with its own class (not saved). Returns generator_path, generator_name, generator_class, created, already_existed, saved. Configure it with set_modulation_generator_settings.
-//   @param generator_path - Full asset path (e.g. /Game/MyGame/Gen_LFO)
+// MCP:create_modulation_generator - Creates a modulation generator asset of class LFO, ADEnvelope or EnvelopeFollower at generator_path (or package_path/generator_name), with engine default settings, and saves it; for an LFO it also writes the given waveform, frequency, amplitude, offset and phase (looping on), on a new LFO or overwriting those fields of an existing one. An existing generator with no LFO field given is returned untouched with its own class (not saved). LFO fields with another generator_class or on an existing generator of another class, and an unknown waveform, are errors. Returns generator_path, generator_name, generator_class, settings as stored, created, already_existed, updated, saved. Configure the other classes with set_modulation_generator_settings.
+//   @param generator_path - Full asset path (e.g. /Game/MyGame/Gen_LFO). Optional when generator_name is given.
+//   @param generator_name - Optional asset name, used with package_path when generator_path is absent.
+//   @param package_path - Optional folder for generator_name (default /Game/MCP); ignored when generator_path is given.
 //   @param generator_class - Concrete class name (case-insensitive). One of: LFO, ADEnvelope, EnvelopeFollower
-//   @returns { generator_path, generator_name, generator_class, created, already_existed, saved }
+//   @param waveform - Optional, LFO only: shape, case-insensitive: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random (RandomSampleHold). Any other value is an error.
+//   @param frequency - Optional, LFO only: frequency in Hz (engine default 1.0).
+//   @param amplitude - Optional, LFO only: amplitude (engine default 1.0).
+//   @param offset - Optional, LFO only: output offset (engine default 0.0).
+//   @param phase - Optional, LFO only: starting phase (engine default 0.0).
+//   @returns { generator_path, generator_name, generator_class, settings: {...}, created, already_existed, updated, saved }
 TSharedPtr<FJsonObject> HandleCreateModulationGenerator(
 	const TSharedPtr<FJsonObject>& Params)
 {
+	// generator_path, else package_path/generator_name.
 	FString GeneratorPath;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("generator_path"), GeneratorPath)) { return Missing; }
+	Params->TryGetStringField(TEXT("generator_path"), GeneratorPath);
+	FString GeneratorName;
+	Params->TryGetStringField(TEXT("generator_name"), GeneratorName);
+	FString PackagePath = mcp_common::DefaultAssetFolder();
+	Params->TryGetStringField(TEXT("package_path"), PackagePath);
+	if (GeneratorPath.IsEmpty())
+	{
+		if (GeneratorName.IsEmpty())
+		{
+			return mcp_common::MakeErrorReply(
+				TEXT("Missing required parameter: generator_path (or generator_name, with an optional package_path)"));
+		}
+		GeneratorPath = PackagePath / GeneratorName;
+	}
 	FString GeneratorClass;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("generator_class"), GeneratorClass)) { return Missing; }
-
-	// Idempotency probe: if the asset exists, return it untouched.
-	if (USoundModulationGenerator* Existing = LoadObject<USoundModulationGenerator>(nullptr, *GeneratorPath))
-	{
-		TSharedPtr<FJsonObject> Data = AudioMod_CreatedAssetData(
-			Existing, TEXT("generator_path"), TEXT("generator_name"), TEXT("generator_class"), /*bCreated=*/false);
-		Data->SetBoolField(TEXT("saved"), false);
-		return mcp_common::MakeOkReply(Data);
-	}
 
 	// USoundModulationGenerator is abstract. Switch over the
 	// supported concrete subclasses directly.
@@ -1081,25 +1055,82 @@ TSharedPtr<FJsonObject> HandleCreateModulationGenerator(
 				*GeneratorClass));
 	}
 
-	TSharedPtr<FJsonObject> Error;
-	USoundModulationGenerator* Gen = AudioMod_NewAssetOfClass<USoundModulationGenerator>(
-		GeneratorPath, ConcreteClass, TEXT("generator_path"), TEXT("USoundModulationGenerator"), Error);
+	// The optional LFO fields, validated before anything is created or written.
+	FString Waveform;
+	const bool bHasWaveform = Params->TryGetStringField(TEXT("waveform"), Waveform);
+	ESoundModulationLFOShape Shape = ESoundModulationLFOShape::Sine;
+	if (bHasWaveform && !AudioMod_ParseLFOShape(Waveform, Shape))
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("Unknown waveform '%s'. Expected one of: Sine, UpSaw, DownSaw, Square, Triangle, Exponential, Random"), *Waveform));
+	}
+	// Typed probes only: the numbers themselves are written by AudioMod_WriteLFONumbers.
+	double LFONumber = 0.0;
+	const bool bHasLFOFields = bHasWaveform || Params->TryGetNumberField(TEXT("frequency"), LFONumber)
+		|| Params->TryGetNumberField(TEXT("amplitude"), LFONumber) || Params->TryGetNumberField(TEXT("offset"), LFONumber)
+		|| Params->TryGetNumberField(TEXT("phase"), LFONumber);
+	if (bHasLFOFields && ConcreteClass != USoundModulationGeneratorLFO::StaticClass())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("waveform, frequency, amplitude, offset and phase apply to generator_class LFO only (got '%s')"), *GeneratorClass));
+	}
+
+	// Idempotency probe: an existing generator is returned untouched unless LFO fields were given for it.
+	bool bCreated = false;
+	USoundModulationGenerator* Gen = LoadObject<USoundModulationGenerator>(nullptr, *GeneratorPath);
+	if (Gen && !bHasLFOFields)
+	{
+		TSharedPtr<FJsonObject> Data = AudioMod_CreatedAssetData(
+			Gen, TEXT("generator_path"), TEXT("generator_name"), TEXT("generator_class"), /*bCreated=*/false);
+		Data->SetObjectField(TEXT("settings"), AudioMod_GeneratorSettingsJson(Gen, /*bWithShape=*/true));
+		Data->SetBoolField(TEXT("updated"), false);
+		Data->SetBoolField(TEXT("saved"), false);
+		return mcp_common::MakeOkReply(Data);
+	}
+	if (Gen && !Gen->IsA<USoundModulationGeneratorLFO>())
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("%s is a %s, not an LFO: waveform, frequency, amplitude, offset and phase cannot be written to it"),
+			*GeneratorPath, *Gen->GetClass()->GetName()));
+	}
 	if (!Gen)
 	{
-		return Error;
+		TSharedPtr<FJsonObject> Error;
+		Gen = AudioMod_NewAssetOfClass<USoundModulationGenerator>(
+			GeneratorPath, ConcreteClass, TEXT("generator_path"), TEXT("USoundModulationGenerator"), Error);
+		if (!Gen)
+		{
+			return Error;
+		}
+		bCreated = true;
+	}
+
+	if (bHasLFOFields)
+	{
+		USoundModulationGeneratorLFO* LFO = CastChecked<USoundModulationGeneratorLFO>(Gen);
+		LFO->Modify();
+		if (bHasWaveform)
+		{
+			LFO->Params.Shape = Shape;
+		}
+		AudioMod_WriteLFONumbers(Params, LFO);
+		LFO->Params.bLooping = true;
+		LFO->MarkPackageDirty();
 	}
 
 	const bool bSaved = mcp_common::SaveAssetPackage(Gen->GetPackage(), Gen);
 
 	TSharedPtr<FJsonObject> Data = AudioMod_CreatedAssetData(
-		Gen, TEXT("generator_path"), TEXT("generator_name"), TEXT("generator_class"), /*bCreated=*/true);
+		Gen, TEXT("generator_path"), TEXT("generator_name"), TEXT("generator_class"), bCreated);
+	Data->SetObjectField(TEXT("settings"), AudioMod_GeneratorSettingsJson(Gen, /*bWithShape=*/true));
+	Data->SetBoolField(TEXT("updated"), bHasLFOFields);
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_modulation_generator"));
 }
 
 // ---------------------------------------------------------------------------
 // set_modulation_generator_settings
 // ---------------------------------------------------------------------------
-// MCP:set_modulation_generator_settings - Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored, other generator classes are refused, and the LFO shape cannot be set here. Returns generator_path, generator_class, settings as stored, updated, saved.
+// MCP:set_modulation_generator_settings - Writes the settings that match the class of a USoundModulationGenerator asset (LFO, ADEnvelope or EnvelopeFollower) and saves it; params of another class are ignored and other generator classes are refused. The LFO shape (waveform) is set with create_modulation_generator. Returns generator_path, generator_class, settings as stored, updated, saved.
 //   @param generator_path - Asset path to the USoundModulationGenerator
 //   @param frequency - LFO only: oscillation frequency in Hz (optional float)
 //   @param amplitude - LFO only: output amplitude/gain multiplier (optional float)
@@ -1129,11 +1160,7 @@ TSharedPtr<FJsonObject> HandleSetModulationGeneratorSettings(
 
 	if (USoundModulationGeneratorLFO* LFO = Cast<USoundModulationGeneratorLFO>(Gen))
 	{
-		double Frequency = 0.0, Amplitude = 0.0, Offset = 0.0, Phase = 0.0;
-		if (Params->TryGetNumberField(TEXT("frequency"), Frequency)) { LFO->Params.Frequency = (float)Frequency; }
-		if (Params->TryGetNumberField(TEXT("amplitude"), Amplitude)) { LFO->Params.Amplitude = (float)Amplitude; }
-		if (Params->TryGetNumberField(TEXT("offset"),    Offset))    { LFO->Params.Offset    = (float)Offset; }
-		if (Params->TryGetNumberField(TEXT("phase"),     Phase))     { LFO->Params.Phase     = (float)Phase; }
+		AudioMod_WriteLFONumbers(Params, LFO);
 	}
 	else if (USoundModulationGeneratorADEnvelope* AD = Cast<USoundModulationGeneratorADEnvelope>(Gen))
 	{
@@ -1209,12 +1236,11 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("create_control_bus"), &HandleCreateControlBus },
 	{ TEXT("create_control_bus_mix"), &HandleCreateControlBusMix },
 	{ TEXT("create_modulation_generator"), &HandleCreateModulationGenerator },
-	{ TEXT("create_modulation_generator_lfo"), &HandleCreateModulationGeneratorLFO },
 	{ TEXT("create_modulation_parameter"), &HandleCreateModulationParameter },
 	{ TEXT("create_sound_modulation_patch"), &HandleCreateSoundModulationPatch },
 	{ TEXT("get_control_bus_mix_info"), &HandleGetControlBusMixInfo },
 	{ TEXT("get_modulation_generator_info"), &HandleGetModulationGeneratorInfo },
-	{ TEXT("get_modulation_info"), &HandleGetModulationInfo },
+	{ TEXT("get_control_bus_info"), &HandleGetModulationInfo },
 	{ TEXT("get_modulation_parameter_info"), &HandleGetModulationParameterInfo },
 	{ TEXT("get_sound_modulation_patch_info"), &HandleGetSoundModulationPatchInfo },
 	{ TEXT("remove_bus_from_mix"), &HandleRemoveBusFromMix },

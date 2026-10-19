@@ -2,7 +2,7 @@
 
 # Lighting
 
-38 tools. Back to the [index](README.md).
+37 tools. Back to the [index](README.md).
 
 ## `configure_light_shadows`
 
@@ -79,25 +79,13 @@ No parameters.
 
 *Read-only.*
 
-Read a PostProcessVolume's color grading and the scalar settings set_post_process_setting manages, each with its override flag.  The reader that was missing: every value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
+Read a PostProcessVolume without changing it: the actor-level enabled / unbounded / priority, its color grading and the scalar settings set_post_process_setting manages, each with its override flag, plus film grain, motion blur, the auto-exposure method and the color grading LUT.  Every graded or scalar value comes with `overridden` (its bOverride_* flag) so you can see what is actually active.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_name` | string | yes | Label/name of the target PostProcessVolume actor. |
 
-**Returns:** `{ actor_name: string, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, exposure_method: int, dynamic_global_illumination_method: int }`
-
-## `get_post_process_volume_settings`
-
-*Read-only.*
-
-Read the FPostProcessSettings struct of an APostProcessVolume. Returns the fields that only this pair can reach (actor-level enabled/unbounded/priority + the FPostProcessSettings members not covered by the key-value pair get_post_process_settings/set_post_process_setting). bloom_intensity/ambient_occlusion_intensity/vignette_intensity are read there, not here (one code path per FPostProcessSettings field).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `volume_name` | string | yes | Label of the APostProcessVolume in the editor world. |
-
-**Returns:** `{ volume_name, enabled, unbounded, priority, white_temp, auto_exposure_method, film_grain_intensity, motion_blur_amount, color_grading_lut_path }`
+**Returns:** `{ actor_name: string, enabled: bool, unbounded: bool, priority: number, color_grading: { saturation, contrast, gamma, gain, offset, saturation_shadows, saturation_midtones, saturation_highlights, contrast_shadows, contrast_midtones, contrast_highlights (each {value:[float], overridden}) }, white_balance: { white_temp, white_tint, shadows_max, highlights_min (each {value, overridden}) }, scalars: { bloom_intensity, vignette_intensity, ambient_occlusion_intensity, auto_exposure_bias, auto_exposure_min_brightness, auto_exposure_max_brightness (each {value, overridden}) }, film_grain_intensity: number, motion_blur_amount: number, color_grading_lut_path: string, exposure_method: int, auto_exposure_method: string, dynamic_global_illumination_method: int }`
 
 ## `get_reflection_capture_properties`
 

@@ -154,7 +154,7 @@ UClass* ResolveEditorUtilityParentClass(const FString& ParentClass, FString& Out
 // ---------------------------------------------------------------------------
 // create_editor_utility_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_editor_utility_blueprint - Create an Editor Utility Blueprint at package_path/name with the editor factory, parented to parent_class, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has; the requested parent_class is not applied to it. A parent_class that does not resolve or cannot back a Blueprint, another kind of asset at that path, or an invalid path is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. A tool with a UI panel: create_editor_utility_widget_blueprint; right-click actions: create_asset_action_utility.
+// MCP:create_editor_utility_blueprint - Create an Editor Utility Blueprint at package_path/name with the editor factory, parented to parent_class, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has; the requested parent_class is not applied to it. A parent_class that does not resolve or cannot back a Blueprint, another kind of asset at that path, or an invalid path is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. A tool with a UI panel: create_editor_utility_widget_blueprint. Right-click actions are made here too: parent_class "AssetActionUtility" (Content Browser assets) or "ActorActionUtility" (level actors) -- their CallInEditor functions become the actions.
 //   @param package_path - Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored.
 //   @param name - Asset name without path or extension, e.g. "EUB_BatchRename".
 //   @param parent_class - Parent class by name without the U or A prefix, e.g. "EditorUtilityActor", or by path such as "/Script/Blutility.EditorUtilityObject" (default EditorUtilityObject); it must be Blueprintable.
@@ -457,129 +457,13 @@ TSharedPtr<FJsonObject> HandleListEditorUtilityWidgets(const TSharedPtr<FJsonObj
 // honest invoked=false with a "requires selected" note.
 // ---------------------------------------------------------------------------
 
-// Shared create path for the two scripted-action-utility commands. ParentClass is
-// UAssetActionUtility or UActorActionUtility. CreateBlueprint(parent), compile+save.
-// Command names the tool in the error of a failed save.
-TSharedPtr<FJsonObject> CreateScriptedActionUtility(const TSharedPtr<FJsonObject>& Params, UClass* ParentClass, const TCHAR* Command)
-{
-    if (!ParentClass)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Internal error: null parent class"));
-    }
-
-    FString PackagePath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), PackagePath)) { return Missing; }
-
-    FString Name;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
-
-    FString NormalizedPath = PackagePath;
-    NormalizedPath.RemoveFromEnd(TEXT("/"));
-    const FString FullPath = FString::Printf(TEXT("%s/%s"), *NormalizedPath, *Name);
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-
-    // An asset of another kind at that path is an error before anything is created: CreatePackage and
-    // CreateBlueprint would otherwise meet it under the same name.
-    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UEditorUtilityBlueprint::StaticClass());
-    if (!Conflict.IsEmpty())
-    {
-        return mcp_common::MakeErrorReply(Conflict);
-    }
-
-    // Idempotent: an existing Editor Utility Blueprint is returned as it is, with its own parent class and nothing
-    // compiled or saved.
-    if (UEditorAssetLibrary::DoesAssetExist(FullPath))
-    {
-        UEditorUtilityBlueprint* Existing = Cast<UEditorUtilityBlueprint>(UEditorAssetLibrary::LoadAsset(FullPath));
-        if (!Existing)
-        {
-            return mcp_common::MakeErrorReply(FString::Printf(
-                TEXT("an asset already exists at %s but does not load as an Editor Utility Blueprint; nothing was created"),
-                *FullPath));
-        }
-        TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
-        Resp->SetBoolField(TEXT("created"), false);
-        Resp->SetBoolField(TEXT("already_existed"), true);
-        Resp->SetBoolField(TEXT("saved"), false);
-        return mcp_common::MakeOkReply(Resp);
-    }
-
-    if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("parent_class '%s' cannot back a scripted action utility blueprint"), *ParentClass->GetName()));
-    }
-
-    // Create the package + the Editor Utility Blueprint headlessly. We use
-    // FKismetEditorUtilities::CreateBlueprint directly with UEditorUtilityBlueprint
-    // as the BP class (the canonical class for AssetActionUtility / ActorActionUtility
-    // blueprints) so no modal factory picker is ever shown.
-    const FString PackageName = FullPath;
-    UPackage* Package = CreatePackage(*PackageName);
-    if (!Package)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Failed to create package %s"), *PackageName));
-    }
-
-    UBlueprint* NewBP = FKismetEditorUtilities::CreateBlueprint(
-        ParentClass,
-        Package,
-        FName(*Name),
-        BPTYPE_Normal,
-        UEditorUtilityBlueprint::StaticClass(),
-        UBlueprintGeneratedClass::StaticClass(),
-        NAME_None);
-
-    if (!NewBP)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Failed to create scripted action utility blueprint at %s"), *FullPath));
-    }
-
-    NewBP->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
-    FAssetRegistryModule::AssetCreated(NewBP);
-
-    FString SaveErr;
-    const bool bSaved = SaveBlueprintAsset(NewBP, SaveErr);
-
-    TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, NewBP, ParentClass->GetName());
-    Resp->SetBoolField(TEXT("created"), true);
-    Resp->SetBoolField(TEXT("already_existed"), false);
-    return mcp_common::MakeSavedReply(Resp, bSaved, Command, SaveErr);
-}
-
-// ---------------------------------------------------------------------------
-// create_asset_action_utility
-// ---------------------------------------------------------------------------
-// MCP:create_asset_action_utility - Create an Editor Utility Blueprint at package_path/name parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be AssetActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on level actors: create_actor_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
-//   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
-//   @param name - Asset name without path or extension, e.g. "EUA_RenameTextures".
-//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }
-TSharedPtr<FJsonObject> HandleCreateAssetActionUtility(const TSharedPtr<FJsonObject>& Params)
-{
-    return CreateScriptedActionUtility(Params, UAssetActionUtility::StaticClass(), TEXT("create_asset_action_utility"));
-}
-
-// ---------------------------------------------------------------------------
-// create_actor_action_utility
-// ---------------------------------------------------------------------------
-// MCP:create_actor_action_utility - Create an Editor Utility Blueprint at package_path/name parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be ActorActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on Content Browser assets: create_asset_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
-//   @param package_path - Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored.
-//   @param name - Asset name without path or extension, e.g. "EUA_AlignToFloor".
-//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }
-TSharedPtr<FJsonObject> HandleCreateActorActionUtility(const TSharedPtr<FJsonObject>& Params)
-{
-    return CreateScriptedActionUtility(Params, UActorActionUtility::StaticClass(), TEXT("create_actor_action_utility"));
-}
-
 // ---------------------------------------------------------------------------
 // list_scripted_action_utilities
 // ---------------------------------------------------------------------------
 // Enumerate Editor Utility Blueprints whose generated/parent class is a child of
 // UAssetActionUtility or UActorActionUtility. We resolve each candidate's
 // generated class (loading the BP if necessary) and classify it.
-// MCP:list_scripted_action_utilities - List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_asset_action_utility or create_actor_action_utility; Editor Utility Widgets: list_editor_utility_widgets.
+// MCP:list_scripted_action_utilities - List the Editor Utility Blueprints under a content folder (subfolders included) whose class derives from UAssetActionUtility (kind asset: Content Browser right-click actions) or UActorActionUtility (kind actor: level actor actions). Each Editor Utility Blueprint found is LOADED to test its class, so a large folder is slow; plain Blueprints and Editor Utility Widgets are not listed. Read-only; a folder with none, or one that does not exist, is an empty list, not an error. Run one with run_asset_action_utility, which also lists its CallInEditor actions; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility"); Editor Utility Widgets: list_editor_utility_widgets.
 //   @param path - Content folder to search, subfolders included, e.g. "/Game/EditorTools", without a trailing slash (default /Game).
 //   @returns { search_path: string, count: int, utilities: [{ name: string, path: string, package_name: string, kind: string, parent_class: string }] }
 TSharedPtr<FJsonObject> HandleListScriptedActionUtilities(const TSharedPtr<FJsonObject>& Params)
@@ -649,7 +533,7 @@ TSharedPtr<FJsonObject> HandleListScriptedActionUtilities(const TSharedPtr<FJson
 // ProcessEvent it on a transient instance of the utility class. Functions that depend on a
 // content-browser / level selection (which the engine surfaces only through the
 // interactive right-click menu) are reported with an honest invoked=false note.
-// MCP:run_asset_action_utility - Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on a new transient instance of its class, as the right-click menu does but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, a utility with no actions or an abstract utility class is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
+// MCP:run_asset_action_utility - Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on a new transient instance of its class, as the right-click menu does but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, a utility with no actions or an abstract utility class is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_editor_utility_blueprint (parent_class "AssetActionUtility" or "ActorActionUtility").
 //   @param utility_path - Asset path of the utility Blueprint, e.g. "/Game/EditorTools/EUA_RenameTextures" (the object path form also works).
 //   @param function_name - Name of the CallInEditor action to run, case-insensitive; when absent the first action found on the class runs.
 //   @returns { utility_path, kind, generated_class, action_functions, function_name, function_found, invoked, note }
@@ -783,8 +667,6 @@ TSharedPtr<FJsonObject> HandleRunAssetActionUtility(const TSharedPtr<FJsonObject
 
 const McpCommandFamilies::FRegistrar Registration =
 {
-    { TEXT("create_actor_action_utility"), &HandleCreateActorActionUtility },
-    { TEXT("create_asset_action_utility"), &HandleCreateAssetActionUtility },
     { TEXT("create_editor_utility_blueprint"), &HandleCreateEditorUtilityBlueprint },
     { TEXT("create_editor_utility_widget_blueprint"), &HandleCreateEditorUtilityWidgetBlueprint },
     { TEXT("list_editor_utility_widgets"), &HandleListEditorUtilityWidgets },

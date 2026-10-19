@@ -197,6 +197,17 @@ namespace
         return GASAuthoring_LoadBlueprintCDO<UGameplayEffect>(BlueprintPath, TEXT("GameplayEffect"), OutBlueprint, OutError);
     }
 
+    // A native UGameplayEffect asset (one that is not a Blueprint, as create_gameplay_effect_asset makes) at Path,
+    // given as an object path or a package path; null when there is none.
+    UGameplayEffect* GASAuthoring_LoadNativeGameplayEffect(const FString& Path)
+    {
+        if (UGameplayEffect* Effect = LoadObject<UGameplayEffect>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
+        {
+            return Effect;
+        }
+        return LoadObject<UGameplayEffect>(nullptr, *(Path + TEXT(".") + FPackageName::GetShortName(Path)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+    }
+
     // The GE modifier a modifier command addresses: the ge_blueprint_path and modifier_index it reads, and the GE
     // Blueprint and CDO they load.
     struct FGASAuthoringModifier
@@ -975,34 +986,16 @@ TSharedPtr<FJsonObject> HandleCreateGameplayEffectBlueprint(const TSharedPtr<FJs
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_attribute_set_blueprint - Create an empty Blueprint parented to UAttributeSet at package_path/name, compile and save it; returns asset_path and is_attribute_set. An AttributeSet Blueprint already there is returned untouched (created false, already_existed true); a Blueprint of another class there is an error. To add attributes use add_attribute_to_set, or create_attribute_set_asset in one call. Refused during PIE.
-//   @param name - Asset name without a path, e.g. "AS_Character".
-//   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, created: bool }
-TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJsonObject>& Params)
-{
-    FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, UAttributeSet::StaticClass(), Created))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("AttributeSet"), TEXT("is_attribute_set"));
-    Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
-}
-
 // AttributeSet authoring: create an AttributeSet Blueprint with FGameplayAttributeData member variables, or
 // append one such member to an existing AttributeSet Blueprint. FBlueprintEditorUtils::AddMemberVariable is
 // the canonical Blueprint variable creator (BlueprintEditorUtils.h).
 
-// MCP:create_attribute_set_asset - Create (or reuse) an AttributeSet Blueprint at package_path/name like create_attribute_set_blueprint (a Blueprint of another class there is an error, and is left untouched), add one FGameplayAttributeData variable per attributes entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. A running PIE session, a read-only root or a .uasset read-only on disk fails before anything is created or added; a call that adds nothing to an existing set is not refused and saves nothing (saved false). A failed save makes success false, with saved false and save_error, and the added attributes stay in memory only.
+// MCP:create_attribute_set_blueprint - Create a Blueprint parented to UAttributeSet at package_path/name, compile and save it, or reuse the AttributeSet Blueprint already there (created false, already_existed true; a Blueprint of another class there is an error, and is left untouched); with attributes, add one FGameplayAttributeData variable per entry, then compile and save it. A name the class already has is skipped and listed in skipped_attribute_names; success is false when an added attribute is missing from the compiled class or did not get its default_value. A running PIE session, a read-only root or a .uasset read-only on disk fails before anything is created or added; a call that adds nothing to an existing set is not refused and saves nothing (saved false). A failed save makes success false, with saved false and save_error, and the added attributes stay in memory only.
 //   @param name - Asset name without a path, e.g. "AS_Character".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Attributes"; defaults to /Game/Blueprints.
-//   @param attributes - Array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored.
+//   @param attributes - Optional array of {"name": "Health", "default_value": 100} objects; default_value (default 0) becomes the BaseValue and CurrentValue of the compiled default. Entries without a name are ignored; omitted, the set is created empty (add attributes later with add_attribute_to_set).
 //   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_attribute_set: bool, already_existed: bool, attributes_added: int, added_attribute_names: [string], skipped_attribute_names: [string], failed_attribute_names: [string], attributes_applied: bool, created: bool, saved: bool, save_error?: string }
-TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObject>& Params)
+TSharedPtr<FJsonObject> HandleCreateAttributeSetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
     FGASAuthoringCreatedBlueprint Created;
     if (TSharedPtr<FJsonObject> Missing = GASAuthoring_ReadCreateTarget(Params, Created))
@@ -1122,10 +1115,10 @@ TSharedPtr<FJsonObject> HandleCreateAttributeSetAsset(const TSharedPtr<FJsonObje
     if (Accepted.Num() > 0 && !bSaved)
     {
         // As with the other create tools: the attributes stay on the Blueprint in memory only, its package dirty.
-        return mcp_common::MakeSavedReply(Result, /*bSaved*/ false, TEXT("create_attribute_set_asset"), SaveError);
+        return mcp_common::MakeSavedReply(Result, /*bSaved*/ false, TEXT("create_attribute_set_blueprint"), SaveError);
     }
     return mcp_common::MakeOutcomeReply(Result, bApplied,
-        bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_attribute_set_asset"), TEXT("attributes_applied")));
+        bApplied ? FString() : mcp_common::MeasuredOutcomeError(TEXT("create_attribute_set_blueprint"), TEXT("attributes_applied")));
 }
 
 // MCP:add_attribute_to_set - Add one FGameplayAttributeData member variable to an AttributeSet Blueprint, with default_value as its BaseValue and CurrentValue, then compile and save it. A name that is already an attribute of the class is left as it is (added false, already_existed true, nothing saved); a name taken by a variable of another type fails. attribute_present and base_value are read from the compiled class. An add is refused before any edit when a running PIE session, a read-only root or a .uasset read-only on disk would keep it from being saved, and a failed save undoes it, taking the variable out again and recompiling the Blueprint.
@@ -1222,11 +1215,11 @@ TSharedPtr<FJsonObject> HandleAddAttributeToSet(const TSharedPtr<FJsonObject>& P
 
 // GameplayEffect CDO authoring
 
-// MCP:set_gameplay_effect_duration - Set DurationPolicy on the class default object of a GameplayEffect Blueprint and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a non-GE Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. duration_seconds and duration_readback_ok come back only for HasDuration. For a native GE asset use set_gameplay_effect_duration_policy; for periodic ticks, set_gameplay_effect_period.
-//   @param ge_blueprint_path - Full asset path of the GE Blueprint
-//   @param duration_policy - Instant, Infinite, or HasDuration
+// MCP:set_gameplay_effect_duration - Set DurationPolicy on a GameplayEffect -- the class default object of a GameplayEffect Blueprint, or a native UGameplayEffect asset when no Blueprint is at that path -- and, for HasDuration, a constant DurationMagnitude of duration_seconds (Instant and Infinite leave the stored magnitude as it was), then save the asset without recompiling and without an undo entry. A bad policy, HasDuration without duration_seconds, a Blueprint that is not a GE, a path with neither, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. old_duration_policy is read before the write; duration_seconds and duration_readback_ok come back only for HasDuration. For periodic ticks, set_gameplay_effect_period.
+//   @param ge_blueprint_path - Full asset path of the GE Blueprint, or of a native UGameplayEffect asset (create_gameplay_effect_asset)
+//   @param duration_policy - Instant, Infinite, or HasDuration (any case)
 //   @param duration_seconds - Duration in seconds; required when duration_policy is HasDuration, ignored for Instant and Infinite
-//   @returns { ge_blueprint_path: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }
+//   @returns { ge_blueprint_path: string, native_asset: bool, old_duration_policy: string, duration_policy: string, policy_matches: bool, duration_readback_ok: bool, duration_seconds: number, set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintPath;
@@ -1265,18 +1258,32 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
             TEXT("duration_seconds is required when duration_policy is HasDuration; nothing was changed"));
     }
 
+    // A GameplayEffect Blueprint's class default object, else -- only when no Blueprint loads there -- a native
+    // UGameplayEffect asset at that path.
     UBlueprint* Blueprint = nullptr;
     FString Error;
     UGameplayEffect* GECDO = LoadGameplayEffectCDO(BlueprintPath, Blueprint, Error);
+    if (!GECDO && !Blueprint)
+    {
+        GECDO = GASAuthoring_LoadNativeGameplayEffect(BlueprintPath);
+        if (!GECDO)
+        {
+            Error = FString::Printf(TEXT("Neither a GameplayEffect Blueprint nor a native UGameplayEffect asset found at %s"), *BlueprintPath);
+        }
+    }
     if (!GECDO)
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
+    const bool bNativeAsset = Blueprint == nullptr;
+    if (TSharedPtr<FJsonObject> Refused = bNativeAsset
+        ? GASAuthoring_RefuseUnsavablePackage(GECDO->GetOutermost()->GetName())
+        : GASAuthoring_RefuseUnsavableEdit(Blueprint))
     {
         return Refused;
     }
 
+    const EGameplayEffectDurationType OldPolicy = GECDO->DurationPolicy;
     FGASAuthoringCDOEdit Edit(GECDO);
     GECDO->Modify();
 
@@ -1292,8 +1299,21 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
     // DurationMagnitude are NATIVE UProperties on the UGameplayEffect parent class
     // (not Blueprint NewVariables), so their values live on the CDO and serialize with
     // the package directly. Recompiling risks re-initializing the CDO; marking dirty +
-    // saving is sufficient and deterministic.
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
+    // saving is sufficient and deterministic. A native asset is saved the same way, as
+    // its own package, and a failed save undoes the edit too.
+    if (bNativeAsset)
+    {
+        GECDO->MarkPackageDirty();
+        FString SaveError;
+        if (!mcp_common::SaveAssetPackage(GECDO->GetOutermost(), GECDO, SaveError))
+        {
+            Edit.Undo();
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("%s The edit was undone, so the asset is as it was before the call."), *SaveError));
+        }
+        Edit.Keep();
+    }
+    else if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
     {
         return SaveFailed;
     }
@@ -1302,18 +1322,22 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectDuration(const TSharedPtr<FJsonOb
     UGameplayEffect* ReadCDO = GECDO;
     const EGameplayEffectDurationType ReadPolicy = ReadCDO ? ReadCDO->DurationPolicy : Policy;
 
-    FString ReadPolicyStr;
-    switch (ReadPolicy)
+    const auto PolicyName = [](EGameplayEffectDurationType In) -> FString
     {
-        case EGameplayEffectDurationType::Instant:     ReadPolicyStr = TEXT("Instant");     break;
-        case EGameplayEffectDurationType::Infinite:    ReadPolicyStr = TEXT("Infinite");    break;
-        case EGameplayEffectDurationType::HasDuration: ReadPolicyStr = TEXT("HasDuration"); break;
-        default:                                       ReadPolicyStr = TEXT("Unknown");     break;
-    }
+        switch (In)
+        {
+            case EGameplayEffectDurationType::Instant:     return TEXT("Instant");
+            case EGameplayEffectDurationType::Infinite:    return TEXT("Infinite");
+            case EGameplayEffectDurationType::HasDuration: return TEXT("HasDuration");
+            default:                                       return TEXT("Unknown");
+        }
+    };
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("ge_blueprint_path"), BlueprintPath);
-    Result->SetStringField(TEXT("duration_policy"), ReadPolicyStr);
+    Result->SetBoolField(TEXT("native_asset"), bNativeAsset);
+    Result->SetStringField(TEXT("old_duration_policy"), PolicyName(OldPolicy));
+    Result->SetStringField(TEXT("duration_policy"), PolicyName(ReadPolicy));
     Result->SetBoolField(TEXT("policy_matches"), ReadPolicy == Policy);
     if (bHasDuration && ReadCDO && ReadPolicy == EGameplayEffectDurationType::HasDuration)
     {
@@ -1724,7 +1748,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_modifier_attribute_based - Switch an existing GE modifier's magnitude to AttributeBased (scales off a captured attribute). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_modifier_attribute_based - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one: backing_attribute, captured from attribute_source, scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, under one of the four calculation policies (with AttributeMagnitudeEvaluatedUpToChannel, only through mod channel final_channel), then save the asset without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. The policy and channel are read back. An unknown attribute, a bad attribute_source, calculation_type or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
 //   @param backing_attribute - Attribute to capture, e.g. Health or MySet.Health (must exist on some AttributeSet)
@@ -1732,9 +1756,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierSetByCaller(const TShared
 //   @param coefficient - Multiplier applied to the captured value. Default 1.0
 //   @param pre_multiply_add - Additive value applied before the coefficient. Default 0.0
 //   @param post_multiply_add - Additive value applied after the coefficient. Default 0.0
-//   @param calculation_type - AttributeMagnitude | AttributeBaseValue | AttributeBonusMagnitude. Default AttributeMagnitude
+//   @param calculation_type - AttributeMagnitude | AttributeBaseValue | AttributeBonusMagnitude | AttributeMagnitudeEvaluatedUpToChannel (any case). Default AttributeMagnitude
+//   @param final_channel - Optional mod evaluation channel (0-9) at which AttributeMagnitudeEvaluatedUpToChannel stops evaluating the attribute. Default 0; only with that calculation_type, an error with another
 //   @param snapshot - If true capture the attribute at spec creation, else track changes. Default true
-//   @returns { ge_blueprint_path: string, modifier_index: int, modifier_count: int, magnitude_type: string, backing_attribute: string, capture_attribute_readback: string, backing_attribute_matches: bool, attribute_source: string, coefficient: number, pre_multiply_add: number, post_multiply_add: number, calculation_type: string, snapshot: bool, set: bool }
+//   @returns { ge_blueprint_path: string, modifier_index: int, modifier_count: int, magnitude_type: string, backing_attribute: string, capture_attribute_readback: string, backing_attribute_matches: bool, attribute_source: string, coefficient: number, pre_multiply_add: number, post_multiply_add: number, calculation_type: string (read back; Unknown when unreadable), final_channel?: int, final_channel_readback?: int, channel_matches?: bool (the three only with AttributeMagnitudeEvaluatedUpToChannel), snapshot: bool, set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSharedPtr<FJsonObject>& Params)
 {
     FGASAuthoringModifier Modifier;
@@ -1756,8 +1781,8 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
         else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid attribute_source '%s' (expected Source|Target)"), *SourceStr)); }
     }
 
-    // Calculation policy (default AttributeMagnitude). We expose the three context-free
-    // policies; AttributeMagnitudeEvaluatedUpToChannel needs a FinalChannel and is omitted.
+    // Calculation policy (default AttributeMagnitude). AttributeMagnitudeEvaluatedUpToChannel also takes the
+    // FinalChannel the evaluation stops at.
     EAttributeBasedFloatCalculationType CalcType = EAttributeBasedFloatCalculationType::AttributeMagnitude;
     FString CalcStr;
     if (Params->TryGetStringField(TEXT("calculation_type"), CalcStr) && !CalcStr.IsEmpty())
@@ -1765,7 +1790,26 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
         if (CalcStr.Equals(TEXT("AttributeMagnitude"), ESearchCase::IgnoreCase))           { CalcType = EAttributeBasedFloatCalculationType::AttributeMagnitude; }
         else if (CalcStr.Equals(TEXT("AttributeBaseValue"), ESearchCase::IgnoreCase))      { CalcType = EAttributeBasedFloatCalculationType::AttributeBaseValue; }
         else if (CalcStr.Equals(TEXT("AttributeBonusMagnitude"), ESearchCase::IgnoreCase)) { CalcType = EAttributeBasedFloatCalculationType::AttributeBonusMagnitude; }
-        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid calculation_type '%s' (expected AttributeMagnitude|AttributeBaseValue|AttributeBonusMagnitude)"), *CalcStr)); }
+        else if (CalcStr.Equals(TEXT("AttributeMagnitudeEvaluatedUpToChannel"), ESearchCase::IgnoreCase)) { CalcType = EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel; }
+        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid calculation_type '%s' (expected AttributeMagnitude|AttributeBaseValue|AttributeBonusMagnitude|AttributeMagnitudeEvaluatedUpToChannel)"), *CalcStr)); }
+    }
+    const bool bUpToChannel = CalcType == EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel;
+
+    // Final channel (0-9), read into a bool so the catalog publishes it as optional. EGameplayModEvaluationChannel
+    // is a contiguous uint8 enum Channel0..Channel9 (GameplayEffectTypes.h); Channel_MAX is the count. Default Channel0.
+    double FinalChannelD = 0.0;
+    const bool bHasFinalChannel = Params->TryGetNumberField(TEXT("final_channel"), FinalChannelD);
+    if (bHasFinalChannel && !bUpToChannel)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("final_channel only applies with calculation_type AttributeMagnitudeEvaluatedUpToChannel; nothing was changed"));
+    }
+    const int32 FinalChannelInt = (int32)FinalChannelD;
+    if (FinalChannelInt < 0 || FinalChannelInt >= (int32)EGameplayModEvaluationChannel::Channel_MAX)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid final_channel %d (expected 0..%d)"),
+                FinalChannelInt, (int32)EGameplayModEvaluationChannel::Channel_MAX - 1));
     }
 
     double Coefficient = 1.0; Params->TryGetNumberField(TEXT("coefficient"), Coefficient);
@@ -1796,6 +1840,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
     AttrFloat.PostMultiplyAdditiveValue = FScalableFloat((float)PostAdd);
     AttrFloat.BackingAttribute = FGameplayEffectAttributeCaptureDefinition(BackingAttr, CaptureSource, bSnapshot);
     AttrFloat.AttributeCalculationType = CalcType;
+    if (bUpToChannel)
+    {
+        AttrFloat.FinalChannel = (EGameplayModEvaluationChannel)FinalChannelInt;
+    }
 
     FGASAuthoringCDOEdit Edit(Modifier.GECDO);
     Modifier.GECDO->Modify();
@@ -1807,10 +1855,15 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
     }
 
     // Read back: confirm type + the captured backing attribute via the exported
-    // GetAttributeCaptureDefinitions (UE_API).
-    const FGameplayEffectModifierMagnitude& Mag = Modifier.Magnitude();
+    // GetAttributeCaptureDefinitions (UE_API), and the calc-type + channel via reflection into the protected
+    // AttributeBasedMagnitude sub-struct.
+    FGameplayEffectModifierMagnitude& Mag = Modifier.Magnitude();
     const bool bIsAttrBased = Mag.GetMagnitudeCalculationType() == EGameplayEffectMagnitudeCalculation::AttributeBased;
     const FString CaptureReadback = GASAuthoring_CapturedAttributeName(Mag);
+    const FAttributeBasedFloat* RBAttr = GetMagnitudeSubStructPtr<FAttributeBasedFloat>(Mag, TEXT("AttributeBasedMagnitude"));
+    const bool bCalcTypeOk = RBAttr && RBAttr->AttributeCalculationType == CalcType;
+    const int32 RBChannel = RBAttr ? (int32)RBAttr->FinalChannel : -1;
+    const bool bChannelMatches = !bUpToChannel || RBChannel == FinalChannelInt;
 
     auto SourceToStr = [](EGameplayEffectAttributeCaptureSource S) -> FString {
         return S == EGameplayEffectAttributeCaptureSource::Target ? TEXT("Target") : TEXT("Source"); };
@@ -1831,9 +1884,15 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBased(const TSha
     Result->SetNumberField(TEXT("coefficient"), Coefficient);
     Result->SetNumberField(TEXT("pre_multiply_add"), PreAdd);
     Result->SetNumberField(TEXT("post_multiply_add"), PostAdd);
-    Result->SetStringField(TEXT("calculation_type"), CalcToStr(CalcType));
+    Result->SetStringField(TEXT("calculation_type"), RBAttr ? CalcToStr(RBAttr->AttributeCalculationType) : FString(TEXT("Unknown")));
+    if (bUpToChannel)
+    {
+        Result->SetNumberField(TEXT("final_channel"), FinalChannelInt);
+        Result->SetNumberField(TEXT("final_channel_readback"), RBChannel);
+        Result->SetBoolField(TEXT("channel_matches"), bChannelMatches);
+    }
     Result->SetBoolField(TEXT("snapshot"), bSnapshot);
-    Result->SetBoolField(TEXT("set"), bIsAttrBased);
+    Result->SetBoolField(TEXT("set"), bIsAttrBased && bCalcTypeOk && bChannelMatches);
     return mcp_common::MakeOkReply(Result);
 }
 
@@ -1938,129 +1997,10 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierCustom(const TSharedPtr<F
 
 // GAS magnitude extras (refinements of the AttributeBased / Custom magnitudes above).
 // APIs (GameplayAbilities plugin):
-//   EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel + FAttributeBasedFloat::FinalChannel
-//     (EGameplayModEvaluationChannel Channel0..Channel9)                                   GameplayEffect.h / GameplayEffectTypes.h
 //   FCustomCalculationBasedFloat::FinalLookupCurve (FCurveTableRowHandle)                   GameplayEffect.h
 //   The protected inner sub-structs AttributeBasedMagnitude/CustomMagnitude are reached by
-//   reflection (GetMagnitudeSubStructPtr, by-name UScriptStruct lookup) — read-back of channel/calc-type
-//   and the FinalLookupCurve write/read (FinalLookupCurve is a public member once the struct is reached).
-
-// MCP:set_gameplay_effect_modifier_attribute_based_up_to_channel - Replace the magnitude of the modifier at modifier_index on the class default object of a GameplayEffect Blueprint with an AttributeBased one using the AttributeMagnitudeEvaluatedUpToChannel policy: backing_attribute, captured from attribute_source, is evaluated only through mod channel final_channel (0-9), then scaled as (value + pre_multiply_add) * coefficient + post_multiply_add, and the asset is saved without recompiling. The modifier keeps its attribute and operation, but its previous magnitude is discarded whole, attribute curve and tag filters included. An unknown attribute, a bad attribute_source or final_channel, an out-of-range modifier_index, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. The other three policies: set_gameplay_effect_modifier_attribute_based; refine afterwards with set_gameplay_effect_modifier_attribute_curve or set_gameplay_effect_modifier_attribute_tag_filters.
-//   @param ge_blueprint_path - Full asset path of the GE Blueprint
-//   @param modifier_index - Index into the GE CDO Modifiers array (0 = first)
-//   @param backing_attribute - Attribute to capture, e.g. Health or MySet.Health (must exist on some AttributeSet)
-//   @param final_channel - Mod evaluation channel (0-9) to terminate the partial attribute evaluation at. Default 0
-//   @param attribute_source - Capture source: Source (caster) or Target (recipient). Default Source
-//   @param coefficient - Multiplier applied to the captured value. Default 1.0
-//   @param pre_multiply_add - Additive value applied before the coefficient. Default 0.0
-//   @param post_multiply_add - Additive value applied after the coefficient. Default 0.0
-//   @param snapshot - If true capture the attribute at spec creation, else track changes. Default true
-//   @returns { ge_blueprint_path: string, modifier_index: int, modifier_count: int, magnitude_type: string, backing_attribute: string, capture_attribute_readback: string, backing_attribute_matches: bool, attribute_source: string, coefficient: number, pre_multiply_add: number, post_multiply_add: number, calculation_type: string, final_channel: int, final_channel_readback: int, channel_matches: bool, snapshot: bool, set: bool }
-TSharedPtr<FJsonObject> HandleSetGameplayEffectModifierAttributeBasedUpToChannel(const TSharedPtr<FJsonObject>& Params)
-{
-    FGASAuthoringModifier Modifier;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_ReadModifierTarget(Params, Modifier))
-    {
-        return Error;
-    }
-
-    FString BackingAttrName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("backing_attribute"), BackingAttrName)) { return Missing; }
-
-    // Final channel (0-9). EGameplayModEvaluationChannel is a contiguous uint8 enum
-    // Channel0..Channel9 (GameplayEffectTypes.h); Channel_MAX is the count. Default Channel0.
-    double FinalChannelD = 0.0; Params->TryGetNumberField(TEXT("final_channel"), FinalChannelD);
-    const int32 FinalChannelInt = (int32)FinalChannelD;
-    if (FinalChannelInt < 0 || FinalChannelInt >= (int32)EGameplayModEvaluationChannel::Channel_MAX)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid final_channel %d (expected 0..%d)"),
-                FinalChannelInt, (int32)EGameplayModEvaluationChannel::Channel_MAX - 1));
-    }
-    const EGameplayModEvaluationChannel FinalChannel = (EGameplayModEvaluationChannel)FinalChannelInt;
-
-    // Capture source (default Source = caster).
-    EGameplayEffectAttributeCaptureSource CaptureSource = EGameplayEffectAttributeCaptureSource::Source;
-    FString SourceStr;
-    if (Params->TryGetStringField(TEXT("attribute_source"), SourceStr) && !SourceStr.IsEmpty())
-    {
-        if (SourceStr.Equals(TEXT("Source"), ESearchCase::IgnoreCase))      { CaptureSource = EGameplayEffectAttributeCaptureSource::Source; }
-        else if (SourceStr.Equals(TEXT("Target"), ESearchCase::IgnoreCase)) { CaptureSource = EGameplayEffectAttributeCaptureSource::Target; }
-        else { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid attribute_source '%s' (expected Source|Target)"), *SourceStr)); }
-    }
-
-    double Coefficient = 1.0; Params->TryGetNumberField(TEXT("coefficient"), Coefficient);
-    double PreAdd = 0.0;      Params->TryGetNumberField(TEXT("pre_multiply_add"), PreAdd);
-    double PostAdd = 0.0;     Params->TryGetNumberField(TEXT("post_multiply_add"), PostAdd);
-    bool bSnapshot = true;    Params->TryGetBoolField(TEXT("snapshot"), bSnapshot);
-
-    FGameplayAttribute BackingAttr = ResolveAttributeByName(BackingAttrName);
-    if (!BackingAttr.IsValid())
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Attribute not found in any AttributeSet: %s"), *BackingAttrName));
-    }
-
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_LoadGEModifier(Modifier))
-    {
-        return Error;
-    }
-
-    // Build the attribute-based float with the channel-terminated policy. All members are public;
-    // FinalChannel is only meaningful for AttributeMagnitudeEvaluatedUpToChannel (mirrors the
-    // set_gameplay_effect_modifier_attribute_based command, which intentionally omits this policy).
-    FAttributeBasedFloat AttrFloat;
-    AttrFloat.Coefficient = FScalableFloat((float)Coefficient);
-    AttrFloat.PreMultiplyAdditiveValue = FScalableFloat((float)PreAdd);
-    AttrFloat.PostMultiplyAdditiveValue = FScalableFloat((float)PostAdd);
-    AttrFloat.BackingAttribute = FGameplayEffectAttributeCaptureDefinition(BackingAttr, CaptureSource, bSnapshot);
-    AttrFloat.AttributeCalculationType = EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel;
-    AttrFloat.FinalChannel = FinalChannel;
-
-    FGASAuthoringCDOEdit Edit(Modifier.GECDO);
-    Modifier.GECDO->Modify();
-    Modifier.Magnitude() = FGameplayEffectModifierMagnitude(AttrFloat);
-
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Modifier.Blueprint, Edit))
-    {
-        return SaveFailed;
-    }
-
-    // Read back: type via the exported getter, captured attribute via GetAttributeCaptureDefinitions,
-    // and the calc-type + channel via reflection into the protected AttributeBasedMagnitude sub-struct.
-    FGameplayEffectModifierMagnitude& Mag = Modifier.Magnitude();
-    const bool bIsAttrBased = Mag.GetMagnitudeCalculationType() == EGameplayEffectMagnitudeCalculation::AttributeBased;
-    const FString CaptureReadback = GASAuthoring_CapturedAttributeName(Mag);
-
-    EAttributeBasedFloatCalculationType RBCalcType = EAttributeBasedFloatCalculationType::AttributeMagnitude;
-    int32 RBChannel = -1;
-    if (const FAttributeBasedFloat* RBAttr = GetMagnitudeSubStructPtr<FAttributeBasedFloat>(Mag, TEXT("AttributeBasedMagnitude")))
-    {
-        RBCalcType = RBAttr->AttributeCalculationType;
-        RBChannel = (int32)RBAttr->FinalChannel;
-    }
-    const bool bCalcTypeOk = RBCalcType == EAttributeBasedFloatCalculationType::AttributeMagnitudeEvaluatedUpToChannel;
-    const bool bChannelMatches = RBChannel == FinalChannelInt;
-
-    auto SourceToStr = [](EGameplayEffectAttributeCaptureSource S) -> FString {
-        return S == EGameplayEffectAttributeCaptureSource::Target ? TEXT("Target") : TEXT("Source"); };
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_ModifierResult(Modifier, bIsAttrBased ? TEXT("AttributeBased") : TEXT("Unknown"));
-    Result->SetStringField(TEXT("backing_attribute"), BackingAttr.GetName());
-    Result->SetStringField(TEXT("capture_attribute_readback"), CaptureReadback);
-    Result->SetBoolField(TEXT("backing_attribute_matches"), !CaptureReadback.IsEmpty() && CaptureReadback == BackingAttr.GetName());
-    Result->SetStringField(TEXT("attribute_source"), SourceToStr(CaptureSource));
-    Result->SetNumberField(TEXT("coefficient"), Coefficient);
-    Result->SetNumberField(TEXT("pre_multiply_add"), PreAdd);
-    Result->SetNumberField(TEXT("post_multiply_add"), PostAdd);
-    Result->SetStringField(TEXT("calculation_type"), bCalcTypeOk ? TEXT("AttributeMagnitudeEvaluatedUpToChannel") : TEXT("Unknown"));
-    Result->SetNumberField(TEXT("final_channel"), FinalChannelInt);
-    Result->SetNumberField(TEXT("final_channel_readback"), RBChannel);
-    Result->SetBoolField(TEXT("channel_matches"), bChannelMatches);
-    Result->SetBoolField(TEXT("snapshot"), bSnapshot);
-    Result->SetBoolField(TEXT("set"), bIsAttrBased && bCalcTypeOk && bChannelMatches);
-    return mcp_common::MakeOkReply(Result);
-}
+//   reflection (GetMagnitudeSubStructPtr, by-name UScriptStruct lookup) — the FinalLookupCurve
+//   write/read (FinalLookupCurve is a public member once the struct is reached).
 
 // MCP:set_gameplay_effect_modifier_custom_curve - Set the FinalLookupCurve (a CurveTable row) on a GE modifier whose magnitude is already CustomCalculationClass; the custom calc output is remapped through the curve. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
@@ -2319,7 +2259,7 @@ TSharedPtr<FJsonObject> HandleSetAbilityCooldown(const TSharedPtr<FJsonObject>& 
     return SetAbilityGameplayEffectClass(Params, TEXT("CooldownGameplayEffectClass"), TEXT("cooldown_effect_path"), TEXT("cooldown_effect_class"));
 }
 
-// MCP:configure_ability_tags - Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_activation_info; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component_asset_tags.
+// MCP:set_ability_asset_tags - Replace the asset tags on the class default object of a GameplayAbility Blueprint, loaded by asset path, with the registered tags in asset_tags, then save the asset without recompiling. The list is the whole new set: tags already there and not listed are dropped, an empty list clears them all, and a string that is not a registered tag is skipped and listed in unknown_tags instead of failing the call. Every call writes and saves, even when the tags are unchanged. A path that is not a GameplayAbility Blueprint, a running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Read back: get_ability_asset_tags; register a tag first: create_gameplay_tag; tags a GameplayEffect owns: set_gameplay_effect_component_asset_tags.
 //   @param ability_blueprint_path - Asset path of the GameplayAbility Blueprint, e.g. "/Game/GAS/Abilities/GA_Fireball".
 //   @param asset_tags - Array of gameplay tag strings that becomes the whole asset-tag set, e.g. ["Ability.Fire", "Ability.Type.Magic"]; an empty array clears every asset tag.
 //   @returns { ability_blueprint_path: string, resolved_tags: [string], unknown_tags: [string], ability_tags: [string], tag_count: int, configured: bool }
@@ -2404,7 +2344,7 @@ namespace
         }
     }
 
-    // create_gameplay_cue_notify_*: sets the optional gameplay_cue_tag on the new notify's CDO and saves the
+    // create_gameplay_cue_notify: sets the optional gameplay_cue_tag on the new notify's CDO and saves the
     // Blueprint. The tag is resolved against the registered tag dictionary (ErrorIfNotFound=false: a project
     // may not have authored GameplayCue.* tags, so an unknown one is reported, not an error). Adds
     // cue_tag_set, cue_tag_requested and cue_tag to Result. The error reply when the save fails.
@@ -2526,7 +2466,7 @@ namespace
         Result->SetNumberField(TEXT("num_preallocated_instances"), CueCDO->NumPreallocatedInstances);
     }
 
-    // The cue notify a set_gameplay_cue_notify_static/burst_properties command edits, how many properties it set, and
+    // The cue notify set_gameplay_cue_notify_static_properties edits, how many properties it set, and
     // the snapshot of its CDO taken before the first write (undone on an error, kept once the edit is saved).
     struct FGASAuthoringCueEdit
     {
@@ -2537,7 +2477,7 @@ namespace
         TOptional<FGASAuthoringCDOEdit> CDOEdit;
     };
 
-    // set_gameplay_cue_notify_static/burst_properties: loads the cue_notify_path Blueprint, whose CDO must be a CueClass
+    // set_gameplay_cue_notify_static_properties: loads the cue_notify_path Blueprint, whose CDO must be a CueClass
     // (CueKind names it in the error), and applies the gameplay_cue_tag and is_override given (public UPROPERTYs on
     // UGameplayCueNotify_Static, written directly after Modify(), so a re-run is idempotent). The error reply when a
     // step fails or neither property is given; Out.CDOEdit then puts the CDO back as it was.
@@ -2598,66 +2538,50 @@ namespace
 
 // GameplayCueNotify authoring
 
-// MCP:create_gameplay_cue_notify_static - Create a Blueprint parented to UGameplayCueNotify_Static (non-instanced, one-shot) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
+// MCP:create_gameplay_cue_notify - Create a GameplayCueNotify Blueprint of the kind notify_type names -- Static (UGameplayCueNotify_Static, non-instanced one-shot, the default), Burst (UGameplayCueNotify_Burst, modern non-instanced one-shot), Actor (AGameplayCueNotify_Actor, a spawned, instanced cue actor) or Looping (AGameplayCueNotify_Looping, modern instanced looping notify) -- at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there, or an unknown notify_type, is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE. Edit it with set_gameplay_cue_notify_static_properties (Static, Burst) or set_gameplay_cue_notify_actor_properties (Actor, Looping).
 //   @param name - Asset name without a path, e.g. "GCN_Hit".
 //   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
+//   @param notify_type - Optional kind of notify, any case: Static (default), Burst, Actor or Looping.
 //   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Hit"; an unregistered tag is skipped (cue_tag_set=false), not an error.
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }
-TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyStatic(const TSharedPtr<FJsonObject>& Params)
+//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, notify_type: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }
+TSharedPtr<FJsonObject> HandleCreateGameplayCueNotify(const TSharedPtr<FJsonObject>& Params)
 {
+    // The parent class notify_type names, resolved before anything is created.
+    FString NotifyType = TEXT("Static");
+    Params->TryGetStringField(TEXT("notify_type"), NotifyType);
+    UClass* ParentClass = nullptr;
+    const TCHAR* ParentClassName = nullptr;
+    const TCHAR* CanonicalType = nullptr;
+    if (NotifyType.Equals(TEXT("Static"), ESearchCase::IgnoreCase))
+    {
+        ParentClass = UGameplayCueNotify_Static::StaticClass(); ParentClassName = TEXT("GameplayCueNotify_Static"); CanonicalType = TEXT("Static");
+    }
+    else if (NotifyType.Equals(TEXT("Burst"), ESearchCase::IgnoreCase))
+    {
+        ParentClass = UGameplayCueNotify_Burst::StaticClass(); ParentClassName = TEXT("GameplayCueNotify_Burst"); CanonicalType = TEXT("Burst");
+    }
+    else if (NotifyType.Equals(TEXT("Actor"), ESearchCase::IgnoreCase))
+    {
+        ParentClass = AGameplayCueNotify_Actor::StaticClass(); ParentClassName = TEXT("GameplayCueNotify_Actor"); CanonicalType = TEXT("Actor");
+    }
+    else if (NotifyType.Equals(TEXT("Looping"), ESearchCase::IgnoreCase))
+    {
+        ParentClass = AGameplayCueNotify_Looping::StaticClass(); ParentClassName = TEXT("GameplayCueNotify_Looping"); CanonicalType = TEXT("Looping");
+    }
+    else
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown notify_type '%s' (expected Static|Burst|Actor|Looping); nothing was created"), *NotifyType));
+    }
+
     FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, UGameplayCueNotify_Static::StaticClass(), Created))
+    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, ParentClass, Created))
     {
         return Error;
     }
 
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayCueNotify_Static"), TEXT("is_gameplay_cue_notify"));
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_SetCreatedCueTag(Params, Created, Result))
-    {
-        return Error;
-    }
-    Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:create_gameplay_cue_notify_actor - Create a Blueprint parented to AGameplayCueNotify_Actor (a spawned, instanced cue actor) at package_path/name, compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it; an unregistered tag only yields cue_tag_set=false. Refused during PIE.
-//   @param name - Asset name without a path, e.g. "GCN_Beam".
-//   @param package_path - Content folder for the new asset, e.g. "/Game/GAS/Cues"; defaults to /Game/Blueprints.
-//   @param gameplay_cue_tag - Registered gameplay tag written as GameplayCueTag and GameplayCueName, e.g. "GameplayCue.Beam"; an unregistered tag is skipped (cue_tag_set=false), not an error.
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }
-TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyActor(const TSharedPtr<FJsonObject>& Params)
-{
-    FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, AGameplayCueNotify_Actor::StaticClass(), Created))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayCueNotify_Actor"), TEXT("is_gameplay_cue_notify"));
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_SetCreatedCueTag(Params, Created, Result))
-    {
-        return Error;
-    }
-    Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:create_gameplay_cue_notify_burst - Create a Blueprint parented to UGameplayCueNotify_Burst (modern non-instanced one-shot notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
-//   @param name - Asset name, e.g. GCN_Hit
-//   @param package_path - Target content path, defaults to /Game/Blueprints
-//   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }
-TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyBurst(const TSharedPtr<FJsonObject>& Params)
-{
-    FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, UGameplayCueNotify_Burst::StaticClass(), Created))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayCueNotify_Burst"), TEXT("is_gameplay_cue_notify"));
+    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, ParentClassName, TEXT("is_gameplay_cue_notify"));
+    Result->SetStringField(TEXT("notify_type"), CanonicalType);
     if (TSharedPtr<FJsonObject> Error = GASAuthoring_SetCreatedCueTag(Params, Created, Result))
     {
         return Error;
@@ -2674,31 +2598,9 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyBurst(const TSharedPtr<FJso
 //     IsOverride, bUniqueInstancePerInstigator/SourceObject, bAllowMultipleOnActive/WhileActiveEvents,
 //     NumPreallocatedInstances  (GameplayCueNotify_Actor.h, all public data members -> no reflection)
 
-// MCP:create_gameplay_cue_notify_looping - Create a Blueprint parented to AGameplayCueNotify_Looping (modern instanced looping notify), compile and save it, or reuse the one of that class already there (created false, already_existed true); a Blueprint of another class there is an error. A registered gameplay_cue_tag is written to the CDO and saved: a read-only root or a .uasset read-only on disk refuses that write and a failed save undoes it.
-//   @param name - Asset name, e.g. GCN_Aura
-//   @param package_path - Target content path, defaults to /Game/Blueprints
-//   @param gameplay_cue_tag - Optional registered GameplayCue tag to set on the CDO
-//   @returns { name: string, asset_path: string, parent_class: string, generated_class: string, is_gameplay_cue_notify: bool, cue_tag_set: bool, cue_tag_requested: string, cue_tag: string, already_existed: bool, created: bool }
-TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyLooping(const TSharedPtr<FJsonObject>& Params)
-{
-    FGASAuthoringCreatedBlueprint Created;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_CreateBlueprint(Params, AGameplayCueNotify_Looping::StaticClass(), Created))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CreatedBlueprintFields(Created, TEXT("GameplayCueNotify_Looping"), TEXT("is_gameplay_cue_notify"));
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_SetCreatedCueTag(Params, Created, Result))
-    {
-        return Error;
-    }
-    Result->SetBoolField(TEXT("already_existed"), Created.bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), !Created.bAlreadyExisted);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:set_gameplay_cue_notify_actor_properties - Write the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values; passing none, or a Blueprint of another class, is an error. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. It never sets the cue tag: set_gameplay_cue_notify_looping_properties does for Looping notifies, set_gameplay_cue_notify_static_properties and set_gameplay_cue_notify_burst_properties for non-actor ones. get_gameplay_cue_notify_info reads them back.
+// MCP:set_gameplay_cue_notify_actor_properties - Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Actor Blueprint (Looping ones included), then save it without recompiling and without an undo entry. Properties left out keep their values, and every call writes and saves even when nothing differs; properties_set counts the ones given. Passing none, an unregistered tag, or a Blueprint of another class is an error and nothing is written. Looping and application effects (particles, sounds) are not authored, as the note on a Looping notify says. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. Static or Burst notifies: set_gameplay_cue_notify_static_properties; read back: get_gameplay_cue_notify_info.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify_Actor/_Looping Blueprint
+//   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
 //   @param auto_destroy_delay - Optional float: seconds to stay alive before auto-destroy (needs auto_destroy_on_remove)
 //   @param auto_attach_to_owner - Optional bool: attach the cue actor to the target while active
@@ -2708,7 +2610,7 @@ TSharedPtr<FJsonObject> HandleCreateGameplayCueNotifyLooping(const TSharedPtr<FJ
 //   @param allow_multiple_on_active_events - Optional bool: re-trigger On Burst if already triggered
 //   @param allow_multiple_while_active_events - Optional bool: re-trigger On Become Relevant if already triggered
 //   @param num_preallocated_instances - Optional int: how many instances of the cue to preallocate
-//   @returns { cue_notify_path: string, properties_set: int, auto_destroy_on_remove: bool, auto_destroy_delay: number, auto_attach_to_owner: bool, is_override: bool, unique_instance_per_instigator: bool, unique_instance_per_source_object: bool, allow_multiple_on_active_events: bool, allow_multiple_while_active_events: bool, num_preallocated_instances: int, set: bool }
+//   @returns { cue_notify_path: string, properties_set: int, gameplay_cue_tag: string, gameplay_cue_name: string, auto_destroy_on_remove: bool, auto_destroy_delay: number, auto_attach_to_owner: bool, is_override: bool, unique_instance_per_instigator: bool, unique_instance_per_source_object: bool, allow_multiple_on_active_events: bool, allow_multiple_while_active_events: bool, num_preallocated_instances: int, note?: string (Looping notifies), set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString BlueprintPath;
@@ -2732,13 +2634,19 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
     FGASAuthoringCDOEdit Edit(CueCDO);
     CueCDO->Modify();
 
-    // Apply only the properties that were provided (set-to-fixed-value -> idempotent across runs).
-    const int32 PropertiesSet = GASAuthoring_ApplyCueActorProperties(Params, CueCDO);
+    // Apply only the properties that were provided (set-to-fixed-value -> idempotent across runs): the cue tag,
+    // then the public Actor lifetime props. An unregistered tag returns here, and Edit puts the CDO back.
+    int32 PropertiesSet = 0;
+    if (TSharedPtr<FJsonObject> TagError = GASAuthoring_ApplyCueTagParam(Params, CueCDO, PropertiesSet))
+    {
+        return TagError;
+    }
+    PropertiesSet += GASAuthoring_ApplyCueActorProperties(Params, CueCDO);
 
     if (PropertiesSet == 0)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("No properties provided (set at least one of auto_destroy_on_remove|auto_destroy_delay|auto_attach_to_owner|is_override|unique_instance_per_instigator|unique_instance_per_source_object|allow_multiple_on_active_events|allow_multiple_while_active_events|num_preallocated_instances)"));
+            TEXT("No properties provided (set at least one of gameplay_cue_tag|auto_destroy_on_remove|auto_destroy_delay|auto_attach_to_owner|is_override|unique_instance_per_instigator|unique_instance_per_source_object|allow_multiple_on_active_events|allow_multiple_while_active_events|num_preallocated_instances)"));
     }
 
     if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
@@ -2750,7 +2658,14 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("cue_notify_path"), BlueprintPath);
     Result->SetNumberField(TEXT("properties_set"), PropertiesSet);
+    Result->SetStringField(TEXT("gameplay_cue_tag"), CueCDO->GameplayCueTag.ToString());
+    Result->SetStringField(TEXT("gameplay_cue_name"), CueCDO->GameplayCueName.ToString());
     GASAuthoring_AddCueActorPropertyFields(Result, CueCDO);
+    if (CueCDO->IsA<AGameplayCueNotify_Looping>())
+    {
+        // LoopingEffects/ApplicationEffects are protected UObject-ref structs, never touched here.
+        Result->SetStringField(TEXT("note"), TEXT("looping/application effects (particles/sounds) require asset-ref authoring; deferred"));
+    }
     Result->SetBoolField(TEXT("set"), true);
     return mcp_common::MakeOkReply(Result);
 }
@@ -2758,15 +2673,15 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyActorProperties(const TSharedP
 // GameplayCueNotify introspection + per-variant tag/override setters.
 // get_gameplay_cue_notify_info reads the CDO of any GCN variant (Static/Burst/Actor/Looping), classifying
 // notify_type by a Cast<> cascade (Burst before Static, Looping before Actor) and reporting the public tag +
-// the Actor/Looping lifetime UPROPERTYs. The setters follow the same Modify + RequestGameplayTag +
-// SaveAssetPackage + read-back pattern as set_gameplay_cue_notify_actor_properties, for the Static/Burst
-// (GameplayCueTag + IsOverride, both public on UGameplayCueNotify_Static) and Looping (Actor lifetime props)
-// variants. BurstEffects/LoopingEffects/ApplicationEffects are protected UObject-ref structs: they are never
-// touched, and the reply says so in a note. APIs (GameplayAbilities):
+// the Actor/Looping lifetime UPROPERTYs. set_gameplay_cue_notify_static_properties follows the same Modify +
+// RequestGameplayTag + SaveAssetPackage + read-back pattern as set_gameplay_cue_notify_actor_properties, for the
+// Static/Burst variants (GameplayCueTag + IsOverride, both public on UGameplayCueNotify_Static).
+// BurstEffects/LoopingEffects/ApplicationEffects are protected UObject-ref structs: they are never touched, and
+// the reply says so in a note. APIs (GameplayAbilities):
 //   UGameplayCueNotify_Static: GameplayCueTag/GameplayCueName/IsOverride (public; GameplayCueNotify_Static.h)
 //   AGameplayCueNotify_Actor public lifetime props (GameplayCueNotify_Actor.h)
 
-// MCP:get_gameplay_cue_notify_info - Read the class default object of a GameplayCueNotify Blueprint, loaded by asset path: notify_type (Static, Burst, Actor or Looping), its direct parent_class, GameplayCueTag, GameplayCueName and IsOverride. The lifetime and instancing fields come back only for Actor and Looping notifies; a Static or Burst reply leaves them out. Read-only and editor-time: it writes nothing and needs no PIE or actor. A missing asset or a Blueprint that is not a GameplayCueNotify is an error. Use it to check a notify before or after editing it with set_gameplay_cue_notify_static_properties, set_gameplay_cue_notify_burst_properties, set_gameplay_cue_notify_actor_properties or set_gameplay_cue_notify_looping_properties; a new one: create_gameplay_cue_notify_static or create_gameplay_cue_notify_looping.
+// MCP:get_gameplay_cue_notify_info - Read the class default object of a GameplayCueNotify Blueprint, loaded by asset path: notify_type (Static, Burst, Actor or Looping), its direct parent_class, GameplayCueTag, GameplayCueName and IsOverride. The lifetime and instancing fields come back only for Actor and Looping notifies; a Static or Burst reply leaves them out. Read-only and editor-time: it writes nothing and needs no PIE or actor. A missing asset or a Blueprint that is not a GameplayCueNotify is an error. Use it to check a notify before or after editing it with set_gameplay_cue_notify_static_properties (Static, Burst) or set_gameplay_cue_notify_actor_properties (Actor, Looping); a new one: create_gameplay_cue_notify.
 //   @param cue_notify_path - Full asset path of the GameplayCueNotify Blueprint (Static/Burst/Actor/Looping), e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @returns { cue_notify_path: string, parent_class: string, notify_type: string, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, auto_destroy_on_remove?: bool, auto_destroy_delay?: number, auto_attach_to_owner?: bool, unique_instance_per_instigator?: bool, unique_instance_per_source_object?: bool, allow_multiple_on_active_events?: bool, allow_multiple_while_active_events?: bool, num_preallocated_instances?: int }
 TSharedPtr<FJsonObject> HandleGetGameplayCueNotifyInfo(const TSharedPtr<FJsonObject>& Params)
@@ -2824,11 +2739,11 @@ TSharedPtr<FJsonObject> HandleGetGameplayCueNotifyInfo(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_cue_notify_static_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint, then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
-//   @param cue_notify_path - Asset path of the GameplayCueNotify_Static Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
+// MCP:set_gameplay_cue_notify_static_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Static Blueprint (UGameplayCueNotify_Burst ones included), then save it without recompiling. Needs at least one of the two; an unregistered tag fails before anything is written. Returns properties_set and the values read back; a Burst notify's burst effects (particles, sounds) are not authored, as its note says. Actor or Looping notifies: set_gameplay_cue_notify_actor_properties. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+//   @param cue_notify_path - Asset path of the GameplayCueNotify_Static or _Burst Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
 //   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
 //   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
-//   @returns { cue_notify_path: string, properties_set: int, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, set: bool }
+//   @returns { cue_notify_path: string, properties_set: int, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, note?: string (Burst notifies), set: bool }
 TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyStaticProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FGASAuthoringCueEdit Edit;
@@ -2843,101 +2758,11 @@ TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyStaticProperties(const TShared
     }
 
     TSharedPtr<FJsonObject> Result = GASAuthoring_CueStaticResult(Edit);
-    Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:set_gameplay_cue_notify_burst_properties - Set GameplayCueTag (mirrored into GameplayCueName) and/or IsOverride on the CDO of a UGameplayCueNotify_Burst Blueprint, then save it without recompiling. Needs at least one; an unregistered tag fails before anything is written. Burst effects (particles, sounds) are not authored. Returns the values read back. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
-//   @param cue_notify_path - Asset path of the GameplayCueNotify_Burst Blueprint, e.g. "/Game/GAS/Cues/GCN_Hit".
-//   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
-//   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
-//   @returns { cue_notify_path: string, properties_set: int, gameplay_cue_tag: string, gameplay_cue_name: string, is_override: bool, note: string, set: bool }
-TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyBurstProperties(const TSharedPtr<FJsonObject>& Params)
-{
-    // Burst only exposes the public Static-inherited GameplayCueTag/IsOverride. Its
-    // BurstEffects/DefaultSpawnCondition/DefaultPlacementInfo are protected UObject-ref
-    // (Niagara/Sound) structs -> asset-ref authoring deferred (see note below).
-    FGASAuthoringCueEdit Edit;
-    if (TSharedPtr<FJsonObject> Error = GASAuthoring_ApplyCueStaticProperties(Params, UGameplayCueNotify_Burst::StaticClass(),
-                                                                              TEXT("a UGameplayCueNotify_Burst"), Edit))
+    if (Edit.CueCDO->IsA<UGameplayCueNotify_Burst>())
     {
-        return Error;
+        // BurstEffects/DefaultSpawnCondition/DefaultPlacementInfo are protected UObject-ref (Niagara/Sound) structs.
+        Result->SetStringField(TEXT("note"), TEXT("burst effects (particles/sounds) require asset-ref authoring; deferred"));
     }
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Edit.Blueprint, *Edit.CDOEdit))
-    {
-        return SaveFailed;
-    }
-
-    TSharedPtr<FJsonObject> Result = GASAuthoring_CueStaticResult(Edit);
-    Result->SetStringField(TEXT("note"), TEXT("burst effects (particles/sounds) require asset-ref authoring; deferred"));
-    Result->SetBoolField(TEXT("set"), true);
-    return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:set_gameplay_cue_notify_looping_properties - Write the GameplayCueTag (mirrored into GameplayCueName) and the lifetime, instancing and override properties you pass on the class default object of an AGameplayCueNotify_Looping Blueprint, then save it without recompiling. Properties left out keep their values, and every call writes and saves even when nothing differs; properties_set counts the ones given. Passing none, an unregistered tag or a Blueprint that is not a Looping notify is an error and nothing is written. The looping and application effects (particles, sounds) are not authored, as the note says. A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit. A plain Actor notify: set_gameplay_cue_notify_actor_properties; Static or Burst: set_gameplay_cue_notify_static_properties or set_gameplay_cue_notify_burst_properties; read back: get_gameplay_cue_notify_info.
-//   @param cue_notify_path - Full asset path of the GameplayCueNotify_Looping Blueprint, e.g. "/Game/GAS/Cues/GCN_Aura".
-//   @param gameplay_cue_tag - Optional registered GameplayCue tag (sets GameplayCueTag + mirrors GameplayCueName); unregistered -> clean error
-//   @param auto_destroy_on_remove - Optional bool: auto recycle/destroy when OnRemove fires
-//   @param auto_destroy_delay - Optional float: seconds to stay alive before auto-destroy (needs auto_destroy_on_remove)
-//   @param auto_attach_to_owner - Optional bool: attach the cue actor to the target while active
-//   @param is_override - Optional bool: this cue overrides parent-tag cues instead of running in addition
-//   @param unique_instance_per_instigator - Optional bool: a new instance per instigator
-//   @param unique_instance_per_source_object - Optional bool: a new instance per source object
-//   @param allow_multiple_on_active_events - Optional bool: re-trigger On Burst if already triggered
-//   @param allow_multiple_while_active_events - Optional bool: re-trigger On Become Relevant if already triggered
-//   @param num_preallocated_instances - Optional int: how many instances of the cue to preallocate
-//   @returns { cue_notify_path: string, properties_set: int, gameplay_cue_tag: string, gameplay_cue_name: string, auto_destroy_on_remove: bool, auto_destroy_delay: number, auto_attach_to_owner: bool, is_override: bool, unique_instance_per_instigator: bool, unique_instance_per_source_object: bool, allow_multiple_on_active_events: bool, allow_multiple_while_active_events: bool, num_preallocated_instances: int, note: string, set: bool }
-TSharedPtr<FJsonObject> HandleSetGameplayCueNotifyLoopingProperties(const TSharedPtr<FJsonObject>& Params)
-{
-    FString BlueprintPath;
-    FString Error;
-    UBlueprint* Blueprint = GASAuthoring_ReadCueNotifyBlueprint(Params, BlueprintPath, Error);
-    if (!Blueprint)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    AGameplayCueNotify_Looping* CueCDO = Cast<AGameplayCueNotify_Looping>(Blueprint->GeneratedClass->GetDefaultObject());
-    if (!CueCDO)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Blueprint is not an AGameplayCueNotify_Looping (or subclass): %s"), *BlueprintPath));
-    }
-    if (TSharedPtr<FJsonObject> Refused = GASAuthoring_RefuseUnsavableEdit(Blueprint))
-    {
-        return Refused;
-    }
-
-    FGASAuthoringCDOEdit Edit(CueCDO);
-    CueCDO->Modify();
-
-    // GameplayCueTag + the public Actor-inherited lifetime props (same set as
-    // set_gameplay_cue_notify_actor_properties). LoopingEffects/ApplicationEffects are
-    // protected UObject-ref structs -> deferred (see note). Set-to-fixed-value -> idempotent.
-    int32 PropertiesSet = 0;
-    if (TSharedPtr<FJsonObject> TagError = GASAuthoring_ApplyCueTagParam(Params, CueCDO, PropertiesSet))
-    {
-        return TagError;
-    }
-    PropertiesSet += GASAuthoring_ApplyCueActorProperties(Params, CueCDO);
-
-    if (PropertiesSet == 0)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("No properties provided (set at least one of gameplay_cue_tag|auto_destroy_on_remove|auto_destroy_delay|auto_attach_to_owner|is_override|unique_instance_per_instigator|unique_instance_per_source_object|allow_multiple_on_active_events|allow_multiple_while_active_events|num_preallocated_instances)"));
-    }
-
-    if (TSharedPtr<FJsonObject> SaveFailed = GASAuthoring_SaveBlueprint(Blueprint, Edit))
-    {
-        return SaveFailed;
-    }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("cue_notify_path"), BlueprintPath);
-    Result->SetNumberField(TEXT("properties_set"), PropertiesSet);
-    Result->SetStringField(TEXT("gameplay_cue_tag"), CueCDO->GameplayCueTag.ToString());
-    Result->SetStringField(TEXT("gameplay_cue_name"), CueCDO->GameplayCueName.ToString());
-    GASAuthoring_AddCueActorPropertyFields(Result, CueCDO);
-    Result->SetStringField(TEXT("note"), TEXT("looping/application effects (particles/sounds) require asset-ref authoring; deferred"));
     Result->SetBoolField(TEXT("set"), true);
     return mcp_common::MakeOkReply(Result);
 }
@@ -3718,7 +3543,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentGrantedAbilities(const T
 // GAS extras: runtime ASC queries + ability info
 // ============================================================================
 
-// MCP:get_ability_activation_info - Read the AssetTags of a GameplayAbility Blueprint from its class default object: ability_tags, asset_tag_count, and ability_name (the default object name). Despite the tool name, no activation data is read: no activation policy, required or blocked tags, cost or cooldown. Read-only and editor-time: it loads the asset and needs no actor or PIE; a path that is not a GameplayAbility Blueprint is an error. configure_ability_tags writes these tags; get_ability_info reads an ability granted to an actor.
+// MCP:get_ability_asset_tags - Read the AssetTags of a GameplayAbility Blueprint from its class default object: ability_tags, asset_tag_count, and ability_name (the default object name). Despite the tool name, no activation data is read: no activation policy, required or blocked tags, cost or cooldown. Read-only and editor-time: it loads the asset and needs no actor or PIE; a path that is not a GameplayAbility Blueprint is an error. set_ability_asset_tags writes these tags; get_ability_info reads an ability granted to an actor.
 //   @param ability_path - Full /Game path to the ability Blueprint asset
 //   @returns { ability_path: string, ability_name: string, ability_tags: [string], asset_tag_count: int }
 TSharedPtr<FJsonObject> HandleGetAbilityActivationInfo(const TSharedPtr<FJsonObject>& Params)
@@ -3752,17 +3577,13 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_attribute_to_set"), &HandleAddAttributeToSet },
     { TEXT("add_gameplay_effect_component"), &HandleAddGameplayEffectComponent },
     { TEXT("add_gameplay_effect_modifier"), &HandleAddGameplayEffectModifier },
-    { TEXT("configure_ability_tags"), &HandleConfigureAbilityTags },
-    { TEXT("create_attribute_set_asset"), &HandleCreateAttributeSetAsset },
+    { TEXT("set_ability_asset_tags"), &HandleConfigureAbilityTags },
     { TEXT("create_attribute_set_blueprint"), &HandleCreateAttributeSetBlueprint },
     { TEXT("create_gameplay_ability_blueprint"), &HandleCreateGameplayAbilityBlueprint },
-    { TEXT("create_gameplay_cue_notify_actor"), &HandleCreateGameplayCueNotifyActor },
-    { TEXT("create_gameplay_cue_notify_burst"), &HandleCreateGameplayCueNotifyBurst },
-    { TEXT("create_gameplay_cue_notify_looping"), &HandleCreateGameplayCueNotifyLooping },
-    { TEXT("create_gameplay_cue_notify_static"), &HandleCreateGameplayCueNotifyStatic },
+    { TEXT("create_gameplay_cue_notify"), &HandleCreateGameplayCueNotify },
     { TEXT("create_gameplay_effect_blueprint"), &HandleCreateGameplayEffectBlueprint },
     { TEXT("create_gameplay_mod_magnitude_calculation_blueprint"), &HandleCreateGameplayModMagnitudeCalculationBlueprint },
-    { TEXT("get_ability_activation_info"), &HandleGetAbilityActivationInfo },
+    { TEXT("get_ability_asset_tags"), &HandleGetAbilityActivationInfo },
     { TEXT("get_gameplay_cue_notify_info"), &HandleGetGameplayCueNotifyInfo },
     { TEXT("get_gameplay_effect_components"), &HandleGetGameplayEffectComponents },
     { TEXT("remove_gameplay_effect_component"), &HandleRemoveGameplayEffectComponent },
@@ -3770,8 +3591,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_ability_cooldown"), &HandleSetAbilityCooldown },
     { TEXT("set_ability_cost"), &HandleSetAbilityCost },
     { TEXT("set_gameplay_cue_notify_actor_properties"), &HandleSetGameplayCueNotifyActorProperties },
-    { TEXT("set_gameplay_cue_notify_burst_properties"), &HandleSetGameplayCueNotifyBurstProperties },
-    { TEXT("set_gameplay_cue_notify_looping_properties"), &HandleSetGameplayCueNotifyLoopingProperties },
     { TEXT("set_gameplay_cue_notify_static_properties"), &HandleSetGameplayCueNotifyStaticProperties },
     { TEXT("set_gameplay_effect_component_asset_tags"), &HandleSetGameplayEffectComponentAssetTags },
     { TEXT("set_gameplay_effect_component_block_ability_tags"), &HandleSetGameplayEffectComponentBlockAbilityTags },
@@ -3781,7 +3600,6 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_gameplay_effect_component_target_tags"), &HandleSetGameplayEffectComponentTargetTags },
     { TEXT("set_gameplay_effect_duration"), &HandleSetGameplayEffectDuration },
     { TEXT("set_gameplay_effect_modifier_attribute_based"), &HandleSetGameplayEffectModifierAttributeBased },
-    { TEXT("set_gameplay_effect_modifier_attribute_based_up_to_channel"), &HandleSetGameplayEffectModifierAttributeBasedUpToChannel },
     { TEXT("set_gameplay_effect_modifier_attribute_curve"), &HandleSetGameplayEffectModifierAttributeCurve },
     { TEXT("set_gameplay_effect_modifier_attribute_tag_filters"), &HandleSetGameplayEffectModifierAttributeTagFilters },
     { TEXT("set_gameplay_effect_modifier_custom"), &HandleSetGameplayEffectModifierCustom },

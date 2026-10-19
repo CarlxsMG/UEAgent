@@ -2,22 +2,22 @@
 
 # Networking
 
-10 tools. Back to the [index](README.md).
+6 tools. Back to the [index](README.md).
 
 ## `configure_replication`
 
 *Destructive, idempotent.*
 
-Configures the replication of an editor-world actor: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Both are read back. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied.
+Configure the replication of an editor-world actor found by object name or label: movement (bReplicateMovement) and lifecycle (bReplicates: the actor is spawned and destroyed on clients). Only the settings sent are applied, inside one undoable transaction, and each is read back: a call that sends neither replicate_movement nor replicate_lifecycle changes nothing and is an error. Physics has no switch of its own in the engine -- a simulating root's state travels with movement replication -- so replicate_physics is reported in not_applied. Only that placed instance changes, not its class defaults; nothing is saved. Read every replication setting with get_actor_replication_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | The name of the actor to configure replication for |
-| `replicate_movement` | boolean | no | Whether to replicate movement (optional, default true; always applied) |
-| `replicate_physics` | boolean | no | Whether to replicate physics (optional; NOT applied, see the description; listed in not_applied when sent) |
-| `replicate_lifecycle` | boolean | no | Whether the actor replicates at all, i.e. exists on clients (optional; applied only when sent). Movement replication does nothing without it. |
+| `actor_name` | string | yes | Object name or label of the actor in the editor world (first match) |
+| `replicate_movement` | boolean | no | Optional: whether to replicate movement (bReplicateMovement); applied only when sent |
+| `replicate_physics` | boolean | no | Optional; NOT applied, see the description; listed in not_applied when sent |
+| `replicate_lifecycle` | boolean | no | Optional: whether the actor replicates at all, i.e. exists on clients (bReplicates, set through AActor::SetReplicates); applied only when sent. Movement replication does nothing without it. |
 
-**Returns:** `{ actor_name: string, replication_configured: bool, message: string, previous_settings: { replicate_movement: bool, replicate_lifecycle: bool }, new_settings: { replicate_movement: bool, replicate_lifecycle?: bool }, actual_settings: { replicate_movement: bool, replicate_lifecycle: bool }, not_applied?: [string], actor_valid: bool, actor_class: string }`
+**Returns:** `{ actor_name: string, replication_configured: bool, message: string, previous_settings: { replicate_movement: bool, replicate_lifecycle: bool }, new_settings: { replicate_movement?: bool, replicate_lifecycle?: bool }, actual_settings: { replicate_movement: bool, replicate_lifecycle: bool }, not_applied?: [string], actor_valid: bool, actor_class: string }`
 
 ## `get_dedicated_server_status`
 
@@ -33,43 +33,13 @@ No parameters.
 
 *Read-only.*
 
-Read a network snapshot of the editor world, never a PIE world: its net mode; the net driver class, tick rates and client connection count; every replicating actor with its class and local role; and, when they exist, the GameState (class, player count) and the first PlayerController. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. Online subsystem config and the player list: get_network_settings; one actor in detail: get_replication_info; replicated actors filtered by role, with remote role and dormancy: list_replicated_actors; the net mode alone: get_world_net_mode.
-
-No parameters.
-
-**Returns:** `{ world_name: string, world_valid: bool, net_mode: string, net_driver_info: { class?: string, max_net_tick_rate?: number, net_server_max_tick_rate?: number, connection_count?: number }, replicated_actors: [{ name: string, class: string, local_role: string, is_replicated: bool }], replicated_actor_count: number, game_state_info?: { class: string, player_count: number, is_valid: bool }, player_controller_info?: { class: string, is_valid: bool, is_local_player: bool } }`
-
-## `get_network_settings`
-
-*Read-only.*
-
-Retrieves current network configuration and settings for the world including NetDriver, GameState, players, and config file settings.
-
-No parameters.
-
-**Returns:** `{ world_name: string, world_valid: bool, net_mode: string, has_net_driver: bool, net_driver_class: string?, net_driver_settings: { max_net_tick_rate: number, net_server_max_tick_rate: number }?, has_replication_driver: bool, replication_driver_class: string, has_game_state: bool, game_state_class: string?, player_count: number?, players: [{ player_name: string, player_id: number, is_valid: bool, player_class: string }]?, config_settings: { default_platform_service: string?, default_identity_interface: string?, max_players: number, use_dedicated_server: bool } }`
-
-## `get_replication_info`
-
-*Read-only.*
-
-Read one actor's current replication settings -- the exact read-side of configure_replication, returning the same fields it can write (replicate_movement, replicate_physics, net_load_on_client, net_use_owner_relevancy...), so a read-check-write round trip lines up field for field. For a whole-project sweep use audit_replication; to enumerate the replicated actors in the world, list_replicated_actors.
+Read a network snapshot of the editor world, never a PIE world: its net mode (with its code and the server/client flags); whether it has a net driver, and the driver's class, tick rates and client connection count; every replicating actor with its class, local and remote role and dormancy, optionally only those with one local role; when they exist, the GameState (class, player count, each player) and the first PlayerController; and the session keys of the [OnlineSubsystem] engine config. The editor world normally has no net driver, GameState or PlayerController, so net_driver_info comes back empty and those two blocks are left out. Nothing is written; without an editor world it is an error. One actor in detail: get_actor_replication_info; a whole-project Blueprint sweep: audit_replication.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_name` | string | yes | Engine actor name (matches GetName()) |
+| `role_filter` | string | no | Optional local role to keep in replicated_actors: Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive); omitted lists every replicating actor. Any other value is an error. |
 
-**Returns:** `{ actor_name, actor_class, replicate_movement, replicate_physics, net_load_on_client, net_use_owner_relevancy, always_relevant, bReplicateMovement?, bReplicates?, dormancy?, net_dormancy_int? }`
-
-## `get_world_net_mode`
-
-*Read-only.*
-
-Read the net mode of the editor world as a string ("Standalone", "ListenServer", "Client" or "DedicatedServer") with net_mode_code, is_server and is_client. Read-only, no parameters; PIE worlds are not read, so this normally reports "Standalone".
-
-No parameters.
-
-**Returns:** `{ net_mode: string, net_mode_code: int, is_server: bool, is_client: bool }`
+**Returns:** `{ world_name: string, world_valid: bool, net_mode: string, net_mode_code: int, is_server: bool, is_client: bool, has_net_driver: bool, net_driver_info: { class?: string, max_net_tick_rate?: number, net_server_max_tick_rate?: number, connection_count?: number }, replicated_actors: [{ name: string, class: string, local_role: string, remote_role: string, is_replicated: bool, net_dormancy: string }], replicated_actor_count: number, role_filter?: string, has_game_state: bool, game_state_info?: { class: string, player_count: number, is_valid: bool, players: [{ player_name: string, player_id: number, is_valid: bool, player_class: string }] }, player_controller_info?: { class: string, is_valid: bool, is_local_player: bool }, config_settings: { default_platform_service?: string, default_identity_interface?: string, max_players: number, use_dedicated_server: bool } }`
 
 ## `launch_dedicated_server`
 
@@ -83,23 +53,11 @@ Relaunches the CURRENT editor binary with "-server -log": a real, non-rendering,
 
 **Returns:** `{ server_started: bool, already_running: bool, command_line: string, note: string }`
 
-## `list_replicated_actors`
-
-*Read-only.*
-
-Enumerate the actors with bReplicates=true in the EDITOR world, optionally filtered by local_role (Authority | SimulatedProxy | AutonomousProxy | None). It reports each actor's local and remote role, so it is the cheap way to find what is even eligible to replicate before spending a PIE session on it; for a per-actor detail read use get_replication_info, and for a project-wide Blueprint sweep audit_replication.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `role_filter` | string | no | Optional ENetRole string (case-insensitive); omit for all replicated actors. |
-
-**Returns:** `{ world_name, total, role_filter?, actors:[{ actor_name, actor_class, local_role, remote_role, is_replicated, net_dormancy }] }`
-
 ## `set_network_authority`
 
 *Destructive, idempotent.*
 
-Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_net_role (by label) or list_replicated_actors; choose what replicates with configure_replication or set_actor_replicates.
+Set the local net role (AActor::SetRole) of an editor-world actor, found by object name rather than label, to Authority, SimulatedProxy, AutonomousProxy or None (case-insensitive; any other value is an error before anything changes). Only that placed instance's in-memory Role changes: RemoteRole and replication settings stay as they are, there is no undo entry and the level is not marked dirty. authority_set compares the role read back with the request. Read roles with get_actor_replication_info (one actor) or get_network_info (every replicated actor, filterable by role); choose what replicates with configure_replication.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

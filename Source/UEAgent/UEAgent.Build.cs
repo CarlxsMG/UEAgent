@@ -64,7 +64,7 @@ public class UEAgent : ModuleRules
 				"AudioExtensions",   // USoundModulatorBase / IAudioModulation
 				"SmartObjectsModule",// USmartObjectDefinition/Component/Subsystem
 				"StateTreeModule",   // UStateTree/UStateTreeSchema/FStateTreeStateLink
-				"GameplayStateTreeModule", // UStateTreeComponent + FStateTreeReference (UStateTreeComponent::SetPropertyOverridden for set_component_parameter_override)
+				"GameplayStateTreeModule", // UStateTreeComponent + FStateTreeReference (UStateTreeComponent::SetPropertyOverridden for set_state_tree_component_parameter_override)
 				"MassEntity",        // UMassEntityConfigAsset/FMassEntityTemplate
 				"MassCommon",        // UMassEntityTraitBase + common fragments
 				"MassSpawner",       // AMassSpawner + FMassEntitySpawnRequest
@@ -140,7 +140,7 @@ public class UEAgent : ModuleRules
 					"LevelEditor",         // ULevelEditorSubsystem (PIE start/stop, current level)
 					"ApplicationCore",     // IPlatformInputDeviceMapper (inject_key_input / inject_analog_input / inject_mouse_button)
 					"Localization",        // ULocalizationSettings/ULocalizationTarget (list/gather/compile_text_for_target)
-					"AssetTools",          // For IAssetTools (import_asset, fixup_redirectors)
+					"AssetTools",          // For IAssetTools (import_texture_file, fixup_redirectors)
 					"GameplayTagsEditor",  // For IGameplayTagsEditorModule (create_gameplay_tag -> AddNewGameplayTagToINI)
 					"UMGEditor",           // UWidgetBlueprint / UWidgetBlueprintFactory
 					"DataValidation",      // UEditorValidatorSubsystem
@@ -174,7 +174,7 @@ public class UEAgent : ModuleRules
 					"StateTreeEditorModule",   // UStateTreeEditorData / UStateTreeState (WITH_EDITOR)
 					"PropertyBindingUtils",    // FPropertyBindingBindableStructDescriptor (FStateTreeCompilerLog dtor needs its export)
 					"LandscapeEditor", // FLandscapeImportHelper + LandscapeEditorUtils (sculpt + heightmap I/O)
-					"VirtualTexturingEditor", // RuntimeVirtualTexture::SetBounds -- the "Set Bounds" op for create_rvt_volume/set_rvt_volume_bounds (VIRTUALTEXTURINGEDITOR_API; Editor-only)
+					"VirtualTexturingEditor", // RuntimeVirtualTexture::SetBounds -- the "Set Bounds" op for create_runtime_virtual_texture_volume/set_runtime_virtual_texture_volume_bounds (VIRTUALTEXTURINGEDITOR_API; Editor-only)
 					// Interchange Editor (reset + asset save pipelines)
 					"InterchangeEditor",                // UInterchangeEditorScriptLibrary (ResetLevelAsset/ResetActors/CanResetActor; INTERCHANGEEDITOR_API UFUNCTION static)
 					"InterchangeEditorUtilities",       // UInterchangeEditorUtilities::SaveAsset/IsRuntimeOrPIE/ClearEditorSelection (INTERCHANGEEDITORUTILITIES_API)

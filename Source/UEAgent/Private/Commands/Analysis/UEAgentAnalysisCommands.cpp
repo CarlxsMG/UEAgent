@@ -8,11 +8,11 @@
 #include "Engine/BlueprintGeneratedClass.h"            // also defines TSimpleRingBuffer (used by GetTraceStack)
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
-#include "Engine/InheritableComponentHandler.h"        // get_blueprint_scs_tree: FComponentKey / ICH override check
-#include "Components/ActorComponent.h"                  // get_blueprint_scs_tree: EComponentCreationMethod / UActorComponent
-#include "Components/SceneComponent.h"                  // get_blueprint_scs_tree: USceneComponent attach info
-#include "Components/PrimitiveComponent.h"              // get_blueprint_components_list: physics / collision flags
-#include "Components/StaticMeshComponent.h"             // get_blueprint_components_list: mesh path + material count
+#include "Engine/InheritableComponentHandler.h"        // get_blueprint_components: FComponentKey / ICH override check
+#include "Components/ActorComponent.h"                  // get_blueprint_components: EComponentCreationMethod / UActorComponent
+#include "Components/SceneComponent.h"                  // get_blueprint_components: USceneComponent attach info
+#include "Components/PrimitiveComponent.h"              // get_blueprint_components: physics / collision flags
+#include "Components/StaticMeshComponent.h"             // get_blueprint_components: mesh path + material count
 #include "Engine/StaticMesh.h"
 #include "Blueprint/BlueprintSupport.h"
 #include "Kismet2/BlueprintEditorUtils.h"              // FindBlueprintForNode
@@ -36,13 +36,13 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/Guid.h"
-#include "Misc/DateTime.h"                              // snapshot_object persist: FDateTime timestamps
+#include "Misc/DateTime.h"                              // capture_object_snapshot persist: FDateTime timestamps
 #include "Misc/FileHelper.h"                            // snapshot persist + verify_on_disk byte scan
 #include "HAL/PlatformFileManager.h"                    // snapshot persist: CreateDirectoryTree / FileExists
 #include "Serialization/JsonSerializer.h"               // snapshot persist: Serialize / Deserialize
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonReader.h"
-#include "K2Node_FunctionEntry.h"                       // get_blueprint_functions_list: GetFunctionFlags (is_pure)
+
 #include "UObject/FieldPath.h"
 #include "Algo/Reverse.h"
 
@@ -97,9 +97,40 @@ namespace
     }
 
     /**
+     * The template facts get_blueprint_components adds to a component record: a loose category (the text before
+     * the first underscore of the name, "Mesh_Body" -> "Mesh"), mobility for a scene component, physics and
+     * collision state for a primitive, and the mesh path + material count of a static mesh component.
+     */
+    void AddComponentTemplateFacts_Analysis(const TSharedPtr<FJsonObject>& Obj, const UActorComponent* Template, const FString& VariableName)
+    {
+        int32 Underscore = INDEX_NONE;
+        Obj->SetStringField(TEXT("category"),
+            VariableName.FindChar(TEXT('_'), Underscore) ? VariableName.Left(Underscore) : FString(TEXT("Default")));
+        if (const USceneComponent* Scene = Cast<USceneComponent>(Template))
+        {
+            Obj->SetStringField(TEXT("mobility"), mcp_common::MobilityLabel(Scene->Mobility));
+        }
+        if (const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Template))
+        {
+            Obj->SetBoolField(TEXT("simulates_physics"), Primitive->IsSimulatingPhysics());
+            Obj->SetBoolField(TEXT("collision_enabled"), Primitive->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
+        }
+        if (const UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Template))
+        {
+            const UStaticMesh* Mesh = MeshComponent->GetStaticMesh();
+            Obj->SetBoolField(TEXT("has_static_mesh"), Mesh != nullptr);
+            if (Mesh != nullptr)
+            {
+                Obj->SetStringField(TEXT("static_mesh_path"), Mesh->GetPathName());
+            }
+            Obj->SetNumberField(TEXT("material_count"), MeshComponent->GetNumMaterials());
+        }
+    }
+
+    /**
      * Collect a Blueprint's full source-classified component set (native CDO + own SCS +
      * inherited-from-ancestor-chain), most-derived-wins dedup by component name. Each record is
-     * IDENTICAL to get_blueprint_scs_tree's, plus a `transform` {loc,rot,scale} for scene comps.
+     * IDENTICAL to get_blueprint_components', plus a `transform` {loc,rot,scale} for scene comps.
      * Fills an ordered array (for scs_tree) and a by-name map (for O(1) diffing).
      *
      * This walk DROPS components on two paths, and without a trace a caller could not tell a short
@@ -116,13 +147,16 @@ namespace
      * @param OutOmittedDuplicates    optional; receives {name, source, owner_class, shadowed_by} objects.
      * @param OutOmittedNullTemplates optional; receives {name, source, owner_class} objects. `name` is ""
      *                                only when the NODE ITSELF is null (nothing left to name it by).
+     * @param bWithTemplateFacts      get_blueprint_components' extras on each record: children[] (the names
+     *                                attached under it) and AddComponentTemplateFacts_Analysis.
      */
     void CollectBlueprintComponents(
         UBlueprint* Blueprint, bool bIncludeNative, bool bIncludeInherited, int32 MaxResults,
         TArray<TSharedPtr<FJsonValue>>& OutOrdered, TMap<FName, TSharedPtr<FJsonObject>>& OutByName,
         int32& OutNative, int32& OutScs, int32& OutInherited, bool& bOutTruncated,
         TArray<TSharedPtr<FJsonValue>>* OutOmittedDuplicates = nullptr,
-        TArray<TSharedPtr<FJsonValue>>* OutOmittedNullTemplates = nullptr)
+        TArray<TSharedPtr<FJsonValue>>* OutOmittedNullTemplates = nullptr,
+        bool bWithTemplateFacts = false)
     {
         OutNative = OutScs = OutInherited = 0;
         bOutTruncated = false;
@@ -236,6 +270,19 @@ namespace
                     Blueprint->InheritableComponentHandler->GetOverridenComponentTemplate(Key) != nullptr);
             }
             AddTransform(Obj, Cast<USceneComponent>(Node->ComponentTemplate));
+            if (bWithTemplateFacts)
+            {
+                TArray<TSharedPtr<FJsonValue>> ChildNames;
+                for (const USCS_Node* Child : Node->GetChildNodes())
+                {
+                    if (Child)
+                    {
+                        ChildNames.Add(MakeShared<FJsonValueString>(Child->GetVariableName().ToString()));
+                    }
+                }
+                Obj->SetArrayField(TEXT("children"), ChildNames);
+                AddComponentTemplateFacts_Analysis(Obj, Node->ComponentTemplate, VarName.ToString());
+            }
 
             OutOrdered.Add(MakeShared<FJsonValueObject>(Obj));
             OutByName.Add(VarName, Obj);
@@ -289,6 +336,23 @@ namespace
                         Obj->SetStringField(TEXT("attach_socket"), TEXT(""));
                     }
                     Obj->SetBoolField(TEXT("parent_is_native"), true);
+                    if (bWithTemplateFacts)
+                    {
+                        // The CDO's own components attached under this one.
+                        TArray<TSharedPtr<FJsonValue>> ChildNames;
+                        if (const USceneComponent* SceneParent = Cast<USceneComponent>(Comp))
+                        {
+                            for (const USceneComponent* Child : SceneParent->GetAttachChildren())
+                            {
+                                if (Child && Child->GetOwner() == CDO)
+                                {
+                                    ChildNames.Add(MakeShared<FJsonValueString>(Child->GetName()));
+                                }
+                            }
+                        }
+                        Obj->SetArrayField(TEXT("children"), ChildNames);
+                        AddComponentTemplateFacts_Analysis(Obj, Comp, CompName.ToString());
+                    }
                     OutOrdered.Add(MakeShared<FJsonValueObject>(Obj));
                     OutByName.Add(CompName, Obj);
                     ++OutNative;
@@ -1357,7 +1421,7 @@ namespace
     }
 
     /**
-     * The two Blueprints diff_blueprints and diff_blueprint_graphs compare (blueprint_a, blueprint_b) and their
+     * The two Blueprints diff_blueprints compares (blueprint_a, blueprint_b) and their
      * max_nodes budget (default 20000, also for a value below 1). Returns the error reply to send back, or
      * nullptr once both Blueprints are loaded.
      */
@@ -1517,121 +1581,44 @@ namespace UEAgentAnalysisCommandsImpl
         }
     }
 
-    /** One node of the Blueprint's OWN construction script, in the shape get_blueprint_components_list reports. */
-    TSharedPtr<FJsonObject> DescribeOwnScsNode(const USCS_Node* Node)
+    /**
+     * The other Blueprint assets under /Game (Widget and Anim Blueprints included) that share a bare Name, when
+     * there is more than one: their object paths, else an empty list. A path-shaped Name is never ambiguous.
+     */
+    TArray<TSharedPtr<FJsonValue>> AmbiguousBlueprintMatches(const FString& Name)
     {
-        UActorComponent* Template = Node->ComponentTemplate;
-        const FString VariableName = Node->GetVariableName().ToString();
-
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), VariableName);
-        Entry->SetStringField(TEXT("class"), Template->GetClass()->GetName());
-        // The text before the first underscore doubles as a loose category ("Mesh_Body" -> "Mesh").
-        int32 Underscore = INDEX_NONE;
-        Entry->SetStringField(TEXT("category"),
-            VariableName.FindChar(TEXT('_'), Underscore) ? VariableName.Left(Underscore) : FString(TEXT("Default")));
-        Entry->SetBoolField(TEXT("is_root"), Node->IsRootNode());
-        Entry->SetBoolField(TEXT("is_scene_component"), Template->IsA<USceneComponent>());
-
-        if (const USceneComponent* Scene = Cast<USceneComponent>(Template))
+        TArray<TSharedPtr<FJsonValue>> Matches;
+        if (Name.IsEmpty() || Name.Contains(TEXT("/")))
         {
-            Entry->SetStringField(TEXT("mobility"), mcp_common::MobilityLabel(Scene->Mobility));
+            return Matches;
         }
-        if (const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Template))
+        FARFilter AnyBlueprintKind;
+        AnyBlueprintKind.PackagePaths.Add(TEXT("/Game"));
+        AnyBlueprintKind.bRecursivePaths = true;
+        AnyBlueprintKind.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+        AnyBlueprintKind.bRecursiveClasses = true;
+        TArray<FAssetData> Pool;
+        mcp_common::AssetRegistry().GetAssets(AnyBlueprintKind, Pool);
+        for (const FAssetData& Candidate : Pool)
         {
-            Entry->SetBoolField(TEXT("simulates_physics"), Primitive->IsSimulatingPhysics());
-            Entry->SetBoolField(TEXT("collision_enabled"), Primitive->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
-        }
-        if (const UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Template))
-        {
-            const UStaticMesh* Mesh = MeshComponent->GetStaticMesh();
-            Entry->SetBoolField(TEXT("has_static_mesh"), Mesh != nullptr);
-            if (Mesh != nullptr)
+            if (Candidate.AssetName.ToString() == Name)
             {
-                Entry->SetStringField(TEXT("static_mesh_path"), Mesh->GetPathName());
+                Matches.Add(MakeShared<FJsonValueString>(Candidate.GetObjectPathString()));
             }
-            Entry->SetNumberField(TEXT("material_count"), MeshComponent->GetNumMaterials());
         }
-        return Entry;
-    }
-
-    /** One entry of UBlueprint::NewVariables: identity, tooltip and the property flags that matter for co-op and UI. */
-    TSharedPtr<FJsonObject> DescribeNewVariable(const FBPVariableDescription& Variable)
-    {
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), Variable.VarName.ToString());
-        Entry->SetStringField(TEXT("type"), Variable.VarType.PinCategory.ToString());
-        Entry->SetStringField(TEXT("category"), Variable.Category.ToString());
-        // FriendlyName is a plain FString on the description, not an FText.
-        Entry->SetStringField(TEXT("tooltip"), Variable.FriendlyName);
-
-        struct FFlagField
+        if (Matches.Num() < 2)
         {
-            const TCHAR* Key;
-            uint64 Mask;
-        };
-        const FFlagField FlagFields[] = {
-            { TEXT("is_public"),              CPF_BlueprintVisible },
-            { TEXT("is_editable"),            CPF_Edit },
-            { TEXT("is_blueprint_read_only"), CPF_BlueprintReadOnly },
-            { TEXT("is_replicated"),          CPF_Net },
-            { TEXT("is_expose_on_spawn"),     CPF_ExposeOnSpawn },
-        };
-        for (const FFlagField& Field : FlagFields)
-        {
-            Entry->SetBoolField(Field.Key, (Variable.PropertyFlags & Field.Mask) != 0);
+            Matches.Reset();
         }
-        return Entry;
+        return Matches;
     }
 
     /**
-     * True when Graph overrides something: a function of the same name already on the parent chain, or one
-     * of an interface the Blueprint implements. OutDeclaringClass names where it was found.
+     * get_asset_dependencies: the outgoing package edges of an asset (what it needs), from the Asset
+     * Registry, optionally without /Engine and /Script entries -- those are skipped without spending the
+     * max_results budget, yet still counted in the raw total. The incoming direction is get_asset_referencers.
      */
-    bool FindOverriddenDeclaration(const UBlueprint* Blueprint, const UEdGraph* Graph, FString& OutDeclaringClass)
-    {
-        const FName GraphName = Graph->GetFName();
-        if (UClass* Parent = Blueprint->ParentClass)
-        {
-            if (const UFunction* Inherited = Parent->FindFunctionByName(GraphName))
-            {
-                const UClass* Owner = Inherited->GetOwnerClass();
-                OutDeclaringClass = Owner ? Owner->GetPathName() : FString();
-                return true;
-            }
-        }
-        for (const FBPInterfaceDescription& Implemented : Blueprint->ImplementedInterfaces)
-        {
-            const UClass* InterfaceClass = Implemented.Interface.Get();
-            if (InterfaceClass && InterfaceClass->FindFunctionByName(GraphName))
-            {
-                OutDeclaringClass = InterfaceClass->GetPathName();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Purity is read off the graph's own entry node (FUNC_BlueprintPure), never inferred. */
-    bool IsPureGraph(UEdGraph* Graph)
-    {
-        TArray<UK2Node_FunctionEntry*> EntryNodes;
-        Graph->GetNodesOfClass<UK2Node_FunctionEntry>(EntryNodes);
-        if (EntryNodes.Num() == 0 || EntryNodes[0] == nullptr)
-        {
-            return false;
-        }
-        return (static_cast<uint32>(EntryNodes[0]->GetFunctionFlags()) & static_cast<uint32>(FUNC_BlueprintPure)) != 0;
-    }
-
-    /**
-     * get_asset_dependencies and get_asset_dependents are one query run in opposite directions, so both
-     * handlers land here and only choose the direction: outgoing edges (what the asset needs) or incoming
-     * ones (who needs it). Package-level edges from the Asset Registry, optionally without /Engine and
-     * /Script entries -- those are skipped without spending the max_results budget, yet still counted in
-     * the raw total.
-     */
-    TSharedPtr<FJsonObject> ListPackageEdges(const TSharedPtr<FJsonObject>& Params, bool bIncoming)
+    TSharedPtr<FJsonObject> ListPackageEdges(const TSharedPtr<FJsonObject>& Params)
     {
         FString Target;
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_name"), Target, mcp_common::EAllowEmpty::Yes)) { return Missing; }
@@ -1666,14 +1653,7 @@ namespace UEAgentAnalysisCommandsImpl
         const FAssetData& Subject = Found.Asset;
 
         TArray<FName> Edges;
-        if (bIncoming)
-        {
-            Registry.GetReferencers(Subject.PackageName, Edges, UE::AssetRegistry::EDependencyCategory::Package, Query);
-        }
-        else
-        {
-            Registry.GetDependencies(Subject.PackageName, Edges, UE::AssetRegistry::EDependencyCategory::Package, Query);
-        }
+        Registry.GetDependencies(Subject.PackageName, Edges, UE::AssetRegistry::EDependencyCategory::Package, Query);
 
         // Truncated means an edge that would have been listed was left out -- not that the list
         // happens to hold exactly Cap entries.
@@ -1706,7 +1686,7 @@ namespace UEAgentAnalysisCommandsImpl
             Listed.Add(MakeShared<FJsonValueObject>(Entry));
         }
 
-        const FString ListKey = bIncoming ? TEXT("dependents") : TEXT("dependencies");
+        const FString ListKey = TEXT("dependencies");
         TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
         Reply->SetStringField(TEXT("asset_name"), Target);
         Reply->SetStringField(TEXT("asset_path"), Subject.GetObjectPathString());
@@ -1789,7 +1769,7 @@ namespace UEAgentAnalysisCommandsImpl
 
 // Blueprint structure
 
-// MCP:get_blueprint_parent - Read which class a Blueprint ASSET inherits from: parent class name and path, whether that parent is native C++ or another Blueprint, and the Blueprint's own type (Normal / Interface / MacroLibrary / FunctionLibrary / LevelScript / Const). The first question to ask about an unfamiliar Blueprint, and the way to tell whether a library class sneaked into the parent chain. It returns ONE level -- get_class_hierarchy walks the whole ancestor chain of the compiled class, get_blueprint_children lists descendants, and verify_reparent_success checks the chain against an expectation after a reparent. WARNING: an ambiguous bare name still resolves to the FIRST match and only lists the rest in `ambiguous_matches` (the other match is often a dated backup copy that backup_asset wrote under /Game/MCP_Backups), so run resolve_asset_by_name first or pass the full path.
+// MCP:get_blueprint_parent - Read which class a Blueprint ASSET inherits from: parent class name and path, whether that parent is native C++ or another Blueprint, and the Blueprint's own type (Normal / Interface / MacroLibrary / FunctionLibrary / LevelScript / Const). The first question to ask about an unfamiliar Blueprint, and the way to tell whether a library class sneaked into the parent chain. It returns ONE level -- get_class_hierarchy walks the whole ancestor chain of the compiled class, list_derived_classes lists descendants, and verify_reparent_success checks the chain against an expectation after a reparent. WARNING: an ambiguous bare name still resolves to the FIRST match and only lists the rest in `ambiguous_matches` (the other match is often a dated backup copy that backup_asset wrote under /Game/MCP_Backups), so run resolve_asset_by_name first or pass the full path.
 //   @param blueprint_name - Blueprint asset short name (exact) or full package name. The full package name is tried first; the bare-name fallback scans /Game only, matching UBlueprint assets, and picks the first hit.
 //   @returns { blueprint_name: string, blueprint_path: string, blueprint_valid: bool, parent_class: string, parent_class_path: string, has_parent: bool, parent_is_native: bool, blueprint_type: string, ambiguous_matches?: [string] }
 TSharedPtr<FJsonObject> HandleGetBlueprintParent(const TSharedPtr<FJsonObject>& Params)
@@ -1827,130 +1807,13 @@ TSharedPtr<FJsonObject> HandleGetBlueprintParent(const TSharedPtr<FJsonObject>& 
     return Reply;
 }
 
-// MCP:get_blueprint_children - List every Blueprint asset that inherits from a given Blueprint -- the "what breaks if I change this base class?" blast-radius query, and the inverse of get_blueprint_parent. Use find_blueprint_assets_by_class when the base is a NATIVE C++ class rather than a Blueprint, get_class_hierarchy to walk upwards instead, and get_asset_referencers for references that are not inheritance at all.
-//   @param blueprint_name - Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches`
-//   @param max_results - Maximum children to return, 1..10000 (default 1000); compare with children_count and results_truncated
-//   @returns { blueprint_name: string, blueprint_path: string, children: [object], children_count: int, max_results: int, results_truncated: bool, parent_blueprint_valid: bool, ambiguous_matches?: [string] }
-TSharedPtr<FJsonObject> HandleGetBlueprintChildren(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentAnalysisCommandsImpl;
-
-    FString Requested;
-    int32 Cap = 0;
-    if (TSharedPtr<FJsonObject> Invalid = Impl::ReadBlueprintListing(Params, Requested, Cap))
-    {
-        return Invalid;
-    }
-
-    Impl::FBlueprintByName Found;
-    UBlueprint* Blueprint = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::LoadNamedBlueprint(Requested, /*bNeedGeneratedClass*/ true, Found, Blueprint))
-    {
-        return Failure;
-    }
-
-    // Descendants come from the class tree the registry keeps in memory, never from loading candidate
-    // assets: loading every Blueprint of the project one by one on the game thread would hang the
-    // editor. Loading the ONE base Blueprint above is fine.
-    const FTopLevelAssetPath BaseClass = Blueprint->GeneratedClass->GetClassPathName();
-    TSet<FTopLevelAssetPath> Descendants;
-    mcp_common::AssetRegistry().GetDerivedClassNames({ BaseClass }, TSet<FTopLevelAssetPath>(), Descendants);
-
-    TArray<TSharedPtr<FJsonValue>> Children;
-    bool bTruncated = false;
-    for (const FTopLevelAssetPath& ChildClass : Descendants)
-    {
-        const FString Package = ChildClass.GetPackageName().ToString();
-        if (ChildClass == BaseClass || !Package.StartsWith(TEXT("/Game")))
-        {
-            continue;   // the base's own class, or a class that is not project content
-        }
-        if (Children.Num() >= Cap)
-        {
-            bTruncated = true;   // a child that would have been listed was left out
-            break;
-        }
-
-        // The generated class is "<Asset>_C" and lives in the asset's own package.
-        FString AssetName = ChildClass.GetAssetName().ToString();
-        AssetName.RemoveFromEnd(TEXT("_C"));
-
-        TSharedPtr<FJsonObject> Child = MakeShared<FJsonObject>();
-        Child->SetStringField(TEXT("name"), AssetName);
-        Child->SetStringField(TEXT("path"), Package + TEXT(".") + AssetName);
-        Child->SetStringField(TEXT("package"), Package);
-        Child->SetStringField(TEXT("class_path"), ChildClass.ToString());
-        Children.Add(MakeShared<FJsonValueObject>(Child));
-    }
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartBlueprintReply(Requested, Found.Asset.GetObjectPathString());
-    Reply->SetBoolField(TEXT("parent_blueprint_valid"), IsValid(Blueprint));
-    Impl::AddBlueprintListing(Reply, TEXT("children"), Children, Cap, bTruncated);
-    Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
-    return Reply;
-}
-
-// MCP:get_blueprint_components_list - List the components a Blueprint declares in its OWN Simple Construction Script, each with class, root flag, scene/primitive flags, mobility, physics and collision state, and static-mesh path + material count when it has one. WARNING: it shows ONLY this Blueprint's own SCS: components inherited from a parent Blueprint and native components from the C++ CDO are INVISIBLE here, so a short list is not proof the component is missing -- get_blueprint_scs_tree returns native + own SCS + inherited, source-classified, and is the right call whenever the answer matters. Use get_actor_components for a live actor instance instead of an asset.
-//   @param blueprint_name - Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches`
-//   @param max_results - Maximum components to return, 1..10000 (default 1000)
-//   @param include_inherited - IGNORED: accepted and parsed but never used. Inherited components are never included here whatever you pass -- call get_blueprint_scs_tree for those.
-//   @returns { blueprint_name: string, blueprint_path: string, components: [object], components_count: int, max_results: int, results_truncated: bool, has_simple_construction_script: bool, blueprint_valid: bool, ambiguous_matches?: [string] }
-TSharedPtr<FJsonObject> HandleGetBlueprintComponentsList(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentAnalysisCommandsImpl;
-
-    FString Requested;
-    int32 Cap = 0;
-    if (TSharedPtr<FJsonObject> Invalid = Impl::ReadBlueprintListing(Params, Requested, Cap))
-    {
-        return Invalid;
-    }
-    // Accepted for compatibility and deliberately unused: this listing only ever covers the Blueprint's
-    // own SCS (get_blueprint_scs_tree is the one that walks native and inherited components).
-    bool bIgnoredIncludeInherited = false;
-    Params->TryGetBoolField(TEXT("include_inherited"), bIgnoredIncludeInherited);
-
-    Impl::FBlueprintByName Found;
-    UBlueprint* Blueprint = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::LoadNamedBlueprint(Requested, /*bNeedGeneratedClass*/ false, Found, Blueprint))
-    {
-        return Failure;
-    }
-
-    TArray<TSharedPtr<FJsonValue>> Components;
-    bool bTruncated = false;
-    if (USimpleConstructionScript* OwnScs = Blueprint->SimpleConstructionScript)
-    {
-        for (USCS_Node* Node : OwnScs->GetAllNodes())
-        {
-            if (Node == nullptr || Node->ComponentTemplate == nullptr)
-            {
-                continue;
-            }
-            if (Components.Num() >= Cap)
-            {
-                bTruncated = true;   // a component that would have been listed was left out
-                break;
-            }
-            Components.Add(MakeShared<FJsonValueObject>(Impl::DescribeOwnScsNode(Node)));
-        }
-    }
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartBlueprintReply(Requested, Found.Asset.GetObjectPathString());
-    Reply->SetBoolField(TEXT("blueprint_valid"), IsValid(Blueprint));
-    Reply->SetBoolField(TEXT("has_simple_construction_script"), Blueprint->SimpleConstructionScript != nullptr);
-    Impl::AddBlueprintListing(Reply, TEXT("components"), Components, Cap, bTruncated);
-    Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
-    return Reply;
-}
-
-// MCP:get_blueprint_scs_tree - Enumerate the COMPLETE component tree of a Blueprint asset -- native components from the C++ CDO, its own SCS nodes, and everything inherited down the ancestor chain -- each classified by source with its class, attach parent/socket and transform, most-derived-wins. The component listing to use by default: get_blueprint_components_list sees ONLY the Blueprint's own SCS and silently omits native and inherited ones. `component_class` filters by class OR ANY SUBCLASS across all three sources, which Actor::GetComponentsByClass cannot do (it only ever sees a constructed instance's OwnedComponents, never SCS templates on a Blueprint nobody instantiated). WARNING: before concluding a component does not exist, read `omitted_total`, NOT results_truncated: null templates and name-shadowed ancestor entries are dropped without setting it, and omitted_duplicate_names[]/omitted_null_templates[] name what disappeared (counted before the component_class filter). `scs_cdo_desync` / `generated_property_exists` flag an SCS that disagrees with the compiled class -- the fingerprint of a half-reverted asset. See diff_blueprint_components to compare two trees, get_actor_components for a live instance.
-//   @param blueprint_name - Blueprint or AnimBlueprint asset short name (exact) or full /Game path; an ambiguous bare name resolves to one match without saying which, so pass the path when it matters
+// MCP:get_blueprint_components - Enumerate the COMPLETE component tree of a Blueprint asset -- native components from the C++ CDO, its own SCS nodes, and everything inherited down the ancestor chain -- each classified by source with its class, attach parent/socket, children, transform and template facts (mobility, physics and collision state, static mesh + material count), most-derived-wins. include_native=false + include_inherited=false narrows it to the Blueprint's OWN construction script. `component_class` filters by class OR ANY SUBCLASS across all three sources, which Actor::GetComponentsByClass cannot do (it only ever sees a constructed instance's OwnedComponents, never SCS templates on a Blueprint nobody instantiated). WARNING: before concluding a component does not exist, read `omitted_total`, NOT results_truncated: null templates and name-shadowed ancestor entries are dropped without setting it, and omitted_duplicate_names[]/omitted_null_templates[] name what disappeared (counted before the component_class filter). `scs_cdo_desync` / `generated_property_exists` flag an SCS that disagrees with the compiled class -- the fingerprint of a half-reverted asset. See diff_blueprint_components to compare two trees, get_actor_components for a live instance.
+//   @param blueprint_name - Blueprint or AnimBlueprint asset short name (exact) or full /Game path; a bare name that matches more than one Blueprint asset resolves to one of them and lists the others in `ambiguous_matches`, so pass the path when it matters
 //   @param include_native - Include C++/native components from the CDO (default true)
 //   @param include_inherited - Include components inherited from ancestor Blueprint classes (default true)
 //   @param component_class - Optional class filter (short name, /Script/Module.Class, or /Game/... Blueprint path). Matches this class OR ANY SUBCLASS of it (same semantics as the engine's own GetComponentsByClass), evaluated against every source (native CDO, own SCS, inherited SCS) -- unlike Actor::GetComponentsByClass/K2_GetComponentsByClass, which only ever see a live actor's already-constructed OwnedComponents and are blind to SCS node templates on a Blueprint that hasn't been instantiated yet.
 //   @param max_results - Cap on components returned, 1..10000 (default 1000)
-//   @returns { blueprint_name: string, blueprint_path: string, blueprint_valid: bool, parent_class: string, parent_class_path: string, components: [object], components_count: int, counts: object, has_simple_construction_script: bool, results_truncated: bool, max_results: int, component_class_filter: string|null, component_class_resolved: bool, desync_count: int, blueprint_status: string, generated_class_available: bool, omitted_duplicate_names: [{name, source, owner_class, shadowed_by?}], omitted_duplicate_count: int, omitted_null_templates: [{name, source, owner_class}], omitted_null_template_count: int, omitted_total: int } -- each component record also carries generated_property_exists (bool|null) and scs_cdo_desync (bool|null): the compiler mints one FObjectProperty per SCS node with the SAME FName as the node (SCS_Node.h, KismetCompiler.cpp), so a MISSING property means the SCS and the compiled class disagree -- the fingerprint of an asset left half-reverted. This tool emits Node->GetVariableName() VERBATIM; it does NOT normalize a trailing digit.
+//   @returns { blueprint_name: string, blueprint_path: string, blueprint_valid: bool, ambiguous_matches?: [string], parent_class: string, parent_class_path: string, components: [{ name, source, class, class_path, owner_class, is_root, is_scene_component, attach_parent, attach_socket, parent_is_native, ich_overridden?, transform?: {loc, rot, scale}, children: [string], category, mobility?, simulates_physics?, collision_enabled?, has_static_mesh?, static_mesh_path?, material_count?, generated_property_exists, scs_cdo_desync }], components_count: int, counts: object, has_simple_construction_script: bool, results_truncated: bool, max_results: int, component_class_filter: string|null, component_class_resolved: bool, desync_count: int, blueprint_status: string, generated_class_available: bool, omitted_duplicate_names: [{name, source, owner_class, shadowed_by?}], omitted_duplicate_count: int, omitted_null_templates: [{name, source, owner_class}], omitted_null_template_count: int, omitted_total: int } -- children names the components attached under a record (same SCS tree, or the CDO's own attach children for a native one); category is the text before the first underscore of the name; mobility only on scene components, simulates_physics/collision_enabled on primitives, has_static_mesh/static_mesh_path/material_count on static mesh components. generated_property_exists (bool|null) and scs_cdo_desync (bool|null): the compiler mints one FObjectProperty per SCS node with the SAME FName as the node (SCS_Node.h, KismetCompiler.cpp), so a MISSING property means the SCS and the compiled class disagree -- the fingerprint of an asset left half-reverted. This tool emits Node->GetVariableName() VERBATIM; it does NOT normalize a trailing digit.
 //   WARNING: omitted_*: `components` is NOT necessarily every component the walk saw. Two paths drop entries and
 //     neither sets results_truncated (which only ever covered the max_results cap): a USCS_Node with a NULL
 //     ComponentTemplate, and a name already claimed by a more-derived record (correct most-derived-wins
@@ -2009,7 +1872,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintScsTree(const TSharedPtr<FJsonObject>&
     TArray<TSharedPtr<FJsonValue>> DroppedNullTemplates;
     CollectBlueprintComponents(Blueprint, bWithNative, bWithInherited, Cap,
         Records, RecordsByName, NativeCount, ScsCount, InheritedCount, bCapped,
-        &DroppedDuplicates, &DroppedNullTemplates);
+        &DroppedDuplicates, &DroppedNullTemplates, /*bWithTemplateFacts=*/true);
 
     // Class filter (subclasses included), applied once the whole native+SCS+inherited set is known so the
     // shared collector keeps the signature and behavior its other caller relies on. The per-source counts
@@ -2101,6 +1964,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintScsTree(const TSharedPtr<FJsonObject>&
 
     TSharedPtr<FJsonObject> Reply = Impl::StartBlueprintReply(Requested, Blueprint->GetPathName());
     Reply->SetBoolField(TEXT("blueprint_valid"), IsValid(Blueprint));
+    Impl::AppendAmbiguity(Reply, Impl::AmbiguousBlueprintMatches(Requested));
     UClass* const ParentClass = Blueprint->ParentClass;
     Reply->SetStringField(TEXT("parent_class"), ParentClass ? ParentClass->GetName() : FString());
     Reply->SetStringField(TEXT("parent_class_path"), ParentClass ? ParentClass->GetPathName() : FString());
@@ -2138,254 +2002,9 @@ TSharedPtr<FJsonObject> HandleGetBlueprintScsTree(const TSharedPtr<FJsonObject>&
     return Reply;
 }
 
-// MCP:get_blueprint_functions_list - List every graph a Blueprint AUTHORED -- function graphs, MACROS, interface implementation graphs, event graphs and ubergraph pages -- each with its node count and a REAL is_override (resolved against the parent class chain AND every implemented interface, reporting the declaring class) and is_pure (read from the graph's UK2Node_FunctionEntry FUNC_BlueprintPure flag, not guessed). The map to read before get_graph_nodes, which needs an exact graph name. WARNING: `ubergraph_pages` is the authored EventGraph you actually see in the editor; `event_graphs` are the TRANSIENT compiled graphs and come back EMPTY on a Blueprint that has not compiled this session -- an empty event_graphs is not an absence of events. Use get_class_functions for the compiled class surface (including inherited and native functions) instead of the authored graphs, and get_function_info for one function's signature.
-//   @param blueprint_name - Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches`
-//   @param max_results - Maximum entries to return, 1..10000 (default 1000)
-//   @param filter_type - Filter to 'all', 'functions', or 'events'. 'functions' covers Function/Macro/Interface graphs; 'events' covers Event/Ubergraph pages. Case-insensitive, and the singular ('function', 'event') is accepted as the same value.
-//   @param include_macros - Include MacroGraphs (type 'Macro'). Default true.
-//   @param include_interface_graphs - Include ImplementedInterfaces[].Graphs (type 'Interface'). Default true.
-//   @param include_ubergraph_pages - Include UbergraphPages (type 'Ubergraph'). Default true.
-//   @returns { blueprint_name: string, blueprint_path: string, functions: [{name, type, nodes_count, is_pure?, is_override?, override_declaring_class?, interface_class?}], functions_count: int, function_graphs_count: int, event_graphs_count: int, macro_graphs_count: int, interface_graphs_count: int, ubergraph_pages_count: int, override_count: int, filter_type: string, max_results: int, results_truncated: bool, blueprint_valid: bool, ambiguous_matches?: [string] }
-TSharedPtr<FJsonObject> HandleGetBlueprintFunctionsList(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentAnalysisCommandsImpl;
-
-    FString Requested;
-    int32 Cap = 0;
-    if (TSharedPtr<FJsonObject> Invalid = Impl::ReadBlueprintListing(Params, Requested, Cap))
-    {
-        return Invalid;
-    }
-
-    // The description reads "all, functions, or events", which invites the singular, so the VALUE is
-    // normalized before validation (trimmed, lower-cased, singular accepted) instead of failing a
-    // filter_type="function" over one letter.
-    FString Scope = TEXT("all");
-    Params->TryGetStringField(TEXT("filter_type"), Scope);
-    Scope = Scope.TrimStartAndEnd().ToLower();
-    if (Scope == TEXT("function"))
-    {
-        Scope = TEXT("functions");
-    }
-    else if (Scope == TEXT("event"))
-    {
-        Scope = TEXT("events");
-    }
-
-    bool bWithMacros = true;
-    bool bWithInterfaceGraphs = true;
-    bool bWithUbergraphPages = true;
-    Params->TryGetBoolField(TEXT("include_macros"), bWithMacros);
-    Params->TryGetBoolField(TEXT("include_interface_graphs"), bWithInterfaceGraphs);
-    Params->TryGetBoolField(TEXT("include_ubergraph_pages"), bWithUbergraphPages);
-
-    const bool bFunctionSide = (Scope == TEXT("all") || Scope == TEXT("functions"));
-    const bool bEventSide = (Scope == TEXT("all") || Scope == TEXT("events"));
-    if (!bFunctionSide && !bEventSide)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Parameter 'filter_type' must be 'all', 'functions', or 'events'"));
-    }
-
-    Impl::FBlueprintByName Found;
-    UBlueprint* Blueprint = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::LoadNamedBlueprint(Requested, /*bNeedGeneratedClass*/ false, Found, Blueprint))
-    {
-        return Failure;
-    }
-
-    // One list in a fixed order -- functions, macros, interface graphs, compiled event graphs, ubergraph
-    // pages -- that stops growing as soon as it holds Cap entries.
-    TArray<TSharedPtr<FJsonValue>> Listed;
-    int32 FunctionCount = 0;
-    int32 MacroCount = 0;
-    int32 InterfaceCount = 0;
-    int32 EventCount = 0;
-    int32 UbergraphCount = 0;
-    int32 OverrideCount = 0;
-
-    // HasRoom ends a walk once an entry has been turned away; TakeSlot is asked right before an
-    // entry would be listed, so results_truncated means "something listable was left out", not "the
-    // list happens to hold exactly Cap entries".
-    bool bTruncated = false;
-    auto HasRoom = [&bTruncated]() { return !bTruncated; };
-    auto TakeSlot = [&Listed, &bTruncated, Cap]()
-    {
-        if (Listed.Num() >= Cap)
-        {
-            bTruncated = true;
-            return false;
-        }
-        return true;
-    };
-    auto StartEntry = [](UEdGraph* Graph, const TCHAR* Kind)
-    {
-        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-        Entry->SetStringField(TEXT("name"), Graph->GetName());
-        Entry->SetStringField(TEXT("type"), Kind);
-        Entry->SetNumberField(TEXT("nodes_count"), Graph->Nodes.Num());
-        return Entry;
-    };
-    // Lists each non-null graph of Graphs, as Describe builds its entry, while there is room; returns how
-    // many it listed.
-    auto ListGraphs = [&Listed, &HasRoom, &TakeSlot](const TArray<TObjectPtr<UEdGraph>>& Graphs, auto&& Describe)
-    {
-        int32 Count = 0;
-        for (UEdGraph* Graph : Graphs)
-        {
-            if (!HasRoom())
-            {
-                break;
-            }
-            if (Graph == nullptr)
-            {
-                continue;
-            }
-            if (!TakeSlot())
-            {
-                break;
-            }
-            Listed.Add(MakeShared<FJsonValueObject>(Describe(Graph)));
-            ++Count;
-        }
-        return Count;
-    };
-
-    if (bFunctionSide)
-    {
-        // is_override is resolved against the parent chain and every implemented interface, naming
-        // where the overridden function is declared.
-        FunctionCount = ListGraphs(Blueprint->FunctionGraphs, [&StartEntry, &OverrideCount, Blueprint](UEdGraph* Graph)
-        {
-            FString DeclaredIn;
-            const bool bOverrides = Impl::FindOverriddenDeclaration(Blueprint, Graph, DeclaredIn);
-            TSharedPtr<FJsonObject> Entry = StartEntry(Graph, TEXT("Function"));
-            Entry->SetBoolField(TEXT("is_pure"), Impl::IsPureGraph(Graph));
-            Entry->SetBoolField(TEXT("is_override"), bOverrides);
-            if (bOverrides)
-            {
-                Entry->SetStringField(TEXT("override_declaring_class"), DeclaredIn);
-                ++OverrideCount;
-            }
-            return Entry;
-        });
-
-        // Macros are authored graphs that FunctionGraphs never contained. A macro has no UFunction,
-        // so it is stated as neither pure nor an override rather than left to be guessed.
-        if (bWithMacros)
-        {
-            MacroCount = ListGraphs(Blueprint->MacroGraphs, [&StartEntry](UEdGraph* Graph)
-            {
-                TSharedPtr<FJsonObject> Entry = StartEntry(Graph, TEXT("Macro"));
-                Entry->SetBoolField(TEXT("is_pure"), false);
-                Entry->SetBoolField(TEXT("is_override"), false);
-                return Entry;
-            });
-        }
-
-        // Interface implementation graphs (ImplementedInterfaces[].Graphs) always override.
-        if (bWithInterfaceGraphs)
-        {
-            for (const FBPInterfaceDescription& Implemented : Blueprint->ImplementedInterfaces)
-            {
-                if (!HasRoom())
-                {
-                    break;
-                }
-                const UClass* InterfaceClass = Implemented.Interface.Get();
-                const FString InterfacePath = InterfaceClass ? InterfaceClass->GetPathName() : FString();
-                const int32 Implementations = ListGraphs(Implemented.Graphs, [&StartEntry, &InterfacePath](UEdGraph* Graph)
-                {
-                    TSharedPtr<FJsonObject> Entry = StartEntry(Graph, TEXT("Interface"));
-                    Entry->SetBoolField(TEXT("is_pure"), Impl::IsPureGraph(Graph));
-                    Entry->SetBoolField(TEXT("is_override"), true);
-                    Entry->SetStringField(TEXT("interface_class"), InterfacePath);
-                    Entry->SetStringField(TEXT("override_declaring_class"), InterfacePath);
-                    return Entry;
-                });
-                InterfaceCount += Implementations;
-                OverrideCount += Implementations;
-            }
-        }
-    }
-
-    if (bEventSide)
-    {
-        // EventGraphs are the TRANSIENT compiled graphs: empty on a Blueprint not compiled this session.
-        EventCount = ListGraphs(Blueprint->EventGraphs, [&StartEntry](UEdGraph* Graph)
-        {
-            return StartEntry(Graph, TEXT("Event"));
-        });
-
-        // Ubergraph pages are the AUTHORED EventGraph, which survives a session without a compile.
-        if (bWithUbergraphPages)
-        {
-            UbergraphCount = ListGraphs(Blueprint->UbergraphPages, [&StartEntry](UEdGraph* Graph)
-            {
-                return StartEntry(Graph, TEXT("Ubergraph"));
-            });
-        }
-    }
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartBlueprintReply(Requested, Found.Asset.GetObjectPathString());
-    Reply->SetBoolField(TEXT("blueprint_valid"), IsValid(Blueprint));
-    Reply->SetStringField(TEXT("filter_type"), Scope);
-    Reply->SetArrayField(TEXT("functions"), Listed);
-    Reply->SetNumberField(TEXT("functions_count"), Listed.Num());
-    Reply->SetNumberField(TEXT("function_graphs_count"), FunctionCount);
-    Reply->SetNumberField(TEXT("macro_graphs_count"), MacroCount);
-    Reply->SetNumberField(TEXT("interface_graphs_count"), InterfaceCount);
-    Reply->SetNumberField(TEXT("event_graphs_count"), EventCount);
-    Reply->SetNumberField(TEXT("ubergraph_pages_count"), UbergraphCount);
-    Reply->SetNumberField(TEXT("override_count"), OverrideCount);
-    Reply->SetNumberField(TEXT("max_results"), Cap);
-    Reply->SetBoolField(TEXT("results_truncated"), bTruncated);
-    Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
-    return Reply;
-}
-
-// MCP:get_blueprint_variables_list - List the variables a Blueprint AUTHORED itself (UBlueprint::NewVariables) with name, pin category, category, tooltip and the flags that matter for co-op and UI work: is_public (BlueprintVisible), is_editable, is_blueprint_read_only, is_replicated (CPF_Net) and is_expose_on_spawn. The quick "what state does this Blueprint own, and is it replicated?" listing. WARNING: own variables only: inherited variables, native C++ UPROPERTYs and component-backed variables are NOT here -- use get_class_properties on the generated class (..._C) for the full property surface, or get_blueprint_variable_detailed_info for one variable's full descriptor and default value.
-//   @param blueprint_name - Blueprint asset short name (exact) or full package name; an ambiguous bare name resolves to the first hit and lists the rest in `ambiguous_matches`
-//   @param max_results - Maximum variables to return, 1..10000 (default 1000)
-//   @returns { blueprint_name: string, blueprint_path: string, variables: [object], variables_count: int, max_results: int, results_truncated: bool, blueprint_valid: bool, ambiguous_matches?: [string] }
-TSharedPtr<FJsonObject> HandleGetBlueprintVariablesList(const TSharedPtr<FJsonObject>& Params)
-{
-    namespace Impl = UEAgentAnalysisCommandsImpl;
-
-    FString Requested;
-    int32 Cap = 0;
-    if (TSharedPtr<FJsonObject> Invalid = Impl::ReadBlueprintListing(Params, Requested, Cap))
-    {
-        return Invalid;
-    }
-
-    Impl::FBlueprintByName Found;
-    UBlueprint* Blueprint = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = Impl::LoadNamedBlueprint(Requested, /*bNeedGeneratedClass*/ false, Found, Blueprint))
-    {
-        return Failure;
-    }
-
-    // Only what this Blueprint declares itself; inherited and native properties are not in NewVariables.
-    TArray<TSharedPtr<FJsonValue>> Variables;
-    for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
-    {
-        if (Variables.Num() >= Cap)
-        {
-            break;
-        }
-        Variables.Add(MakeShared<FJsonValueObject>(Impl::DescribeNewVariable(Variable)));
-    }
-
-    TSharedPtr<FJsonObject> Reply = Impl::StartBlueprintReply(Requested, Found.Asset.GetObjectPathString());
-    Reply->SetBoolField(TEXT("blueprint_valid"), IsValid(Blueprint));
-    Impl::AddBlueprintListing(Reply, TEXT("variables"), Variables, Cap, Blueprint->NewVariables.Num() > Variables.Num());
-    Impl::AppendAmbiguity(Reply, Found.AmbiguousMatches);
-    return Reply;
-}
-
 // Asset dependencies
 
-// MCP:get_asset_dependencies - List every package an asset DEPENDS ON (its outgoing edges), each with its class and loaded state -- "what does this asset drag in with it?", the input to a migration or import budget. Direction matters: this is what the asset NEEDS; get_asset_dependents / get_asset_referencers answer who needs IT. Use get_asset_dependencies_recursive for the transitive closure and check_asset_circular_dependency to detect cycles. WARNING: these are PACKAGE-level edges from the Asset Registry: they cannot tell you WHICH node or property creates the edge (that is find_blueprint_node_references), and a name built at runtime or resolved through a DataRegistry produces no edge at all.
+// MCP:get_asset_dependencies - List every package an asset DEPENDS ON (its outgoing edges), each with its class and loaded state -- "what does this asset drag in with it?", the input to a migration or import budget. Direction matters: this is what the asset NEEDS; get_asset_referencers answers who needs IT. Use get_asset_dependencies_recursive for the transitive closure and check_asset_circular_dependency to detect cycles. WARNING: these are PACKAGE-level edges from the Asset Registry: they cannot tell you WHICH node or property creates the edge (that is find_blueprint_node_references), and a name built at runtime or resolved through a DataRegistry produces no edge at all.
 //   @param asset_name - Exact asset name or full package name; the bare-name fallback scans /Game only and stops at the FIRST match, without reporting that others existed
 //   @param max_results - Maximum dependencies to return, 1..50000 (default 5000). Read `results_truncated` for the real answer: `total_dependencies` counts the RAW registry edges before exclude_engine, so it exceeds dependencies_count on almost every asset without anything having been cut.
 //   @param exclude_engine - Skip /Engine and /Script dependencies, default true. Filtered entries do NOT consume the max_results budget, but they ARE counted in total_dependencies.
@@ -2395,20 +2014,7 @@ TSharedPtr<FJsonObject> HandleGetAssetDependencies(const TSharedPtr<FJsonObject>
 {
     using UEAgentAnalysisCommandsImpl::ListPackageEdges;
     // Outgoing edges: what the asset needs.
-    return ListPackageEdges(Params, /*bIncoming*/ false);
-}
-
-// MCP:get_asset_dependents - List every package that REFERENCES an asset (its incoming edges), each with its class and loaded state -- "who breaks if I delete or move this?", addressed by asset NAME. Direction matters: this is who needs IT; get_asset_dependencies is what it needs. Nearly the same query as get_asset_referencers -- prefer THAT one when the name could be ambiguous (it refuses to guess and echoes `resolved_package`, while this one silently takes the first /Game match), and prefer this one when you want the hard/soft split via dependency_type. Package-level edges only: use find_blueprint_node_references to find call sites inside graphs.
-//   @param asset_name - Exact asset name or full package name; the bare-name fallback scans /Game only and stops at the FIRST match, without reporting that others existed
-//   @param max_results - Maximum dependents to return, 1..50000 (default 5000). Read `results_truncated`: `total_dependents` counts the RAW registry edges before exclude_engine, so it can exceed dependents_count with nothing cut.
-//   @param exclude_engine - Skip /Engine and /Script referencers, default true. Filtered entries do NOT consume the max_results budget, but they ARE counted in total_dependents.
-//   @param dependency_type - Filter by dependency kind: "hard", "soft", or "all" (case-insensitive), default "all"
-//   @returns { asset_name: string, asset_path: string, dependents: [object], dependents_count: int, total_dependents: int, max_results: int, results_truncated: bool, exclude_engine: bool, dependency_type: string }
-TSharedPtr<FJsonObject> HandleGetAssetDependents(const TSharedPtr<FJsonObject>& Params)
-{
-    using UEAgentAnalysisCommandsImpl::ListPackageEdges;
-    // Incoming edges (referencers): who needs the asset.
-    return ListPackageEdges(Params, /*bIncoming*/ true);
+    return ListPackageEdges(Params);
 }
 
 // MCP:check_asset_circular_dependency - Depth-first search of an asset's dependency graph looking for a CYCLE, returning has_circular_dependency plus the actual circular_path that closes the loop and its length -- the diagnosis for cook failures, load-order surprises and Blueprints that will not compile in isolation. Complements get_asset_dependencies (one level out) and get_asset_dependencies_recursive (the whole closure without cycle detection). WARNING: check `search_limit_reached` before trusting a false: the walk stops at max_depth / max_visited, and a cycle beyond those limits reads exactly like no cycle at all.
@@ -2523,108 +2129,47 @@ TSharedPtr<FJsonObject> HandleCheckAssetCircularDependency(const TSharedPtr<FJso
 // Class-based BP enumeration + hard-reference lookup.
 // ---------------------------------------------------------------------------
 
-// MCP:find_blueprint_assets_by_class - Search a content path for every Blueprint ASSET whose generated class derives from a target UClass, returning asset name, asset path, generated class and the deepest NATIVE parent -- "give me every Blueprint that is a Pawn / a Widget / an ActorComponent" without hand-scanning folders. Use get_blueprint_children when the base is itself a Blueprint rather than a C++ class, list_derived_classes for classes instead of assets, and get_assets_by_tag when you want a registry tag rather than an inheritance test. WARNING: it LOADS every Blueprint under package_path to read its GeneratedClass, so scope the path narrowly on a big project rather than sweeping all of /Game.
-//   @param class_name - UClass short name or /Script/ path (e.g. "Pawn", "/Script/Engine.Pawn"); a bare name is also retried with a "U" prefix. An unresolvable name is an error, not an empty result.
-//   @param package_path - Content path to scan, recursive (default "/Game"). Narrow it: every Blueprint underneath gets loaded.
-//   @returns { class_name, target_class, package_path, total, assets:[{ asset_name, asset_path, generated_class, native_parent }] }
-
-TSharedPtr<FJsonObject> HandleFindBlueprintAssetsByClass(const TSharedPtr<FJsonObject>& Params)
-{
-    FString ClassName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("class_name"), ClassName)) { return Missing; }
-    FString PackagePath;
-    Params->TryGetStringField(TEXT("package_path"), PackagePath);
-    if (PackagePath.IsEmpty()) { PackagePath = TEXT("/Game"); }
-
-    UClass* TargetClass = nullptr;
-    // Try direct FindObject first (handles /Script/Module.Class paths).
-    TargetClass = FindObject<UClass>(nullptr, *ClassName);
-    if (!TargetClass)
-    {
-        // Try without the leading "U" (engine classes drop it: "APawn" -> "/Script/Engine.Pawn" doesn't work,
-        // but "Pawn" alone usually works via LoadObject).
-        TargetClass = LoadObject<UClass>(nullptr, *ClassName);
-    }
-    if (!TargetClass)
-    {
-        // Last resort: append "U" if missing.
-        if (!ClassName.StartsWith(TEXT("U")) && !ClassName.StartsWith(TEXT("A")))
-        {
-            const FString Prefixed = FString::Printf(TEXT("U%s"), *ClassName);
-            TargetClass = FindObject<UClass>(nullptr, *Prefixed);
-        }
-    }
-    if (!TargetClass)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unknown class: %s (tried direct + LoadObject + U-prefix)"), *ClassName));
-    }
-
-    IAssetRegistry& AR = mcp_common::AssetRegistry();
-
-    // Enumerate ALL assets under PackagePath, then filter to UBlueprint-derived via AssetClassPath.
-    // Avoid GetAssetsByClass(UBlueprint, bSearchSubClasses=true) which can hang on a large registry.
-    TArray<FAssetData> AllAssets;
-    AR.GetAssetsByPath(FName(*PackagePath), AllAssets, /*bRecursive*/ true);
-
-    const FTopLevelAssetPath BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
-
-    TArray<TSharedPtr<FJsonValue>> Entries;
-    for (const FAssetData& AD : AllAssets)
-    {
-        // AssetClassPath filter -- fast, doesn't load the asset.
-        if (AD.AssetClassPath != BlueprintClassPath)
-        {
-            continue;
-        }
-        UBlueprint* BP = Cast<UBlueprint>(AD.GetAsset());
-        if (!BP) { continue; }
-        UClass* GenClass = BP->GeneratedClass;
-        if (!GenClass || !GenClass->IsChildOf(TargetClass)) { continue; }
-
-        // Find the deepest native parent class.
-        UClass* NativeParent = GenClass;
-        while (NativeParent && !NativeParent->IsNative())
-        {
-            NativeParent = NativeParent->GetSuperClass();
-        }
-
-        TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
-        E->SetStringField(TEXT("asset_name"), BP->GetName());
-        E->SetStringField(TEXT("asset_path"), BP->GetPathName());
-        E->SetStringField(TEXT("generated_class"), GenClass->GetName());
-        E->SetStringField(TEXT("native_parent"), NativeParent ? NativeParent->GetName() : FString());
-        Entries.Add(MakeShared<FJsonValueObject>(E));
-    }
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("class_name"), ClassName);
-    Data->SetStringField(TEXT("target_class"), TargetClass->GetName());
-    Data->SetStringField(TEXT("package_path"), PackagePath);
-    Data->SetNumberField(TEXT("total"), Entries.Num());
-    Data->SetArrayField(TEXT("assets"), Entries);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_asset_referencers - List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path and class. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); set include_soft_references=true to include TSoftObjectPtr / FSoftObjectPath edges. Its mirror is get_asset_dependencies (what this asset needs); get_asset_dependents answers the same direction as this one from a bare asset name, and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
+// MCP:get_asset_referencers - List every asset that REFERENCES a target asset -- "who breaks if I delete, move or rename this?" -- wrapping AssetRegistry::GetReferencers over the Package category and returning each referencing package with its primary asset's name, path, class and loaded state. It accepts an object path, a package path or a bare name, echoes `resolved_package` so you can confirm it queried the package you meant, and REFUSES an ambiguous bare name with the candidate list instead of picking one. Hard references only by default (the "what keeps this loaded" audit); dependency_type='soft' or 'all' (or include_soft_references=true) brings in TSoftObjectPtr / FSoftObjectPath edges, and exclude_engine=true drops /Engine and /Script referencers. Works for any asset type, a MetaSound included. Its mirror is get_asset_dependencies (what this asset needs), and find_blueprint_node_references finds call sites INSIDE graphs, which package-level references cannot see.
 //   @param asset_path - Target asset: an object path ('/Game/X/DT_ItemRows.DT_ItemRows'), a package path ('/Game/X/DT_ItemRows'), or an unambiguous bare asset name ('DT_ItemRows'). An ambiguous bare name is an error listing the candidates, never a silent pick.
-//   @param include_soft_references - If true, also include soft referencers (default false -> hard-only).
+//   @param asset_name - Alias of asset_path.
+//   @param dependency_type - Optional 'hard' | 'soft' | 'all' (case-insensitive): which edges count. When given it wins over include_soft_references; when absent, include_soft_references decides (hard, or all).
+//   @param include_soft_references - If true, also include soft referencers (default false -> hard-only). Shorthand for dependency_type='all'.
+//   @param exclude_engine - Optional bool (default false): skip /Engine and /Script referencers. They do not count against max_results, but they do count in total.
 //   @param max_results - Cap on number of returned referencers (1..50000); defaults to 5000.
-//   @returns { asset_path, resolved_package, include_soft_references, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class? }] }
+//   @returns { asset_path, resolved_package, include_soft_references, dependency_type, exclude_engine, total, returned, results_truncated, referencers:[{ package_name, asset_name?, asset_path?, asset_class?, is_loaded? }] } -- total counts every referencer the registry returned, engine ones included; results_truncated says a referencer that would have been listed was left out by max_results; is_loaded is whether the referencing asset is loaded now.
 
 TSharedPtr<FJsonObject> HandleGetAssetReferencers(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) && !Params->TryGetStringField(TEXT("asset_name"), AssetPath))
+    {
+        return mcp_common::MissingParameterReply(TEXT("asset_path"));
+    }
+    if (AssetPath.IsEmpty())
+    {
+        return UEAgentAnalysisCommandsImpl::EmptyParamError(TEXT("asset_path"));
+    }
 
     // Hard referencers only unless soft ones are asked for; max_results caps the returned list.
     bool bIncludeSoftRefs = false;
     Params->TryGetBoolField(TEXT("include_soft_references"), bIncludeSoftRefs);
+    FString Kind;
+    const bool bHasKind = Params->TryGetStringField(TEXT("dependency_type"), Kind) && !Kind.IsEmpty();
+    Kind = bHasKind ? Kind.ToLower() : FString(bIncludeSoftRefs ? TEXT("all") : TEXT("hard"));
+    bool bSkipEngine = false;
+    Params->TryGetBoolField(TEXT("exclude_engine"), bSkipEngine);
     int32 MaxResults = 5000;
     Params->TryGetNumberField(TEXT("max_results"), MaxResults);
     if (TSharedPtr<FJsonObject> OutOfRange = UEAgentAnalysisCommandsImpl::RangeError(TEXT("max_results"), MaxResults, 1, 50000))
     {
         return OutOfRange;
+    }
+    // GetReferencers takes (FName, TArray<FName>&, EDependencyCategory, FDependencyQuery): 'all' is the
+    // default-constructed query (hard and soft together), 'hard' and 'soft' require that flag.
+    UE::AssetRegistry::FDependencyQuery Query;
+    if (!UEAgentAnalysisCommandsImpl::ParseDependencyKind(Kind, Query))
+    {
+        return UEAgentAnalysisCommandsImpl::DependencyKindError();
     }
 
     IAssetRegistry& AR = mcp_common::AssetRegistry();
@@ -2672,23 +2217,26 @@ TSharedPtr<FJsonObject> HandleGetAssetReferencers(const TSharedPtr<FJsonObject>&
         }
     }
     const FName PackageName(*PackageNameStr);
-    // GetReferencers takes (FName, TArray<FName>&, EDependencyCategory, FDependencyQuery).
-    // Hard-only by default (EDependencyQuery::Hard). When soft refs are requested we drop the flag
-    // (default-constructed FDependencyQuery) so the query returns both hard and soft referencers.
-    UE::AssetRegistry::FDependencyQuery Query = bIncludeSoftRefs
-        ? UE::AssetRegistry::FDependencyQuery()
-        : UE::AssetRegistry::FDependencyQuery(UE::AssetRegistry::EDependencyQuery::Hard);
 
     TArray<FName> Referencers;
     AR.GetReferencers(PackageName, Referencers,
         UE::AssetRegistry::EDependencyCategory::Package,
         Query);
 
+    // Truncated means a referencer that would have been listed was left out -- not that the list
+    // happens to hold exactly max_results entries. Skipped engine referencers spend no budget.
     TArray<TSharedPtr<FJsonValue>> Entries;
+    bool bTruncated = false;
     for (const FName& Ref : Referencers)
     {
+        const FString RefPackage = Ref.ToString();
+        if (bSkipEngine && (RefPackage.StartsWith(TEXT("/Engine/")) || RefPackage.StartsWith(TEXT("/Script/"))))
+        {
+            continue;
+        }
         if (Entries.Num() >= MaxResults)
         {
+            bTruncated = true;
             break;
         }
         // EDependencyCategory::Package makes GetReferencers yield PACKAGE names
@@ -2718,6 +2266,7 @@ TSharedPtr<FJsonObject> HandleGetAssetReferencers(const TSharedPtr<FJsonObject>&
             E->SetStringField(TEXT("asset_name"), Primary->AssetName.ToString());
             E->SetStringField(TEXT("asset_path"), Primary->GetSoftObjectPath().ToString());
             E->SetStringField(TEXT("asset_class"), Primary->AssetClassPath.ToString());
+            E->SetBoolField(TEXT("is_loaded"), Primary->IsAssetLoaded());
         }
         Entries.Add(MakeShared<FJsonValueObject>(E));
     }
@@ -2727,24 +2276,27 @@ TSharedPtr<FJsonObject> HandleGetAssetReferencers(const TSharedPtr<FJsonObject>&
     // What asset_path actually resolved to. Lets a caller confirm the query hit the intended
     // package instead of trusting a bare count -- a wrong package also answers total:0.
     Data->SetStringField(TEXT("resolved_package"), PackageNameStr);
-    Data->SetBoolField(TEXT("include_soft_references"), bIncludeSoftRefs);
+    Data->SetBoolField(TEXT("include_soft_references"), Kind != TEXT("hard"));
+    Data->SetStringField(TEXT("dependency_type"), Kind);
+    Data->SetBoolField(TEXT("exclude_engine"), bSkipEngine);
     Data->SetNumberField(TEXT("total"), Referencers.Num());
     Data->SetNumberField(TEXT("returned"), Entries.Num());
-    Data->SetBoolField(TEXT("results_truncated"), Referencers.Num() > Entries.Num());
+    Data->SetBoolField(TEXT("results_truncated"), bTruncated);
     Data->SetArrayField(TEXT("referencers"), Entries);
     return mcp_common::MakeOkReply(Data);
 }
 
 // ---------------------------------------------------------------------------
-// diff_blueprints / diff_blueprint_graphs (structural Blueprint diff)
+// diff_blueprints (structural Blueprint diff)
 // ---------------------------------------------------------------------------
 
-// MCP:diff_blueprints - Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_graphs for ONE named graph, diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, compare_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
+// MCP:diff_blueprints - Structural diff of TWO Blueprints (or AnimBlueprints): parent class, SCS components, variables, functions, and per graph a node-by-node diff of what was added, removed and changed, where a changed node reports its title, per-pin default-value and link changes and -- for AnimGraph nodes -- the internal FAnimNode config and property-binding differences. With graph_name it diffs ONE graph pair only -- far cheaper when you already know the graph you care about (an "AnimGraph", a function, a collapsed composite by title). WARNING: nodes are matched by NodeGuid, which duplicating or forking an asset PRESERVES: this is built to compare a fork against its original, and two independently authored Blueprints will show every single node as added/removed, which is noise, not a finding. Read-only. Siblings: diff_blueprint_components for components only, get_blueprint_component_overrides for per-property provenance, compare_objects for two LIVE UObjects instead of authored structure. Watch `graphs_not_examined[]` -- when the node budget runs out the remaining graphs are listed there instead of being reported as identical.
 //   @param blueprint_a - First Blueprint asset path or short name.
 //   @param blueprint_b - Second Blueprint asset path or short name.
+//   @param graph_name - Optional: diff only this graph, resolved deep on each side (function/event/macro/AnimGraph, a collapsed composite by title, or a path form 'EventGraph > Title'); an empty string means the event graph. A graph missing on either side is an error.
 //   @param max_nodes - TOTAL cap on nodes examined across every graph (default 20000). When it runs out, the remaining graphs are listed in graphs_not_examined[] instead of being silently reported as identical.
 //   @param max_nodes_per_graph - Per-graph cap so one fat graph cannot starve the rest (default = max_nodes).
-//   @returns { blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, parent_class:{a,b,changed}, components:{added,removed,changed}, variables:{added,removed,changed}, functions:{added,removed,common}, graphs:[{graph_name, nodes_added, nodes_removed, nodes_changed, node_count_a, node_count_b, nodes_examined_a, nodes_examined_b, truncated}], graphs_identical:[string], graphs_not_examined:[{graph_name, reason}], graphs_only_in_a, graphs_only_in_b, truncated, max_nodes, max_nodes_per_graph, nodes_examined, total_differences }
+//   @returns { blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, parent_class:{a,b,changed}, components:{added,removed,changed}, variables:{added,removed,changed}, functions:{added,removed,common}, graphs:[{graph_name, nodes_added, nodes_removed, nodes_changed, node_count_a, node_count_b, nodes_examined_a, nodes_examined_b, truncated}], graphs_identical:[string], graphs_not_examined:[{graph_name, reason}], graphs_only_in_a, graphs_only_in_b, truncated, max_nodes, max_nodes_per_graph, nodes_examined, total_differences } -- with graph_name the reply is that one pair instead: { blueprint_a, blueprint_b, a_path, b_path, a_class, b_class, graph_name, resolved_graph_a, resolved_graph_b, node_count_a, node_count_b, nodes_added, nodes_removed, nodes_changed, nodes_examined_a, nodes_examined_b, truncated, max_nodes, total_differences }.
 TSharedPtr<FJsonObject> HandleDiffBlueprints(const TSharedPtr<FJsonObject>& Params)
 {
     FString NameA;
@@ -2756,6 +2308,9 @@ TSharedPtr<FJsonObject> HandleDiffBlueprints(const TSharedPtr<FJsonObject>& Para
     {
         return Failure;
     }
+    // A graph_name that is there at all, even empty (the event graph), asks for that one pair only.
+    FString OneGraphName;
+    const bool bOneGraph = Params->TryGetStringField(TEXT("graph_name"), OneGraphName);
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("blueprint_a"), NameA);
@@ -2764,6 +2319,36 @@ TSharedPtr<FJsonObject> HandleDiffBlueprints(const TSharedPtr<FJsonObject>& Para
     Result->SetStringField(TEXT("b_path"), BPB->GetPathName());
     Result->SetStringField(TEXT("a_class"), BPA->GetClass()->GetName());
     Result->SetStringField(TEXT("b_class"), BPB->GetClass()->GetName());
+
+    if (bOneGraph)
+    {
+        UEdGraph* GraphA = FUEAgentGraphUtils::FindGraphByNameDeep(BPA, OneGraphName);
+        if (!GraphA) { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Graph '%s' not found in %s"), *OneGraphName, *NameA)); }
+        UEdGraph* GraphB = FUEAgentGraphUtils::FindGraphByNameDeep(BPB, OneGraphName);
+        if (!GraphB) { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Graph '%s' not found in %s"), *OneGraphName, *NameB)); }
+
+        int32 NodeBudget = MaxNodes;
+        bool bPairTruncated = false;
+        FGraphPairDiffStats_Analysis Stats;
+        TArray<TSharedPtr<FJsonValue>> NAdded, NRemoved, NChanged;
+        DiffGraphPair(GraphA, GraphB, NAdded, NRemoved, NChanged, NodeBudget, bPairTruncated, &Stats);
+
+        Result->SetStringField(TEXT("graph_name"), OneGraphName);
+        Result->SetStringField(TEXT("resolved_graph_a"), GraphA->GetName());
+        Result->SetStringField(TEXT("resolved_graph_b"), GraphB->GetName());
+        Result->SetNumberField(TEXT("node_count_a"), GraphA->Nodes.Num());
+        Result->SetNumberField(TEXT("node_count_b"), GraphB->Nodes.Num());
+        Result->SetArrayField(TEXT("nodes_added"), NAdded);
+        Result->SetArrayField(TEXT("nodes_removed"), NRemoved);
+        Result->SetArrayField(TEXT("nodes_changed"), NChanged);
+        Result->SetBoolField(TEXT("truncated"), bPairTruncated);
+        Result->SetNumberField(TEXT("max_nodes"), MaxNodes);
+        // Examined counters so a budget-truncated run can never read as "no differences".
+        Result->SetNumberField(TEXT("nodes_examined_a"), Stats.ExaminedA);
+        Result->SetNumberField(TEXT("nodes_examined_b"), Stats.ExaminedB);
+        Result->SetNumberField(TEXT("total_differences"), NAdded.Num() + NRemoved.Num() + NChanged.Num());
+        return Result;
+    }
 
     int32 TotalDiffs = 0;
 
@@ -2936,57 +2521,6 @@ TSharedPtr<FJsonObject> HandleDiffBlueprints(const TSharedPtr<FJsonObject>& Para
     return Result;
 }
 
-// MCP:diff_blueprint_graphs - Diff ONE named graph across two Blueprints or AnimBlueprints: which nodes were added, removed and changed, with per-pin default-value and link changes and, for AnimGraph nodes, the FAnimNode config and property-binding differences. The focused, far cheaper subset of diff_blueprints for when you already know the single graph you care about (an "AnimGraph", a function, a collapsed composite). Same NodeGuid matching caveat: it compares a fork against its original meaningfully, but two independently authored Blueprints show every node as added/removed. Read-only.
-//   @param blueprint_a - First Blueprint asset path or short name.
-//   @param blueprint_b - Second Blueprint asset path or short name.
-//   @param graph_name - Graph to diff (deep-resolved: function/event/macro/AnimGraph or a collapsed composite by title). Defaults to the event graph.
-//   @param max_nodes - Cap on GUID-matched nodes examined (default 20000).
-//   @returns { blueprint_a, blueprint_b, graph_name, resolved_graph_a, resolved_graph_b, node_count_a, node_count_b, nodes_added, nodes_removed, nodes_changed, truncated, nodes_examined_a, nodes_examined_b, total_differences }
-TSharedPtr<FJsonObject> HandleDiffBlueprintGraphs(const TSharedPtr<FJsonObject>& Params)
-{
-    FString NameA;
-    FString NameB;
-    int32 MaxNodes = 0;
-    UBlueprint* BPA = nullptr;
-    UBlueprint* BPB = nullptr;
-    if (TSharedPtr<FJsonObject> Failure = LoadDiffPair_Analysis(Params, NameA, NameB, MaxNodes, BPA, BPB))
-    {
-        return Failure;
-    }
-
-    FString GraphName;
-    Params->TryGetStringField(TEXT("graph_name"), GraphName);
-
-    UEdGraph* GraphA = FUEAgentGraphUtils::FindGraphByNameDeep(BPA, GraphName);
-    if (!GraphA) { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Graph '%s' not found in %s"), *GraphName, *NameA)); }
-    UEdGraph* GraphB = FUEAgentGraphUtils::FindGraphByNameDeep(BPB, GraphName);
-    if (!GraphB) { return mcp_common::MakeErrorReply(FString::Printf(TEXT("Graph '%s' not found in %s"), *GraphName, *NameB)); }
-
-    int32 NodeBudget = MaxNodes;
-    bool bTruncated = false;
-    FGraphPairDiffStats_Analysis Stats;
-    TArray<TSharedPtr<FJsonValue>> NAdded, NRemoved, NChanged;
-    DiffGraphPair(GraphA, GraphB, NAdded, NRemoved, NChanged, NodeBudget, bTruncated, &Stats);
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("blueprint_a"), NameA);
-    Result->SetStringField(TEXT("blueprint_b"), NameB);
-    Result->SetStringField(TEXT("graph_name"), GraphName);
-    Result->SetStringField(TEXT("resolved_graph_a"), GraphA->GetName());
-    Result->SetStringField(TEXT("resolved_graph_b"), GraphB->GetName());
-    Result->SetNumberField(TEXT("node_count_a"), GraphA->Nodes.Num());
-    Result->SetNumberField(TEXT("node_count_b"), GraphB->Nodes.Num());
-    Result->SetArrayField(TEXT("nodes_added"), NAdded);
-    Result->SetArrayField(TEXT("nodes_removed"), NRemoved);
-    Result->SetArrayField(TEXT("nodes_changed"), NChanged);
-    Result->SetBoolField(TEXT("truncated"), bTruncated);
-    // Examined counters so a budget-truncated run can never read as "no differences".
-    Result->SetNumberField(TEXT("nodes_examined_a"), Stats.ExaminedA);
-    Result->SetNumberField(TEXT("nodes_examined_b"), Stats.ExaminedB);
-    Result->SetNumberField(TEXT("total_differences"), NAdded.Num() + NRemoved.Num() + NChanged.Num());
-    return Result;
-}
-
 // ---------------------------------------------------------------------------
 // find_erroring_blueprints
 // ---------------------------------------------------------------------------
@@ -3114,10 +2648,10 @@ TSharedPtr<FJsonObject> HandleFindErroringBlueprints(const TSharedPtr<FJsonObjec
 }
 
 // ---------------------------------------------------------------------------
-// snapshot_object / diff_object_snapshots
+// capture_object_snapshot / diff_object_snapshots
 // ---------------------------------------------------------------------------
 
-// MCP:snapshot_object - Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/<handle>.json to survive a restart. compare_objects diffs two live objects instead.
+// MCP:capture_object_snapshot - Capture the properties and components of one object into a named in-memory snapshot (read-only) for a later diff_object_snapshots: before vs after an action, editor vs PIE, or "server" vs "client" via world. persist=true also writes Saved/MCPAudits/snapshots/<handle>.json to survive a restart. compare_objects diffs two live objects instead.
 //   @param object_path - Object path or dotted "Actor[.Component[.Subobject]]" (name or editor label for the first segment).
 //   @param world - Optional world selector: absent/'editor' (default) | 'server' (the PIE world with authority) | 'client' | 'pie:N' | 'pie'/'game'/'runtime' (ambiguous: PlayWorld, else the first PIE/Game context) to resolve a live runtime instance.
 //   @param handle - Optional handle to store under (overwrites); auto-generated when omitted (alias: snapshot_id).
@@ -3237,10 +2771,10 @@ TSharedPtr<FJsonObject> HandleSnapshotObject(const TSharedPtr<FJsonObject>& Para
     return Result;
 }
 
-// MCP:diff_object_snapshots - Compare two snapshots taken by snapshot_object and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from snapshot_object(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. compare_objects is the same idea for two LIVE objects at one instant.
+// MCP:diff_object_snapshots - Compare two snapshots taken by capture_object_snapshot and report which properties were added, removed or CHANGED, at the object level and per component, with both values side by side. The second half of the before/after measurement: capture a baseline, run the action, capture again, and this tells you what actually moved -- instead of trusting the acting call's own success flag. Also the way to diff editor-vs-PIE and, in co-op, SERVER-vs-CLIENT state for the same actor, which is the only proof that a value really replicated. Sides can be given as stored handles, as inline snapshot objects (from capture_object_snapshot(return_snapshot=true)), or as paths to persisted snapshot files; `a_origin`/`b_origin` report which route each side came from. compare_objects is the same idea for two LIVE objects at one instant.
 //   @param handle_a - Handle of the first (baseline) snapshot (aliases: a, snapshot_a). Resolved from the in-memory store first, then from the persisted Saved/MCPAudits/snapshots/<handle>.json copy.
 //   @param handle_b - Handle of the second snapshot (aliases: b, snapshot_b). Same resolution.
-//   @param snapshot_a - The baseline snapshot INLINE (a JSON object, e.g. what snapshot_object(return_snapshot=true) handed back). A STRING here is read as a handle.
+//   @param snapshot_a - The baseline snapshot INLINE (a JSON object, e.g. what capture_object_snapshot(return_snapshot=true) handed back). A STRING here is read as a handle.
 //   @param snapshot_b - The second snapshot INLINE (a JSON object). A STRING here is read as a handle.
 //   @param path_a - Path to a persisted baseline snapshot file (bare handles resolve under Saved/MCPAudits/snapshots/).
 //   @param path_b - Path to a persisted second snapshot file.
@@ -3339,7 +2873,7 @@ TSharedPtr<FJsonObject> HandleDiffObjectSnapshots(const TSharedPtr<FJsonObject>&
 // get_blueprint_exec_path
 // ---------------------------------------------------------------------------
 
-// MCP:get_blueprint_exec_path - Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime -- which Branch went true, which FunctionResult fired -- read from the editor's Blueprint-debugger trace stack. Unlike trace_blueprint_execution and profile_blueprint_execution, which are STATIC and list every node that exists, this reflects real execution, so it answers "did that path run at all?" when a graph fails silently. WARNING: two-phase by construction: the VM only records the trace for the object currently being DEBUGGED, so call it ONCE with object_path to arm recording (SetObjectBeingDebugged), then drive the PIE scenario, then call it AGAIN to read the recorded path -- a single call returns nothing and that is not a bug. Requires a running PIE session with Blueprint debugging; `world` (including 'server' / 'client' / 'pie:N') selects which instance gets armed, and the response stamps which world it was.
+// MCP:get_blueprint_exec_path - Report which exec nodes and BRANCHES actually RAN inside a Blueprint at runtime -- which Branch went true, which FunctionResult fired -- read from the editor's Blueprint-debugger trace stack. Unlike the static reader get_blueprint_debug_info, which lists every node that exists, this reflects real execution, so it answers "did that path run at all?" when a graph fails silently. WARNING: two-phase by construction: the VM only records the trace for the object currently being DEBUGGED, so call it ONCE with object_path to arm recording (SetObjectBeingDebugged), then drive the PIE scenario, then call it AGAIN to read the recorded path -- a single call returns nothing and that is not a bug. Requires a running PIE session with Blueprint debugging; `world` (including 'server' / 'client' / 'pie:N') selects which instance gets armed, and the response stamps which world it was.
 //   @param blueprint_name - Blueprint / AnimBlueprint asset path or short name to filter the trace to.
 //   @param function_name - Optional: only include samples in a function/graph whose name contains this.
 //   @param object_path - Optional live PIE object to set as the debugged instance (arms trace recording).
@@ -3460,10 +2994,10 @@ TSharedPtr<FJsonObject> HandleGetBlueprintExecPath(const TSharedPtr<FJsonObject>
     return Result;
 }
 
-// MCP:diff_blueprint_components - Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a components[] array captured earlier from get_blueprint_scs_tree) and report which components were added, removed or changed, where "changed" means the class, attach_parent, attach_socket, source or relative transform (0.01 tolerance) differ. It reuses get_blueprint_scs_tree's full enumeration, so native + own SCS + inherited components are all in scope, most-derived-wins. Use it for "did a reparent or a merge lose a component?" -- feeding a pre-change scs_tree as components_b makes it a before/after check without a second asset. removed = in A only, added = in B only. Read-only. diff_blueprints covers components AND graphs AND variables; get_blueprint_component_overrides goes deeper into ONE component's per-property provenance.
+// MCP:diff_blueprint_components - Compare the COMPONENT trees of two Blueprints (or of one Blueprint against a components[] array captured earlier from get_blueprint_components) and report which components were added, removed or changed, where "changed" means the class, attach_parent, attach_socket, source or relative transform (0.01 tolerance) differ. It reuses get_blueprint_components's full enumeration, so native + own SCS + inherited components are all in scope, most-derived-wins. Use it for "did a reparent or a merge lose a component?" -- feeding a pre-change scs_tree as components_b makes it a before/after check without a second asset. removed = in A only, added = in B only. Read-only. diff_blueprints covers components AND graphs AND variables; get_blueprint_component_overrides goes deeper into ONE component's per-property provenance.
 //   @param blueprint_a - First Blueprint asset path or short name (the "before" / baseline side).
 //   @param blueprint_b - Second Blueprint (the "after" side). Omit if passing components_b.
-//   @param components_b - Alternative to blueprint_b: a prior get_blueprint_scs_tree components array (snapshot). A snapshot without transforms reads every transform as changed.
+//   @param components_b - Alternative to blueprint_b: a prior get_blueprint_components components array (snapshot). A snapshot without transforms reads every transform as changed.
 //   @param include_native - Include native/CDO components on the live side(s) (default true).
 //   @param include_inherited - Include components inherited from ancestor Blueprints (default true).
 //   @param max_results - Cap on components enumerated per live side, 1..10000 (default 2000).
@@ -3487,7 +3021,7 @@ TSharedPtr<FJsonObject> HandleDiffBlueprintComponents(const TSharedPtr<FJsonObje
     int32 NatA = 0, ScsA = 0, InhA = 0; bool TrA = false;
     CollectBlueprintComponents(BPA, bIncludeNative, bIncludeInherited, MaxResults, OrderedA, ByNameA, NatA, ScsA, InhA, TrA);
 
-    // Side B -- live BP (blueprint_b) OR a prior get_blueprint_scs_tree components[] snapshot (components_b).
+    // Side B -- live BP (blueprint_b) OR a prior get_blueprint_components components[] snapshot (components_b).
     TMap<FName, TSharedPtr<FJsonObject>> ByNameB;
     int32 NatB = 0, ScsB = 0, InhB = 0; bool TrB = false;
     FString NameB, BPathB, SideBSource;
@@ -3518,7 +3052,7 @@ TSharedPtr<FJsonObject> HandleDiffBlueprintComponents(const TSharedPtr<FJsonObje
     }
     else
     {
-        return mcp_common::MakeErrorReply(TEXT("Provide either 'blueprint_b' (a Blueprint) or 'components_b' (a prior get_blueprint_scs_tree components array)"));
+        return mcp_common::MakeErrorReply(TEXT("Provide either 'blueprint_b' (a Blueprint) or 'components_b' (a prior get_blueprint_components components array)"));
     }
 
     // --- Comparators (JSON-record-based so live and snapshot sides compare identically) ---
@@ -3620,7 +3154,7 @@ TSharedPtr<FJsonObject> HandleDiffBlueprintComponents(const TSharedPtr<FJsonObje
     return Result;
 }
 
-// MCP:get_blueprint_component_overrides - Per-property PROVENANCE on a Blueprint's component templates: which values this Blueprint actually OVERRODE and which it merely inherits. Over the same components as get_blueprint_scs_tree (native CDO + own SCS + inherited chain) it resolves the effective template down the SCS -> child ICH override -> ancestor SCS -> native CDO cascade, never minting an ICH override, and compares each editable property against a baseline -- the archetype by default, or the same-named template in `other_blueprint` for the "fork vs original" question -- with the ENGINE's equality (FProperty::Identical, PPF_DeepComparison) instead of exported text. Each result is CLASSIFIED (identical | real_override | text_localization_metadata_only | object_outer_only | export_text_only | type_mismatch | no_baseline), so FText localization and object-outer noise stop masquerading as edits. WARNING: component templates can go STALE in memory (values can flip just from an editor restart): pass verify_on_disk to cross-check the raw .uasset bytes -- for anything not string-ish it answers found:null / applicable:false, never a misleading false. Read-only. list_instance_overrides asks the same question about a PLACED ACTOR.
+// MCP:get_blueprint_component_overrides - Per-property PROVENANCE on a Blueprint's component templates: which values this Blueprint actually OVERRODE and which it merely inherits. Over the same components as get_blueprint_components (native CDO + own SCS + inherited chain) it resolves the effective template down the SCS -> child ICH override -> ancestor SCS -> native CDO cascade, never minting an ICH override, and compares each editable property against a baseline -- the archetype by default, or the same-named template in `other_blueprint` for the "fork vs original" question -- with the ENGINE's equality (FProperty::Identical, PPF_DeepComparison) instead of exported text. Each result is CLASSIFIED (identical | real_override | text_localization_metadata_only | object_outer_only | export_text_only | type_mismatch | no_baseline), so FText localization and object-outer noise stop masquerading as edits. WARNING: component templates can go STALE in memory (values can flip just from an editor restart): pass verify_on_disk to cross-check the raw .uasset bytes -- for anything not string-ish it answers found:null / applicable:false, never a misleading false. Read-only. list_instance_overrides asks the same question about a PLACED ACTOR.
 //   @param blueprint_name - Blueprint asset path or short name to audit.
 //   @param component_name - Optional: restrict the audit to this one component (exact variable name).
 //   @param property_name - Optional: restrict the audit to this one property (FName or authored name).
@@ -3673,7 +3207,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentOverrides(const TSharedPtr<FJ
         }
     }
 
-    // Enumerate components with the SAME collector as get_blueprint_scs_tree.
+    // Enumerate components with the SAME collector as get_blueprint_components.
     TArray<TSharedPtr<FJsonValue>> Ordered;
     TMap<FName, TSharedPtr<FJsonObject>> ByName;
     int32 NatCount = 0, ScsCount = 0, InhCount = 0;
@@ -3963,7 +3497,7 @@ TSharedPtr<FJsonObject> HandleGetBlueprintComponentOverrides(const TSharedPtr<FJ
     return Result;
 }
 
-// MCP:verify_reparent_success - Check, after a reparent_blueprint, that the Blueprint really ended up where you wanted: it confirms the parent class against an expectation, reports the compile status, and -- when you feed it counts captured BEFOREHAND -- verifies no components or variables were lost, listing every failed invariant in `regressions[]`. This is the oracle for a reparent, because reparent_blueprint's own return value says nothing about whether the class survived it. WARNING: read-only by default, which means it reports the CACHED Blueprint->Status: pass force_compile=true to recompile and get the real status plus the compiler messages (compile_messages[] is empty without it, and `compile_ran` tells you which mode you got). Component count comes from the compiled CDO (native + SCS + inherited). Omit the expected_* counts to skip those invariants; get_blueprint_scs_tree or get_blueprint_variables_list before the reparent is where they come from.
+// MCP:verify_reparent_success - Check, after a reparent_blueprint, that the Blueprint really ended up where you wanted: it confirms the parent class against an expectation, reports the compile status, and -- when you feed it counts captured BEFOREHAND -- verifies no components or variables were lost, listing every failed invariant in `regressions[]`. This is the oracle for a reparent, because reparent_blueprint's own return value says nothing about whether the class survived it. WARNING: read-only by default, which means it reports the CACHED Blueprint->Status: pass force_compile=true to recompile and get the real status plus the compiler messages (compile_messages[] is empty without it, and `compile_ran` tells you which mode you got). Component count comes from the compiled CDO (native + SCS + inherited). Omit the expected_* counts to skip those invariants; get_blueprint_components or get_blueprint_variables before the reparent is where they come from.
 //   @param blueprint_name - Blueprint asset name or path.
 //   @param expected_parent_class - Class name or path the Blueprint should now inherit from.
 //   @param expected_component_count - Optional: CDO component count captured before the reparent.
@@ -4079,23 +3613,16 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("check_asset_circular_dependency"), &HandleCheckAssetCircularDependency },
     { TEXT("diff_blueprint_components"), &HandleDiffBlueprintComponents },
-    { TEXT("diff_blueprint_graphs"), &HandleDiffBlueprintGraphs },
     { TEXT("diff_blueprints"), &HandleDiffBlueprints },
     { TEXT("diff_object_snapshots"), &HandleDiffObjectSnapshots },
-    { TEXT("find_blueprint_assets_by_class"), &HandleFindBlueprintAssetsByClass },
     { TEXT("find_erroring_blueprints"), &HandleFindErroringBlueprints },
     { TEXT("get_asset_dependencies"), &HandleGetAssetDependencies },
-    { TEXT("get_asset_dependents"), &HandleGetAssetDependents },
     { TEXT("get_asset_referencers"), &HandleGetAssetReferencers },
-    { TEXT("get_blueprint_children"), &HandleGetBlueprintChildren },
     { TEXT("get_blueprint_component_overrides"), &HandleGetBlueprintComponentOverrides },
-    { TEXT("get_blueprint_components_list"), &HandleGetBlueprintComponentsList },
     { TEXT("get_blueprint_exec_path"), &HandleGetBlueprintExecPath },
-    { TEXT("get_blueprint_functions_list"), &HandleGetBlueprintFunctionsList },
     { TEXT("get_blueprint_parent"), &HandleGetBlueprintParent },
-    { TEXT("get_blueprint_scs_tree"), &HandleGetBlueprintScsTree },
-    { TEXT("get_blueprint_variables_list"), &HandleGetBlueprintVariablesList },
-    { TEXT("snapshot_object"), &HandleSnapshotObject },
+    { TEXT("get_blueprint_components"), &HandleGetBlueprintScsTree },
+    { TEXT("capture_object_snapshot"), &HandleSnapshotObject },
     { TEXT("verify_reparent_success"), &HandleVerifyReparentSuccess },
 };
 } // namespace UEAgentAnalysisCommands

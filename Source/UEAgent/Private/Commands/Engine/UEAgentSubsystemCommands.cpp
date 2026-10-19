@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Common/UEAgentGraphUtils.h" // FUEAgentGraphUtils::ResolveClass for inspect_subsystem_instance
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -15,7 +16,7 @@
 /**
  * Live subsystem instance commands: list the local-player subsystems, and inspect the public properties of
  * a live engine, editor, game-instance, world or local-player subsystem. Subsystem CLASSES are listed by
- * list_subsystem_classes / get_subsystem_class_info (UEAgentSubsystemAuthoringCommands).
+ * list_derived_classes and described by get_class_hierarchy, both of which report a subsystem's lifetime.
  */
 namespace UEAgentSubsystemCommands
 {
@@ -114,16 +115,21 @@ TSharedPtr<FJsonObject> HandleListLocalPlayerSubsystems(const TSharedPtr<FJsonOb
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:inspect_subsystem_instance - Reads the exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped) of a live subsystem instance, each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported). lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. For a quick existence check use get_subsystem_instance; to enumerate use list_subsystem_instances or list_local_player_subsystems.
-//   @param subsystem_class - Class name of the subsystem to inspect (short reflected name or /Script path).
-//   @param lifetime - Which host resolves the instance: one of engine | gameinstance | world | editor | localplayer.
+// MCP:inspect_subsystem_instance - Find the live instance of a subsystem class by its lifetime and read its exposed properties (EditAnywhere or Blueprint-visible, inherited included, Transient skipped), each with name, C++ type, property class, edit and blueprint_visible flags, and its value exported as text (empty when it cannot be exported); include_properties=false skips the property walk for a cheap "is it there, and what is it called" lookup. lifetime picks the host: world reads the world the world selector picks, the editor world by default; gameinstance and localplayer read the game instance of that world, the running Play-in-Editor world by default, since the editor world never has one (without PIE they fail saying so). The reply names the world it read (world_package, world_type). A missing host or instance is an error. Read-only. To enumerate use list_subsystem_instances or list_local_player_subsystems.
+//   @param subsystem_class - Class of the subsystem to inspect: short reflected name (with or without the U prefix), /Script path, or a Blueprint subsystem's class path. Must derive from USubsystem.
+//   @param class_name - Alias of subsystem_class.
+//   @param lifetime - Which host resolves the instance: one of engine | gameinstance | world | editor | localplayer (case-insensitive).
 //   @param player_index - Local player index, used only when lifetime is "localplayer" (default 0).
+//   @param include_properties - Optional bool (default true). false returns the instance's identity only, with no properties walk.
 //   @param world - Optional world selector for the world, gameinstance and localplayer lifetimes, ignored by the others: editor, pie (ambiguous: PlayWorld, else the first PIE context), game (alias of pie), server (the PIE world with authority), client or pie:N. Absent means editor for world and pie for gameinstance and localplayer. An unrecognised value fails naming the worlds that exist
-//   @returns { subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, property_count: int, properties: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- the world fields only for the world, gameinstance and localplayer lifetimes
+//   @returns { subsystem_class: string, lifetime: string, subsystem_name: string, subsystem_path: string, instance_name: string, instance_path: string, property_count?: int, properties?: [{ name, cpp_type, class, edit, blueprint_visible, value }], world?: string, world_name?: string, world_package?: string, world_type?: string, net_mode?: string, pie_instance?: int } -- instance_name/instance_path repeat subsystem_name/subsystem_path; property_count and properties only with include_properties; the world fields only for the world, gameinstance and localplayer lifetimes
 TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObject>& Params)
 {
     FString ClassName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("subsystem_class"), ClassName)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("subsystem_class"), ClassName) && !Params->TryGetStringField(TEXT("class_name"), ClassName))
+    {
+        return mcp_common::MissingParameterReply(TEXT("subsystem_class"));
+    }
     FString Host;
     if (!Params->TryGetStringField(TEXT("lifetime"), Host) || Host.IsEmpty())
     {
@@ -132,11 +138,22 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
     // Only consulted for the "localplayer" host.
     int32 LocalPlayerSlot = 0;
     Params->TryGetNumberField(TEXT("player_index"), LocalPlayerSlot);
+    bool bIncludeProperties = true;
+    Params->TryGetBoolField(TEXT("include_properties"), bIncludeProperties);
 
-    UClass* const WantedClass = FindFirstObject<UClass>(*ClassName);
+    // The plugin's class resolver first (it takes /Script and Blueprint paths), then a plain reflected-name lookup.
+    UClass* WantedClass = FUEAgentGraphUtils::ResolveClass(ClassName);
+    if (WantedClass == nullptr)
+    {
+        WantedClass = FindFirstObject<UClass>(*ClassName);
+    }
     if (WantedClass == nullptr)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Subsystem class not found: %s"), *ClassName));
+    }
+    if (!WantedClass->IsChildOf(USubsystem::StaticClass()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Class is not a USubsystem: %s"), *WantedClass->GetPathName()));
     }
 
     // The live instance comes from the host the caller named. A host that does not exist
@@ -223,7 +240,7 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
 
     // The public surface only: EditAnywhere or BlueprintVisible, and never Transient.
     TArray<TSharedPtr<FJsonValue>> Exposed;
-    for (TFieldIterator<FProperty> It(Instance->GetClass(), EFieldIteratorFlags::IncludeSuper); It; ++It)
+    for (TFieldIterator<FProperty> It(Instance->GetClass(), EFieldIteratorFlags::IncludeSuper); bIncludeProperties && It; ++It)
     {
         const FProperty* Prop = *It;
         const bool bPublic = Prop != nullptr
@@ -254,8 +271,13 @@ TSharedPtr<FJsonObject> HandleInspectSubsystemInstance(const TSharedPtr<FJsonObj
     Payload->SetStringField(TEXT("lifetime"), Host);
     Payload->SetStringField(TEXT("subsystem_name"), Instance->GetName());
     Payload->SetStringField(TEXT("subsystem_path"), Instance->GetPathName());
-    Payload->SetNumberField(TEXT("property_count"), Exposed.Num());
-    Payload->SetArrayField(TEXT("properties"), Exposed);
+    Payload->SetStringField(TEXT("instance_name"), Instance->GetName());
+    Payload->SetStringField(TEXT("instance_path"), Instance->GetPathName());
+    if (bIncludeProperties)
+    {
+        Payload->SetNumberField(TEXT("property_count"), Exposed.Num());
+        Payload->SetArrayField(TEXT("properties"), Exposed);
+    }
     if (HostWorld != nullptr)
     {
         Payload->SetStringField(TEXT("world"), WorldSelector);

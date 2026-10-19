@@ -357,6 +357,30 @@ namespace
         return PhysicsAsset_LoadAsset(AssetPath, OutPhysAsset);
     }
 
+    // Reads the optional [x,y,z] param Key into Out; bOutPresent says whether it was given. Null on success
+    // (absent included), else the error reply for a value that is not an array of 3 numbers.
+    TSharedPtr<FJsonObject> PhysicsAsset_ReadOptionalVector3(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key,
+        FVector& Out, bool& bOutPresent)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+        bOutPresent = Params->TryGetArrayField(Key, Arr);
+        if (!bOutPresent && !Params->HasField(Key))
+        {
+            return nullptr;
+        }
+        double X = 0.0;
+        double Y = 0.0;
+        double Z = 0.0;
+        if (!bOutPresent || !Arr || Arr->Num() != 3
+            || !(*Arr)[0]->TryGetNumber(X) || !(*Arr)[1]->TryGetNumber(Y) || !(*Arr)[2]->TryGetNumber(Z))
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("%s must be an array of 3 numbers [x,y,z]; nothing was changed"), Key));
+        }
+        Out = FVector(X, Y, Z);
+        return nullptr;
+    }
+
     // Reads the physics asset and the body to configure in it, by "body_index" or else by "bone_name";
     // null on success, else the error reply.
     TSharedPtr<FJsonObject> PhysicsAsset_ReadBody(const TSharedPtr<FJsonObject>& Params, UPhysicsAsset*& OutPhysAsset,
@@ -577,7 +601,7 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_physics_asset"), SaveError);
 }
 
-// MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties or set_physics_body_advanced_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
+// MCP:get_physics_asset_info - Read a UPhysicsAsset without changing it: body_count and constraint_count; each body's index, bone_name and primitive_count; every constraint with its name, child and parent bones, swing, twist and linear motions and limits, and its drive, breakable and projection settings; skeletal_mesh_path, the asset's preview mesh (empty when none, and not necessarily a mesh that uses the asset); and skeleton_bones, that mesh's bone names, the names body and constraint tools accept. A path that does not load as a physics asset is an error. Edit bodies with set_physics_body_properties, joints with add_physics_asset_constraint, set_physics_asset_constraint_limits or set_physics_asset_constraint_drives; a world constraint actor is get_physics_constraint_info.
 //   @param physics_asset_path - Path of the UPhysicsAsset, e.g. "/Game/Physics/PA_Hero" or "/Game/Physics/PA_Hero.PA_Hero".
 //   @returns { asset_path: string, asset_name: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object] }
 TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>& Params)
@@ -593,13 +617,20 @@ TSharedPtr<FJsonObject> HandleGetPhysicsAssetInfo(const TSharedPtr<FJsonObject>&
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:set_physics_body_properties - Set the physics type and/or a mass override on one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing neither is an error and nothing is written. An asset with no bodies, no body found or an unknown physics_type is an error, checked before any write. mass_override_enabled is read back from the body. success is false, with save_error, when the save fails (during PIE, for one). For damping, gravity, mass scale or centre of mass use set_physics_body_advanced_properties; get_physics_asset_info reads the body count.
+// MCP:set_physics_body_properties - Set the physics type, a mass override and/or the advanced FBodyInstance fields (damping, mass scale, inertia scale, centre-of-mass nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or else bone_name, in an undo transaction, then save the asset. Only the fields you pass change; passing none is an error and nothing is written. An asset with no bodies, no body found, an unknown physics_type, a mass_scale below 0.001 or a vector that is not 3 numbers is an error, checked before any write. Every field is read back from the authored body (not the live physics actor, which is absent headless). success is false, with save_error, when the save fails (during PIE, for one). get_physics_asset_info reads the body count.
 //   @param physics_asset_path - /Game path to the UPhysicsAsset.
 //   @param body_index - 0-based index of the body in the asset; wins over bone_name when both are given
 //   @param bone_name - Bone whose body to configure, used when body_index is absent
 //   @param physics_type - Body physics type (Default|Kinematic|Simulated), case-insensitive; omit to keep the current one
 //   @param mass - Mass override in kilograms; also switches the mass override on. Omit to keep the current mass
-//   @returns { physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, updated, saved, save_error }
+//   @param linear_damping [number] - Optional. Drag that slows linear movement (FBodyInstance LinearDamping, unitless, engine default 0.01); omit to keep the current value
+//   @param angular_damping [number] - Optional. Drag that slows rotation (FBodyInstance AngularDamping, unitless, engine default 0); omit to keep the current value
+//   @param mass_scale [number] - Optional. Per-instance mass multiplier, >= 0.001
+//   @param inertia_tensor_scale [array] - Optional. [x,y,z] inertia scale
+//   @param com_nudge [array] - Optional. [x,y,z] centre-of-mass offset
+//   @param enable_gravity [bool] - Optional. Whether the body is affected by gravity
+//   @param update_mass_when_scale_changes [bool] - Optional. Recompute mass on scale change
+//   @returns { physics_asset_path, body_index, bone_name, physics_type, physics_type_applied, mass_override_enabled, mass, mass_applied, linear_damping, angular_damping, mass_scale, inertia_tensor_scale: [x,y,z], com_nudge: [x,y,z], enable_gravity, update_mass_when_scale_changes, applied_count (fields written by this call), updated, saved, save_error }
 TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObject>& Params)
 {
     UPhysicsAsset* PhysAsset = nullptr;
@@ -640,16 +671,48 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
     double Mass = 0.0;
     const bool bMassApplied = Params->TryGetNumberField(TEXT("mass"), Mass);
 
-    if (!bPhysicsTypeApplied && !bMassApplied)
+    // The advanced FBodyInstance fields, each optional, read and validated here too.
+    double LinearDamping = 0.0;
+    const bool bLinearDamping = Params->TryGetNumberField(TEXT("linear_damping"), LinearDamping);
+    double AngularDamping = 0.0;
+    const bool bAngularDamping = Params->TryGetNumberField(TEXT("angular_damping"), AngularDamping);
+    double MassScale = 1.0;
+    const bool bMassScale = Params->TryGetNumberField(TEXT("mass_scale"), MassScale);
+    if (bMassScale && MassScale < 0.001)
     {
         return mcp_common::MakeErrorReply(
-            TEXT("No properties provided (physics_type|mass); nothing was changed"));
+            FString::Printf(TEXT("mass_scale must be >= 0.001 (got %g); nothing was changed"), MassScale));
+    }
+    FVector InertiaTensorScale = FVector::OneVector;
+    bool bInertiaTensorScale = false;
+    if (TSharedPtr<FJsonObject> Invalid = PhysicsAsset_ReadOptionalVector3(Params, TEXT("inertia_tensor_scale"), InertiaTensorScale, bInertiaTensorScale))
+    {
+        return Invalid;
+    }
+    FVector ComNudge = FVector::ZeroVector;
+    bool bComNudge = false;
+    if (TSharedPtr<FJsonObject> Invalid = PhysicsAsset_ReadOptionalVector3(Params, TEXT("com_nudge"), ComNudge, bComNudge))
+    {
+        return Invalid;
+    }
+    bool bEnableGravity = false;
+    const bool bEnableGravityGiven = Params->TryGetBoolField(TEXT("enable_gravity"), bEnableGravity);
+    bool bUpdateMassOnScale = false;
+    const bool bUpdateMassOnScaleGiven = Params->TryGetBoolField(TEXT("update_mass_when_scale_changes"), bUpdateMassOnScale);
+
+    const int32 Applied = int32(bPhysicsTypeApplied) + int32(bMassApplied) + int32(bLinearDamping) + int32(bAngularDamping)
+        + int32(bMassScale) + int32(bInertiaTensorScale) + int32(bComNudge) + int32(bEnableGravityGiven) + int32(bUpdateMassOnScaleGiven);
+    if (Applied == 0)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("No properties provided (physics_type|mass|linear_damping|angular_damping|mass_scale|inertia_tensor_scale|com_nudge|enable_gravity|update_mass_when_scale_changes); nothing was changed"));
     }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetPhysicsBodyProperties", "Set Physics Body Properties"));
     PhysAsset->Modify();
     BodySetup->Modify();
 
+    FBodyInstance& BI = BodySetup->DefaultInstance;
     if (bPhysicsTypeApplied)
     {
         BodySetup->PhysicsType = NewType;
@@ -657,7 +720,36 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
     if (bMassApplied)
     {
         // FBodyInstance::SetMassOverride(MassInKG, bNewOverrideMass=true)  [ENGINE_API]
-        BodySetup->DefaultInstance.SetMassOverride((float)Mass, /*bNewOverrideMass=*/true);
+        BI.SetMassOverride((float)Mass, /*bNewOverrideMass=*/true);
+    }
+    if (bLinearDamping)
+    {
+        BI.LinearDamping = static_cast<float>(LinearDamping);
+    }
+    if (bAngularDamping)
+    {
+        BI.AngularDamping = static_cast<float>(AngularDamping);
+    }
+    if (bMassScale)
+    {
+        BI.SetMassScale(static_cast<float>(MassScale));   // ENGINE_API setter
+    }
+    if (bInertiaTensorScale)
+    {
+        BI.InertiaTensorScale = InertiaTensorScale;
+    }
+    if (bComNudge)
+    {
+        BI.COMNudge = ComNudge;
+    }
+    if (bEnableGravityGiven)
+    {
+        BI.SetEnableGravity(bEnableGravity);   // ENGINE_API setter
+    }
+    if (bUpdateMassOnScaleGiven)
+    {
+        // Bitfield from FBodyInstanceCore base; direct write.
+        BI.bUpdateMassWhenScaleChanges = bUpdateMassOnScale ? 1 : 0;
     }
 
     BodySetup->MarkPackageDirty();
@@ -684,124 +776,103 @@ TSharedPtr<FJsonObject> HandleSetPhysicsBodyProperties(const TSharedPtr<FJsonObj
     // bOverrideMass is a public FBodyInstanceCore bitfield: read it back rather than echo the request, so an
     // override that was already on (or that the write failed to turn on) shows as it is.
     ResultObj->SetBoolField(TEXT("mass_override_enabled"), BodySetup->DefaultInstance.bOverrideMass != 0);
-    ResultObj->SetNumberField(TEXT("mass"), BodySetup->DefaultInstance.GetMassOverride());
+    ResultObj->SetNumberField(TEXT("mass"), BI.GetMassOverride());
     ResultObj->SetBoolField(TEXT("mass_applied"), bMassApplied);
-    ResultObj->SetBoolField(TEXT("updated"), true);
-
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_physics_body_properties"), SaveError);
-}
-
-// MCP:set_physics_body_advanced_properties - Writes only the given advanced FBodyInstance fields (damping, mass scale, inertia scale, COM nudge, gravity, mass update on scale) of one body of a UPhysicsAsset, chosen by body_index or bone_name, and saves it. Fails when no field is given. Returns the authored values read back, applied_count, saved.
-//   @param physics_asset_path - /Game path to the UPhysicsAsset.
-//   @param body_index [int] - Index of the body in the asset; wins over bone_name when both are given
-//   @param bone_name - Bone name to resolve the body (alternative to body_index).
-//   @param linear_damping [number] - Drag that slows linear movement (FBodyInstance LinearDamping, unitless, engine default 0.01); omit to keep the current value
-//   @param angular_damping [number] - Drag that slows rotation (FBodyInstance AngularDamping, unitless, engine default 0); omit to keep the current value
-//   @param mass_scale [number] - Per-instance mass multiplier (>= 0.001).
-//   @param inertia_tensor_scale [array] - [x,y,z] inertia scale.
-//   @param com_nudge [array] - [x,y,z] center-of-mass offset.
-//   @param enable_gravity [bool] - Whether the body is affected by gravity.
-//   @param update_mass_when_scale_changes [bool] - Recompute mass on scale change.
-//   @returns { physics_asset_path: string, body_index: int, bone_name: string, linear_damping: number, angular_damping: number, mass_scale: number, inertia_tensor_scale: [number], com_nudge: [number], enable_gravity: bool, update_mass_when_scale_changes: bool, applied_count: int, updated: bool, saved: bool }
-TSharedPtr<FJsonObject> HandleSetPhysicsBodyAdvancedProperties(const TSharedPtr<FJsonObject>& Params)
-{
-    UPhysicsAsset* PhysAsset = nullptr;
-    int32 BodyIndex = INDEX_NONE;
-    USkeletalBodySetup* BodySetup = nullptr;
-    if (TSharedPtr<FJsonObject> Error = PhysicsAsset_ReadBody(Params, PhysAsset, BodyIndex, BodySetup))
-    {
-        return Error;
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetPhysicsBodyAdvancedProperties", "Set Physics Body Advanced Properties"));
-    PhysAsset->Modify();
-    BodySetup->Modify();
-
-    FBodyInstance& BI = BodySetup->DefaultInstance;
-
-    int32 Applied = 0;
-    double Num = 0.0;
-    bool Flag = false;
-
-    if (Params->TryGetNumberField(TEXT("linear_damping"), Num)) { BI.LinearDamping = static_cast<float>(Num); ++Applied; }
-    if (Params->TryGetNumberField(TEXT("angular_damping"), Num)) { BI.AngularDamping = static_cast<float>(Num); ++Applied; }
-    if (Params->TryGetNumberField(TEXT("mass_scale"), Num)) { BI.SetMassScale(static_cast<float>(Num)); ++Applied; }   // ENGINE_API setter
-    {
-        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-        if (Params->TryGetArrayField(TEXT("inertia_tensor_scale"), Arr) && Arr && Arr->Num() >= 3)
-        {
-            BI.InertiaTensorScale = FVector((*Arr)[0]->AsNumber(), (*Arr)[1]->AsNumber(), (*Arr)[2]->AsNumber());
-            ++Applied;
-        }
-    }
-    {
-        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-        if (Params->TryGetArrayField(TEXT("com_nudge"), Arr) && Arr && Arr->Num() >= 3)
-        {
-            BI.COMNudge = FVector((*Arr)[0]->AsNumber(), (*Arr)[1]->AsNumber(), (*Arr)[2]->AsNumber());
-            ++Applied;
-        }
-    }
-    if (Params->TryGetBoolField(TEXT("enable_gravity"), Flag)) { BI.SetEnableGravity(Flag); ++Applied; }   // ENGINE_API setter
-    if (Params->TryGetBoolField(TEXT("update_mass_when_scale_changes"), Flag))
-    {
-        // Bitfield from FBodyInstanceCore base; direct write.
-        BI.bUpdateMassWhenScaleChanges = Flag ? 1 : 0;
-        ++Applied;
-    }
-
-    if (Applied == 0)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("No properties provided (linear_damping|angular_damping|mass_scale|inertia_tensor_scale|com_nudge|enable_gravity|update_mass_when_scale_changes)"));
-    }
-
-    BodySetup->MarkPackageDirty();
-    PhysAsset->MarkPackageDirty();
-
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(PhysAsset->GetOutermost(), PhysAsset, SaveError);
-
-    // READ-BACK: read AUTHORED struct fields directly off BI. Never call GetBodyMass()/
-    // GetBodyInertiaTensor() — those read the live physics actor, which is 0/absent headless.
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("physics_asset_path"), PhysAsset->GetPathName());
-    ResultObj->SetNumberField(TEXT("body_index"), BodyIndex);
-    ResultObj->SetStringField(TEXT("bone_name"), BodySetup->BoneName.ToString());
+    // READ-BACK of the advanced fields: the AUTHORED struct fields off BI. Never GetBodyMass()/
+    // GetBodyInertiaTensor() -- those read the live physics actor, which is 0/absent headless.
     ResultObj->SetNumberField(TEXT("linear_damping"), BI.LinearDamping);
     ResultObj->SetNumberField(TEXT("angular_damping"), BI.AngularDamping);
     ResultObj->SetNumberField(TEXT("mass_scale"), BI.MassScale);
-    {
-        ResultObj->SetArrayField(TEXT("inertia_tensor_scale"), mcp_common::VectorToJsonArray(BI.InertiaTensorScale));
-    }
-    {
-        ResultObj->SetArrayField(TEXT("com_nudge"), mcp_common::VectorToJsonArray(BI.COMNudge));
-    }
+    ResultObj->SetArrayField(TEXT("inertia_tensor_scale"), mcp_common::VectorToJsonArray(BI.InertiaTensorScale));
+    ResultObj->SetArrayField(TEXT("com_nudge"), mcp_common::VectorToJsonArray(BI.COMNudge));
     ResultObj->SetBoolField(TEXT("enable_gravity"), BI.bEnableGravity);
     ResultObj->SetBoolField(TEXT("update_mass_when_scale_changes"), BI.bUpdateMassWhenScaleChanges);
     ResultObj->SetNumberField(TEXT("applied_count"), Applied);
     ResultObj->SetBoolField(TEXT("updated"), true);
 
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_physics_body_advanced_properties"), SaveError);
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_physics_body_properties"), SaveError);
 }
 
-// MCP:add_simple_collision_to_static_mesh - Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bounds of a UStaticMesh to its BodySetup and saves the mesh; a mesh outside /Game is first duplicated to dest_path. Not idempotent: each call adds one more (clear them with remove_static_mesh_collision).
+// MCP:add_static_mesh_simple_collision - Appends one simple collision element to a UStaticMesh and saves the mesh: a primitive (Box, Sphere or Capsule) sized to the mesh bounds, or a K-DOP hull (NDOP10_X / NDOP10_Y / NDOP10_Z bevel the four edges along that axis, NDOP18 every edge, NDOP26 every edge and corner) fitted around the LOD0 vertices as the Static Mesh Editor's Add K-DOP action does. A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there (duplicated: this call created it). An unknown shape is an error naming the accepted ones, checked before any copy. Not idempotent: each call adds one more element, existing collision is kept (clear it with remove_static_mesh_collision; convex decomposition is set_static_mesh_convex_collision). A K-DOP subsystem failure, as under PIE, makes success false with collision_changed and the new copy's saved; a failed save makes success false with save_error.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - Path under /Game to copy a mesh that is not under /Game into before editing (required then; an existing mesh there is reused and edited)
-//   @param shape - Box, Sphere or Capsule, case-insensitive, sized from the mesh bounds (default Box; any other value also adds a Box)
-//   @returns { static_mesh_path, shape, box_count, sphere_count, capsule_count, element_count, collision_added, duplicated_to_game, saved, save_error }
+//   @param shape - Box (default), Sphere, Capsule, NDOP10_X, NDOP10_Y, NDOP10_Z, NDOP18 or NDOP26, case-insensitive. Any other value is refused.
+//   @returns { static_mesh_path, shape, box_count, sphere_count, capsule_count, element_count, collision_added, duplicated_to_game, duplicated, added_index (K-DOP shapes), simple_collision_count (K-DOP shapes), saved, save_error?, collision_changed? }
+//   @hints additive not-idempotent
 TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJsonObject>& Params)
 {
+    // The shape (and, for a K-DOP, the subsystem) is checked before ResolveWritableStaticMesh, so a refused
+    // call copies nothing into /Game.
+    FString ShapeStr = TEXT("Box");
+    Params->TryGetStringField(TEXT("shape"), ShapeStr);
+    const bool bSphere = ShapeStr.Equals(TEXT("Sphere"), ESearchCase::IgnoreCase);
+    const bool bCapsule = ShapeStr.Equals(TEXT("Capsule"), ESearchCase::IgnoreCase);
+    const bool bBox = ShapeStr.Equals(TEXT("Box"), ESearchCase::IgnoreCase);
+    EScriptCollisionShapeType KDopShape = EScriptCollisionShapeType::NDOP18;
+    const bool bKDop = !bSphere && !bCapsule && !bBox && ParseKDopShape(ShapeStr, KDopShape);
+    if (!bSphere && !bCapsule && !bBox && !bKDop)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Invalid shape '%s' (Box|Sphere|Capsule|NDOP10_X|NDOP10_Y|NDOP10_Z|NDOP18|NDOP26)"), *ShapeStr));
+    }
+
+    UStaticMeshEditorSubsystem* SMES = nullptr;
+    if (bKDop)
+    {
+        SMES = GEditor ? GEditor->GetEditorSubsystem<UStaticMeshEditorSubsystem>() : nullptr;
+        if (!SMES)
+        {
+            return mcp_common::MakeErrorReply(TEXT("UStaticMeshEditorSubsystem unavailable"));
+        }
+    }
+
     bool bDuplicated = false;
     TSharedPtr<FJsonObject> Error;
-    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error);
+    FWritableMeshCopy Copy;
+    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error, &Copy);
     if (!StaticMesh)
     {
         return Error;
     }
 
-    FString ShapeStr = TEXT("Box");
-    Params->TryGetStringField(TEXT("shape"), ShapeStr);
+    if (bKDop)
+    {
+        const FMeshCollisionProbe Probe(StaticMesh);
+        FScopedTransaction KDopTransaction(NSLOCTEXT("UEAgent", "AddStaticMeshKDopCollision", "Add Static Mesh K-DOP Collision"));
+        StaticMesh->Modify();
+
+        // Returns the index of the newly-created collision; a negative value means it failed: under PIE, before it
+        // touches the mesh, or when the mesh has neither render data nor a LOD 0 mesh description to fit the hull to,
+        // after it has given a mesh without a body setup an empty one.
+        const int32 AddedIndex = SMES->AddSimpleCollisionsWithNotification(StaticMesh, KDopShape, /*bApplyChanges=*/true);
+        if (AddedIndex < 0)
+        {
+            return MeshCollision_FailureReply(StaticMesh, Probe, bDuplicated, Copy,
+                FString::Printf(TEXT("K-DOP collision (%s) failed for %s (subsystem returned index %d)"),
+                    *ShapeStr, *StaticMesh->GetPathName(), AddedIndex));
+        }
+
+        StaticMesh->MarkPackageDirty();
+        FString KDopSaveError;
+        const bool bKDopSaved = mcp_common::SaveAssetPackage(StaticMesh->GetOutermost(), StaticMesh, KDopSaveError);
+
+        const UBodySetup* KDopBodySetup = StaticMesh->GetBodySetup();
+        TSharedPtr<FJsonObject> KDopResult = MakeShared<FJsonObject>();
+        KDopResult->SetStringField(TEXT("static_mesh_path"), StaticMesh->GetPathName());
+        KDopResult->SetStringField(TEXT("shape"), ShapeStr.ToUpper());
+        KDopResult->SetNumberField(TEXT("added_index"), AddedIndex);
+        KDopResult->SetNumberField(TEXT("simple_collision_count"), SMES->GetSimpleCollisionCount(StaticMesh));
+        KDopResult->SetNumberField(TEXT("box_count"), KDopBodySetup ? KDopBodySetup->AggGeom.BoxElems.Num() : 0);
+        KDopResult->SetNumberField(TEXT("sphere_count"), KDopBodySetup ? KDopBodySetup->AggGeom.SphereElems.Num() : 0);
+        KDopResult->SetNumberField(TEXT("capsule_count"), KDopBodySetup ? KDopBodySetup->AggGeom.SphylElems.Num() : 0);
+        KDopResult->SetNumberField(TEXT("element_count"), KDopBodySetup ? KDopBodySetup->AggGeom.GetElementCount() : 0);
+        KDopResult->SetBoolField(TEXT("collision_added"), true);
+        KDopResult->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+        KDopResult->SetBoolField(TEXT("duplicated"), Copy.bCreated);
+
+        // This save also writes the /Game copy, so it is the one the reply reports.
+        return mcp_common::MakeSavedReply(KDopResult, bKDopSaved, TEXT("add_static_mesh_simple_collision"), KDopSaveError);
+    }
 
     UBodySetup* BodySetup = StaticMesh->GetBodySetup();
     if (!BodySetup)
@@ -825,7 +896,7 @@ TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJ
     const FVector Center = Bounds.Origin;
 
     FString AppliedShape;
-    if (ShapeStr.Equals(TEXT("Sphere"), ESearchCase::IgnoreCase))
+    if (bSphere)
     {
         FKSphereElem Elem;
         Elem.Center = Center;
@@ -833,7 +904,7 @@ TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJ
         BodySetup->AggGeom.SphereElems.Add(Elem);
         AppliedShape = TEXT("Sphere");
     }
-    else if (ShapeStr.Equals(TEXT("Capsule"), ESearchCase::IgnoreCase))
+    else if (bCapsule)
     {
         FKSphylElem Elem;
         Elem.Center = Center;
@@ -843,7 +914,7 @@ TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJ
         BodySetup->AggGeom.SphylElems.Add(Elem);
         AppliedShape = TEXT("Capsule");
     }
-    else // default Box
+    else // Box
     {
         FKBoxElem Elem;
         Elem.Center = Center;
@@ -872,13 +943,15 @@ TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJ
     ResultObj->SetNumberField(TEXT("element_count"), BodySetup->AggGeom.GetElementCount());
     ResultObj->SetBoolField(TEXT("collision_added"), true);
     ResultObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+    ResultObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
 
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_simple_collision_to_static_mesh"), SaveError);
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("add_static_mesh_simple_collision"), SaveError);
 }
 
-// Static-mesh collision CRUD: clear (RemoveSimpleCollision), convex decomposition, K-DOP.
+// Static-mesh collision CRUD: clear (RemoveSimpleCollision) and convex decomposition (primitives and K-DOP hulls
+// are add_static_mesh_simple_collision above).
 
-// MCP:remove_static_mesh_collision - Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves; a failed save makes success false with save_error.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first (an existing copy there is reused); duplicated is true when this call created that copy.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true, where saved reports only the save of a copy this call created and is false, with nothing saved, when there is none.
+// MCP:remove_static_mesh_collision - Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves; a failed save makes success false with save_error.  Reuses the same duplicate-first logic as add_static_mesh_simple_collision so a read-only /Engine source is copied into dest_path first (an existing copy there is reused); duplicated is true when this call created that copy.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true, where saved reports only the save of a copy this call created and is false, with nothing saved, when there is none.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
 //   @returns { static_mesh_path, removed_count, element_count, collision_removed, already_empty, duplicated_to_game, duplicated, saved, save_error?, note? }
@@ -948,7 +1021,7 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_static_mesh_collision"), SaveError);
 }
 
-// MCP:set_static_mesh_convex_collision - Replace the simple collision of a UStaticMesh asset, found by path, with a V-HACD convex decomposition, as the Static Mesh Editor's Auto Convex Collision does, in one undo step, then save it; re-running replaces the hulls, never adds to them. hull_count and hull_precision must be positive, checked before anything is copied. A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there; duplicated says this call created it. When the subsystem fails (no mesh description, no LOD 0 geometry with collision enabled, a PIE session), success is false: collision_changed says whether it had already cleared the old collision, left unsaved and undoable, and saved whether a new copy was saved. A failed save makes success false with save_error. K-DOP hull: set_static_mesh_kdop_collision; clear: remove_static_mesh_collision.
+// MCP:set_static_mesh_convex_collision - Replace the simple collision of a UStaticMesh asset, found by path, with a V-HACD convex decomposition, as the Static Mesh Editor's Auto Convex Collision does, in one undo step, then save it; re-running replaces the hulls, never adds to them. hull_count and hull_precision must be positive, checked before anything is copied. A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there; duplicated says this call created it. When the subsystem fails (no mesh description, no LOD 0 geometry with collision enabled, a PIE session), success is false: collision_changed says whether it had already cleared the old collision, left unsaved and undoable, and saved whether a new copy was saved. A failed save makes success false with save_error. Box, sphere, capsule or K-DOP hull: add_static_mesh_simple_collision; clear: remove_static_mesh_collision.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
 //   @param hull_count - Maximum number of convex pieces to create (default 4, must be positive).
@@ -1035,80 +1108,6 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshConvexCollision(const TSharedPtr<FJso
 
     // This save also writes the /Game copy, so it is the one the reply reports.
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_static_mesh_convex_collision"), SaveError);
-}
-
-// MCP:set_static_mesh_kdop_collision - Add one K-DOP simple collision hull to a UStaticMesh asset, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there (duplicated: this call created it). An invalid shape, checked before any copy, or an unknown mesh is an error; a subsystem failure, as under PIE, makes success false with collision_changed and the new copy's saved. A failed save makes success false with save_error. Convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
-//   @param static_mesh_path - Path to the source UStaticMesh.
-//   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
-//   @param shape - K-DOP hull shape: NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26 (default NDOP18).
-//   @returns { static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, duplicated, saved, save_error?, collision_changed? }
-//   @hints additive not-idempotent
-TSharedPtr<FJsonObject> HandleSetStaticMeshKDopCollision(const TSharedPtr<FJsonObject>& Params)
-{
-    // The shape and the subsystem are checked before ResolveWritableStaticMesh, so a refused call copies nothing
-    // into /Game.
-    FString ShapeStr = TEXT("NDOP18");
-    Params->TryGetStringField(TEXT("shape"), ShapeStr);
-    EScriptCollisionShapeType Shape = EScriptCollisionShapeType::NDOP18;
-    if (!ParseKDopShape(ShapeStr, Shape))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid shape '%s' (NDOP10_X|NDOP10_Y|NDOP10_Z|NDOP18|NDOP26)"), *ShapeStr));
-    }
-
-    UStaticMeshEditorSubsystem* SMES = GEditor ? GEditor->GetEditorSubsystem<UStaticMeshEditorSubsystem>() : nullptr;
-    if (!SMES)
-    {
-        return mcp_common::MakeErrorReply(TEXT("UStaticMeshEditorSubsystem unavailable"));
-    }
-
-    bool bDuplicated = false;
-    TSharedPtr<FJsonObject> Error;
-    FWritableMeshCopy Copy;
-    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error, &Copy);
-    if (!StaticMesh)
-    {
-        return Error;
-    }
-
-    const FMeshCollisionProbe Probe(StaticMesh);
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetStaticMeshKDopCollision", "Set Static Mesh K-DOP Collision"));
-    StaticMesh->Modify();
-
-    // Returns the index of the newly-created collision; a negative value means it failed: under PIE, before it
-    // touches the mesh, or when the mesh has neither render data nor a LOD 0 mesh description to fit the hull to,
-    // after it has given a mesh without a body setup an empty one.
-    const int32 AddedIndex = SMES->AddSimpleCollisionsWithNotification(StaticMesh, Shape, /*bApplyChanges=*/true);
-    if (AddedIndex < 0)
-    {
-        return MeshCollision_FailureReply(StaticMesh, Probe, bDuplicated, Copy,
-            FString::Printf(TEXT("K-DOP collision (%s) failed for %s (subsystem returned index %d)"),
-                *ShapeStr, *StaticMesh->GetPathName(), AddedIndex));
-    }
-
-    StaticMesh->MarkPackageDirty();
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(StaticMesh->GetOutermost(), StaticMesh, SaveError);
-
-    const int32 SimpleCount = SMES->GetSimpleCollisionCount(StaticMesh);
-    int32 ElementCount = 0;
-    if (UBodySetup* BodySetup = StaticMesh->GetBodySetup())
-    {
-        ElementCount = BodySetup->AggGeom.GetElementCount();
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("static_mesh_path"), StaticMesh->GetPathName());
-    ResultObj->SetStringField(TEXT("shape"), ShapeStr);
-    ResultObj->SetNumberField(TEXT("added_index"), AddedIndex);
-    ResultObj->SetNumberField(TEXT("simple_collision_count"), SimpleCount);
-    ResultObj->SetNumberField(TEXT("element_count"), ElementCount);
-    ResultObj->SetBoolField(TEXT("collision_added"), true);
-    ResultObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
-    ResultObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
-
-    // This save also writes the /Game copy, so it is the one the reply reports.
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_static_mesh_kdop_collision"), SaveError);
 }
 
 // Ragdoll constraints inside the UPhysicsAsset (distinct from the world constraint-actor commands).
@@ -1491,16 +1490,14 @@ TSharedPtr<FJsonObject> HandleSetPhysicsAssetConstraintDrives(const TSharedPtr<F
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_physics_asset_constraint"), &HandleAddPhysicsAssetConstraint },
-    { TEXT("add_simple_collision_to_static_mesh"), &HandleAddSimpleCollisionToStaticMesh },
+    { TEXT("add_static_mesh_simple_collision"), &HandleAddSimpleCollisionToStaticMesh },
     { TEXT("create_physics_asset"), &HandleCreatePhysicsAsset },
     { TEXT("get_physics_asset_info"), &HandleGetPhysicsAssetInfo },
     { TEXT("remove_physics_asset_constraint"), &HandleRemovePhysicsAssetConstraint },
     { TEXT("remove_static_mesh_collision"), &HandleRemoveStaticMeshCollision },
     { TEXT("set_physics_asset_constraint_drives"), &HandleSetPhysicsAssetConstraintDrives },
     { TEXT("set_physics_asset_constraint_limits"), &HandleSetPhysicsAssetConstraintLimits },
-    { TEXT("set_physics_body_advanced_properties"), &HandleSetPhysicsBodyAdvancedProperties },
     { TEXT("set_physics_body_properties"), &HandleSetPhysicsBodyProperties },
     { TEXT("set_static_mesh_convex_collision"), &HandleSetStaticMeshConvexCollision },
-    { TEXT("set_static_mesh_kdop_collision"), &HandleSetStaticMeshKDopCollision },
 };
 } // namespace UEAgentPhysicsAssetCommands

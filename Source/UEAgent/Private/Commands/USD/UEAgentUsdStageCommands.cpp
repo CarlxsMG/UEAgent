@@ -142,37 +142,12 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------
-// usd_module_status
-// ---------------------------------------------------------------------------
-// MCP:usd_module_status - Probe whether the USDCore plugin is loaded and what file formats USD can read/write.  Calls UnrealUSDWrapper::GetNativeFileFormats (expected to include "usd", "usda", "usdc", "usdz") and UnrealUSDWrapper::GetAllSupportedFileFormats (which also includes extensions from third-party USD plugins like Alembic "abc"). A zero count on either means USDCore did not load.
-//   @returns { native_formats: [string], supported_formats: [string], supported_count: int, native_count: int, native_present: bool, supported_present: bool }
-//   @hints read-only
-
-TSharedPtr<FJsonObject> HandleUsdModuleStatus(const TSharedPtr<FJsonObject>& Params)
-{
-    const TArray<FString> Native = UnrealUSDWrapper::GetNativeFileFormats();
-    const TArray<FString> All    = UnrealUSDWrapper::GetAllSupportedFileFormats();
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-
-    Data->SetArrayField(TEXT("native_formats"), mcp_common::StringsToJson(Native));
-    Data->SetNumberField(TEXT("native_count"), Native.Num());
-
-    Data->SetArrayField(TEXT("supported_formats"), mcp_common::StringsToJson(All));
-    Data->SetNumberField(TEXT("supported_count"), All.Num());
-
-    Data->SetBoolField(TEXT("native_present"),    Native.Num() > 0);
-    Data->SetBoolField(TEXT("supported_present"), All.Num() > 0);
-
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // list_usd_file_formats
 // ---------------------------------------------------------------------------
-// MCP:list_usd_file_formats - List the USD file format extensions the engine supports, with optional human-readable descriptions.  Always returns the native set ("usd"/"usda"/"usdc"/"usdz") and the full supported set (native + third-party USD plugin extensions like "abc" from usdAbc). When include_descriptions is true, also calls AddUsdImportFileFormatDescriptions to populate the human-readable per-extension description strings (e.g. "usdc; Universal Scene Description binary files").
+// MCP:list_usd_file_formats - List the USD file format extensions the engine supports, with optional human-readable descriptions -- also the probe of whether the USDCore plugin loaded: native_present / supported_present false (a zero count) means it did not.  Always returns the native set ("usd"/"usda"/"usdc"/"usdz", UnrealUSDWrapper::GetNativeFileFormats) and the full supported set (native + third-party USD plugin extensions like "abc" from usdAbc, GetAllSupportedFileFormats). When include_descriptions is true, also calls AddUsdImportFileFormatDescriptions to populate the human-readable per-extension description strings (e.g. "usdc; Universal Scene Description binary files").
 //   @param include_descriptions [bool] - Also return the per-extension import description strings from UnrealUSDWrapper::AddUsdImportFileFormatDescriptions (optional, default false).
-//   @returns { native_formats: [string], supported_formats: [string], native_count: int, supported_count: int, descriptions: [{format: string, description: string}]? }
+//   @returns { native_formats: [string], supported_formats: [string], native_count: int, supported_count: int, native_present: bool, supported_present: bool, descriptions: [{format: string, description: string}]? }
+//   @hints read-only
 
 TSharedPtr<FJsonObject> HandleListUsdFileFormats(const TSharedPtr<FJsonObject>& Params)
 {
@@ -189,6 +164,10 @@ TSharedPtr<FJsonObject> HandleListUsdFileFormats(const TSharedPtr<FJsonObject>& 
 
     Data->SetNumberField(TEXT("native_count"),    Native.Num());
     Data->SetNumberField(TEXT("supported_count"), All.Num());
+
+    // A zero count on either means USDCore did not load.
+    Data->SetBoolField(TEXT("native_present"),    Native.Num() > 0);
+    Data->SetBoolField(TEXT("supported_present"), All.Num() > 0);
 
     if (bIncludeDescriptions)
     {
@@ -677,6 +656,5 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("open_usd_stage"), &HandleOpenUsdStage },
     { TEXT("save_usd_stage"), &HandleSaveUsdStage },
     { TEXT("set_usd_stage_time_range"), &HandleSetUsdStageTimeRange },
-    { TEXT("usd_module_status"), &HandleUsdModuleStatus },
 };
 } // namespace UEAgentUsdStageCommands

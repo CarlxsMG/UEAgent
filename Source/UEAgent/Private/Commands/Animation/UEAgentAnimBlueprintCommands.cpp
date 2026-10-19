@@ -12,6 +12,7 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
+#include "HAL/PlatformFileManager.h"   // get_anim_blueprint_info: size and timestamp of the .uasset
 
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -33,16 +34,8 @@
 #include "AnimationGraph.h"
 #include "AnimGraphNode_StateMachine.h"
 #include "AnimGraphNode_StateMachineBase.h"
-// AnimBP scaffolding (locomotion / aim offset / foot IK)
+// AnimBP scaffolding (locomotion / foot IK)
 #include "AnimGraphNode_LegIK.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/BlendSpace1D.h"
-#include "Animation/AimOffsetBlendSpace.h"
-#include "Animation/AnimSequence.h"
-#include "Factories/BlendSpaceFactory1D.h"
-// 2D BlendSpace + AimOffsetBlendSpace factories.
-#include "Factories/BlendSpaceFactoryNew.h"
-#include "Factories/AimOffsetBlendSpaceFactoryNew.h"
 #include "AnimationStateMachineGraph.h"
 #include "AnimationStateMachineSchema.h"   // FEdGraphSchemaAction_NewStateNode
 #include "AnimStateNode.h"
@@ -576,7 +569,7 @@ TSharedPtr<FJsonObject> HandleCreateAnimBlueprint(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // add_anim_state_machine
 // ---------------------------------------------------------------------------
-// MCP:add_anim_state_machine - Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_anim_graph_pins, fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_animation_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+// MCP:add_anim_state_machine - Add a state machine node named machine_name to the top-level AnimGraph of an Animation Blueprint, then mark the blueprint structurally modified and save it without compiling (compile_anim_blueprint gives runtime effect). Idempotent by name: an existing machine is returned unchanged (already_existed true). The node starts with only its entry and is not connected to the Output Pose: wire it with connect_anim_graph_pins, fill it with add_anim_state, add_anim_conduit and add_anim_transition, or build it in one call with build_anim_state_machine. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @param machine_name - Name for the new state machine
 //   @returns { anim_blueprint_path: string, machine_name: string, node_class: string, state_machine_graph: string, state_machine_created: bool, already_existed: bool, saved: bool, state_machine_count: int, save_error?: string }
@@ -1191,38 +1184,73 @@ TSharedPtr<FJsonObject> HandleCompileAnimBlueprint(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // get_anim_blueprint_info
 // ---------------------------------------------------------------------------
-// MCP:get_anim_blueprint_info - Read an Animation Blueprint without compiling or changing it: target skeleton, parent and generated class, is_anim_instance, is_template, graph_count, and the state machines of its top-level AnimGraph with their state counts (conduits not counted). list_anim_state_machines scans every function graph.
-//   @param anim_blueprint_path - Path to the UAnimBlueprint asset
-//   @returns { asset_path: string, target_skeleton: string, target_skeleton_set: bool, parent_class: string, generated_class: string, is_anim_instance: bool, is_template: bool, graph_count: int, state_machine_count: int, state_machines: [{ name: string, state_count: int }] }
+// MCP:get_anim_blueprint_info - Read an Animation Blueprint without compiling or changing it: its Asset Registry identity (object path, class, package, is_loaded, and the size and timestamp of its .uasset, left out when no file is on disk), target skeleton and its bone count, parent and generated class, is_anim_instance, is_abstract, is_template, graph_count, and the state machines at the top level of every function graph (the AnimGraph included) with their graph and state counts (conduits not counted; machines nested inside states are not listed). anim_blueprint_path takes an object path, a package path or a short name searched under /Game; no match is an error, and so is a short name several anim blueprints share, with the candidates listed.
+//   @param anim_blueprint_path - Object path, package path or short name of the UAnimBlueprint asset
+//   @returns { asset_path: string, asset_class: string, package_name: string, is_loaded: bool, file_size_bytes: number?, file_size_kb: number?, file_size_mb: number?, last_modified: string?, target_skeleton: string, target_skeleton_set: bool, skeleton_bone_count: int, parent_class: string, generated_class: string, is_anim_instance: bool, is_abstract: bool, is_template: bool, graph_count: int, state_machine_count: int, state_machines: [{ name: string, graph_name: string, state_count: int }] }
 
 TSharedPtr<FJsonObject> HandleGetAnimBlueprintInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString AnimBPPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
-    UAnimBlueprint* AnimBP = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(AnimBPPath, TEXT("anim blueprint"), AnimBP)) { return Error; }
+    // The registry entry first (object path, package path or short name under /Game), so is_loaded says
+    // whether the asset was in memory BEFORE this call loads it. Two anim blueprints sharing a short name can
+    // differ in everything, so an ambiguous name is refused with the candidates instead of picking one.
+    TArray<FAssetData> Matches;
+    FString LookupError;
+    const bool bRegistered = !AnimBPPath.IsEmpty()
+        && mcp_common::ResolveAssetFlexible(AnimBPPath, UAnimBlueprint::StaticClass(), TEXT("/Game"), Matches, LookupError)
+        && Matches.Num() > 0;
+    if (bRegistered && Matches.Num() > 1)
+    {
+        TArray<FString> MatchPaths;
+        for (const FAssetData& Match : Matches)
+        {
+            MatchPaths.Add(Match.GetObjectPathString());
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Ambiguous anim_blueprint_path '%s': %d anim blueprints match (%s). Pass a full object path to disambiguate."),
+            *AnimBPPath, Matches.Num(), *FString::Join(MatchPaths, TEXT(", "))));
+    }
+    const bool bWasLoaded = bRegistered && Matches[0].IsAssetLoaded();
+
+    // The registry entry loads it; a path the registry does not list (an export-text path, say) falls back
+    // to the direct load. A short name never reaches that load.
+    UAnimBlueprint* AnimBP = bRegistered ? Cast<UAnimBlueprint>(Matches[0].GetAsset()) : nullptr;
+    if (!AnimBP && !AnimBPPath.IsEmpty())
+    {
+        AnimBP = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(AnimBPPath);
+    }
+    if (!AnimBP)
+    {
+        return mcp_common::MakeErrorReply(LookupError.IsEmpty()
+            ? FString::Printf(TEXT("Could not load anim blueprint: %s"), *AnimBPPath)
+            : FString::Printf(TEXT("Could not load anim blueprint: %s (%s)"), *AnimBPPath, *LookupError));
+    }
 
     TArray<UEdGraph*> AllGraphs;
     AnimBP->GetAllGraphs(AllGraphs);
-
-    const int32 StateMachineCount = CountStateMachines(AnimBP);
 
     UClass* ParentClass = AnimBP->ParentClass;
     const bool bChild = AnimBP->GeneratedClass &&
         AnimBP->GeneratedClass->IsChildOf(UAnimInstance::StaticClass());
 
-    // Describe each state machine + its state count.
+    // Describe each state machine at the top level of every function graph + its state count.
     TArray<TSharedPtr<FJsonValue>> Machines;
-    if (UAnimationGraph* AnimGraph = FindAnimGraph(AnimBP))
+    for (UEdGraph* Graph : AnimBP->FunctionGraphs)
     {
-        for (UEdGraphNode* Node : AnimGraph->Nodes)
+        if (!Graph)
+        {
+            continue;
+        }
+        for (UEdGraphNode* Node : Graph->Nodes)
         {
             if (UAnimGraphNode_StateMachine* SM = Cast<UAnimGraphNode_StateMachine>(Node))
             {
                 TSharedPtr<FJsonObject> MObj = MakeShared<FJsonObject>();
                 MObj->SetStringField(TEXT("name"),
                     SM->EditorStateMachineGraph ? SM->EditorStateMachineGraph->GetName() : TEXT(""));
+                MObj->SetStringField(TEXT("graph_name"), Graph->GetName());
                 MObj->SetNumberField(TEXT("state_count"),
                     SM->EditorStateMachineGraph ? AnimBp_CountNodes<UAnimStateNode>(SM->EditorStateMachineGraph) : 0);
                 Machines.Add(MakeShared<FJsonValueObject>(MObj));
@@ -1232,66 +1260,51 @@ TSharedPtr<FJsonObject> HandleGetAnimBlueprintInfo(const TSharedPtr<FJsonObject>
 
     TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
     Resp->SetStringField(TEXT("asset_path"), AnimBP->GetPathName());
-    Resp->SetStringField(TEXT("target_skeleton"),
-        AnimBP->TargetSkeleton ? AnimBP->TargetSkeleton->GetPathName() : TEXT(""));
-    Resp->SetBoolField(TEXT("target_skeleton_set"), AnimBP->TargetSkeleton != nullptr);
+    Resp->SetStringField(TEXT("asset_class"), AnimBP->GetClass()->GetPathName());
+    const FString PackageName = AnimBP->GetOutermost()->GetName();
+    Resp->SetStringField(TEXT("package_name"), PackageName);
+    Resp->SetBoolField(TEXT("is_loaded"), bRegistered ? bWasLoaded : true);
+
+    // Size and timestamp of the .uasset behind the package; left out when it maps to no file on disk.
+    FString OnDisk;
+    if (FPackageName::TryConvertLongPackageNameToFilename(PackageName, OnDisk, FPackageName::GetAssetPackageExtension()))
+    {
+        IPlatformFile& Disk = FPlatformFileManager::Get().GetPlatformFile();
+        if (Disk.FileExists(*OnDisk))
+        {
+            const int64 Bytes = Disk.FileSize(*OnDisk);
+            Resp->SetNumberField(TEXT("file_size_bytes"), static_cast<double>(Bytes));
+            Resp->SetNumberField(TEXT("file_size_kb"), Bytes / 1024.0);
+            Resp->SetNumberField(TEXT("file_size_mb"), Bytes / (1024.0 * 1024.0));
+            Resp->SetStringField(TEXT("last_modified"), Disk.GetTimeStamp(*OnDisk).ToString());
+        }
+    }
+
+    const USkeleton* TargetSkeleton = AnimBP->TargetSkeleton;
+    Resp->SetStringField(TEXT("target_skeleton"), TargetSkeleton ? TargetSkeleton->GetPathName() : TEXT(""));
+    Resp->SetBoolField(TEXT("target_skeleton_set"), TargetSkeleton != nullptr);
+    Resp->SetNumberField(TEXT("skeleton_bone_count"), TargetSkeleton ? TargetSkeleton->GetReferenceSkeleton().GetNum() : 0);
     Resp->SetStringField(TEXT("parent_class"), ParentClass ? ParentClass->GetName() : TEXT(""));
     Resp->SetStringField(TEXT("generated_class"),
         AnimBP->GeneratedClass ? AnimBP->GeneratedClass->GetName() : TEXT(""));
     Resp->SetBoolField(TEXT("is_anim_instance"), bChild);
+    Resp->SetBoolField(TEXT("is_abstract"), AnimBP->GeneratedClass && AnimBP->GeneratedClass->HasAnyClassFlags(CLASS_Abstract));
     Resp->SetBoolField(TEXT("is_template"), AnimBP->bIsTemplate);
     Resp->SetNumberField(TEXT("graph_count"), AllGraphs.Num());
-    Resp->SetNumberField(TEXT("state_machine_count"), StateMachineCount);
+    Resp->SetNumberField(TEXT("state_machine_count"), Machines.Num());
     Resp->SetArrayField(TEXT("state_machines"), Machines);
     return mcp_common::MakeOkReply(Resp);
 }
 
 // ===========================================================================
 // AnimBP state machine introspection (READ-ONLY).
-// List, get info, validate. NO graph mutation, NO compile. Headless-safe.
+// Node list + count-based checks of one machine. NO graph mutation, NO compile. Headless-safe.
 // ===========================================================================
 
-// MCP:list_anim_state_machines - List the state machine nodes at the top level of every function graph of an Animation Blueprint (the AnimGraph included), read-only and without compiling: count and state_machines [{name, graph_name}]. Machines nested inside states are not listed.
+// MCP:get_anim_state_machine_info - Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded. It also checks the machine by those counts: no states is an error, one an info, several without transitions a warning (is_valid is false only on an error); compile_anim_blueprint is the check that the machine compiles.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @returns { count, state_machines: [{name, graph_name}] }
-TSharedPtr<FJsonObject> HandleListAnimStateMachines(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AnimBPPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("anim_blueprint_path"), AnimBPPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    UAnimBlueprint* AnimBP = LoadObject<UAnimBlueprint>(nullptr, *AnimBPPath);
-    if (!AnimBP)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("AnimBlueprint not found: %s"), *AnimBPPath));
-    }
-
-    TArray<TSharedPtr<FJsonValue>> Machines;
-    int32 Count = 0;
-    for (UEdGraph* Graph : AnimBP->FunctionGraphs)
-    {
-        if (!Graph) { continue; }
-        for (UEdGraphNode* Node : Graph->Nodes)
-        {
-            if (UAnimGraphNode_StateMachine* SM = Cast<UAnimGraphNode_StateMachine>(Node))
-            {
-                ++Count;
-                TSharedPtr<FJsonObject> M = MakeShared<FJsonObject>();
-                M->SetStringField(TEXT("name"), SM->GetStateMachineName());
-                M->SetStringField(TEXT("graph_name"), Graph->GetName());
-                Machines.Add(MakeShared<FJsonValueObject>(M));
-            }
-        }
-    }
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetNumberField(TEXT("count"), Count);
-    Data->SetArrayField(TEXT("state_machines"), Machines);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_anim_state_machine_info - Read the nodes of one state machine of an Animation Blueprint without compiling or changing it: state_count counts the states, conduit_count the conduits and transition_count the transitions; states lists every state, conduit and alias node with its kind (class name) and graph position, transitions excluded.
-//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param state_machine_name - Name of the state machine
-//   @returns { state_machine, state_count, conduit_count, transition_count, states:[{name,kind,x,y}] }
+//   @param state_machine_name - Name of a state machine in the top-level AnimGraph, matched without case (get_anim_blueprint_info lists them).
+//   @returns { state_machine, state_count, conduit_count, transition_count, states:[{name,kind,x,y}], is_valid, errors:[string], warnings:[string], info:[string] }
 TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObject>& Params)
 {
     FString MachineName;
@@ -1318,33 +1331,11 @@ TSharedPtr<FJsonObject> HandleGetAnimStateMachineInfo(const TSharedPtr<FJsonObje
             StateJson.Add(MakeShared<FJsonValueObject>(S));
         }
     }
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("state_machine"), MachineName);
-    Data->SetNumberField(TEXT("state_count"), AnimBp_CountNodes<UAnimStateNode>(SMGraph));
-    Data->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
-    Data->SetNumberField(TEXT("transition_count"), AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph));
-    Data->SetArrayField(TEXT("states"), StateJson);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:validate_anim_state_machine - Check a state machine of an Animation Blueprint by node counts, without compiling or changing it: no states is an error, one an info, several without transitions a warning. state_count counts states only (conduits and aliases excluded), transition_count the transition nodes; compile_anim_blueprint is the check that the machine compiles.
-//   @param anim_blueprint_path - Asset path of the UAnimBlueprint
-//   @param state_machine_name - Name of a state machine in the top-level AnimGraph, matched without case (see list_anim_state_machines).
-//   @returns { is_valid, errors[], warnings[], info[], state_count, transition_count }
-TSharedPtr<FJsonObject> HandleValidateAnimStateMachine(const TSharedPtr<FJsonObject>& Params)
-{
-    FString MachineName;
-    TSharedPtr<FJsonObject> Error;
-    UAnimationStateMachineGraph* SMGraph = AnimBp_ReadInspectedMachine(Params, MachineName, Error);
-    if (!SMGraph)
-    {
-        return Error;
-    }
-
     // UAnimStateTransitionNode derives from UAnimStateNodeBase too: count each class on its own.
     const int32 StateCount = AnimBp_CountNodes<UAnimStateNode>(SMGraph);
     const int32 TransitionCount = AnimBp_CountNodes<UAnimStateTransitionNode>(SMGraph);
 
+    // The checks run on those counts: states only (conduits and aliases excluded) and transition nodes.
     TArray<FString> Errors, Warnings, InfoList;
     if (StateCount == 0)
     {
@@ -1360,12 +1351,15 @@ TSharedPtr<FJsonObject> HandleValidateAnimStateMachine(const TSharedPtr<FJsonObj
     }
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("state_machine"), MachineName);
+    Data->SetNumberField(TEXT("state_count"), StateCount);
+    Data->SetNumberField(TEXT("conduit_count"), AnimBp_CountNodes<UAnimStateConduitNode>(SMGraph));
+    Data->SetNumberField(TEXT("transition_count"), TransitionCount);
+    Data->SetArrayField(TEXT("states"), StateJson);
     Data->SetBoolField(TEXT("is_valid"), Errors.Num() == 0);
     Data->SetArrayField(TEXT("errors"), mcp_common::StringsToJson(Errors));
     Data->SetArrayField(TEXT("warnings"), mcp_common::StringsToJson(Warnings));
     Data->SetArrayField(TEXT("info"), mcp_common::StringsToJson(InfoList));
-    Data->SetNumberField(TEXT("state_count"), StateCount);
-    Data->SetNumberField(TEXT("transition_count"), TransitionCount);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -1799,13 +1793,13 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
 // AnimBP scaffolding
 // ============================================================================
 //
-// Three primitives on top of the AnimGraph's state-machine / state / transition /
+// Two primitives on top of the AnimGraph's state-machine / state / transition /
 // conduit / notify / montage plumbing, so a locomotion AnimBP does not take 5+
 // commands wired by hand. `scaffold_locomotion_animbp` packages the recipe
 // (create AnimBP + state machine + Idle/Walk/Run states + bidirectional
-// transitions) into one call. `wire_aim_offset` makes a 1D BlendSpace for aim
-// yaw/pitch. `setup_foot_ik` adds a UAnimGraphNode_LegIK to the AnimGraph and
-// binds the foot bone references.
+// transitions) into one call. `setup_foot_ik` adds a UAnimGraphNode_LegIK to the
+// AnimGraph and binds the foot bone references. Aim offset assets are made by
+// create_blend_space (blend_space_type AimOffset / AimOffset1D).
 
 // MCP:scaffold_locomotion_animbp - Create or update a character Animation Blueprint with a "Locomotion" state machine + Idle/Walk/Run states + bidirectional transitions between them. Idempotent: re-running on an existing AnimBP returns the existing scaffold.
 //   @param package_path - UE content folder, e.g. "/Game/MyGame".
@@ -1984,294 +1978,6 @@ TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("scaffold_locomotion_animbp"), SaveErr);
 }
 
-// MCP:wire_aim_offset - Create a plain UBlendSpace1D asset (not an aim offset class) for a skeleton at package_path/asset_name and save it, or re-save the UBlendSpace1D already there (already_existed=true, its skeleton and samples kept); nothing is overwritten, so it is idempotent. axis_name, min_value, max_value and num_grid_points are only echoed in the reply (min and max sorted, the grid clamped to 1-10), never written to the asset: set the axis with set_blendspace_properties and add samples with add_blendspace_sample. A skeleton that does not load or a failed create is an error; a failed save, as during PIE, makes success false with save_error. A real 2D aim offset (UAimOffsetBlendSpace): scaffold_aim_offset_blend_space; other blend spaces: create_blend_space or scaffold_blend_space_2d; delete: remove_blendspace_1d.
-//   @param package_path - Content folder for the asset, e.g. /Game/Animation (a trailing slash is ignored).
-//   @param asset_name - Asset name; the object path becomes package_path/asset_name.asset_name.
-//   @param skeleton_path - Asset path of the USkeleton a new blend space targets; it must load even when the asset already exists, which keeps its own skeleton.
-//   @param axis_name - Optional axis label echoed in the reply (default "Yaw"); not written to the asset.
-//   @param min_value - Optional float (default -90.0) echoed as the axis minimum; not written to the asset.
-//   @param max_value - Optional float (default 90.0) echoed as the axis maximum; not written to the asset.
-//   @param num_grid_points - Optional int (default 4) echoed clamped to 1-10; not written to the asset.
-//   @returns { asset_path, axis_name, min_value, max_value, num_grid_points, already_existed, saved, save_error? }
-//   @hints additive
-TSharedPtr<FJsonObject> HandleWireAimOffset(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString PackagePath, AssetName, SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
-    {
-        return Missing;
-    }
-    FString AxisName;
-    Params->TryGetStringField(TEXT("axis_name"), AxisName);
-    if (AxisName.IsEmpty()) { AxisName = TEXT("Yaw"); }
-
-    double MinVal = -90.0;
-    Params->TryGetNumberField(TEXT("min_value"), MinVal);
-    double MaxVal = 90.0;
-    Params->TryGetNumberField(TEXT("max_value"), MaxVal);
-    double GridD = 4;
-    Params->TryGetNumberField(TEXT("num_grid_points"), GridD);
-
-    USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, *SkeletonPath);
-    if (!Skeleton)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Could not load skeleton: %s"), *SkeletonPath));
-    }
-
-    PackagePath.RemoveFromEnd(TEXT("/"));
-    const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetObjectPath)) { return Invalid; }
-
-    UBlendSpace1D* BS = LoadObject<UBlendSpace1D>(nullptr, *AssetObjectPath);
-    const bool bAlreadyExisted = (BS != nullptr);
-
-    if (!BS)
-    {
-        UBlendSpaceFactory1D* Factory = NewObject<UBlendSpaceFactory1D>();
-        Factory->TargetSkeleton = Skeleton;
-
-        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-        UObject* NewAsset = AssetToolsModule.Get().CreateAsset(
-            AssetName, PackagePath, UBlendSpace1D::StaticClass(), Factory);
-        BS = Cast<UBlendSpace1D>(NewAsset);
-        if (!BS)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Failed to create BlendSpace1D at %s"), *AssetObjectPath));
-        }
-        FAssetRegistryModule::AssetCreated(BS);
-    }
-
-BS->Modify();
-    // UBlendSpace::BlendParameters is protected — we cannot touch it from here.
-    // The BlendSpace is created with engine defaults; the dev edits the axis via
-    // the editor or via future set_blendspace_axis / add_blendspace_sample
-    // commands. We just persist the asset so the (path, axis_name) pair is
-    // ready for the dev to wire samples.
-    (void)AxisName;
-    (void)MinVal;
-    (void)MaxVal;
-    (void)GridD;
-
-    BS->MarkPackageDirty();
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(BS->GetOutermost(), BS, SaveErr);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("asset_path"), AssetObjectPath);
-    Data->SetStringField(TEXT("axis_name"), AxisName);
-    Data->SetNumberField(TEXT("min_value"), static_cast<double>(FMath::Min(MinVal, MaxVal)));
-    Data->SetNumberField(TEXT("max_value"), static_cast<double>(FMath::Max(MinVal, MaxVal)));
-    Data->SetNumberField(TEXT("num_grid_points"), static_cast<double>(FMath::Clamp(static_cast<int32>(GridD), 1, 10)));
-    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("wire_aim_offset"), SaveErr);
-}
-
-// 2D BlendSpace asset scaffolders.
-//
-// `wire_aim_offset` makes a UBlendSpace1D; these make the two 2D flavours:
-// `UBlendSpace` (generic 2D) and `UAimOffsetBlendSpace` (AimOffset 2D —
-// the canonical pattern for character Yaw x Pitch aim graphs). Both assets
-// ride the standard UAssetToolsModule::CreateAsset + factory pattern; the
-// factories live in `Editor/UnrealEd/Classes/Factories/` and just set their
-// `TargetSkeleton` before the creation call.
-//
-// Sample-point wiring is intentionally NOT implemented here — UBlendSpace's
-// `SampleSet` is editor-only data that drives the visual grid. Adding
-// samples is done separately with add_blendspace_sample.
-
-// Helper: create any 2D BlendSpace-flavored asset via the asset tools factory
-// route. Class-specific instantiation is the caller's job (UBlendSpace,
-// UAimOffsetBlendSpace). Idempotent on already-existed path (LoadObject
-// before factory is used). Saves the asset package on success.
-template <typename TBlendSpace>
-static TSharedPtr<FJsonObject> ScaffoldBlendSpaceAssetImpl(
-    const TSharedPtr<FJsonObject>& Params,
-    bool bIsAimOffset,
-    USkeleton* Skeleton,
-    const FString& PackagePathIn,
-    const FString& AssetNameIn,
-    const FString& SkeletonPathOut)
-{
-    FString PackagePath = PackagePathIn;
-    FString AssetName = AssetNameIn;
-    PackagePath.RemoveFromEnd(TEXT("/"));
-    const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetObjectPath)) { return Invalid; }
-
-    // Idempotent: if the asset already exists, just save with the new params
-    // and report already_existed=true. We do NOT mutate the sample set
-    // (add_blendspace_sample does that).
-    TBlendSpace* BS = LoadObject<TBlendSpace>(nullptr, *AssetObjectPath);
-    const bool bAlreadyExisted = (BS != nullptr);
-
-    if (!BS)
-    {
-        // Factory class selection drives the AimOffset metadata. The factory
-        // is a transient object owned by us — it goes out of scope after the
-        // CreateAsset call returns.
-        UFactory* Factory = bIsAimOffset
-            ? static_cast<UFactory*>(NewObject<UAimOffsetBlendSpaceFactoryNew>())
-            : static_cast<UFactory*>(NewObject<UBlendSpaceFactoryNew>());
-        if (!Factory)
-        {
-            return mcp_common::MakeErrorReply(TEXT("Failed to allocate BlendSpace factory"));
-        }
-        // Both factories expose `TargetSkeleton` as a UPROPERTY — the property
-        // name is the same on UAimOffsetBlendSpaceFactoryNew + UBlendSpaceFactoryNew.
-        if (UBlendSpaceFactoryNew* ConcreteFactory = Cast<UBlendSpaceFactoryNew>(Factory))
-        {
-            ConcreteFactory->TargetSkeleton = Skeleton;
-        }
-
-        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-        UObject* NewAsset = AssetToolsModule.Get().CreateAsset(
-            AssetName, PackagePath, TBlendSpace::StaticClass(), Factory);
-        BS = Cast<TBlendSpace>(NewAsset);
-        if (!BS)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Failed to create %s at %s"),
-                    bIsAimOffset ? TEXT("AimOffsetBlendSpace") : TEXT("BlendSpace"),
-                    *AssetObjectPath));
-        }
-        FAssetRegistryModule::AssetCreated(BS);
-    }
-
-    BS->Modify();
-    BS->MarkPackageDirty();
-    // Note: UBlendSpace axis metadata (AxisToScale, BlendParameters, etc.) is
-    // stored on protected/protected-set members — we cannot touch them
-    // from here. The asset is left at engine-default axes (the editor / a
-    // future MCP cmd can re-open it). The response surfaces the values we
-    // recorded but not necessarily reflect on disk until the dev opens the
-    // asset at least once.
-    FString SaveErr;
-    const bool bSaved = mcp_common::SaveAssetPackage(BS->GetOutermost(), BS, SaveErr);
-
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("asset_path"), AssetObjectPath);
-    Data->SetStringField(TEXT("skeleton_path"), SkeletonPathOut);
-    Data->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    mcp_common::AddSaveOutcome(Data, bSaved, SaveErr);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:scaffold_blend_space_2d - Create a UBlendSpace (2D) asset for parameter-driven animation blending (e.g. Speed x Direction). Idempotent on re-run; axis metadata left at engine defaults (set the protected axis fields afterwards with set_blendspace_properties).
-//   @param package_path [string!] - /Game/... folder for the new asset (required)
-//   @param asset_name [string!] - Display name (required)
-//   @param skeleton_path [string!] - USkeleton the BS targets (required)
-//   @param axis_x_label [string] - Optional X-axis display name (default "X"); engine field is protected so visible only after editor opens the asset.
-//   @param axis_y_label [string] - Optional Y-axis display name (default "Y"); same engine protection caveat.
-//   @param min_x [number] - Optional X axis lower bound (default 0); recorded in response but not written to asset.
-//   @param max_x [number] - Optional X axis upper bound (default 100); same caveat as above.
-//   @param min_y [number] - Optional Y axis lower bound (default 0)
-//   @param max_y [number] - Optional Y axis upper bound (default 100)
-//   @param num_grid_points_x [number] - Optional X grid density (default 4)
-//   @param num_grid_points_y [number] - Optional Y grid density (default 4)
-//   @returns { asset_path, skeleton_path, axis_x_label, axis_y_label, x_axis_range, y_axis_range, num_grid_points_x, num_grid_points_y, already_existed, saved, note? }
-TSharedPtr<FJsonObject> HandleScaffoldBlendSpace2D(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString PackagePath, AssetName, SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
-    {
-        return Missing;
-    }
-    FString AxisXLabel, AxisYLabel;
-    Params->TryGetStringField(TEXT("axis_x_label"), AxisXLabel);
-    if (AxisXLabel.IsEmpty()) { AxisXLabel = TEXT("X"); }
-    Params->TryGetStringField(TEXT("axis_y_label"), AxisYLabel);
-    if (AxisYLabel.IsEmpty()) { AxisYLabel = TEXT("Y"); }
-
-    double MinXD = 0.0, MaxXD = 100.0, MinYD = 0.0, MaxYD = 100.0;
-    Params->TryGetNumberField(TEXT("min_x"), MinXD);
-    Params->TryGetNumberField(TEXT("max_x"), MaxXD);
-    Params->TryGetNumberField(TEXT("min_y"), MinYD);
-    Params->TryGetNumberField(TEXT("max_y"), MaxYD);
-    double GridXD = 4.0, GridYD = 4.0;
-    Params->TryGetNumberField(TEXT("num_grid_points_x"), GridXD);
-    Params->TryGetNumberField(TEXT("num_grid_points_y"), GridYD);
-
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
-
-    TSharedPtr<FJsonObject> Resp = ScaffoldBlendSpaceAssetImpl<UBlendSpace>(
-        Params, /*bIsAimOffset*/ false, Skeleton, PackagePath, AssetName, SkeletonPath);
-    // On success, append the requested axis metadata so callers can verify
-    // the call's intent even though the engine-side fields are protected.
-    if (Resp.IsValid() && Resp->HasField(TEXT("data")))
-    {
-        const TSharedPtr<FJsonObject>* DataObj = nullptr;
-        if (Resp->TryGetObjectField(TEXT("data"), DataObj) && DataObj->IsValid())
-        {
-            (*DataObj)->SetStringField(TEXT("axis_x_label"), AxisXLabel);
-            (*DataObj)->SetStringField(TEXT("axis_y_label"), AxisYLabel);
-            (*DataObj)->SetNumberField(TEXT("min_x"), MinXD);
-            (*DataObj)->SetNumberField(TEXT("max_x"), MaxXD);
-            (*DataObj)->SetNumberField(TEXT("min_y"), MinYD);
-            (*DataObj)->SetNumberField(TEXT("max_y"), MaxYD);
-            (*DataObj)->SetNumberField(TEXT("num_grid_points_x"), GridXD);
-            (*DataObj)->SetNumberField(TEXT("num_grid_points_y"), GridYD);
-            (*DataObj)->SetStringField(TEXT("note"),
-                TEXT("axis labels / ranges are recorded for traceability; UE 5.8 marks UBlendSpace::BlendParameters / AxisToScale as protected. Use set_blendspace_properties to set them after the asset is created."));
-        }
-    }
-    return Resp;
-}
-
-// MCP:scaffold_aim_offset_blend_space - Create a UAimOffsetBlendSpace for a skeleton at package_path/asset_name and save it, or re-save the one already there (already_existed=true); a failed save still succeeds with saved=false. Yaw/pitch ranges and grid counts are only echoed, not written: set axes with set_blendspace_properties.
-//   @param package_path [string!] - Content folder for the new asset, e.g. /Game/Animation/AimOffsets (a trailing slash is ignored).
-//   @param asset_name [string!] - Name of the aim offset asset (e.g. "AO_Rifle"); the object path becomes package_path/asset_name.asset_name.
-//   @param skeleton_path [string!] - Asset path of the USkeleton the new aim offset targets (e.g. "/Game/Characters/Mannequin/SK_Mannequin_Skeleton"); a reused asset keeps its own skeleton.
-//   @param yaw_min [number] - Yaw lower bound echoed in the reply (default -90.0 degrees); not written to the asset.
-//   @param yaw_max [number] - Yaw upper bound echoed in the reply (default 90.0); not written to the asset.
-//   @param pitch_min [number] - Pitch lower bound echoed in the reply (default -90.0); not written to the asset.
-//   @param pitch_max [number] - Pitch upper bound echoed in the reply (default 90.0); not written to the asset.
-//   @param num_grid_points_yaw [number] - Yaw grid divisions echoed in the reply (default 4); not written to the asset.
-//   @param num_grid_points_pitch [number] - Pitch grid divisions echoed in the reply (default 4); not written to the asset.
-//   @returns { asset_path, skeleton_path, yaw_min, yaw_max, pitch_min, pitch_max, num_grid_points_yaw, num_grid_points_pitch, already_existed, saved, note? }
-TSharedPtr<FJsonObject> HandleScaffoldAimOffsetBlendSpace(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString PackagePath, AssetName, SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = AnimBp_ReadScaffoldParams(Params, PackagePath, AssetName, SkeletonPath))
-    {
-        return Missing;
-    }
-    double YawMinD = -90.0, YawMaxD = 90.0;
-    double PitchMinD = -90.0, PitchMaxD = 90.0;
-    double GridYD = 4.0, GridPD = 4.0;
-    Params->TryGetNumberField(TEXT("yaw_min"), YawMinD);
-    Params->TryGetNumberField(TEXT("yaw_max"), YawMaxD);
-    Params->TryGetNumberField(TEXT("pitch_min"), PitchMinD);
-    Params->TryGetNumberField(TEXT("pitch_max"), PitchMaxD);
-    Params->TryGetNumberField(TEXT("num_grid_points_yaw"), GridYD);
-    Params->TryGetNumberField(TEXT("num_grid_points_pitch"), GridPD);
-
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
-
-    TSharedPtr<FJsonObject> Resp = ScaffoldBlendSpaceAssetImpl<UAimOffsetBlendSpace>(
-        Params, /*bIsAimOffset*/ true, Skeleton, PackagePath, AssetName, SkeletonPath);
-    if (Resp.IsValid() && Resp->HasField(TEXT("data")))
-    {
-        const TSharedPtr<FJsonObject>* DataObj = nullptr;
-        if (Resp->TryGetObjectField(TEXT("data"), DataObj) && DataObj->IsValid())
-        {
-            (*DataObj)->SetNumberField(TEXT("yaw_min"), YawMinD);
-            (*DataObj)->SetNumberField(TEXT("yaw_max"), YawMaxD);
-            (*DataObj)->SetNumberField(TEXT("pitch_min"), PitchMinD);
-            (*DataObj)->SetNumberField(TEXT("pitch_max"), PitchMaxD);
-            (*DataObj)->SetNumberField(TEXT("num_grid_points_yaw"), GridYD);
-            (*DataObj)->SetNumberField(TEXT("num_grid_points_pitch"), GridPD);
-        }
-    }
-    return Resp;
-}
-
 // MCP:setup_foot_ik - Add a Leg IK node (UAnimGraphNode_LegIK) to the top-level AnimGraph of an Animation Blueprint, or reuse the first one already there, bind the feet into its LegsDefinition, then mark the blueprint structurally modified and save it without compiling. Leg 0 gets left_foot_bone and leg 1 right_foot_bone as the FK foot bone; a leg's IK target bone is set to the same bone when it is unset or the leg's foot changes, so the node compiles but has no effect until each IK target names an IK bone (set_anim_graph_node_property on LegsDefinition with the returned node_id); legs beyond the first two and the other leg settings are kept. Bones the target skeleton lacks are an error and nothing is written. The node is left unwired: connect it with connect_anim_graph_pins. Idempotent; refused while PIE runs unless force=true.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset.
 //   @param left_foot_bone - Left foot bone, written as the FK foot bone of leg 0; checked against the target skeleton when the blueprint has one.
@@ -2391,7 +2097,7 @@ TSharedPtr<FJsonObject> HandleSetupFootIk(
 // re-implementing them; each primitive is idempotent on its own, so the orchestrator only coordinates the
 // steps and aggregates their errors.
 
-// MCP:build_animation_state_machine - Atomic JSON-spec builder for an Animation Blueprint state machine. Builds (or reuses) the state machine, then iterates states, transitions, and per-transition rules in one idempotent call. Replaces 8+ primitive cmds (add_anim_state_machine + add_anim_state + add_anim_transition + set_anim_transition_rule_*) with a single spec. Re-running with the same spec is a no-op (each primitive is internally idempotent: state-by-name, transition-by-source+target). For repeated invocations that change rule shape, the rule is re-applied on the existing transition.
+// MCP:build_anim_state_machine - Atomic JSON-spec builder for an Animation Blueprint state machine. Builds (or reuses) the state machine, then iterates states, transitions, and per-transition rules in one idempotent call. Replaces 8+ primitive cmds (add_anim_state_machine + add_anim_state + add_anim_transition + set_anim_transition_rule_*) with a single spec. Re-running with the same spec is a no-op (each primitive is internally idempotent: state-by-name, transition-by-source+target). For repeated invocations that change rule shape, the rule is re-applied on the existing transition.
 //   @param anim_blueprint_path - Path to the UAnimBlueprint asset
 //   @param state_machine_name - Target state machine name (created if missing via add_anim_state_machine)
 //   @param spec [object!] - JSON describing the graph shape. states: [{name: str, animation?: str (/Game/Anim/Foo — optional; load-bearing for the runtime state asset but NOT created here), loop?: bool, pos?: [x, y]}]. transitions: [{from: str, to: str, blend?: number (= crossfade_duration seconds), bidirectional?: bool, priority_order?: int, rule?: object}]. Each rule variant maps 1:1 to an existing primitive cmd: {type: "automatic", enabled?: bool = false, trigger_time?: number = 0.0} | {type: "bool", variable: str (must exist on the AnimBP), invert?: bool = false} | {type: "comparison", variable: str (must be float/double on the AnimBP), operator: "=="|"!="|">"|"<"|">="|"<=", comparison_value: number}. An absent rule leaves the transition inert (no rule wired).
@@ -2714,24 +2420,19 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("add_anim_state"), &HandleAddAnimState },
     { TEXT("add_anim_state_machine"), &HandleAddAnimStateMachine },
     { TEXT("add_anim_transition"), &HandleAddAnimTransition },
-    { TEXT("build_animation_state_machine"), &HandleBuildAnimationStateMachine },
+    { TEXT("build_anim_state_machine"), &HandleBuildAnimationStateMachine },
     { TEXT("clear_anim_transition_rule"), &HandleClearAnimTransitionRule },
     { TEXT("compile_anim_blueprint"), &HandleCompileAnimBlueprint },
     { TEXT("create_anim_blueprint"), &HandleCreateAnimBlueprint },
     { TEXT("get_anim_blueprint_info"), &HandleGetAnimBlueprintInfo },
     { TEXT("get_anim_state_machine_info"), &HandleGetAnimStateMachineInfo },
-    { TEXT("list_anim_state_machines"), &HandleListAnimStateMachines },
     { TEXT("remove_anim_conduit"), &HandleRemoveAnimConduit },
     { TEXT("remove_anim_state"), &HandleRemoveAnimState },
     { TEXT("remove_anim_transition"), &HandleRemoveAnimTransition },
-    { TEXT("scaffold_aim_offset_blend_space"), &HandleScaffoldAimOffsetBlendSpace },
-    { TEXT("scaffold_blend_space_2d"), &HandleScaffoldBlendSpace2D },
     { TEXT("scaffold_locomotion_animbp"), &HandleScaffoldLocomotionAnimBp },
     { TEXT("set_anim_transition_rule_automatic"), &HandleSetAnimTransitionRuleAutomatic },
     { TEXT("set_anim_transition_rule_from_bool"), &HandleSetAnimTransitionRuleFromBool },
     { TEXT("set_anim_transition_rule_from_comparison"), &HandleSetAnimTransitionRuleFromComparison },
     { TEXT("setup_foot_ik"), &HandleSetupFootIk },
-    { TEXT("validate_anim_state_machine"), &HandleValidateAnimStateMachine },
-    { TEXT("wire_aim_offset"), &HandleWireAimOffset },
 };
 } // namespace UEAgentAnimBlueprintCommands

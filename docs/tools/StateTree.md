@@ -2,7 +2,7 @@
 
 # StateTree
 
-63 tools. Back to the [index](README.md).
+57 tools. Back to the [index](README.md).
 
 ## `add_consideration`
 
@@ -17,6 +17,19 @@ Attach a utility-AI consideration (any struct deriving from FStateTreeConsiderat
 | `consideration_class` | string | yes | Struct name (FStateTreeConstantConsideration / StateTreeConstantConsideration) or alias (Constant\|FloatInput\|Enum Input\|...) |
 
 **Returns:** `{ tree_path, state_name, consideration_class, consideration_count, added, saved }`
+
+## `add_evaluator`
+
+*Additive, idempotent.*
+
+Attach an evaluator node (by struct name, via reflection) to a UStateTree; evaluators are TREE-scoped (they live on UStateTreeEditorData::Evaluators, not on a state) and tick for the whole tree, so this command takes no state_name.  Idempotent: an evaluator of the same struct already present is not appended again.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path to the UStateTree. |
+| `evaluator_class` | string | yes | Evaluator struct name or /Script path; must derive from StateTreeEvaluatorBase (e.g. "TestEval_A" from the StateTree test suite, or any project/plugin evaluator struct). |
+
+**Returns:** `{ tree_path, evaluator_class, evaluator_count, already_existed, added, saved }`
 
 ## `add_state`
 
@@ -45,19 +58,6 @@ Append a new enter-condition node, of the struct named by condition_struct and w
 
 **Returns:** `{ tree_path, state_name, condition_struct, enter_condition_count, added, saved }`
 
-## `add_state_evaluator`
-
-*Additive, idempotent.*
-
-Attach an evaluator node (by struct name, via reflection) to a UStateTree; evaluators are TREE-scoped (they live on UStateTreeEditorData::Evaluators, not on a state) and tick for the whole tree, so this command takes no state_name.  Idempotent: an evaluator of the same struct already present is not appended again.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `evaluator_class` | string | yes | Evaluator struct name or /Script path; must derive from StateTreeEvaluatorBase (e.g. "TestEval_A" from the StateTree test suite, or any project/plugin evaluator struct). |
-
-**Returns:** `{ tree_path, evaluator_class, evaluator_count, already_existed, added, saved }`
-
 ## `add_state_task`
 
 *Additive.*
@@ -76,7 +76,7 @@ Attach a task node (by struct name, resolved via reflection) to a state's Tasks 
 
 *Additive.*
 
-Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with set_transition_properties. Returns transition_count and saved.
+Append a transition from from_state to to_state on a StateTree asset (trigger OnStateCompleted, type GotoState), then compile and save it; each call adds another one. event_name only fills RequiredEvent, which matters with an OnEvent trigger: set that with update_transition. Returns transition_count and saved.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -97,7 +97,7 @@ Bind a UStateTree root parameter (source) to a target node's input property (tar
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
 | `target_property` | string | yes | Name of the target node's input property to bind (the binding target), e.g. "BindableText". |
-| `source_parameter` | string | yes | Name of the root parameter to bind from (the binding source; add it with add_tree_parameter first). |
+| `source_parameter` | string | yes | Name of the root parameter to bind from (the binding source; add it with add_state_tree_parameter first). |
 | `state_name` | string | no | Name of the state owning the target node (required for target_kind task\|enter_condition\|consideration; ignored for global_task\|evaluator, which live on the tree). |
 | `target_kind` | string | no | Which node list holds the target: "task" (default) \| "enter_condition" \| "consideration" \| "global_task" \| "evaluator". |
 | `target_index` | number | no | Optional index into the selected node list (default 0). |
@@ -117,41 +117,11 @@ Attach a global task node (by struct name, via reflection) to a UStateTree; glob
 
 **Returns:** `{ tree_path, task_struct, global_task_count, added, saved }`
 
-## `add_state_tree_global_task_property`
-
-*Additive.*
-
-Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `global_task_index` | number | yes | 0-based index into the tree GlobalTasks, as listed by list_global_tasks; out of range is an error. |
-| `property` | string | yes | Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive. |
-| `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
-
-**Returns:** `{ tree_path, global_task_index, property, set, value_changed, saved }`
-
-## `add_transition_condition`
-
-*Additive.*
-
-Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as list_transitions or get_state_tree_info report it. Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_transition_condition; a condition for entering a state: add_state_enter_condition.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `condition_struct` | string | yes | Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition") |
-| `transition_index` | number | no | 0-based index of the transition within that state (the index field of list_transitions or get_state_tree_info); required |
-
-**Returns:** `{ tree_path, state_name, transition_index, condition_struct, condition_count, added, saved }`
-
-## `add_tree_parameter`
+## `add_state_tree_parameter`
 
 *Additive, idempotent.*
 
-Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
+Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), in one undo step, then save the asset without compiling it. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_state_tree_parameter; inverse: remove_state_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_state_tree_component_parameter_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -160,6 +130,21 @@ Add a typed parameter to the root parameter bag of a StateTree asset (the parame
 | `parameter_type` | string | no | Scalar type: bool, int (default), int64, float, double, name, string, text, byte; case is ignored, int32 and fstring are accepted as aliases, and an unrecognised type silently becomes a string parameter |
 
 **Returns:** `{ tree_path, parameter_name, parameter_type, parameter_count, added, already_existed, saved, note? }`
+
+## `add_transition_condition`
+
+*Additive.*
+
+Append a new condition node, of the struct named by condition_struct and with that struct's default values, to the Conditions of one transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index, its 0-based position in that state's list as get_state_tree_info reports it (transitions[].index). Each call appends another node. A missing tree or state, a missing or out-of-range transition_index, or a struct that does not derive from FStateTreeConditionBase is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. Struct names: list_condition_types; set a field: set_condition_property with target_kind "transition"; inverse: remove_transition_condition; a condition for entering a state: add_state_enter_condition.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
+| `transition_index` | number | yes | 0-based index of the transition within that state (the index field of get_state_tree_info transitions); required |
+| `condition_struct` | string | yes | Condition struct name or /Script path; must derive from StateTreeConditionBase (e.g. "StateTreeRandomCondition") |
+
+**Returns:** `{ tree_path, state_name, transition_index, condition_struct, condition_count, added, saved }`
 
 ## `compile_state_tree`
 
@@ -186,30 +171,17 @@ Create a StateTree asset at package_path/tree_name (or load the one already ther
 
 **Returns:** `{ tree_path, tree_name, state_count, created, saved }`
 
-## `delete_state_tree`
-
-*Destructive, idempotent.*
-
-Delete a UStateTree asset from the project with the editor's delete (UEditorAssetLibrary::DeleteLoadedAsset): permanent, with no reference check, and open editors of it close. confirm must be true, or nothing happens and the call is an error. Typed: the asset at tree_path must be a UStateTree; any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. Idempotent: a path with no asset is a success with deleted false and already_existed false. A delete the engine does not carry out (a Play-in-Editor session running, a file that cannot be deleted) is success false with deleted false. A path that cannot name an asset is an error. List trees with list_state_trees; create one with create_state_tree.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `confirm` | boolean | yes | Must be true to actually delete. Honest-headless safety against accidental wipe. |
-
-**Returns:** `{ tree_path, deleted, already_existed, asset_class?, note? }`
-
 ## `get_component_state_tree_path`
 
 *Read-only.*
 
-Resolve a UStateTreeComponent on a placed actor and return the bound asset path (read-only).
+Read which StateTree asset the UStateTreeComponent of an editor-world actor runs (its StateTreeRef), without changing anything. The actor is the first whose object name or editor label matches; an actor with no StateTreeComponent gives has_state_tree_component false and an empty state_tree_path, and a component with no tree bound an empty path. Bind or override with set_state_tree_component_parameter_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `actor_label` | string | yes | Actor label/name to inspect |
+| `actor_label` | string | yes | Editor label or object name of the actor to inspect |
 
-**Returns:** `{ actor_label, has_state_tree_component, state_tree_path }`
+**Returns:** `{ actor_label, has_state_tree_component, component_name?, state_tree_path }`
 
 ## `get_condition_info`
 
@@ -221,7 +193,7 @@ Dump one condition node of a StateTree state as JSON without changing the asset:
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the condition; the command fails without it. |
-| `condition_index` | number | yes | 0-based index into the selected condition list, as counted by list_conditions or list_transitions. |
+| `condition_index` | number | yes | 0-based index into the selected condition list, as counted by list_conditions or get_state_tree_info (transitions[].condition_count). |
 | `target_kind` | string | no | Which list to read: "state" (default, the state EnterConditions) or "transition" (the Conditions of transition transition_index); any other value reads the enter conditions. |
 | `transition_index` | number | no | 0-based index into the state transitions; required when target_kind is "transition" and ignored otherwise. |
 
@@ -300,11 +272,24 @@ Read one property of a tree-scoped evaluator node of a StateTree asset by reflec
 
 **Returns:** `{ tree_path, evaluator_index, property, type, value, has_value }`
 
-## `get_state_theme_colors`
+## `get_state_tree_info`
 
 *Read-only.*
 
-List the theme color palette of a StateTree asset (UStateTreeEditorData Colors) without changing it. Returns count and colors [{display_name, color_ref, r, g, b, a}], color_ref being the GUID that states point to. Takes state_tree_path, not tree_path; set colors with set_state_theme_color.
+Read the whole structure of a StateTree asset without changing it, as it is in memory (unsaved edits included), or one state's subtree when root_state is given. states has one entry per state, depth-first with the last top-level state first, giving its type, selection behavior, task completion, parent, depth and task, enter-condition, child and transition counts; transitions has one entry per transition with from_state, its index within that state (what the transition commands take), to_state, trigger, priority, event tag, condition count, delay and enabled -- filter it by from_state for one state's transitions; parameters gives each root parameter's type, or its class, struct or enum name, and its value_type. The root_state field of the reply is the first top-level state, empty when there is none. A tree that cannot be loaded or has no editor data, or a root_state that names no state, is an error. One state's nodes: list_tasks, list_conditions, list_considerations; finding trees: list_state_trees; compile check: validate_state_tree.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `root_state` | string | no | Optional state name (the first match in a depth-first walk, case-insensitive): states and transitions, and their counts, then cover only that state, at depth 0, and its descendants. Omitted, the whole tree. |
+
+**Returns:** `{ tree_path, state_count, states: [{ name, type, selection_behavior, completion, parent, depth, task_count, enter_condition_count, children, transitions }], transition_count, transitions: [{ from_state, index, to_state, trigger, priority, event_tag, condition_count, delay, delay_duration, enabled }], evaluator_count, global_task_count, binding_count, parameter_count, parameters: [{ name, type, value_type }], root_state }`
+
+## `get_state_tree_theme_colors`
+
+*Read-only.*
+
+List the theme color palette of a StateTree asset (UStateTreeEditorData Colors) without changing it. Returns count and colors [{display_name, color_ref, r, g, b, a}], color_ref being the GUID that states point to. Takes state_tree_path, not tree_path; set colors with set_state_tree_theme_color.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -312,23 +297,11 @@ List the theme color palette of a StateTree asset (UStateTreeEditorData Colors) 
 
 **Returns:** `{ count, colors: [{display_name, color_ref, r, g, b, a}] }`
 
-## `get_state_tree_info`
-
-*Read-only.*
-
-Read the whole structure of a StateTree asset without changing it, as it is in memory (unsaved edits included). states has one entry per state, depth-first with the last top-level state first, giving its type, selection behavior and task, enter-condition, child and transition counts; transitions has one entry per transition with from_state, its index within that state (what the transition commands take), to_state, trigger, priority, event tag, condition count, delay and enabled; parameters gives each root parameter's type, or its class, struct or enum name. root_state is the first top-level state, empty when there is none. A tree that cannot be loaded or has no editor data is an error. One state's nodes: list_tasks, list_conditions, list_considerations; parents: list_states; finding trees: list_state_trees; compile check: validate_state_tree.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-
-**Returns:** `{ tree_path, state_count, states: [{ name, type, selection_behavior, task_count, enter_condition_count, children, transitions }], transition_count, transitions: [{ from_state, index, to_state, trigger, priority, event_tag, condition_count, delay, delay_duration, enabled }], evaluator_count, global_task_count, binding_count, parameter_count, parameters: [{ name, type }], root_state }`
-
 ## `get_task_info`
 
 *Read-only.*
 
-Read one task of a named state in a StateTree asset without changing it: the task node's struct name (class), its instance_id and every property of the node struct as JSON (properties). The task's instance data is not included. Errors when the tree, its editor data or the state is missing, or task_index is out of range; state_name picks the first state with that name. List a state's tasks with list_tasks; read or write one field with get_task_property or set_task_property; global tasks: list_global_tasks.
+Read one task of a named state in a StateTree asset without changing it: the task node's struct name (class), its instance_id and every property of the node struct as JSON (properties). The task's instance data is not included. Errors when the tree, its editor data or the state is missing, or task_index is out of range; state_name picks the first state with that name. List a state's tasks with list_tasks; read or write one field with get_task_property or set_task_property; global tasks: list_state_tree_global_tasks.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -367,7 +340,7 @@ No parameters.
 
 *Read-only.*
 
-List the enter conditions of a state. (Transition-level conditions are exposed via list_transitions' condition_count; a full per-transition dump is not available yet.)
+List the enter conditions of a state. (Transition-level conditions are counted by get_state_tree_info, transitions[].condition_count; a full per-transition dump is not available yet.)
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -380,7 +353,7 @@ List the enter conditions of a state. (Transition-level conditions are exposed v
 
 *Read-only.*
 
-List the utility considerations of one state of a StateTree asset without changing it: count and, per consideration in array order, its index, class (the consideration struct name) and instance_id (the node GUID). A state with none gives count 0 and an empty list; a missing tree, editor data or state is an error. index is what get_consideration_info, get_consideration_property, set_consideration_property and remove_consideration take; add one with add_consideration. Other node lists of a state: list_tasks, list_conditions (enter conditions); tree-scoped nodes: list_evaluators, list_global_tasks; every count at once: get_state_tree_info.
+List the utility considerations of one state of a StateTree asset without changing it: count and, per consideration in array order, its index, class (the consideration struct name) and instance_id (the node GUID). A state with none gives count 0 and an empty list; a missing tree, editor data or state is an error. index is what get_consideration_info, get_consideration_property, set_consideration_property and remove_consideration take; add one with add_consideration. Other node lists of a state: list_tasks, list_conditions (enter conditions); tree-scoped nodes: list_evaluators, list_state_tree_global_tasks; every count at once: get_state_tree_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -393,7 +366,7 @@ List the utility considerations of one state of a StateTree asset without changi
 
 *Read-only.*
 
-List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_state_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
+List the concrete evaluator struct types (children of FStateTreeEvaluatorBase, abstract ones skipped) of the loaded modules, sorted by name, for add_evaluator. Returns count and types [{name, struct_path}]; struct_path always assumes /Script/StateTreeModule, so pass name for other modules.
 
 No parameters.
 
@@ -411,11 +384,23 @@ List all evaluators on the tree (UStateTreeEditorData::Evaluators — tree-scope
 
 **Returns:** `{ tree_path, count, evaluators: [{ index, class, instance_id }] }`
 
-## `list_global_tasks`
+## `list_state_tree_bindings`
 
 *Read-only.*
 
-List the global tasks of a StateTree asset (tasks that run for the whole tree, not one state) without changing it. Returns count and global_tasks [{index, class, instance_id}]; index is what add_state_tree_global_task_property and remove_state_tree_global_task take.
+List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_state_tree_binding.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+
+**Returns:** `{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }`
+
+## `list_state_tree_global_tasks`
+
+*Read-only.*
+
+List the global tasks of a StateTree asset (tasks that run for the whole tree, not one state) without changing it. Returns count and global_tasks [{index, class, instance_id}]; index is what set_state_tree_global_task_property and remove_state_tree_global_task take.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -434,19 +419,6 @@ List all UStateTree assets under a content path (default /Game).
 | `package_path` | string | no | Content path to filter on (default "/Game"). |
 
 **Returns:** `{ package_path, count, trees: [{ path, name, class }] }`
-
-## `list_states`
-
-*Read-only.*
-
-List every state of a StateTree asset, found by asset path, as one flat breadth-first list, read as loaded in memory (unsaved edits included) without changing anything: the top-level states (SubTrees) at depth 0 first, then each level of children. Each entry gives the name, type (State, Group, Linked, LinkedAsset or Subtree), task completion (All or Any), parent name (empty at depth 0), depth, child_count (direct children only, not recursive), and task, enter-condition and transition counts. root_state, matched by name (case-insensitive, first match in tree order), lists only that state, at depth 0, and its descendants. An unknown tree or root_state, or a tree without editor data, is an error. Whole structure with transitions: get_state_tree_info; one state's details: list_transitions, list_tasks, list_conditions; finding trees: list_state_trees.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `root_state` | string | no | Optional. If set, walk from this state as root (top-level SubTrees are skipped). |
-
-**Returns:** `{ tree_path, count, states: [{ name, type, completion, has_children, child_count, task_count, enter_condition_count, transition_count, depth, parent }] }`
 
 ## `list_task_types`
 
@@ -470,43 +442,6 @@ List all tasks of a state, with their struct class name, instance ID, and per-ta
 | `state_name` | string | yes | Name of the state. |
 
 **Returns:** `{ tree_path, state_name, count, tasks: [{ index, class, instance_id, condition_count }] }`
-
-## `list_transitions`
-
-*Read-only.*
-
-List all transitions of a state, with their target name, trigger event, conditions count, delay, and priority.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `state_name` | string | yes | Name of the state. |
-
-**Returns:** `{ tree_path, state_name, count, transitions: [{ index, target, trigger, condition_count, delay, priority }] }`
-
-## `list_tree_bindings`
-
-*Read-only.*
-
-List the property bindings stored in the editor data of a StateTree asset, without changing it. Returns count and bindings [{index, source_path, target_path, source_id, target_id}], where source_id and target_id are the struct GUIDs of the two ends. Add bindings with add_state_tree_binding and remove them with remove_tree_binding.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-
-**Returns:** `{ tree_path, count, bindings: [{ index, source_path, target_path, source_id, target_id }] }`
-
-## `list_tree_parameters`
-
-*Read-only.*
-
-List the root parameters of a StateTree asset (its typed parameter bag) without changing it: count and, per parameter in bag order, name, type (the short EPropertyBagPropertyType name, e.g. Float) and value_type (the same type qualified, e.g. EPropertyBagPropertyType::Float). Parameter values are not reported, nor is the class, struct or enum behind a parameter, which get_state_tree_info names. A tree with no parameters gives count 0; a missing tree or editor data is an error. Use it before add_tree_parameter, which suffixes a name already taken; write a value with set_tree_parameter, take one out with remove_tree_parameter, bind one with add_state_tree_binding.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-
-**Returns:** `{ tree_path, count, parameters: [{ name, type, value_type }] }`
 
 ## `remove_consideration`
 
@@ -563,6 +498,23 @@ Remove one enter condition, by index, from a state of a StateTree asset and save
 
 **Returns:** `{ tree_path, state_name, condition_index, removed, remaining, saved, note }`
 
+## `remove_state_tree_binding`
+
+*Destructive.*
+
+Remove the property binding whose target is target_property on one node of a StateTree asset (and any binding to a sub-property of it), the way the StateTree editor clears a binding, then save the asset. Nothing bound there is not an error: removed is false and the asset is not saved. Returns removed, removed_count and remaining (bindings left in the tree); list them with list_state_tree_bindings.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `target_kind` | string | yes | Node list of the binding target: "task", "condition" (a state enter condition; "enter_condition" also works), "consideration", "transition" (a transition condition), "global_task" or "evaluator". |
+| `target_property` | string | yes | Property path of the binding target on that node, as list_state_tree_bindings shows it in target_path, e.g. "BindableText". |
+| `state_name` | string | no | Name of the state that owns the target node; needed for the task, condition, consideration and transition kinds. |
+| `transition_index` | number | no | 0-based index into the state transitions; used only by the transition kind. |
+| `target_index` | number | no | 0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition. |
+
+**Returns:** `{ tree_path, target_kind, state_name?, target_index, target_property, target_struct_id, removed, removed_count, remaining, saved }`
+
 ## `remove_state_tree_global_task`
 
 *Destructive, idempotent.*
@@ -575,6 +527,19 @@ Remove a tree-scoped global task (by index). Idempotent at the index-out-of-rang
 | `global_task_index` | number | yes | 0-based index into the tree's GlobalTasks array. |
 
 **Returns:** `{ tree_path, global_task_index, removed, remaining, saved }`
+
+## `remove_state_tree_parameter`
+
+*Destructive, idempotent.*
+
+Remove a named parameter from a UStateTree's root parameter bag. Idempotent — removing an absent parameter is a no-op (removed:false).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path to the UStateTree. |
+| `parameter_name` | string | yes | Name of the root parameter to remove. |
+
+**Returns:** `{ tree_path, parameter_name, removed, parameter_count, saved }`
 
 ## `remove_task`
 
@@ -614,56 +579,10 @@ Remove one condition, by index, from a transition of a StateTree state and save 
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state that owns the transition; the command fails without it. |
-| `transition_index` | number | yes | 0-based index into the state transitions, as listed by list_transitions. |
+| `transition_index` | number | yes | 0-based index into the state transitions, as listed by get_state_tree_info (transitions[].index). |
 | `condition_index` | number | yes | 0-based index into the Conditions of that transition. |
 
 **Returns:** `{ tree_path, state_name, transition_index, condition_index, removed, remaining, saved, note }`
-
-## `remove_tree_binding`
-
-*Destructive.*
-
-Remove the property binding whose target is target_property on one node of a StateTree asset (and any binding to a sub-property of it), the way the StateTree editor clears a binding, then save the asset. Nothing bound there is not an error: removed is false and the asset is not saved. Returns removed, removed_count and remaining (bindings left in the tree); list them with list_tree_bindings.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `target_kind` | string | yes | Node list of the binding target: "task", "condition" (a state enter condition; "enter_condition" also works), "consideration", "transition" (a transition condition), "global_task" or "evaluator". |
-| `target_property` | string | yes | Property path of the binding target on that node, as list_tree_bindings shows it in target_path, e.g. "BindableText". |
-| `state_name` | string | no | Name of the state that owns the target node; needed for the task, condition, consideration and transition kinds. |
-| `transition_index` | number | no | 0-based index into the state transitions; used only by the transition kind. |
-| `target_index` | number | no | 0-based index of the target node in its list, default 0; for the transition kind, the index into the Conditions of that transition. |
-
-**Returns:** `{ tree_path, target_kind, state_name?, target_index, target_property, target_struct_id, removed, removed_count, remaining, saved }`
-
-## `remove_tree_parameter`
-
-*Destructive, idempotent.*
-
-Remove a named parameter from a UStateTree's root parameter bag. Idempotent — removing an absent parameter is a no-op (removed:false).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the UStateTree. |
-| `parameter_name` | string | yes | Name of the root parameter to remove. |
-
-**Returns:** `{ tree_path, parameter_name, removed, parameter_count, saved }`
-
-## `set_component_parameter_override`
-
-*Destructive, idempotent.*
-
-Override a single UStateTree root parameter on a UStateTreeComponent living on a placed actor. CRITICAL: the implementation calls UStateTreeStateTreeReference::SetPropertyOverridden(ParamGuid, true) — without this, the runtime reads from the asset default and the per-instance value is silently dropped. The value is written via FInstancedPropertyBag::SetValueSerializedString so the engine parses the string into the parameter's actual type (Bool/Int/Float/Vector/Struct/...). The tree must already declare the parameter; add it with add_tree_parameter first. Use clear_overrides=true to remove the override (asset default takes over again) without writing a value. If the component has no bound tree, pass state_tree_path to auto-bind before overriding (cold-start convenience); the public UStateTreeComponent::SetStateTree(UStateTree*) handles the bind through reflection on the protected StateTreeRef member.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `actor_label` | string | yes | Actor label/name that owns the UStateTreeComponent (resolved against the editor world) |
-| `parameter_name` | string | no | Root parameter name to override (must exist on the bound tree); required unless clear_overrides is true |
-| `value` | string | no | String-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc. Required unless clear_overrides is true |
-| `state_tree_path` | string | no | Optional path to a UStateTree to bind the component to if no tree is already bound |
-| `clear_overrides` | boolean | no | If true, drop all per-instance overrides on the component (asset defaults take over); value is ignored |
-
-**Returns:** `{ actor_label, component_class, parameter_name, parameter_id, value, was_overridden, cleared, saved, bound_tree }`
 
 ## `set_condition_property`
 
@@ -728,25 +647,11 @@ Set how a state aggregates its tasks' completion (UStateTreeState::TasksCompleti
 
 **Returns:** `{ tree_path, state_name, completion_type, set, saved }`
 
-## `set_state_linked_asset`
-
-*Destructive, idempotent.*
-
-Turn a state into a LinkedAsset state pointing at another UStateTree (UStateTreeState::SetLinkedStateAsset).  This forces the state's Type to EStateTreeStateType::LinkedAsset (the engine setter asserts on Type) and the setter clears Tasks, fixes the parameter layout from the linked subtree, and sets SelectionBehavior=TryEnterState — so a linked-asset state runs the target tree instead of local tasks.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path to the owning UStateTree. |
-| `state_name` | string | yes | Name of the state to convert into a LinkedAsset state. |
-| `linked_asset_path` | string | yes | Asset path to the target UStateTree to link (must exist). |
-
-**Returns:** `{ tree_path, state_name, state_type, linked_asset, set, saved }`
-
 ## `set_state_selection_behavior`
 
 *Destructive, idempotent.*
 
-Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), in one undo step, then save the asset without compiling it. A state that already has that behavior changes and saves nothing (changed false, saved false). An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type, set_state_completion_type, set_state_linked_asset; read back with get_state_tree_info; check the tree with compile_state_tree.
+Set how one state of a StateTree asset is entered when the tree selects it (UStateTreeState SelectionBehavior: enter it, try its children in order, at random or by utility, or follow its transitions), in one undo step, then save the asset without compiling it. A state that already has that behavior changes and saves nothing (changed false, saved false). An unknown behavior name, a missing tree or a missing state is an error before anything changes; a failed save (for example while PIE runs) makes success false with the change only in memory. The utility behaviors score the children through their considerations (add_consideration). Other state settings: set_state_type (its linked_asset_path links another tree), set_state_completion_type; read back with get_state_tree_info; check the tree with compile_state_tree.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -756,7 +661,65 @@ Set how one state of a StateTree asset is entered when the tree selects it (USta
 
 **Returns:** `{ tree_path, state_name, selection_behavior, set, changed, saved, note? }`
 
-## `set_state_theme_color`
+## `set_state_tree_component_parameter_override`
+
+*Destructive, idempotent.*
+
+Override a single UStateTree root parameter on a UStateTreeComponent living on a placed actor. CRITICAL: the implementation calls UStateTreeStateTreeReference::SetPropertyOverridden(ParamGuid, true) — without this, the runtime reads from the asset default and the per-instance value is silently dropped. The value is written via FInstancedPropertyBag::SetValueSerializedString so the engine parses the string into the parameter's actual type (Bool/Int/Float/Vector/Struct/...). The tree must already declare the parameter; add it with add_state_tree_parameter first. Use clear_overrides=true to remove the override (asset default takes over again) without writing a value. If the component has no bound tree, pass state_tree_path to auto-bind before overriding (cold-start convenience); the public UStateTreeComponent::SetStateTree(UStateTree*) handles the bind through reflection on the protected StateTreeRef member.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `actor_label` | string | yes | Actor label/name that owns the UStateTreeComponent (resolved against the editor world) |
+| `parameter_name` | string | no | Root parameter name to override (must exist on the bound tree); required unless clear_overrides is true |
+| `value` | string | no | String-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc. Required unless clear_overrides is true |
+| `state_tree_path` | string | no | Optional path to a UStateTree to bind the component to if no tree is already bound |
+| `clear_overrides` | boolean | no | If true, drop all per-instance overrides on the component (asset defaults take over); value is ignored |
+
+**Returns:** `{ actor_label, component_class, parameter_name, parameter_id, value, was_overridden, cleared, saved, bound_tree }`
+
+## `set_state_tree_global_task_property`
+
+*Destructive, idempotent.*
+
+Write one property of an existing global task of a StateTree asset by reflection and save the asset; despite the name it adds nothing (create the task with add_state_tree_global_task). Only node struct properties are reachable, not instance data. Returns value_changed, new_value and saved.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `global_task_index` | number | yes | 0-based index into the tree GlobalTasks, as listed by list_state_tree_global_tasks; out of range is an error. |
+| `property` | string | yes | Name of a property on the global task node struct, e.g. "FontScale" on a debug text task; case-insensitive. |
+| `value` | any | yes | New value as JSON: a number, bool or string, or an object for a struct property, applied through FJsonObjectConverter. |
+
+**Returns:** `{ tree_path, global_task_index, property, set, value_changed, saved }`
+
+## `set_state_tree_parameter`
+
+*Destructive, idempotent.*
+
+Set the value of an existing root parameter of a StateTree asset and save it. Works for bool, byte, int32, int64, float, double, name, string and text parameters; array and other types return an error. Add the parameter first with add_state_tree_parameter. Returns value_changed, new_value and saved.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `parameter` | string | yes | Name of a root parameter that already exists, as listed by get_state_tree_info (parameters[].name); an unknown name is an error. |
+| `value` | any | yes | New value as JSON matching the parameter type: true or false, a number, or a string for name, string and text parameters. |
+
+**Returns:** `{ tree_path, parameter, set, value_changed, saved, new_value? }`
+
+## `set_state_tree_root`
+
+*Destructive, idempotent.*
+
+Make a top-level state the root of a StateTree asset by moving it to the first SubTree slot, then compile and save it. A nested state is refused. Returns root_state with set and saved, or already_root when it was already first (nothing saved).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
+| `root_state_name` | string | yes | Name of a top-level state, such as one made by add_state; a state nested under another is refused. |
+
+**Returns:** `{ tree_path, root_state, already_root, set, saved }`
+
+## `set_state_tree_theme_color`
 
 *Destructive, idempotent.*
 
@@ -773,32 +736,20 @@ Upsert a theme color in UStateTreeEditorData::Colors. CRITICAL: if a color with 
 
 **Returns:** `{ state_tree_path, color_name, color_ref, r, g, b, a, was_new, saved }`
 
-## `set_state_tree_root`
-
-*Destructive, idempotent.*
-
-Make a top-level state the root of a StateTree asset by moving it to the first SubTree slot, then compile and save it. A nested state is refused. Returns root_state with set and saved, or already_root when it was already first (nothing saved).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `root_state_name` | string | yes | Name of a top-level state, such as one made by add_state; a state nested under another is refused. |
-
-**Returns:** `{ tree_path, root_state, already_root, set, saved }`
-
 ## `set_state_type`
 
 *Destructive, idempotent.*
 
-Set the type of one state of a StateTree asset (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree), in one undo step, then save the asset without compiling it. The state is the first one named state_name in a depth-first walk of the hierarchy. Only the type is written: the follow-up the StateTree details panel applies (clearing a group's tasks, resetting a link) does not run, so to point a state at another tree prefer set_state_linked_asset. A state that already has that type changes and saves nothing (changed false, saved false). An unknown name, or a missing tree or state, is an error; a failed save makes success false. Read back with get_state_tree_info; selection: set_state_selection_behavior.
+Set the type of one state of a StateTree asset (EStateTreeStateType: State, Group, Linked, LinkedAsset or Subtree), in one undo step, then save the asset without compiling it; with linked_asset_path it also points a LinkedAsset state at another StateTree. The state is the first one named state_name in a depth-first walk of the hierarchy. Without linked_asset_path only the type is written: the follow-up the StateTree details panel applies (clearing a group's tasks, resetting a link) does not run. With it, the engine setter UStateTreeState::SetLinkedStateAsset runs: it clears the state's tasks, takes the parameter layout of the linked tree and sets SelectionBehavior to TryEnterState, and the call always writes and saves. A state that already has that type, with no linked_asset_path, changes and saves nothing (changed false, saved false). An unknown type name, a missing tree or state, a linked_asset_path with another state_type, or a linked tree that does not load is an error before anything changes; a failed save makes success false. Read back with get_state_tree_info; selection: set_state_selection_behavior.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
 | `state_name` | string | yes | Name of the state to change; the command fails without it. |
 | `state_type` | string | yes | Enum value name: State, Group, Linked, LinkedAsset or Subtree (an EStateTreeStateType:: prefix is accepted). |
+| `linked_asset_path` | string | no | Optional asset path of the UStateTree a LinkedAsset state runs, e.g. "/Game/AI/ST_Sub"; only with state_type LinkedAsset. |
 
-**Returns:** `{ tree_path, state_name, state_type, set, changed, saved, note? }`
+**Returns:** `{ tree_path, state_name, state_type, linked_asset (the state's linked tree, empty when none), set, changed, saved, note? }`
 
 ## `set_task_property`
 
@@ -816,50 +767,17 @@ Set a single field of a task instance by reflection (FJsonObjectConverter::JsonV
 
 **Returns:** `{ tree_path, state_name, task_index, property, set, value_changed, saved }`
 
-## `set_transition_properties`
-
-*Destructive, idempotent.*
-
-Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, in one undo step, then save the asset without compiling it. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. A call that leaves every field as it was changes and saves nothing (changed false, saved false). An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `state_name` | string | yes | Name of the state owning the transition; the first state with that name in a depth-first walk of the hierarchy is used |
-| `transition_index` | number | no | 0-based index of the transition within that state (the index field of list_transitions or get_state_tree_info); required |
-| `trigger` | string | no | Optional EStateTreeTransitionTrigger name (e.g. OnStateCompleted, OnStateSucceeded, OnStateFailed, OnTick, OnEvent, OnDelegate) |
-| `priority` | string | no | Optional EStateTreeTransitionPriority name (e.g. Low, Normal, Medium, High, Critical) |
-| `enabled` | boolean | no | Optional whether the transition is enabled |
-| `delay` | boolean | no | Optional whether to delay the transition |
-| `delay_duration` | number | no | Optional delay duration in seconds (requires delay=true to take effect) |
-
-**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, enabled, delay, delay_duration, changed, saved, note? }`
-
-## `set_tree_parameter`
-
-*Destructive, idempotent.*
-
-Set the value of an existing root parameter of a StateTree asset and save it. Works for bool, byte, int32, int64, float, double, name, string and text parameters; array and other types return an error. Add the parameter first with add_tree_parameter. Returns value_changed, new_value and saved.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `parameter` | string | yes | Name of a root parameter that already exists, as listed by list_tree_parameters; an unknown name is an error. |
-| `value` | any | yes | New value as JSON matching the parameter type: true or false, a number, or a string for name, string and text parameters. |
-
-**Returns:** `{ tree_path, parameter, set, value_changed, saved, new_value? }`
-
 ## `update_transition`
 
 *Destructive.*
 
-Update any subset of a transition's metadata fields on a state. Only fields explicitly passed are written; everything else is preserved. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. Superset of set_transition_properties: adds transition_type (None|Succeeded|Failed|GotoState|Parent|NextState|...), target_state (rebind by name), event_tag (FGameplayTag, when trigger=OnEvent), and payload_struct (event-payload struct, when trigger=OnEvent). Use this when set_transition_properties doesn't expose the field you need.
+Update any subset of the fields of an existing transition of a state of a StateTree asset -- trigger, priority, type, target state, event tag and payload, enabled flag and delay -- in one undo step, then save the asset without compiling it. Only fields explicitly passed are written; everything else is preserved, and the reply reads every field back. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct, or a missing or out-of-range transition_index, is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. A call that leaves every field as it was changes and saves nothing (changed false, saved false, a note). A failed save (for example while PIE runs) makes success false. A new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the UStateTree |
-| `state_name` | string | yes | State that owns the transition |
-| `transition_index` | number | no | Index into the state's Transitions array (0-based) |
+| `state_name` | string | yes | State that owns the transition; the first state with that name in a depth-first walk of the hierarchy is used |
+| `transition_index` | number | yes | Index into the state's Transitions array (0-based, transitions[].index of get_state_tree_info); required |
 | `trigger` | string | no | Optional EStateTreeTransitionTrigger name (None\|OnStateCompleted\|OnStateTick\|OnEvent\|OnDelta\|...) |
 | `priority` | string | no | Optional EStateTreeTransitionPriority name (Lowest\|Low\|Normal\|High\|Highest) |
 | `transition_type` | string | no | Optional EStateTreeTransitionType name (None\|Succeeded\|Failed\|GotoState\|Parent\|NextState\|NextSelectableState\|NextParent\|NextSelectableParent) |
@@ -871,7 +789,7 @@ Update any subset of a transition's metadata fields on a state. Only fields expl
 | `delay_duration` | number | no | Optional number (seconds) |
 | `delay_variance` | number | no | Optional number (seconds of random variance) |
 
-**Returns:** `{ tree_path, state_name, transition_index, applied_fields: [string], errors: [string], saved }`
+**Returns:** `{ tree_path, state_name, transition_index, trigger, priority, transition_type, target_state, event_tag, payload_struct, enabled, delay, delay_duration, delay_variance, applied_fields: [string] (the fields passed), errors: [string], changed, saved, note? }`
 
 ## `validate_state_tree`
 

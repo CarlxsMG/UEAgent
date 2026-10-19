@@ -2,7 +2,7 @@
 
 # DataAsset
 
-60 tools. Back to the [index](README.md).
+52 tools. Back to the [index](README.md).
 
 ## `add_curve_key`
 
@@ -62,32 +62,6 @@ Attach a DataTable source to a UDataRegistry.  Creates a UDataRegistrySource_Dat
 | `precache` | boolean | no | bool, enables synchronous cached lookups (default true). |
 
 **Returns:** `{ registry_path: string, data_table_path: string, source_name: string, success: bool, precache: bool, source_count: int, saved: bool, save_error: string }`
-
-## `add_data_table_row`
-
-*Destructive.*
-
-Create a new row in a DataTable (upsert -- it overwrites if the key exists), passing columns as a plain JSON object. Values go through reflection, so scalars, enums by name, nested structs and arrays all work. It fails the WHOLE write when any column cannot be imported, rather than committing a half-filled row with silent defaults, and lists anything it did not recognise in unknown_columns -- read that array, a typo'd column name is dropped, not an error. GameplayTag and GameplayTagContainer columns are the ones that reject a bare string: pass them in ExportText form, e.g. (TagName="A.B"). Use set_data_table_row to require the row to exist, or set_data_table_row_fields for a partial per-column update with before/after evidence.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable (e.g. /Game/MyGame/DT_Example) |
-| `row_name` | string | yes | Name (key) of the row to write |
-| `row_data` | object | yes | Object of {column_name: value}; values may be string/number/bool |
-
-**Returns:** `success or error payload`
-
-## `clear_data_registry_sources`
-
-*Destructive, idempotent.*
-
-Empty the DataSources[] array on a UDataRegistry and save the asset.  Honest: UDataRegistrySubsystem has no public UnregisterRegistry, so this does NOT unregister the registry from the subsystem registry map. The already-loaded sources may still be queryable for their cached items until the editor restarts. Use refresh_data_registry_map() after editing to force the subsystem to re-read the registry map.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `registry_path` | string | yes | Content path to the UDataRegistry asset. |
-
-**Returns:** `{ registry_path: string, source_count_before: int, source_count_after: int, cleared: bool, save_error: string }`
 
 ## `compile_text_for_target`
 
@@ -193,7 +167,7 @@ Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the 
 
 *Additive, idempotent.*
 
-Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with add_data_table_row or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
+Create a DataTable asset bound to a row struct -- the standard container for game data (items, recipes, loot, quests, dialogue) that designers edit without touching Blueprints. The row struct must already exist (create_struct) and cannot be changed afterwards without losing data, so settle its columns first. Idempotent: re-running with the same row_struct returns the existing table unchanged with already_existed=true and saved=false, and nothing is saved; a different row_struct, a composite table or another asset class at the path is an error. Rows go in with set_data_table_row (create_if_missing=true) or import_data_table_csv; create_composite_data_table is the variant that merges several parent tables.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -280,7 +254,7 @@ Export a whole DataTable to CSV with the native exporter (read-only), returning 
 
 *Destructive, idempotent.*
 
-Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap&lt;Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row_as_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
+Export a whole DataTable, a composite one included, through the engine's native JSON exporter: json is a string holding an array of row objects in which TMap&lt;Enum,SoftClass>, soft references and GameplayTags survive, unlike the reflection readers such as get_data_table_rows. The table is only read, never modified or saved. With file_path the same text is also written to that OS path as UTF-8, overwriting a file already there; a failed write is an error and returns no json. Repeating the call gives the same output (idempotent). data_table wins over table_path when both are given; a table that does not load, or has no row struct, is an error. Flat CSV: export_data_table_as_csv; one row: get_data_table_row with include_native_json; compare two exports with diff_data_tables; write rows back with set_data_table_rows_from_json.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -303,27 +277,17 @@ Gather text into a localization target's manifest/archive files, by generating i
 
 **Returns:** `{ target_name: string, scope: string, config_path: string, config_written: bool, exit_code: int, success: bool, message: string }`
 
-## `get_active_culture`
-
-*Read-only.*
-
-Read the editor's current active culture/locale (FInternationalization::GetCurrentCulture).
-
-No parameters.
-
-**Returns:** `{ culture_name: string, display_name: string, native_name: string, iso_two_letter_name: string }`
-
 ## `get_culture_info`
 
 *Read-only.*
 
-Look up a culture by name without switching the active one (FInternationalization::GetCulture).
+Look up a culture by name, or with no name read the editor's current active culture/locale (FInternationalization::GetCurrentCulture), without switching the active one (FInternationalization::GetCulture). is_active says whether the reported culture is the current one. An unknown name is a success with found=false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `culture_name` | string | yes | Required culture identifier, e.g. "en", "es-ES", "ja". |
+| `culture_name` | string | no | Optional culture identifier, e.g. "en", "es-ES", "ja"; omitted or empty reports the current active culture. |
 
-**Returns:** `{ culture_name: string, found: bool, display_name: string, native_name: string, iso_two_letter_name: string }`
+**Returns:** `{ culture_name: string, found: bool, is_active: bool, display_name?: string, native_name?: string, iso_two_letter_name?: string }`
 
 ## `get_curve_keys`
 
@@ -365,13 +329,13 @@ Read a DataAsset's class and ALL of its reflected properties with their current 
 
 *Read-only.*
 
-Read a UDataRegistry asset: registry_type, item_struct, initialized, its sources (name, class, data_table) and item_names. Read-only. item_names lists cached items only, so it stays empty until the registry is initialized (initialize_data_registry); null source slots are skipped, unlike get_data_registry_source_count.
+Read a UDataRegistry asset: registry_type, item_struct, initialized, every DataSources[] slot (index, name, class, data_table, source_table) and item_names. Read-only. source_count counts every slot, a null one included (listed with class "null"). source_table is the SourceTable of any source class that has one (DataTable and CurveTable sources). item_names lists cached items only, so it stays empty until the registry is initialized (initialize_data_registry).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `registry_path` | string | yes | Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items". |
 
-**Returns:** `{ registry_path: string, registry_type: string, item_struct: string, initialized: bool, sources: [{name, class, data_table}], source_count: int, item_names: [string], item_count: int }`
+**Returns:** `{ registry_path: string, registry_type: string, item_struct: string, initialized: bool, sources: [{index: int, class: string, name?: string, data_table?: string, source_table?: string}], source_count: int, item_names: [string], item_count: int }`
 
 ## `get_data_registry_item`
 
@@ -385,18 +349,6 @@ Synchronously look up a precached item by registry type and item name.  Uses UDa
 | `item_name` | string | yes | The item (row) name. |
 
 **Returns:** `{ registry_type: string, item_name: string, item_struct: string, found: bool, item_data: string }`
-
-## `get_data_registry_source_count`
-
-*Read-only.*
-
-Count the entries of DataSources[] on a UDataRegistry asset, null slots included. Read-only; returns registry_path and source_count. For the sources themselves (class, source table) use list_data_registry_sources or get_data_registry_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `registry_path` | string | yes | Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items". |
-
-**Returns:** `{ registry_path: string, source_count: int }`
 
 ## `get_data_table_column`
 
@@ -416,7 +368,7 @@ Read one column across every row of a DataTable as ExportText strings, so TMaps,
 
 *Read-only.*
 
-Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, get_data_table_row or read_data_table_row_complex; one column: get_data_table_column; build a composite: create_composite_data_table.
+Describe a DataTable without changing it: table class, row struct (None when it has none), row count, every row name in row-map order, and the row-struct columns with their C++ type and is_map / is_soft / is_tag flags. For a UCompositeDataTable (see table_class) row_count is the already-merged map, so the reply adds where the rows come from: parent_tables in precedence order (a higher index overrides a lower one), merged versus summed parent row counts, shadowed_rows with the winning parent, and parent_row_struct_mismatch for parents the engine skips; include_row_sources adds the winner of every row. A path that does not load as a DataTable is an error. Row values: get_data_table_rows, or get_data_table_row (include_export_text for each cell as ExportText); one column: get_data_table_column; build a composite: create_composite_data_table.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -429,27 +381,16 @@ Describe a DataTable without changing it: table class, row struct (None when it 
 
 *Read-only.*
 
-Read ONE row of a DataTable by key and get every column as JSON . Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns. When you need the byte-exact ExportText of a column (to copy a vendor row, or to tell an empty enum from an unwritten one) use read_data_table_row_complex instead, and get_data_table_rows when you want the enum DISPLAY names.
+Read ONE row of a DataTable by key and get every column as JSON. Reads the row memory untyped (FindRowUnchecked), so it works on Blueprint / user-defined row structs that are not FTableRowBase children, where the typed lookup reports "Row not found" for rows that exist; a miss here really is a missing key. Serializes TMap, nested struct and GameplayTag columns in row_data. Two optional renderings of the same row: include_native_json adds row_json, the verbatim string of UE's own DataTable JSON writer -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/round-trip (it emits GameplayTagContainers in the ExportText form the importer accepts; the round trip is not lossless for multi-word user-defined enums, so re-read what you wrote); include_export_text adds fields, every cell as its byte-exact ExportText string, so TMap&lt;Enum,SoftClass>, nested struct arrays and soft references appear in full (row_data shows such TMaps as {}) -- the form to copy a vendor row or to tell an empty enum from an unwritten one. Use get_data_table_rows when you want the enum DISPLAY names.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | The full asset path to the DataTable. |
 | `row_name` | string | yes | The name of the row to retrieve. |
+| `include_native_json` | boolean | no | Optional bool, default false: add row_json, the row as UE's native DataTable JSON string. |
+| `include_export_text` | boolean | no | Optional bool, default false: add fields, {column: ExportText string} for every cell. |
 
-**Returns:** `{ table_path, row_name, row_data } where row_data is the fully serialized row struct (TMap / nested struct / FGameplayTag columns included)`
-
-## `get_data_table_row_as_json`
-
-*Read-only.*
-
-Export ONE DataTable row through UE's own DataTable JSON writer, returning both the verbatim native JSON string and a parsed object -- the exact format set_data_table_row_from_json consumes, so it is the read half of a copy/duplicate/round-trip. Use it over get_data_table_row when the value has to go back INTO the engine (it emits GameplayTagContainers in the ExportText form the importer accepts). The round trip is not lossless for multi-word user-defined enums, so re-read what you wrote.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable |
-| `row_name` | string | yes | Name (key) of the row |
-
-**Returns:** `{ table_path, row_name, row_struct, row_json (verbatim native JSON string), row_data (parsed) }`
+**Returns:** `{ table_path: string, row_name: string, row_struct: string, row_data: object, row_json?: string, fields?: object } where row_data is the fully serialized row struct (TMap / nested struct / FGameplayTag columns included)`
 
 ## `get_data_table_rows`
 
@@ -467,26 +408,14 @@ Dump EVERY row of a DataTable as an array, with the row count -- for browsing or
 
 *Read-only.*
 
-Lists every entry of a UStringTable asset without changing it. Returns string_table_name, string_table_id, namespace, count and entries, each with key, source (the source string) and its metadata as an id to value object with metadata_count. Edit entries with set_string_table_entry.
+Lists every entry of a UStringTable asset, or with key only that entry, without changing it. Returns string_table_name, string_table_id, namespace, count and entries, each with key, source (the source string) and its metadata (FStringTable::EnumerateMetaData) as an id to value object with metadata_count; with key, entry_exists says whether the table has it (a missing key is a success with entry_exists=false and no entries). Edit entries with set_string_table_entry and metadata with set_string_table_metadata.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `string_table_path` | string | yes | Full asset path to the UStringTable |
+| `key` | string | no | Optional entry key: list only that entry and report entry_exists |
 
-**Returns:** `{ string_table_path: string, string_table_name: string, string_table_id: string, namespace: string, entries: [object], count: int }`
-
-## `get_string_table_metadata`
-
-*Read-only.*
-
-Read all metadata (id->value) attached to a UStringTable entry (FStringTable::EnumerateMetaData).  The reader that pairs with set_string_table_metadata.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `string_table_path` | string | yes | Full asset path to the UStringTable. |
-| `key` | string | yes | Entry key to read metadata from. |
-
-**Returns:** `{ string_table_path: string, key: string, entry_exists: bool, metadata: object, metadata_count: int, namespace: string }`
+**Returns:** `{ string_table_path: string, string_table_name: string, string_table_id: string, namespace: string, entries: [{ key: string, source: string, metadata: object, metadata_count: int }], count: int, key?: string, entry_exists?: bool }`
 
 ## `import_data_table_csv`
 
@@ -513,18 +442,6 @@ Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem fo
 
 **Returns:** `{ registry_path: string, registry_type: string, success: bool, loaded: bool, registered: bool, initialized: bool }`
 
-## `list_data_registry_sources`
-
-*Read-only.*
-
-List the DataTable sources attached to a UDataRegistry asset.  Reads UDataRegistry::DataSources[] via reflection (the UDataRegistrySource base class does not have a public SourceTable accessor; the UDataRegistrySource_DataTable subclass does, and we read it via FProperty lookup so this stays portable across DataTable source variants).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `registry_path` | string | yes | Content path to the UDataRegistry asset. |
-
-**Returns:** `{ registry_path: string, source_count: int, sources: [{index, class, source_table}] }`
-
 ## `list_data_registry_types`
 
 *Read-only.*
@@ -547,21 +464,7 @@ List localization targets configured in the Localization Dashboard (ULocalizatio
 
 **Returns:** `{ scope: string, targets: [{ name: string, scope: string, native_culture: string, supported_cultures: string[] }], targets_count: int }`
 
-## `read_data_table_row_complex`
-
-*Read-only.*
-
-Read one DataTable row with every cell as its ExportText string, so TMap&lt;Enum,SoftClass>, nested struct arrays and soft references appear in full (get_data_table_row shows TMaps as {}); read-only. Returns row_struct and fields as {column: text}; a missing row is an error.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `data_table` | string | yes | Full asset path of the DataTable (table_path also accepted) |
-| `row_name` | string | yes | Name (key) of the row to read |
-| `table_path` | string | no | Alias of data_table (the DataTable asset path, e.g. "/Game/Data/DT_Items"); data_table wins when both are given |
-
-**Returns:** `{ table_path, row_name, row_struct, fields:{column: exporttext-serialized value} }`
-
-## `read_datatable_from_package_file`
+## `read_data_table_from_package_file`
 
 *Read-only.*
 
@@ -621,15 +524,16 @@ Remove a single key from an existing UCurveTable row's rich curve by index or ti
 
 *Destructive, idempotent.*
 
-Remove a DataTable source from a UDataRegistry asset (the true inverse of add_data_registry_source).  Does a reflective RemoveAt on the registry's protected DataSources[] array and saves the asset. Select the source either by data_table_path (matched against each DataTable source's SourceTable) or by source_index. Does NOT unregister from the subsystem. Idempotent: if the source is not present it returns removed:false with an unchanged count.
+Remove a DataTable source from a UDataRegistry asset (the true inverse of add_data_registry_source), or with all=true empty every DataSources[] slot.  Does a reflective RemoveAt (or Empty) on the registry's protected DataSources[] array and saves the asset. Select one source either by data_table_path (matched against each DataTable source's SourceTable) or by source_index. Does NOT unregister from the subsystem (there is no public UnregisterRegistry): already-cached items may stay queryable until the editor restarts; refresh_data_registry_map makes the subsystem re-read the registry map. Idempotent: a source that is not present, or all=true on a registry without sources, returns removed:false with an unchanged count.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `registry_path` | string | yes | Content path to the UDataRegistry asset. |
-| `data_table_path` | string | no | Content path of the source DataTable to remove (matched against SourceTable). Provide this OR source_index. |
-| `source_index` | number | no | Direct index into DataSources[] to remove. Provide this OR data_table_path. |
+| `data_table_path` | string | no | Content path of the source DataTable to remove (matched against SourceTable). Provide this OR source_index OR all. |
+| `source_index` | number | no | Direct index into DataSources[] to remove. Provide this OR data_table_path OR all. |
+| `all` | boolean | no | Optional bool, default false: true removes every source (null slots included) instead of one; it excludes data_table_path and source_index. |
 
-**Returns:** `{ registry_path: string, source_index: int, data_table_path: string, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error: string, note: string }`
+**Returns:** `{ registry_path: string, source_index?: int, data_table_path?: string, all?: bool, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `remove_string_table_entry`
 
@@ -648,7 +552,7 @@ Remove the entry key, with all its metadata, from a UStringTable asset inside an
 
 *Destructive, idempotent.*
 
-Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). Idempotent (no-op if the id is absent). Pairs with set/get_string_table_metadata.
+Remove a metadata id from a UStringTable entry (FStringTable::RemoveMetaData). Idempotent (no-op if the id is absent). Pairs with set_string_table_metadata; read it back with get_string_table_entries.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -736,15 +640,16 @@ Set one element of an array column in a DataTable row (a field of a struct eleme
 
 *Destructive, idempotent.*
 
-Update an EXISTING DataTable row, erroring if the key is absent -- that guard is the only difference from add_data_table_row, and it is what stops a typo'd row name from quietly creating a second row. Columns you omit keep their current values; the write fails as a whole if any provided column cannot be imported, and unrecognised names come back in unknown_columns. Pass GameplayTag columns in ExportText form, e.g. (TagName="A.B"). For per-column before/after evidence use set_data_table_row_fields; for one cell use set_data_table_cell.
+Write a DataTable row from a plain JSON object of columns and save the table. By default the row must EXIST and a missing key is an error -- the guard that stops a typo'd row name from quietly creating a second row; create_if_missing=true creates the row (from struct defaults) when absent, an upsert. Values go through reflection, so scalars, enums by name, nested structs and arrays all work. Columns you omit keep their current values; the write fails as a whole if any provided column cannot be imported, rather than committing a half-filled row with silent defaults, and unrecognised names come back in unknown_columns -- read that array, a typo'd column name is dropped, not an error. Pass GameplayTag and GameplayTagContainer columns in ExportText form, e.g. (TagName="A.B"). For per-column before/after evidence use set_data_table_row_fields; for one cell use set_data_table_cell.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `table_path` | string | yes | Full asset path of the DataTable |
-| `row_name` | string | yes | Name (key) of the existing row to update |
-| `row_data` | object | yes | Object of {column_name: value} to apply over the current row |
+| `table_path` | string | yes | Full asset path of the DataTable (e.g. /Game/MyGame/DT_Example) |
+| `row_name` | string | yes | Name (key) of the row to write |
+| `row_data` | object | yes | Object of {column_name: value} to apply over the current row (or over struct defaults for a new row) |
+| `create_if_missing` | boolean | no | Optional bool, default false: true creates the row when the key is absent instead of erroring |
 
-**Returns:** `success or error payload`
+**Returns:** `{ table_path: string, row_name: string, row_struct: string, updated_existing: bool, columns_written: int, row_count: int, saved: bool, row_data?: object, unknown_columns?: [string] }`
 
 ## `set_data_table_row_fields`
 
@@ -766,13 +671,13 @@ Write only the named cells of one DataTable row via the native JSON importer, de
 
 *Destructive, idempotent.*
 
-Write a whole DataTable row from a native-format JSON object (the shape get_data_table_row_as_json emits), with merge=true to overwrite only the columns you supply. The route for copying a row between tables or authoring a complex row in one call. ALWAYS read the problems array: success:true routinely coexists with columns that never landed -- a GameplayTagContainer passed as a JSON array is rejected and left empty (give it as the string "(GameplayTags=((TagName=\"A.B\")))"), a sub-field whose internal name differs from the display name you used stays at its struct default, and a user-defined enum whose display name has spaces is cut at the first space and lands on the index-0 enumerator (write the internal NewEnumeratorN name instead). Confirm with read_data_table_row_complex.
+Write a whole DataTable row from a native-format JSON object (the shape get_data_table_row emits as row_json with include_native_json), with merge=true to overwrite only the columns you supply. The route for copying a row between tables or authoring a complex row in one call. ALWAYS read the problems array: success:true routinely coexists with columns that never landed -- a GameplayTagContainer passed as a JSON array is rejected and left empty (give it as the string "(GameplayTags=((TagName=\"A.B\")))"), a sub-field whose internal name differs from the display name you used stays at its struct default, and a user-defined enum whose display name has spaces is cut at the first space and lands on the index-0 enumerator (write the internal NewEnumeratorN name instead). Confirm with get_data_table_row include_export_text=true.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `table_path` | string | yes | Full asset path of the DataTable |
 | `row_name` | string | yes | Name (key) of the row to write |
-| `row_json` | any | yes | A JSON object of {column:value} (as produced by get_data_table_row_as_json) |
+| `row_json` | any | yes | A JSON object of {column:value} (as produced by get_data_table_row as row_json with include_native_json) |
 | `merge` | boolean | no | When true and the row exists, only the caller-provided columns are overwritten |
 
 **Returns:** `success or error payload`

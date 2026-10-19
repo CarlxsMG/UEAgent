@@ -91,6 +91,28 @@ namespace McpReadbackInResponseC
 			TEXT("response:no verification fields"), RB_check_row_without_evidence_0);
 	}
 
+	/** set_data_table_row returned `saved:false`: the row lives only in memory. `saved` is the proof, not `success`. */
+	static FO CheckRowInMemory(const FO& Params, const FO& Result)
+	{
+		if (!IsFalse(Get(Payload(Result), TEXT("saved"))))
+		{
+			return nullptr;
+		}
+		return DegradingFindingWithError(TEXT("row_only_in_memory"), Get(Params, TEXT("row_name")), B(false), TEXT("in-response:saved"), RB_check_row_in_memory_0,
+			TEXT("Read `saved`, not `success`."));
+	}
+
+	/** set_data_table_row (an update, or an upsert with create_if_missing): a row left only in memory degrades the call;
+	 *  otherwise the warning that the response carries no evidence of what was written. */
+	static FO CheckDataTableRowWrite(const FO& Params, const FO& Result)
+	{
+		if (const FO InMemory = CheckRowInMemory(Params, Result))
+		{
+			return InMemory;
+		}
+		return CheckRowWithoutEvidence(Params, Result);
+	}
+
 	/** success:true with a graph_name does not prove the function graph exists. */
 	static FO CheckNewFunction(const FO& Params, const FO& Result)
 	{
@@ -104,20 +126,14 @@ namespace McpReadbackInResponseC
 		{
 			return nullptr;
 		}
-		return WarningFinding(TEXT("function_graph_unverified"), TextField(Params, TEXT("function_name")), S(GraphName), TEXT("response:success+graph_name"),
-			Percent(RB_check_new_function_0, { S(Percent(TEXT(" (you are looking for %r)"), { S(GraphName) })) }));
-	}
-
-	/** For an interface EVENT, already_existed:false is unreliable. */
-	static FO CheckInterfaceOverride(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
-		if (!IsFalse(Get(Data, TEXT("already_existed"))) || !StrEq(Lower(TextOf(Get(Data, TEXT("kind")))), TEXT("event")))
+		// An event override (override=true on an event-shape member) is a node in the event graph graph_name
+		// names, with its node_id: there is no new function graph to look for.
+		if (StrEq(LowerStrip(Get(Data, TEXT("kind"))), TEXT("event")))
 		{
 			return nullptr;
 		}
-		return WarningFinding(TEXT("already_existed_unreliable_for_events"), TextField(Params, TEXT("function_name")), TextField(Data, TEXT("kind")),
-			TEXT("response:kind+already_existed"), RB_check_interface_override_0);
+		return WarningFinding(TEXT("function_graph_unverified"), TextField(Params, TEXT("function_name")), S(GraphName), TEXT("response:success+graph_name"),
+			Percent(RB_check_new_function_0, { S(Percent(TEXT(" (you are looking for %r)"), { S(GraphName) })) }));
 	}
 
 	/** Select option pins keep generic names, so the option-to-value mapping cannot be read from the graph. */
@@ -150,17 +166,10 @@ namespace McpReadbackInResponseC
 			Percent(RB_check_select_polarity_0, { S(Join(Quoted, TEXT(", "))) }));
 	}
 
-	/** activity_tags:[] does not prove the definition has no tags. */
-	static FO CheckSmartObjectTags(const FO& Params, const FO& Result)
+	/** add_graph_node: only a select node has option pins to check. */
+	static FO CheckAddGraphNode(const FO& Params, const FO& Result)
 	{
-		const FO Data = Payload(Result);
-		const FV Tags = Get(Data, TEXT("activity_tags"));
-		if (!IsList(Tags) || Len(Tags) > 0)
-		{
-			return nullptr;
-		}
-		return WarningFinding(TEXT("empty_activity_tags_not_absent"), TextField(Params, TEXT("definition_path")), Get(Data, TEXT("slot_count")),
-			TEXT("response:activity_tags"), RB_check_smart_object_tags_0);
+		return StrEq(LowerStrip(Get(Params, TEXT("node_type"))), TEXT("select")) ? CheckSelectPolarity(Params, Result) : nullptr;
 	}
 
 	/** Zero matches when searching labels: auto-named actors do not carry the label you expect. */
@@ -349,24 +358,6 @@ namespace McpReadbackInResponseC
 			TEXT("response:lines+held_total"), NoteText);
 	}
 
-	/** This is a static listing, not a trace (and the profiling variant recompiles the Blueprint). */
-	static FO CheckStaticAnalysis(const FO& Params, const FO& Result)
-	{
-		const FO Data = Payload(Result);
-		if (TextOf(Get(Data, TEXT("blueprint_path"))).IsEmpty())
-		{
-			return nullptr;
-		}
-		const bool bProfiles = Has(Data, TEXT("execution_time")) || Has(Data, TEXT("performance_rating")) || Has(Data, TEXT("cpu_usage"));
-		FString NoteText = RB_check_static_analysis_0;
-		if (bProfiles)
-		{
-			NoteText += RB_check_static_analysis_1;
-		}
-		return WarningFinding(TEXT("static_analysis_not_a_trace"), TextField(Params, TEXT("blueprint_path")), Get(Data, TEXT("total_execution_paths")),
-			TEXT("response:blueprint_path"), NoteText);
-	}
-
 	/** A root canvas created on a child widget eclipses the parent's widget tree. */
 	static FO CheckChildWidgetWithRoot(const FO& Params, const FO& Result)
 	{
@@ -471,35 +462,83 @@ namespace McpReadbackInResponseC
 			TEXT("response:scheduled+generated"), RB_check_pcg_regenerated_0);
 	}
 
-	/** An RPC called from Python does not cross the network: an empty returns_json proves nothing. */
+	/** call_function names its function and target under aliases the contract view keeps (the tool declares them). */
+	static FV CalledFunction(const FO& Params)
+	{
+		return S(FirstNonEmptyText(Get(Params, TEXT("function_name")), Get(Params, TEXT("function"))));
+	}
+
+	static FV CalledTarget(const FO& Params)
+	{
+		return S(FirstNonEmptyText(Or(Get(Params, TEXT("object_path")), Get(Params, TEXT("actor"))), Get(Params, TEXT("class_name"))));
+	}
+
+	/** A call that came back with nothing (no return_value, no out_params) does not prove the function ran: an RPC
+	 *  invoked this way does not cross the network. */
 	static FO WarnLocalRpc(const FO& Params, const FO& Result)
 	{
 		const FO Data = Payload(Result);
-		if (!Has(Data, TEXT("returns_json")))
+		if (!Has(Data, TEXT("function_name")) || IsFalse(Get(Data, TEXT("success"))))
+		{
+			return nullptr; // not a call_function reply
+		}
+		if (Has(Data, TEXT("return_value")) || Has(Data, TEXT("out_params")))
 		{
 			return nullptr;
 		}
-		const FV Returned = Get(Data, TEXT("returns_json"));
-		const bool bEmpty = (IsDict(Returned) && Len(Returned) == 0)
-			|| (IsStr(Returned) && (StrEq(AsStr(Returned), TEXT("{}")) || AsStr(Returned).IsEmpty())); // in ({}, '{}', '')
-		if (!bEmpty || IsFalse(Get(Data, TEXT("success"))))
-		{
-			return nullptr;
-		}
-		return WarningFinding(TEXT("rpc_not_crossing_wire"), TextField(Params, TEXT("function_name")), TextField(Params, TEXT("object_path")),
-			TEXT("in-response:returns_json"), RB_warn_local_rpc_0);
+		return WarningFinding(TEXT("rpc_not_crossing_wire"), CalledFunction(Params), CalledTarget(Params),
+			TEXT("in-response:return_value+out_params"), RB_warn_local_rpc_0);
 	}
 
-	/** A GameplayTag argument passed as a string arrives as None; otherwise falls back to the local-RPC warning. */
-	static FO CheckCallWithTag(const FO& Params, const FO& Result)
+	/**
+	 * Struct arguments of call_function: the JSON is nativized field by field and keys that match no field are
+	 * ignored, so a struct can arrive at its defaults while the function's output still looks plausible. A struct whose
+	 * only key is TagName is a GameplayTag, which call_function validates against the registry; object paths are
+	 * resolved or refused by the tool itself, so they are not flagged.
+	 */
+	static FO CheckStructArguments(const FO& Params, const FO& Result)
 	{
-		const FString Args = TextOf(Get(Params, TEXT("args_json")));
-		if (Args.IsEmpty() || !Contains(Lower(Args), TEXT("tag")))
+		// The tool reads `parameters`, then its older names `args_json` and `params`.
+		const FV Args = Or(Get(Params, TEXT("parameters")), Get(Params, TEXT("args_json")), Get(Params, TEXT("params")));
+		if (!IsDict(Args) || Len(Args) == 0)
 		{
-			return WarnLocalRpc(Params, Result);
+			return nullptr;
 		}
-		return WarningFinding(TEXT("tag_as_string_in_call"), TextField(Params, TEXT("function_name")), TextField(Params, TEXT("object_path")),
-			TEXT("params:args_json"), RB_check_call_with_tag_0);
+		TArray<FString> Structs;
+		for (const auto& Field : Args->AsObject()->Values)
+		{
+			if (!IsDict(Field.Value))
+			{
+				continue;
+			}
+			const FO Value = Field.Value->AsObject();
+			bool bOnlyTag = Value->Values.Num() > 0;
+			for (const auto& Sub : Value->Values)
+			{
+				bOnlyTag &= StrEq(Lower(Strip(FString(Sub.Key))), TEXT("tagname"));
+			}
+			if (!bOnlyTag)
+			{
+				Structs.Add(FString(Field.Key));
+			}
+		}
+		if (Structs.Num() == 0)
+		{
+			return nullptr;
+		}
+		const TArray<FString> Names = Sorted(Structs);
+		return WarningFinding(TEXT("argument_not_marshaled"), L(Names), None(), TEXT("params:types_that_do_not_marshal"),
+			Percent(RB_check_bridge_arguments_0, { S(Join(Names, TEXT(", "))) }));
+	}
+
+	/** call_function: the struct-argument check first, then the empty-reply warning. */
+	static FO CheckCallFunction(const FO& Params, const FO& Result)
+	{
+		if (const FO Structs = CheckStructArguments(Params, Result))
+		{
+			return Structs;
+		}
+		return WarnLocalRpc(Params, Result);
 	}
 
 	/** add_function_parameter adds a parameter but nothing can retype it afterwards. */
@@ -708,7 +747,7 @@ namespace McpReadbackInResponseC
 			return nullptr;
 		}
 		return WarningFinding(TEXT("report_cannot_disconfirm"), Get(Params, TEXT("variable_name")), Get(Data, TEXT("property_flags")),
-			TEXT("in_response:set_bp_variable_replication"), RB_check_unverifiable_replication_0);
+			TEXT("in_response:set_blueprint_variable_replication"), RB_check_unverifiable_replication_0);
 	}
 
 	// ------------------------------------------------------------------ standing warnings
@@ -718,13 +757,6 @@ namespace McpReadbackInResponseC
 		return PayloadFailed(Result) ? nullptr : WarningFinding(Verdict, Requested, Stored, TEXT("in-response:warning"), Note);
 	}
 
-	/** Relevancy is not dormancy: these calls do not fix a client that does not mirror a change. */
-	static FO WarnNetRelevancy(const FO& Params, const FO& Result)
-	{
-		return StandingWarning(Result, TEXT("net_relevancy_not_dormancy"), TextField(Params, TEXT("actor_name")), S(TEXT("")),
-			RB_warn_net_relevancy_0);
-	}
-
 	/** Possessing a pawn contaminates later reads of the remote proxy. */
 	static FO WarnTamperedProxy(const FO& Params, const FO& Result)
 	{
@@ -732,10 +764,15 @@ namespace McpReadbackInResponseC
 			RB_warn_tampered_proxy_0);
 	}
 
-	/** Enabling replicated movement gives no headless oracle of the movement mirror. */
+	/** Setting replicated movement gives no headless oracle of the movement mirror. configure_replication applies only
+	 *  the settings sent, so this speaks only when replicate_movement was one of them. */
 	static FO WarnMovementMirror(const FO& Params, const FO& Result)
 	{
-		return StandingWarning(Result, TEXT("movement_mirror_not_measurable_headless"), TextField(Params, TEXT("actor_label")),
+		if (!Has(Params, TEXT("replicate_movement")))
+		{
+			return nullptr;
+		}
+		return StandingWarning(Result, TEXT("movement_mirror_not_measurable_headless"), TextField(Params, TEXT("actor_name")),
 			TextField(Params, TEXT("replicate_movement")), RB_warn_movement_mirror_0);
 	}
 
@@ -761,7 +798,6 @@ namespace McpReadbackInResponseC
 		{
 			Consider(Value);
 		}
-		Consider(Get(Params, TEXT("size")));
 		return Longest;
 	}
 
@@ -772,8 +808,7 @@ namespace McpReadbackInResponseC
 		const FString Lead = LongestSide.IsSet() && *LongestSide > 600000.0
 			? Percent(RB_warn_volume_collision_0, { N(FMath::TruncToDouble(*LongestSide)) })
 			: FString(RB_warn_volume_collision_1);
-		return StandingWarning(Result, TEXT("volume_collision_not_transform"),
-			S(TextOf(Or(Get(Params, TEXT("volume_class")), Get(Params, TEXT("volume_name"))))),
+		return StandingWarning(Result, TEXT("volume_collision_not_transform"), TextField(Params, TEXT("volume_class")),
 			S(LongestSide.IsSet() ? Str(N(FMath::TruncToDouble(*LongestSide))) : FString()), Lead + RB_warn_volume_collision_2);
 	}
 
@@ -888,6 +923,39 @@ namespace McpReadbackInResponseC
 			RB_warn_unlocated_region_0);
 	}
 
+	/** A polygroup that selected no triangle (ids start at 1), or a paint that was dropped (no MaterialID attribute). */
+	static FO CheckPolygroupPaint(const FO& Params, const FO& Result)
+	{
+		const FO Data = Payload(Result);
+		TArray<FString> Warnings;
+		const FV Selected = Get(Data, TEXT("triangles_selected"));
+		if (IsNum(Selected) && AsNum(Selected) <= 0)
+		{
+			Warnings.Add(Percent(RB_check_polygroup_paint_0, { Get(Params, TEXT("polygroup_id")) }));
+		}
+		const FV DistinctIds = Get(Data, TEXT("distinct_material_ids_after"));
+		if (IsTrue(Get(Data, TEXT("applied"))) && Equals(DistinctIds, N(1)))
+		{
+			Warnings.Add(RB_check_polygroup_paint_1);
+		}
+		return JoinedWarningFinding(TEXT("material_id_paint_no_effect"), Get(Params, TEXT("material_id")), DistinctIds, RB_check_polygroup_paint_2,
+			Warnings);
+	}
+
+	/** set_mesh_material_id: a polygroup region gets the polygroup check, any other region the standing warning about
+	 *  locating a painted range; scope 'all' and 'triangles' paint no region. */
+	static FO CheckMeshMaterialId(const FO& Params, const FO& Result)
+	{
+		const FString Scope = LowerStrip(Get(Params, TEXT("scope")));
+		const FString Region = LowerStrip(Get(Params, TEXT("region")));
+		const bool bRegion = StrEq(Scope, TEXT("region")) || (Scope.IsEmpty() && !Region.IsEmpty()); // the tool's own default
+		if (!bRegion)
+		{
+			return nullptr;
+		}
+		return StrEq(Region, TEXT("polygroup")) ? CheckPolygroupPaint(Params, Result) : WarnUnlocatedRegion(Params, Result);
+	}
+
 	/** Always speaks: without window focus the editor is throttled, so frame_ms measures the idle editor. */
 	static FO WarnThrottledFrame(const FO& Params, const FO& Result)
 	{
@@ -988,7 +1056,7 @@ namespace McpReadbackUtil
 	}
 
 	/** A container default reaches the CDO but not the SCS template or placed actors. Fallback of
-	 *  set_bp_variable_default. */
+	 *  set_blueprint_variable_default. */
 	FO WarnArrayNotPropagated(const FO& Params, const FO& Result)
 	{
 		using namespace McpPy;
@@ -1018,61 +1086,57 @@ void McpReadbackChecks::RegisterInResponseC(McpReadback::FTables& Tables)
 		}
 	};
 	T.Add(TEXT("compare_objects"), &CheckObjectComparison);
-	T.Add(TEXT("reparent_blueprint_safe"), &CheckReparentRollback);
-	T.Add(TEXT("set_data_table_row"), &CheckRowWithoutEvidence);
+	T.Add(TEXT("reparent_blueprint"), &CheckReparentRollback);
+	T.Add(TEXT("set_data_table_row"), &CheckDataTableRowWrite);
 	T.Add(TEXT("add_blueprint_function"), &CheckNewFunction);
-	T.Add(TEXT("implement_interface_function"), &CheckInterfaceOverride);
-	T.Add(TEXT("add_select_node"), &CheckSelectPolarity);
-	T.Add(TEXT("get_smart_object_info"), &CheckSmartObjectTags);
+	T.Add(TEXT("add_graph_node"), &CheckAddGraphNode);
 	T.Add(TEXT("find_actors_by_name"), &CheckNameSearch);
 	T.Add(TEXT("get_blueprint_exec_path"), &CheckExecutionTrace);
 	T.Add(TEXT("snap_actor_to_ground"), &CheckGroundPlacement);
-	AddForEach({ TEXT("get_world_settings"), TEXT("get_world_settings_detail") }, &CheckTimeDilation);
+	T.Add(TEXT("get_world_settings"), &CheckTimeDilation);
 	T.Add(TEXT("set_landscape_material"), &CheckLandscapeMaterial);
-	T.Add(TEXT("get_rvt_info"), &CheckRvtInfo);
+	T.Add(TEXT("get_runtime_virtual_texture_info"), &CheckRvtInfo);
 	T.Add(TEXT("get_montage_info"), &CheckMontageNotifies);
-	T.Add(TEXT("validate_anim_state_machine"), &CheckStateMachine);
+	T.Add(TEXT("get_anim_state_machine_info"), &CheckStateMachine);
 	AddForEach({ TEXT("get_skeleton_info"), TEXT("get_skeletal_mesh_info") }, &CheckTruncatedBones);
 	T.Add(TEXT("create_gameplay_tag"), &CheckGameplayTag);
 	T.Add(TEXT("get_collision_profile"), &CheckCollisionProfileRead);
 	T.Add(TEXT("get_output_log_lines"), &CheckLogLines);
-	AddForEach({ TEXT("trace_blueprint_execution"), TEXT("profile_blueprint_execution") }, &CheckStaticAnalysis);
 	T.Add(TEXT("create_widget_blueprint"), &CheckChildWidgetWithRoot);
 	T.Add(TEXT("rename_function_parameter"), &CheckParameterRename);
 	T.Add(TEXT("get_data_table_info"), &CheckCompositeTable);
-	AddForEach({ TEXT("add_subtitle_cue"), TEXT("set_subtitle_cue_text"), TEXT("add_enum_entry"), TEXT("map_input_action") }, &CheckVisibleTextWithoutIdentity);
+	AddForEach({ TEXT("add_subtitle_cue"), TEXT("set_subtitle_cue"), TEXT("add_enum_entry"), TEXT("add_mapping_to_context") }, &CheckVisibleTextWithoutIdentity);
 	AddForEach({ TEXT("get_landscape_grass_type_properties"), TEXT("set_landscape_grass_type_properties") }, &CheckGrassVariety);
 	T.Add(TEXT("fork_class_chain"), &CheckForkWithoutTag);
 	T.Add(TEXT("create_struct"), &CheckNewStruct);
 	T.Add(TEXT("generate_pcg_component"), &CheckPcgRegenerated);
-	T.Add(TEXT("call_object_method"), &CheckCallWithTag);
+	T.Add(TEXT("call_function"), &CheckCallFunction);
 	T.Add(TEXT("add_function_parameter"), &CheckFunctionParameter);
 	T.Add(TEXT("spawn_nav_modifier_volume"), &CheckNavModifierVolume);
 	T.Add(TEXT("get_recast_navmesh_settings"), &CheckNavmeshSettings);
 	T.Add(TEXT("create_ocean_water_body"), &CheckOceanCreated);
 	T.Add(TEXT("import_landscape_heightmap"), &CheckHeightmapImport);
-	T.Add(TEXT("create_rvt_volume"), &CheckRvtVolume);
+	T.Add(TEXT("create_runtime_virtual_texture_volume"), &CheckRvtVolume);
 	T.Add(TEXT("find_unused_assets"), &CheckUnusedAssets);
 	T.Add(TEXT("gather_text_for_target"), &CheckTextGather);
 	T.Add(TEXT("add_component_to_blueprint"), &CheckComponentMayNotPersist);
 	T.Add(TEXT("smooth_landscape_in_box"), &CheckClampedSmoothing);
-	T.Add(TEXT("set_bp_variable_replication"), &CheckUnverifiableReplication);
-	AddForEach({ TEXT("force_net_update"), TEXT("flush_net_dormancy") }, &WarnNetRelevancy);
+	T.Add(TEXT("set_blueprint_variable_replication"), &CheckUnverifiableReplication);
 	T.Add(TEXT("possess_pawn"), &WarnTamperedProxy);
-	T.Add(TEXT("set_actor_replicate_movement"), &WarnMovementMirror);
+	T.Add(TEXT("configure_replication"), &WarnMovementMirror);
 	AddForEach({ TEXT("create_lake_water_body"), TEXT("create_river_water_body") }, &WarnWaterWithoutSwimVolume);
-	AddForEach({ TEXT("spawn_box_volume"), TEXT("create_volume") }, &WarnVolumeCollision);
+	T.Add(TEXT("spawn_box_volume"), &WarnVolumeCollision);
 	T.Add(TEXT("add_spline_mesh_component"), &WarnUndeformedCollision);
 	T.Add(TEXT("rerun_construction_scripts"), &WarnConstructionScriptErases);
 	T.Add(TEXT("set_spline_points"), &WarnFragileSplinePoints);
 	T.Add(TEXT("list_objects_of_class"), &WarnUncountedGrass);
 	T.Add(TEXT("add_collision_channel"), &WarnChannelUnknownToEngine);
-	T.Add(TEXT("add_widget_extended"), &WarnWidgetWithoutLifecycle);
+	T.Add(TEXT("add_widget_to_blueprint"), &WarnWidgetWithoutLifecycle);
 	T.Add(TEXT("inject_key_input"), &WarnClientKeyInput);
 	T.Add(TEXT("set_control_rotation"), &WarnInjectedAim);
-	T.Add(TEXT("set_mesh_material_id_in_region"), &WarnUnlocatedRegion);
-	T.Add(TEXT("frame_timing"), &WarnThrottledFrame);
+	T.Add(TEXT("set_mesh_material_id"), &CheckMeshMaterialId);
+	T.Add(TEXT("get_frame_timing"), &WarnThrottledFrame);
 	T.Add(TEXT("is_play_in_editor_active"), &WarnPieStillLoading);
 	T.Add(TEXT("start_play_in_editor"), &WarnPieNotStartingClean);
-	AddForEach({ TEXT("list_derived_classes"), TEXT("get_blueprint_scs_tree"), TEXT("get_class_hierarchy") }, &WarnSweepLoadsBlueprints);
+	AddForEach({ TEXT("list_derived_classes"), TEXT("get_blueprint_components"), TEXT("get_class_hierarchy") }, &WarnSweepLoadsBlueprints);
 }

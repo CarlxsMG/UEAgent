@@ -109,7 +109,7 @@ namespace
 
 	/**
 	 * Best-effort column-type check by name (case-insensitive, like FString ==). Used to reject
-	 * obvious type mismatches in add_chooser_column_to_table when the caller passes a column_type
+	 * obvious type mismatches in add_chooser_column when the caller passes a column_type
 	 * that doesn't match the column struct.
 	 */
 	bool IsKnownColumnType(const FString& ColumnTypeName)
@@ -645,7 +645,7 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 	return mcp_common::MakeSavedReply(MakeReplyData(), bSaved, TEXT("create_chooser_table"), SaveError);
 }
 
-// MCP:add_chooser_column_to_table - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The column goes where the Chooser editor puts it: a filter column before the first output or Randomize column, so filters stay ahead of them; an output column at the end but before a trailing Randomize column; a Randomize column last. The columns after it move up one index; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
+// MCP:add_chooser_column - Add a column of column_type, its input left unbound, to a UChooserTable asset as one undo step, then compile and save the table; success is false, with save_error, when the save fails. Each call adds a new column, even of a type the table already has, except Randomize: a table holds at most one, so an existing Randomize column is returned with already_existed=true and nothing changes. The column goes where the Chooser editor puts it: a filter column before the first output or Randomize column, so filters stay ahead of them; an output column at the end but before a trailing Randomize column; a Randomize column last. The columns after it move up one index; column_index is where the new column went. The new column gets one cell, its DefaultRowValue, per row already in the table, so columns and rows stay in step whichever is added first. Besides the types listed under column_type it accepts OutputFloat, OutputBool, OutputName, OutputEnum, ObjectClass, Name, MultiEnum and Randomize.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_type - Column struct to add: "FloatRange", "Bool", "Enum", "Object", or "OutputObject".
 //   @param column_name - Label echoed back in the reply only; it is not stored on the column.
@@ -653,29 +653,29 @@ TSharedPtr<FJsonObject> HandleCreateChooserTable(const TSharedPtr<FJsonObject>& 
 TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
-	if (TSharedPtr<FJsonObject> Missing = Chooser_ReadTablePath(Params, TEXT("add_chooser_column_to_table"), TablePath))
+	if (TSharedPtr<FJsonObject> Missing = Chooser_ReadTablePath(Params, TEXT("add_chooser_column"), TablePath))
 	{
 		return Missing;
 	}
 	FString ColumnType;
 	if (!Params->TryGetStringField(TEXT("column_type"), ColumnType) || ColumnType.IsEmpty())
 	{
-		return mcp_common::MakeErrorReply(TEXT("add_chooser_column_to_table: 'column_type' is required"));
+		return mcp_common::MakeErrorReply(TEXT("add_chooser_column: 'column_type' is required"));
 	}
 	FString ColumnName;
 	if (!Params->TryGetStringField(TEXT("column_name"), ColumnName) || ColumnName.IsEmpty())
 	{
-		return mcp_common::MakeErrorReply(TEXT("add_chooser_column_to_table: 'column_name' is required"));
+		return mcp_common::MakeErrorReply(TEXT("add_chooser_column: 'column_name' is required"));
 	}
 
 	if (!IsKnownColumnType(ColumnType))
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("add_chooser_column_to_table: unknown column_type '%s' (expected FloatRange|Bool|Enum|Object|OutputObject|OutputFloat|OutputBool|OutputName|ObjectClass|Name|OutputEnum|MultiEnum|Randomize)"), *ColumnType));
+			FString::Printf(TEXT("add_chooser_column: unknown column_type '%s' (expected FloatRange|Bool|Enum|Object|OutputObject|OutputFloat|OutputBool|OutputName|ObjectClass|Name|OutputEnum|MultiEnum|Randomize)"), *ColumnType));
 	}
 
 	TSharedPtr<FJsonObject> LoadError;
-	UChooserTable* Table = Chooser_LoadTable(TablePath, TEXT("add_chooser_column_to_table"), LoadError);
+	UChooserTable* Table = Chooser_LoadTable(TablePath, TEXT("add_chooser_column"), LoadError);
 	if (!Table)
 	{
 		return LoadError;
@@ -685,7 +685,7 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 	if (!ColumnStruct)
 	{
 		return mcp_common::MakeErrorReply(
-			FString::Printf(TEXT("add_chooser_column_to_table: could not resolve script struct for column_type '%s'"), *ColumnType));
+			FString::Printf(TEXT("add_chooser_column: could not resolve script struct for column_type '%s'"), *ColumnType));
 	}
 
 	// A table holds any number of columns of one type (each bound to its own input), so a new column is
@@ -775,7 +775,7 @@ TSharedPtr<FJsonObject> HandleAddChooserColumnToTable(const TSharedPtr<FJsonObje
 	int32 ColumnRowCount = 0;
 	Chooser_VisitColumn(Table->ColumnsStructs[NewIndex], [&ColumnRowCount](const auto& Column) { ColumnRowCount = Chooser_RowArray(Column).Num(); });
 	Data->SetNumberField(TEXT("row_count"), ColumnRowCount);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_column_to_table"), SaveError);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_chooser_column"), SaveError);
 }
 
 // MCP:add_chooser_row - Add one implicit row to a UChooserTable. Grows every column's RowValues by one (using each column's DefaultRowValue where available) and grows ResultsStructs by one, as one undo step, then compiles and saves the table; success is false, with save_error, when the save fails.
@@ -1121,7 +1121,7 @@ TSharedPtr<FJsonObject> HandleListChooserTables(const TSharedPtr<FJsonObject>& P
 // against the same UChooserTable pipeline; no PIE, no render.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_chooser_column - Remove a column from a UChooserTable by index (inverse of add_chooser_column_to_table). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
+// MCP:remove_chooser_column - Remove a column from a UChooserTable by index (inverse of add_chooser_column). The column's per-row cells go with it -- a column owns its own RowValues, so nothing needs re-syncing across the other columns and the row COUNT is unchanged (use remove_chooser_row for that). The removal is one undo step; the table is then compiled and saved, and success is false, with save_error, when the save fails. A table with no columns is left as it is (note, saved false). Omit column_index (or pass -1) to remove the LAST column, matching remove_chooser_row's default.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param column_index - Optional 0-based column index (default -1 = last column).
 //   @returns { table_path, removed_column_index, previous_column_count, new_column_count, column_type, saved, save_error?, note? }
@@ -1587,12 +1587,13 @@ TSharedPtr<FJsonObject> HandleSetChooserColumnDefault(const TSharedPtr<FJsonObje
 	return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("set_chooser_column_default"), SaveError);
 }
 
-// MCP:evaluate_chooser_table - Actually RUN a UChooserTable and get the SINGLE chosen result -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null. Use evaluate_chooser_table_multi when you want EVERY matching result instead of the first.
+// MCP:evaluate_chooser_table - Actually RUN a UChooserTable and get the SINGLE chosen result, or with all_results EVERY matching result (for a chooser meant to select a set) -- the way to test a chooser you just authored without opening the editor. Headless-safe: it is a pure runtime API, so it needs no PIE and no render. Pass context_object_path (any UObject in the editor world) to seed the evaluation context. A table with no columns, or one where no context property matches, falls through to the table's FallbackResult (reported as fallback_used); a table that matches nothing and has no fallback returns null (an empty results list with all_results). With all_results, null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results, and result_object_path is the first of them.
 //   @param table_path - Long package path of an existing UChooserTable.
 //   @param context_object_path - Optional UObject path used to seed the evaluation context.
-//   @param object_class - Optional UClass path for the expected result type (default = /Script/Engine.Object).
-//   @returns { table_path, evaluated, result_object_path, result_object_class, fallback_used, note? }
-//   NOTE (impl): wraps UChooserFunctionLibrary::EvaluateChooser (BlueprintThreadSafe).
+//   @param object_class - Optional UClass path for the expected result type (default = /Script/CoreUObject.Object); results are filtered with IsA.
+//   @param all_results - Optional bool, default false: true evaluates with EvaluateChooserMulti and returns every matching result in results.
+//   @returns { table_path, evaluated, result_object_path, result_object_class, fallback_used, column_count, result_count?: int, results?: [{ result_object_path, result_object_class }], note? }
+//   NOTE (impl): wraps UChooserFunctionLibrary::EvaluateChooser, or EvaluateChooserMulti with all_results (both BlueprintThreadSafe).
 
 TSharedPtr<FJsonObject> HandleEvaluateChooserTable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1610,11 +1611,32 @@ TSharedPtr<FJsonObject> HandleEvaluateChooserTable(const TSharedPtr<FJsonObject>
 		return Error;
 	}
 
+	bool bAllResults = false;
+	Params->TryGetBoolField(TEXT("all_results"), bAllResults);
+
 	// Snapshot FallbackResult presence BEFORE evaluation so we can detect a fallback path.
 	const bool bFallbackPresent = Table->FallbackResult.IsValid()
 		&& Table->FallbackResult.GetScriptStruct() != nullptr;
 
-	UObject* Result = UChooserFunctionLibrary::EvaluateChooser(ContextObject, Table, TSubclassOf<UObject>(ResultClass));
+	UObject* Result = nullptr;
+	TArray<TSharedPtr<FJsonValue>> ResultsArr;
+	if (bAllResults)
+	{
+		// The engine can interleave nullptr entries; skip them when building the payload.
+		for (UObject* R : UChooserFunctionLibrary::EvaluateChooserMulti(ContextObject, Table, TSubclassOf<UObject>(ResultClass)))
+		{
+			if (!R) { continue; }
+			if (!Result) { Result = R; }
+			TSharedPtr<FJsonObject> RObj = MakeShared<FJsonObject>();
+			RObj->SetStringField(TEXT("result_object_path"), R->GetPathName());
+			RObj->SetStringField(TEXT("result_object_class"), R->GetClass()->GetPathName());
+			ResultsArr.Add(MakeShared<FJsonValueObject>(RObj));
+		}
+	}
+	else
+	{
+		Result = UChooserFunctionLibrary::EvaluateChooser(ContextObject, Table, TSubclassOf<UObject>(ResultClass));
+	}
 	const bool bResultValid = (Result != nullptr);
 
 	// Heuristic for fallback_used: no context was provided AND the table has no columns
@@ -1625,6 +1647,11 @@ TSharedPtr<FJsonObject> HandleEvaluateChooserTable(const TSharedPtr<FJsonObject>
 	const bool bFallbackUsed = bResultValid && bNoContextAndNoColumns && bFallbackPresent;
 
 	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+	if (bAllResults)
+	{
+		Resp->SetNumberField(TEXT("result_count"), ResultsArr.Num());
+		Resp->SetArrayField(TEXT("results"), ResultsArr);
+	}
 	Resp->SetStringField(TEXT("table_path"), Table->GetPathName());
 	Resp->SetBoolField(TEXT("evaluated"), true);
 	Resp->SetStringField(TEXT("result_object_path"),
@@ -1642,7 +1669,7 @@ TSharedPtr<FJsonObject> HandleEvaluateChooserTable(const TSharedPtr<FJsonObject>
 }
 
 // ---------------------------------------------------------------------------
-// Per-row / per-column readers + multi-result evaluation. The readers walk the
+// Per-row / per-column readers. The readers walk the
 // ungated RowValues arrays (RowValuesWithAny for Bool) and write each cell with
 // Chooser_WriteCell.
 // ---------------------------------------------------------------------------
@@ -1783,68 +1810,13 @@ TSharedPtr<FJsonObject> HandleGetChooserColumnValues(const TSharedPtr<FJsonObjec
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:evaluate_chooser_table_multi - Actually RUN a UChooserTable and get EVERY matching result, not just the first: the multi-result mirror of evaluate_chooser_table, which is what you want when the chooser is meant to select a set. Headless-safe pure runtime API -- no PIE, no render. object_class defaults to /Script/CoreUObject.Object and is never null, since results are post-filtered with IsA; null entries the engine interleaves in its array are skipped, so result_count is the count of REAL results.
-//   @param table_path - Long package path of an existing UChooserTable.
-//   @param context_object_path - Optional UObject path used to seed the evaluation context.
-//   @param object_class - Optional UClass path for the expected result type (default = /Script/CoreUObject.Object).
-//   @returns { table_path, evaluated, result_count, results: [{ result_object_path, result_object_class }], fallback_used, column_count }
-//   NOTE (impl): wraps UChooserFunctionLibrary::EvaluateChooserMulti (BlueprintThreadSafe).
-TSharedPtr<FJsonObject> HandleEvaluateChooserTableMulti(const TSharedPtr<FJsonObject>& Params)
-{
-	TSharedPtr<FJsonObject> Error;
-	UChooserTable* Table = Chooser_LoadTableParam(Params, TEXT("evaluate_chooser_table_multi"), Error);
-	if (!Table)
-	{
-		return Error;
-	}
-
-	UObject* ContextObject = nullptr;
-	UClass* ResultClass = nullptr;
-	if (!Chooser_ReadEvaluationInputs(Params, TEXT("evaluate_chooser_table_multi"), ContextObject, ResultClass, Error))
-	{
-		return Error;
-	}
-
-	// Snapshot FallbackResult presence BEFORE evaluation so we can detect a fallback path.
-	const bool bFallbackPresent = Table->FallbackResult.IsValid()
-		&& Table->FallbackResult.GetScriptStruct() != nullptr;
-
-	TArray<UObject*> Results = UChooserFunctionLibrary::EvaluateChooserMulti(ContextObject, Table, TSubclassOf<UObject>(ResultClass));
-
-	// The engine can interleave nullptr entries; skip them when building the payload.
-	TArray<TSharedPtr<FJsonValue>> ResultsArr;
-	for (UObject* R : Results)
-	{
-		if (!R) { continue; }
-		TSharedPtr<FJsonObject> RObj = MakeShared<FJsonObject>();
-		RObj->SetStringField(TEXT("result_object_path"), R->GetPathName());
-		RObj->SetStringField(TEXT("result_object_class"), R->GetClass()->GetPathName());
-		ResultsArr.Add(MakeShared<FJsonValueObject>(RObj));
-	}
-
-	// Same fallback heuristic as evaluate_chooser_table: with no context and no columns bound,
-	// any non-empty result can only have come from FallbackResult.
-	const bool bNoContextAndNoColumns = (ContextObject == nullptr) && (Table->ColumnsStructs.Num() == 0);
-	const bool bFallbackUsed = (ResultsArr.Num() > 0) && bNoContextAndNoColumns && bFallbackPresent;
-
-	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-	Resp->SetStringField(TEXT("table_path"), Table->GetPathName());
-	Resp->SetBoolField(TEXT("evaluated"), true);
-	Resp->SetNumberField(TEXT("result_count"), ResultsArr.Num());
-	Resp->SetArrayField(TEXT("results"), ResultsArr);
-	Resp->SetBoolField(TEXT("fallback_used"), bFallbackUsed);
-	Resp->SetNumberField(TEXT("column_count"), Table->ColumnsStructs.Num());
-	return mcp_common::MakeOkReply(Resp);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
-	{ TEXT("add_chooser_column_to_table"), &HandleAddChooserColumnToTable },
+	{ TEXT("add_chooser_column"), &HandleAddChooserColumnToTable },
 	{ TEXT("add_chooser_row"), &HandleAddChooserRow },
 	{ TEXT("create_chooser_table"), &HandleCreateChooserTable },
 	{ TEXT("delete_chooser_table"), &HandleDeleteChooserTable },
 	{ TEXT("evaluate_chooser_table"), &HandleEvaluateChooserTable },
-	{ TEXT("evaluate_chooser_table_multi"), &HandleEvaluateChooserTableMulti },
 	{ TEXT("get_chooser_column_values"), &HandleGetChooserColumnValues },
 	{ TEXT("get_chooser_row_values"), &HandleGetChooserRowValues },
 	{ TEXT("inspect_chooser_table"), &HandleInspectChooserTable },

@@ -11,10 +11,14 @@
 #include "Modules/ModuleManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/Blueprint.h"                     // list_derived_classes: a Blueprint asset as base_class
+#include "Blueprint/BlueprintSupport.h"            // FBlueprintTags::NativeParentClassPath of an unloaded Blueprint
+#include "Commands/Asset/AssetCommandHelpers.h"     // FindAssetByExactName / AppendAmbiguity
+#include "Commands/Subsystem/SubsystemLifetime.h"   // lifetime of a subsystem class
 
 /**
  * Reflection discovery commands: enumerate the types, live instances, interfaces and modules a project
- * defines -- what list_subsystem_classes does for subsystems, for any UObject-derived hierarchy.
+ * defines, for any UObject-derived hierarchy (subsystems included).
  * Read-only; runtime-safe (no PIE/render dependency).
  */
 namespace UEAgentReflectionDiscoveryCommands
@@ -53,12 +57,15 @@ namespace
     }
 }
 
-// MCP:list_derived_classes - Enumerate every class derived from a base class (native + Blueprint), the generalization of list_subsystem_classes to any UObject hierarchy. With loaded_only=false also surfaces not-yet-loaded Blueprint subclasses via the asset registry (class_name/path only, loaded=false).
-//   @param base_class - Name/path of the base class (resolved via ResolveClass: bare name, /Script/ path, or Blueprint asset path)
+// MCP:list_derived_classes - Enumerate every class derived from a base class (native + Blueprint, Widget and Anim Blueprints included) in any UObject hierarchy -- "what breaks if I change this base class?", or every subsystem of a lifetime family (base_class GameInstanceSubsystem, WorldSubsystem, EditorSubsystem...). The base may be a native class or a Blueprint asset. With loaded_only=false (default) it also surfaces not-yet-loaded Blueprint subclasses from the asset registry without loading them (loaded=false: no is_abstract/module/parent_class/lifetime, native_parent from the registry tag). include_native=false and package_path narrow it to the Blueprint assets under a content folder.
+//   @param base_class - Name/path of the base class (resolved via ResolveClass: bare name, /Script/ path, or Blueprint class/asset path); a name ResolveClass does not know is looked up as a Blueprint asset name under /Game, and when that name matches more than one asset the others are listed in ambiguous_matches.
 //   @param include_blueprints - Include Blueprint-generated (non-native) subclasses (default true)
+//   @param include_native - Include native C++ subclasses (default true); false lists only Blueprint classes
 //   @param include_abstract - Include classes flagged CLASS_Abstract (default false)
 //   @param loaded_only - If false (default), also queries the asset registry for Blueprint subclasses not currently loaded in memory
-//   @returns { base_class: string, classes: [{class_name, path, is_blueprint, is_abstract, module?, loaded}], count: int }
+//   @param package_path - Optional content folder (e.g. "/Game" or "/Game/Characters"): keep only Blueprint classes whose package lies under it. Native classes are not filtered by it.
+//   @param max_results - Optional cap on classes returned, 1..100000 (absent: no cap); results_truncated says whether any were left out
+//   @returns { base_class: string, base_class_path: string, ambiguous_matches?: [string], classes: [{class_name, path, is_blueprint, is_abstract?, module?, loaded, parent_class?, native_parent?, lifetime?, asset_name?, asset_path?, package?}], count: int, native_count: int, blueprint_count: int, results_truncated: bool, max_results?: int } -- asset_name/asset_path/package name the Blueprint ASSET of a Blueprint class (its generated "_C" class stripped); native_parent is the first native ancestor; lifetime (Editor, Engine, GameInstance, World, LocalPlayer or Unknown) only for a loaded USubsystem class.
 
 TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& Params)
 {
@@ -67,25 +74,75 @@ TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& 
 
     bool bIncludeBlueprints = true;
     Params->TryGetBoolField(TEXT("include_blueprints"), bIncludeBlueprints);
+    bool bIncludeNative = true;
+    Params->TryGetBoolField(TEXT("include_native"), bIncludeNative);
     bool bIncludeAbstract = false;
     Params->TryGetBoolField(TEXT("include_abstract"), bIncludeAbstract);
     bool bLoadedOnly = false;
     Params->TryGetBoolField(TEXT("loaded_only"), bLoadedOnly);
+    FString PackageFilter;
+    Params->TryGetStringField(TEXT("package_path"), PackageFilter);
+    PackageFilter.RemoveFromEnd(TEXT("/"));
+    int32 Cap = 0;   // 0 = no cap
+    double RequestedCap = 0.0;
+    if (Params->TryGetNumberField(TEXT("max_results"), RequestedCap))
+    {
+        Cap = (int32)RequestedCap;
+        if (RequestedCap != (double)Cap || Cap < 1 || Cap > 100000)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Parameter 'max_results' must be a whole number from 1 to 100000; got %g"), RequestedCap));
+        }
+    }
 
+    // A class name or path first; a name it does not know may be a Blueprint asset's.
     UClass* Base = FUEAgentGraphUtils::ResolveClass(BaseClassName);
+    AssetCommandHelpers::FNamedAsset BaseAsset;
+    if (!Base && AssetCommandHelpers::FindAssetByExactName(BaseClassName, UBlueprint::StaticClass(), BaseAsset))
+    {
+        if (const UBlueprint* BaseBlueprint = Cast<UBlueprint>(BaseAsset.Asset.GetAsset()))
+        {
+            Base = BaseBlueprint->GeneratedClass;
+        }
+    }
     if (!Base)
     {
         return mcp_common::MakeErrorReply(FUEAgentGraphUtils::DescribeClassNotFound(BaseClassName));
     }
+    const FTopLevelAssetPath BasePath = Base->GetClassPathName();
+
+    // The Blueprint asset behind a Blueprint class path ("<Package>.<Asset>_C"), and whether package_path keeps it.
+    const auto BlueprintAssetOf = [](const FTopLevelAssetPath& ClassPath, FString& OutPackage, FString& OutAssetName)
+    {
+        OutPackage = ClassPath.GetPackageName().ToString();
+        OutAssetName = ClassPath.GetAssetName().ToString();
+        OutAssetName.RemoveFromEnd(TEXT("_C"));
+    };
+    const auto UnderPackageFilter = [&PackageFilter](const FString& Package)
+    {
+        return PackageFilter.IsEmpty() || Package == PackageFilter || Package.StartsWith(PackageFilter + TEXT("/"));
+    };
 
     // GetDerivedClasses does NOT filter by EClassFlags on its own (confirmed against
-    // UObjectHash.cpp) -- filter Abstract/Deprecated/NewerVersionExists manually, same
-    // idiom as list_subsystem_classes.
+    // UObjectHash.cpp) -- filter Abstract/Deprecated/NewerVersionExists manually.
     TArray<UClass*> Derived;
     GetDerivedClasses(Base, Derived, /*bRecursive=*/true);
 
     TArray<TSharedPtr<FJsonValue>> ClassesArray;
     TSet<FTopLevelAssetPath> LoadedPaths;
+    int32 NativeCount = 0;
+    int32 BlueprintCount = 0;
+    bool bTruncated = false;
+    // Room for one more entry; a listable entry turned away marks the listing truncated.
+    const auto TakeSlot = [&ClassesArray, &bTruncated, Cap]()
+    {
+        if (Cap > 0 && ClassesArray.Num() >= Cap)
+        {
+            bTruncated = true;
+            return false;
+        }
+        return true;
+    };
 
     for (UClass* Cls : Derived)
     {
@@ -98,12 +155,22 @@ TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& 
             continue;
         }
         const bool bIsBlueprint = !Cls->IsNative();
-        if (bIsBlueprint && !bIncludeBlueprints)
+        if ((bIsBlueprint && !bIncludeBlueprints) || (!bIsBlueprint && !bIncludeNative))
+        {
+            continue;
+        }
+        FString Package, AssetName;
+        BlueprintAssetOf(Cls->GetClassPathName(), Package, AssetName);
+        if (bIsBlueprint && !UnderPackageFilter(Package))
         {
             continue;
         }
 
         LoadedPaths.Add(Cls->GetClassPathName());
+        if (!TakeSlot())
+        {
+            continue;
+        }
 
         TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
         Entry->SetStringField(TEXT("class_name"), Cls->GetName());
@@ -113,6 +180,34 @@ TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& 
         const FString Module = ResolveModuleName(Cls);
         if (!Module.IsEmpty()) { Entry->SetStringField(TEXT("module"), Module); }
         Entry->SetBoolField(TEXT("loaded"), true);
+        if (const UClass* Super = Cls->GetSuperClass())
+        {
+            Entry->SetStringField(TEXT("parent_class"), Super->GetName());
+        }
+        const UClass* NativeParent = Cls;
+        while (NativeParent && !NativeParent->IsNative())
+        {
+            NativeParent = NativeParent->GetSuperClass();
+        }
+        if (NativeParent)
+        {
+            Entry->SetStringField(TEXT("native_parent"), NativeParent->GetPathName());
+        }
+        if (Cls->IsChildOf(USubsystem::StaticClass()))
+        {
+            Entry->SetStringField(TEXT("lifetime"), UEAgentSubsystemLifetime::DetectLifetimeCategory(Cls));
+        }
+        if (bIsBlueprint)
+        {
+            Entry->SetStringField(TEXT("asset_name"), AssetName);
+            Entry->SetStringField(TEXT("asset_path"), Package + TEXT(".") + AssetName);
+            Entry->SetStringField(TEXT("package"), Package);
+            ++BlueprintCount;
+        }
+        else
+        {
+            ++NativeCount;
+        }
         ClassesArray.Add(MakeShared<FJsonValueObject>(Entry));
     }
 
@@ -122,31 +217,62 @@ TSharedPtr<FJsonObject> HandleListDerivedClasses(const TSharedPtr<FJsonObject>& 
     // is_abstract/module are unknowable, so those fields are omitted rather than guessed.
     if (!bLoadedOnly && bIncludeBlueprints)
     {
+        IAssetRegistry& Registry = mcp_common::AssetRegistry();
         TArray<FTopLevelAssetPath> ClassNames;
-        ClassNames.Add(Base->GetClassPathName());
+        ClassNames.Add(BasePath);
         TSet<FTopLevelAssetPath> ExcludedClassNames;
         TSet<FTopLevelAssetPath> DerivedClassNames;
-        mcp_common::AssetRegistry().GetDerivedClassNames(ClassNames, ExcludedClassNames, DerivedClassNames);
+        Registry.GetDerivedClassNames(ClassNames, ExcludedClassNames, DerivedClassNames);
 
         for (const FTopLevelAssetPath& Path : DerivedClassNames)
         {
-            if (LoadedPaths.Contains(Path))
+            if (Path == BasePath || LoadedPaths.Contains(Path))
             {
-                continue; // already emitted above (loaded copy takes precedence)
+                continue; // the base itself, or already emitted above (loaded copy takes precedence)
+            }
+            FString Package, AssetName;
+            BlueprintAssetOf(Path, Package, AssetName);
+            if (!UnderPackageFilter(Package))
+            {
+                continue;
+            }
+            if (!TakeSlot())
+            {
+                continue;
             }
             TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
             Entry->SetStringField(TEXT("class_name"), Path.GetAssetName().ToString());
             Entry->SetStringField(TEXT("path"), Path.ToString());
             Entry->SetBoolField(TEXT("is_blueprint"), true);
             Entry->SetBoolField(TEXT("loaded"), false);
+            Entry->SetStringField(TEXT("asset_name"), AssetName);
+            Entry->SetStringField(TEXT("asset_path"), Package + TEXT(".") + AssetName);
+            Entry->SetStringField(TEXT("package"), Package);
+            // The native parent of an unloaded Blueprint is a registry tag of its asset.
+            const FAssetData BlueprintAsset = Registry.GetAssetByObjectPath(FSoftObjectPath(Package + TEXT(".") + AssetName));
+            FString NativeParentTag;
+            if (BlueprintAsset.IsValid() && BlueprintAsset.GetTagValue(FBlueprintTags::NativeParentClassPath, NativeParentTag))
+            {
+                Entry->SetStringField(TEXT("native_parent"), FPackageName::ExportTextPathToObjectPath(NativeParentTag));
+            }
+            ++BlueprintCount;
             ClassesArray.Add(MakeShared<FJsonValueObject>(Entry));
         }
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("base_class"), BaseClassName);
+    ResultObj->SetStringField(TEXT("base_class_path"), Base->GetPathName());
+    AssetCommandHelpers::AppendAmbiguity(ResultObj, BaseAsset.AmbiguousMatches);
     ResultObj->SetArrayField(TEXT("classes"), ClassesArray);
     ResultObj->SetNumberField(TEXT("count"), ClassesArray.Num());
+    ResultObj->SetNumberField(TEXT("native_count"), NativeCount);
+    ResultObj->SetNumberField(TEXT("blueprint_count"), BlueprintCount);
+    ResultObj->SetBoolField(TEXT("results_truncated"), bTruncated);
+    if (Cap > 0)
+    {
+        ResultObj->SetNumberField(TEXT("max_results"), Cap);
+    }
     return mcp_common::MakeOkReply(ResultObj);
 }
 
@@ -163,7 +289,7 @@ TSharedPtr<FJsonObject> HandleListStructs(const TSharedPtr<FJsonObject>& Params)
 
     TArray<TSharedPtr<FJsonValue>> StructsArray;
     // TObjectRange<T> does not exist in UE 5.8 (confirmed against source) -- TObjectIterator<T>
-    // is the real iteration mechanism, same idiom as list_subsystem_classes.
+    // is the real iteration mechanism.
     for (TObjectIterator<UScriptStruct> It; It; ++It)
     {
         UScriptStruct* Struct = *It;
@@ -181,7 +307,7 @@ TSharedPtr<FJsonObject> HandleListStructs(const TSharedPtr<FJsonObject>& Params)
         Entry->SetStringField(TEXT("struct_name"), Struct->GetName());
         Entry->SetStringField(TEXT("path"), Struct->GetPathName());
         if (!Module.IsEmpty()) { Entry->SetStringField(TEXT("module"), Module); }
-        // is_user_defined: !IsNative() is the same proxy list_subsystem_classes already uses
+        // is_user_defined: !IsNative() is the same proxy list_derived_classes uses
         // for native-vs-Blueprint; a UUserDefinedStruct (Blueprint struct asset) is non-native.
         Entry->SetBoolField(TEXT("is_user_defined"), !Struct->IsNative());
         StructsArray.Add(MakeShared<FJsonValueObject>(Entry));
@@ -341,7 +467,7 @@ TSharedPtr<FJsonObject> HandleListObjectsOfClass(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:find_classes_implementing_interface - Enumerate every loaded class that implements a given UInterface. No inverse index exists in the engine (confirmed against source) -- this is an O(loaded classes) sweep, same idiom as list_subsystem_classes.
+// MCP:find_classes_implementing_interface - Enumerate every loaded class that implements a given UInterface. No inverse index exists in the engine (confirmed against source) -- this is an O(loaded classes) sweep.
 //   @param interface - Name/path of the interface to search for (resolved via ResolveClass)
 //   @param include_blueprints - Include Blueprint-generated (non-native) classes (default true)
 //   @returns { interface: string, classes: [{class_name, path, is_blueprint, implemented_by_k2}], count: int, scanned_class_count: int }

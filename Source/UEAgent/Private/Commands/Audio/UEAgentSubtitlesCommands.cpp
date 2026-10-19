@@ -1,6 +1,5 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
-#include "Commands/Asset/AssetCommandHelpers.h"
 
 // Engine subtitles (USubtitleAssetUserData + FSubtitleAssetData — Runtime/Engine module,
 // header under Subtitles/; no extra module add needed)
@@ -137,7 +136,7 @@ namespace
 // canonical direct-create path (no USubtitleFactory needed — and we avoid it
 // because it's an editor factory with dialog surface and not headless-safe).
 // ---------------------------------------------------------------------------
-// MCP:create_subtitles_asset - Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; the inverse is remove_subtitles_asset.
+// MCP:create_subtitles_asset - Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; delete it with delete_asset.
 //   @param name - Name of the new subtitles asset.
 //   @param package_path - Destination /Game folder (default /Game/MCP).
 //   @returns { asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }
@@ -205,7 +204,7 @@ TSharedPtr<FJsonObject> HandleCreateSubtitlesAsset(
 // FSubtitleAssetData::operator== (text+duration+start+priority+type; ignores
 // Comment), and either appends or returns the existing cue's index.
 // ---------------------------------------------------------------------------
-// MCP:add_subtitle_cue - Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue with set_subtitle_cue_text or set_subtitle_cue_timing and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
+// MCP:add_subtitle_cue - Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue (text or timing) with set_subtitle_cue and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
 //   @param asset_path - Content path of the USubtitleAssetUserData asset.
 //   @param text - The subtitle text (required).
 //   @param start_offset - Initial delay in seconds before the subtitle is visible (default 0).
@@ -321,68 +320,19 @@ TSharedPtr<FJsonObject> HandleAddSubtitleCue(
 }
 
 // ---------------------------------------------------------------------------
-// set_subtitle_cue_text
-// Sets Subtitles[cue_index].Text on an existing USubtitleAssetUserData.
-// ---------------------------------------------------------------------------
-// MCP:set_subtitle_cue_text - Sets the text on an existing subtitle cue.  Loads the USubtitleAssetUserData, verifies cue_index is in range, sets Subtitles[cue_index].Text, and saves.
-//   @param asset_path - Content path of the USubtitleAssetUserData asset.
-//   @param cue_index - Zero-based index into the Subtitles array (required).
-//   @param text - New subtitle text (required).
-//   @returns { asset_path: string, cue_index: int, text: string, success: bool, saved: bool }
-
-TSharedPtr<FJsonObject> HandleSetSubtitleCueText(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
-
-    double CueIndexD = -1.0;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("cue_index"), CueIndexD)) { return Missing; }
-    const int32 CueIndex = static_cast<int32>(CueIndexD);
-
-    FString Text;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("text"), Text)) { return Missing; }
-
-    USubtitleAssetUserData* Asset = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = Subtitles_LoadCue(AssetPath, CueIndex, Asset))
-    {
-        return LoadError;
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSubtitleCueText", "Set Subtitle Cue Text"));
-    Asset->Modify();
-
-    Asset->Subtitles[CueIndex].Text = FText::FromString(Text);
-
-    FString SaveError;
-    const bool bSaved = mcp_common::SaveAssetPackage(Asset->GetOutermost(), Asset, SaveError);
-    if (!bSaved)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("SaveAssetPackage failed: %s"), *SaveError));
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("asset_path"), Asset->GetPathName());
-    ResultObj->SetNumberField(TEXT("cue_index"), CueIndex);
-    ResultObj->SetStringField(TEXT("text"), Text);
-    ResultObj->SetBoolField(TEXT("success"), true);
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_subtitle_cue_text"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// set_subtitle_cue_timing
-// Patches StartOffset / Duration / SubtitleDurationType on Subtitles[cue_index].
-// All three fields are optional; only present fields are applied. The asset is
+// set_subtitle_cue
+// Patches Text / StartOffset / Duration / SubtitleDurationType on Subtitles[cue_index].
+// All four fields are optional; only present fields are applied. The asset is
 // saved even if nothing changed (to keep idempotent "set to X" semantics).
 // ---------------------------------------------------------------------------
-// MCP:set_subtitle_cue_timing - Updates the timing fields on an existing subtitle cue.  Loads the USubtitleAssetUserData, applies any combination of start_offset / duration / duration_type to Subtitles[cue_index], and saves. Fields not provided are left untouched.
+// MCP:set_subtitle_cue - Updates the text and timing fields on an existing subtitle cue.  Loads the USubtitleAssetUserData, applies any combination of text / start_offset / duration / duration_type to Subtitles[cue_index], and saves. Fields not provided are left untouched.
 //   @param asset_path - Content path of the USubtitleAssetUserData asset.
 //   @param cue_index - Zero-based index into the Subtitles array (required).
+//   @param text - Optional new subtitle text (Subtitles[cue_index].Text); an empty string clears it.
 //   @param start_offset - Optional new StartOffset (seconds).
 //   @param duration - Optional new Duration (seconds).
 //   @param duration_type - Optional new SubtitleDurationType ("use_sound_duration" or "use_duration_property").
-//   @returns { asset_path: string, cue_index: int, success: bool, applied_start_offset: bool, applied_duration: bool, applied_duration_type: bool, start_offset: float, duration: float, duration_type: string, saved: bool }
+//   @returns { asset_path: string, cue_index: int, success: bool, applied_text: bool, applied_start_offset: bool, applied_duration: bool, applied_duration_type: bool, text?: string (when text was given, read back), start_offset: float, duration: float, duration_type: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
     const TSharedPtr<FJsonObject>& Params)
@@ -394,14 +344,37 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("cue_index"), CueIndexD)) { return Missing; }
     const int32 CueIndex = static_cast<int32>(CueIndexD);
 
+    // Optional, read up front: an absent key leaves the cue's text alone, an empty string clears it.
+    FString Text;
+    const bool bHasText = Params->TryGetStringField(TEXT("text"), Text);
+
+    // duration_type is checked before anything is written, so a bad one leaves the cue untouched.
+    bool bAppliedDurationType = false;
+    ESubtitleDurationType ParsedDurationType = ESubtitleDurationType::UseDurationProperty;
+    FString DurationTypeStr;
+    if (Params->TryGetStringField(TEXT("duration_type"), DurationTypeStr) && !DurationTypeStr.IsEmpty())
+    {
+        FString Err;
+        if (!ParseDurationType(DurationTypeStr, ParsedDurationType, Err))
+        {
+            return mcp_common::MakeErrorReply(Err);
+        }
+        bAppliedDurationType = true;
+    }
+
     USubtitleAssetUserData* Asset = nullptr;
     if (TSharedPtr<FJsonObject> LoadError = Subtitles_LoadCue(AssetPath, CueIndex, Asset))
     {
         return LoadError;
     }
 
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSubtitleCueTiming", "Set Subtitle Cue Timing"));
+    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSubtitleCue", "Set Subtitle Cue"));
     Asset->Modify();
+
+    if (bHasText)
+    {
+        Asset->Subtitles[CueIndex].Text = FText::FromString(Text);
+    }
 
     bool bAppliedStartOffset = false;
     double StartOffsetD = 0.0;
@@ -419,18 +392,9 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
         bAppliedDuration = true;
     }
 
-    bool bAppliedDurationType = false;
-    FString DurationTypeStr;
-    if (Params->TryGetStringField(TEXT("duration_type"), DurationTypeStr) && !DurationTypeStr.IsEmpty())
+    if (bAppliedDurationType)
     {
-        ESubtitleDurationType Parsed;
-        FString Err;
-        if (!ParseDurationType(DurationTypeStr, Parsed, Err))
-        {
-            return mcp_common::MakeErrorReply(Err);
-        }
-        Asset->Subtitles[CueIndex].SubtitleDurationType = Parsed;
-        bAppliedDurationType = true;
+        Asset->Subtitles[CueIndex].SubtitleDurationType = ParsedDurationType;
     }
 
     FString SaveError;
@@ -447,6 +411,12 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
     ResultObj->SetStringField(TEXT("asset_path"), Asset->GetPathName());
     ResultObj->SetNumberField(TEXT("cue_index"), CueIndex);
     ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetBoolField(TEXT("applied_text"), bHasText);
+    if (bHasText)
+    {
+        // The cue's text as stored, echoed only when this call wrote it.
+        ResultObj->SetStringField(TEXT("text"), Cue.Text.ToString());
+    }
     ResultObj->SetBoolField(TEXT("applied_start_offset"), bAppliedStartOffset);
     ResultObj->SetBoolField(TEXT("applied_duration"), bAppliedDuration);
     ResultObj->SetBoolField(TEXT("applied_duration_type"), bAppliedDurationType);
@@ -455,7 +425,7 @@ TSharedPtr<FJsonObject> HandleSetSubtitleCueTiming(
     ResultObj->SetStringField(TEXT("duration_type"), Cue.SubtitleDurationType == ESubtitleDurationType::UseSoundDuration
         ? TEXT("use_sound_duration")
         : TEXT("use_duration_property"));
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_subtitle_cue_timing"), SaveError);
+    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_subtitle_cue"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -497,10 +467,10 @@ TSharedPtr<FJsonObject> HandleListSubtitleCues(
 }
 
 // ---------------------------------------------------------------------------
-// Typed delete cue + typed delete asset.
+// Typed delete cue.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_subtitle_cue - Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; use remove_subtitles_asset to destroy the whole asset instead. Idempotent: an out-of-range index returns removed:false + note, not an error.
+// MCP:remove_subtitle_cue - Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; use delete_asset to destroy the whole asset instead. Idempotent: an out-of-range index returns removed:false + note, not an error.
 //   @param asset_path - /Game path to the USubtitleAssetUserData.
 //   @param cue_index - 0-based index into Subtitles[].
 //   @returns { asset_path, cue_index, removed, previous_count, new_count }
@@ -545,54 +515,12 @@ TSharedPtr<FJsonObject> HandleRemoveSubtitleCue(const TSharedPtr<FJsonObject>& P
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("remove_subtitle_cue"), SaveError);
 }
 
-// MCP:remove_subtitles_asset - Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
-//   @param asset_path - Full /Game/... asset path of the subtitles asset.
-//   @returns { asset_path, deleted, already_existed, asset_class?, note? }
-//   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
-
-TSharedPtr<FJsonObject> HandleRemoveSubtitlesAsset(const TSharedPtr<FJsonObject>& Params)
-{
-    FString AssetPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("asset_path"), AssetPath)) { return Missing; }
-    if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
-    {
-        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-        Resp->SetStringField(TEXT("asset_path"), AssetPath);
-        Resp->SetBoolField(TEXT("deleted"), false);
-        Resp->SetBoolField(TEXT("already_existed"), false);
-        Resp->SetStringField(TEXT("note"), TEXT("asset_path does not exist; nothing to remove"));
-        return mcp_common::MakeOkReply(Resp);
-    }
-    UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
-    if (!Asset)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("remove_subtitles_asset: could not load asset at %s"), *AssetPath));
-    }
-    if (!Asset->IsA<USubtitleAssetUserData>())
-    {
-        return AssetCommandHelpers::WrongTypeRefusal(TEXT("remove_subtitles_asset"), AssetPath, *Asset, TEXT("USubtitleAssetUserData"));
-    }
-
-    const FString AssetClassName = Asset->GetClass()->GetName();
-    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
-
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    Resp->SetStringField(TEXT("asset_path"), AssetPath);
-    Resp->SetStringField(TEXT("asset_class"), AssetClassName);
-    Resp->SetBoolField(TEXT("deleted"), bDeleted);
-    Resp->SetBoolField(TEXT("already_existed"), true);
-    return AssetCommandHelpers::DeleteOutcomeReply(TEXT("remove_subtitles_asset"), Resp, bDeleted, AssetPath);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_subtitle_cue"), &HandleAddSubtitleCue },
     { TEXT("create_subtitles_asset"), &HandleCreateSubtitlesAsset },
     { TEXT("list_subtitle_cues"), &HandleListSubtitleCues },
     { TEXT("remove_subtitle_cue"), &HandleRemoveSubtitleCue },
-    { TEXT("remove_subtitles_asset"), &HandleRemoveSubtitlesAsset },
-    { TEXT("set_subtitle_cue_text"), &HandleSetSubtitleCueText },
-    { TEXT("set_subtitle_cue_timing"), &HandleSetSubtitleCueTiming },
+    { TEXT("set_subtitle_cue"), &HandleSetSubtitleCueTiming },
 };
 } // namespace UEAgentSubtitlesCommands

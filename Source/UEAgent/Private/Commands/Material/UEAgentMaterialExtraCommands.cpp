@@ -11,13 +11,13 @@
 #include "Materials/MaterialExpressionConstant4Vector.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
-// set_material_instance_param re-reads through UMaterialEditingLibrary's value
+// set_material_instance_parameter re-reads through UMaterialEditingLibrary's value
 // getters, all of which take an EMaterialParameterAssociation.
 #include "Materials/MaterialParameters.h"
 #include "Engine/Texture.h"
 #include "SceneTypes.h"
 #include "UObject/UObjectIterator.h"
-#include "UObject/UnrealType.h"            // FProperty import/export (set_material_node_param)
+#include "UObject/UnrealType.h"            // FProperty import/export (set_material_expression_property)
 #include "Misc/StringOutputDevice.h"       // captures ImportText_Direct's own error text
 #include "RenderingThread.h"   // FlushRenderingCommands — serialize material recompile vs render thread
 
@@ -45,6 +45,9 @@
 #include "Engine/SubsurfaceProfile.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
+#include "UObject/SoftObjectPath.h"                    // get_material_function_info soft-path load
+#include "Materials/MaterialFunctionMaterialLayer.h"      // create_material_function usage MaterialLayer
+#include "Materials/MaterialFunctionMaterialLayerBlend.h" // create_material_function usage MaterialLayerBlend
 
 /** Additional material commands: connect an expression to a material output property, set
  *  expression/instance parameters, recompile a material and set its domain, plus material functions
@@ -91,7 +94,7 @@ namespace
         return false;
     }
 
-    // Defined further down, next to set_material_instance_param, its first user.
+    // Defined further down, next to set_material_instance_parameter, its first user.
     bool ParseLinearColorForMaterialInstanceParam(
         const FString& In, FLinearColor& Out, FString& OutFormat, FString& OutError);
 
@@ -198,7 +201,7 @@ namespace UEAgentMaterialExtraImpl
 
 // MCP:connect_to_material_output - Wire one output of an expression node into a main input of a UMaterial asset (BaseColor, Roughness, Normal...). The edit stays in memory: no recompile, no dirty flag, no save, so follow with compile_material and save_asset. Node-to-node wiring is connect_material_expressions.
 //   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock"; a material instance path fails with Material not found.
-//   @param from_node_id - Id of the source expression (from create_material_expression / get_material_expressions).
+//   @param from_node_id - Id of the source expression (from create_material_expression / get_material_graph_info).
 //   @param output_property - Material input to feed, case-insensitive: BaseColor, Metallic, Specular, Roughness, Anisotropy, Normal, Tangent, EmissiveColor (or Emissive), Opacity, OpacityMask, WorldPositionOffset (WPO), AmbientOcclusion (AO), Refraction, PixelDepthOffset, SubsurfaceColor.
 //   @param from_pin - Output pin name on the source node, e.g. "RGB" or "R"; omitted or empty uses its first output.
 //   @returns { material: string, from_node_id: string, output_property: string, connected: bool }
@@ -267,7 +270,7 @@ TSharedPtr<FJsonObject> HandleDisconnectToMaterialOutput(const TSharedPtr<FJsonO
     return Result;
 }
 
-// MCP:set_material_node_param - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_param.
+// MCP:set_material_expression_property - Write one property of an expression node of a UMaterial asset (not an instance), found by its object name node_id. param_name names the property on every node type (R on Constant, DefaultValue or SliderMax on ScalarParameter, Constant on Constant3Vector and Constant4Vector, DefaultValue on VectorParameter...); ParameterName renames a node that has a parameter name. A value that does not parse for the property is refused and nothing is written. No undo, no save: it runs PostEditChange and marks the material dirty (persist with save_asset). value_after is the property read back. Instances: set_material_instance_parameter.
 //   @param material_path - Material asset path
 //   @param node_id - Id of the target expression in the material
 //   @param param_name - Name of the property to set (e.g. "ParameterName", "R", "DefaultValue")
@@ -334,7 +337,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialNodeParam(const TSharedPtr<FJsonObject>
 }
 
 // ===========================================================================
-// set_material_instance_param -- two engine traps in one tool
+// set_material_instance_parameter -- two engine traps in one tool
 //
 // (1) The setter's return value is meaningless. The four
 //     UMaterialEditingLibrary::SetMaterialInstance*ParameterValue functions are written
@@ -447,7 +450,7 @@ namespace
     }
 }
 
-// MCP:set_material_instance_param - Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
+// MCP:set_material_instance_parameter - Set a scalar, vector, texture or static-switch global parameter on a Material Instance Constant asset and re-read it: set comes from the re-read (the engine setter always returns false), plus value_after and overridden_after. Malformed vectors are rejected. Marks the package dirty; does not save.
 //   @param instance_path - Asset path of the UMaterialInstanceConstant, e.g. "/Game/Materials/MI_Rock".
 //   @param param_name - Parameter name as defined in the parent material, e.g. "BaseTint"; only global parameters are reached, not layer parameters.
 //   @param value - Value. Scalar: a number (JSON number or numeric string). Vector: '(R=..,G=..,B=..,A=..)', '[r,g,b,a]', '[r,g,b]', 'r,g,b,a', 'r,g,b', or a real JSON array of 3-4 numbers; anything else is REJECTED (never written as black). Texture: an asset path. Static switch: a bool or 'true'/'false'.
@@ -578,7 +581,7 @@ TSharedPtr<FJsonObject> HandleSetMaterialInstanceParam(const TSharedPtr<FJsonObj
                 // The whole reason this branch exists: refuse, because writing an
                 // unparsed vector stores (0,0,0,1) and says nothing.
                 return mcp_common::MakeErrorReply(FString::Printf(
-                    TEXT("set_material_instance_param: %s"), *ParseError));
+                    TEXT("set_material_instance_parameter: %s"), *ParseError));
             }
         }
         UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(Instance, PName, Requested, Assoc);
@@ -665,6 +668,26 @@ TSharedPtr<FJsonObject> HandleCompileMaterial(const TSharedPtr<FJsonObject>& Par
 
 namespace
 {
+    // Stable label of an EMaterialFunctionUsage, as create_material_function and get_material_function_info report it.
+    const TCHAR* MaterialExtra_FunctionUsageName(EMaterialFunctionUsage Usage)
+    {
+        switch (Usage)
+        {
+        case EMaterialFunctionUsage::MaterialLayer:      return TEXT("MaterialLayer");
+        case EMaterialFunctionUsage::MaterialLayerBlend: return TEXT("MaterialLayerBlend");
+        default:                                         return TEXT("Default");
+        }
+    }
+
+    // create_material_function's usage parameter -> EMaterialFunctionUsage (case-insensitive); false for any other name.
+    bool MaterialExtra_ParseFunctionUsage(const FString& Name, EMaterialFunctionUsage& OutUsage)
+    {
+        if (Name.Equals(TEXT("Default"), ESearchCase::IgnoreCase))            { OutUsage = EMaterialFunctionUsage::Default;            return true; }
+        if (Name.Equals(TEXT("MaterialLayer"), ESearchCase::IgnoreCase))      { OutUsage = EMaterialFunctionUsage::MaterialLayer;      return true; }
+        if (Name.Equals(TEXT("MaterialLayerBlend"), ESearchCase::IgnoreCase)) { OutUsage = EMaterialFunctionUsage::MaterialLayerBlend; return true; }
+        return false;
+    }
+
     // Count function input/output expressions currently inside a material function.
     void CountFunctionIO(const UMaterialFunction* Function, int32& OutInputs, int32& OutOutputs)
     {
@@ -850,6 +873,8 @@ namespace UEAgentMaterialExtraImpl
             TSharedPtr<FJsonObject> NObj = MakeShared<FJsonObject>();
             NObj->SetStringField(TEXT("name"), Expr->GetName());
             NObj->SetStringField(TEXT("class"), Expr->GetClass()->GetName());
+            NObj->SetStringField(TEXT("class_path"), Expr->GetClass()->GetPathName());
+            NObj->SetStringField(TEXT("description"), Expr->GetDescription());
 
             // Per-class inputs via GetInput(i)/CountInputs() (GetInputsView() is deprecated).
             TArray<TSharedPtr<FJsonValue>> InputsJson;
@@ -889,6 +914,34 @@ namespace UEAgentMaterialExtraImpl
         Result->SetArrayField(TEXT("nodes"), Nodes);
         Result->SetNumberField(TEXT("connection_count"), Connections.Num());
         Result->SetArrayField(TEXT("connections"), Connections);
+    }
+
+    // expression_count and orphan_nodes: every live expression object whose outer is Owner (the material or function),
+    // and those of them its expression collection does not list. A partial bulk delete or a duplicate can leave such
+    // nodes behind; they still count, so expression_count is the oracle for deleting nodes one by one.
+    void AddOuterOwnedCensus(const TSharedPtr<FJsonObject>& Result, const UObject* Owner, TConstArrayView<TObjectPtr<UMaterialExpression>> Listed)
+    {
+        int32 OwnedCount = 0;
+        TArray<TSharedPtr<FJsonValue>> Orphans;
+        for (TObjectIterator<UMaterialExpression> NodeIt; NodeIt; ++NodeIt)
+        {
+            UMaterialExpression* Node = *NodeIt;
+            if (Node == nullptr || Node->GetOuter() != Owner)
+            {
+                continue;
+            }
+            ++OwnedCount;
+            if (!Listed.Contains(Node))
+            {
+                TSharedPtr<FJsonObject> Orphan = MakeShared<FJsonObject>();
+                Orphan->SetStringField(TEXT("name"), Node->GetName());
+                Orphan->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+                Orphans.Add(MakeShared<FJsonValueObject>(Orphan));
+            }
+        }
+        Result->SetNumberField(TEXT("expression_count"), OwnedCount);
+        Result->SetNumberField(TEXT("orphan_count"), Orphans.Num());
+        Result->SetArrayField(TEXT("orphan_nodes"), Orphans);
     }
 
     // Saves the package Asset lives in; false, with OutError saying why, when it has none or the save fails.
@@ -931,11 +984,12 @@ namespace UEAgentMaterialExtraImpl
     }
 }
 
-// MCP:create_material_function - Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
-//   @param package_path - /Game package directory, e.g. '/Game/MyGame'
+// MCP:create_material_function - Create an empty material function asset named name in package_path -- a plain UMaterialFunction through the editor factory, or with usage MaterialLayer / MaterialLayerBlend a material layer or layer blend function, the way the editor's factories make them -- exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing material function at that path, whatever its class or usage, is returned untouched with already_exists=true, already_existed=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) makes success false with created=true, saved=false and save_error, the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_expression (material_function_path); read it back with get_material_graph_info; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call (a layer or blend: set_material_layer_stack); inverse: delete_asset.
+//   @param package_path - /Game package directory, e.g. '/Game/MyGame'; a trailing slash is ignored
 //   @param name - Asset name for the new material function
 //   @param description - Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists.
-//   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, save_error?: string, already_exists?: bool }
+//   @param usage - Optional "Default" (a plain UMaterialFunction, the default), "MaterialLayer" (a UMaterialFunctionMaterialLayer) or "MaterialLayerBlend" (a UMaterialFunctionMaterialLayerBlend), any case. Any other value is an error
+//   @returns { function_path: string, asset_path: string, name: string, package_path: string, class: string, usage: string, description: string, num_inputs: number, num_outputs: number, created: bool, already_existed: bool, saved: bool, save_error?: string, already_exists?: bool }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -943,6 +997,18 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("package_path"), PackagePath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     Params->TryGetStringField(TEXT("description"), Description);
+    FString UsageName;
+    Params->TryGetStringField(TEXT("usage"), UsageName);
+    EMaterialFunctionUsage Usage = EMaterialFunctionUsage::Default;
+    if (!UsageName.IsEmpty() && !MaterialExtra_ParseFunctionUsage(UsageName, Usage))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown usage: %s (expected Default, MaterialLayer or MaterialLayerBlend)"), *UsageName));
+    }
+    while (PackagePath.EndsWith(TEXT("/")))
+    {
+        PackagePath.LeftChopInline(1, EAllowShrinking::No);
+    }
 
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
@@ -957,12 +1023,16 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
             CountFunctionIO(Existing, NumInputs, NumOutputs);
             TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
             R->SetStringField(TEXT("function_path"), Existing->GetPathName());
+            R->SetStringField(TEXT("asset_path"), Existing->GetPathName());
             R->SetStringField(TEXT("name"), Existing->GetName());
             R->SetStringField(TEXT("package_path"), PackagePath);
+            R->SetStringField(TEXT("class"), Existing->GetClass()->GetName());
+            R->SetStringField(TEXT("usage"), MaterialExtra_FunctionUsageName(Existing->GetMaterialFunctionUsage()));
             R->SetStringField(TEXT("description"), Existing->Description);
             R->SetNumberField(TEXT("num_inputs"), NumInputs);
             R->SetNumberField(TEXT("num_outputs"), NumOutputs);
             R->SetBoolField(TEXT("already_exists"), true);
+            R->SetBoolField(TEXT("already_existed"), true);
             R->SetBoolField(TEXT("created"), false);
             R->SetBoolField(TEXT("saved"), false);
             return mcp_common::MakeOkReply(R);
@@ -970,18 +1040,40 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Asset exists but is not a UMaterialFunction: %s"), *FullPath));
     }
 
-    // Create via the real editor factory so the inner objects are set up correctly.
-    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-    IAssetTools& AssetTools = AssetToolsModule.Get();
+    UMaterialFunction* Function = nullptr;
+    if (Usage == EMaterialFunctionUsage::Default)
+    {
+        // Create via the real editor factory so the inner objects are set up correctly.
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+        IAssetTools& AssetTools = AssetToolsModule.Get();
 
-    UMaterialFunctionFactoryNew* Factory = NewObject<UMaterialFunctionFactoryNew>();
-    if (!Factory)
-        return mcp_common::MakeErrorReply(TEXT("Failed to create UMaterialFunctionFactoryNew"));
+        UMaterialFunctionFactoryNew* Factory = NewObject<UMaterialFunctionFactoryNew>();
+        if (!Factory)
+            return mcp_common::MakeErrorReply(TEXT("Failed to create UMaterialFunctionFactoryNew"));
 
-    UObject* CreatedAsset = AssetTools.CreateAsset(Name, PackagePath, UMaterialFunction::StaticClass(), Factory);
-    UMaterialFunction* Function = Cast<UMaterialFunction>(CreatedAsset);
-    if (!Function)
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create material function: %s"), *FullPath));
+        UObject* CreatedAsset = AssetTools.CreateAsset(Name, PackagePath, UMaterialFunction::StaticClass(), Factory);
+        Function = Cast<UMaterialFunction>(CreatedAsset);
+        if (!Function)
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create material function: %s"), *FullPath));
+    }
+    else
+    {
+        // A layer or blend: what the editor's layer factories do (neither overrides ConfigureProperties, so this is
+        // headless-safe): a new object of the specialised class, tagged with its usage, registered with the registry.
+        UClass* const LayerClass = Usage == EMaterialFunctionUsage::MaterialLayer
+            ? UMaterialFunctionMaterialLayer::StaticClass()
+            : UMaterialFunctionMaterialLayerBlend::StaticClass();
+        if (const FString AssetConflict = mcp_common::AssetNameConflict(FullPath, Name, LayerClass); !AssetConflict.IsEmpty())
+            return mcp_common::MakeErrorReply(AssetConflict);
+        UPackage* Package = CreatePackage(*FullPath);
+        if (!Package)
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create package: %s"), *FullPath));
+        Function = NewObject<UMaterialFunction>(Package, LayerClass, *Name, RF_Public | RF_Standalone | RF_Transactional);
+        if (!Function)
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create %s asset"), *LayerClass->GetName()));
+        Function->SetMaterialFunctionUsage(Usage);
+        FAssetRegistryModule::AssetCreated(Function);
+    }
 
     Function->Modify();
     if (!Description.IsEmpty())
@@ -1002,12 +1094,16 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("function_path"), Function->GetPathName());
+    Result->SetStringField(TEXT("asset_path"), Function->GetPathName());
     Result->SetStringField(TEXT("name"), Function->GetName());
     Result->SetStringField(TEXT("package_path"), PackagePath);
+    Result->SetStringField(TEXT("class"), Function->GetClass()->GetName());
+    Result->SetStringField(TEXT("usage"), MaterialExtra_FunctionUsageName(Function->GetMaterialFunctionUsage()));
     Result->SetStringField(TEXT("description"), Function->Description);
     Result->SetNumberField(TEXT("num_inputs"), NumInputs);
     Result->SetNumberField(TEXT("num_outputs"), NumOutputs);
     Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("already_existed"), false);
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_material_function"), SaveError);
 }
 
@@ -1069,7 +1165,7 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionInput(const TSharedPtr<FJsonObj
     return Result;
 }
 
-// MCP:add_material_function_output - Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_material_function_pins, edit it with set_material_function_output_props, and its inverse is delete_material_function_output; inputs are add_material_function_input; list pins with get_material_function_inputs; persist with save_asset.
+// MCP:add_material_function_output - Add a FunctionOutput node, the output pin named output_name, to a UMaterialFunction asset loaded from function_path, then recompile the function (loaded materials that use it recompile too) and mark it dirty, without saving and without an undo transaction. Each call adds another node, so it is not idempotent, and output_name is stored as given: a name another output already has is not made unique. The new output starts unwired, placed right of the graph below the existing outputs, and node_id is its handle; added confirms the output count rose by one. A function that does not load is an error. Wire it with connect_material_function_pins, edit it with set_material_function_output_props, and its inverse is delete_material_function_output; inputs are add_material_function_input; list pins with get_material_function_info; persist with save_asset.
 //   @param function_path - Full path to the material function, e.g. "/Game/MyGame/MF_Example.MF_Example"
 //   @param output_name - Name of the new output pin, stored as given: a name another output already uses is not made unique
 //   @returns { function_path: string, output_name: string, node_id: string, num_outputs: number, added: bool }
@@ -1110,7 +1206,7 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionOutput(const TSharedPtr<FJsonOb
     return Result;
 }
 
-// MCP:set_material_function_input_props - Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_inputs.
+// MCP:set_material_function_input_props - Edit an existing FunctionInput node of a UMaterialFunction asset, found by node_id: only the fields you pass are written (name, type, description, preview value, default flag, sort priority), then the function is recompiled and marked dirty without saving. Read it back with get_material_function_info.
 //   @param function_path - Full path to the material function, e.g. '/Game/MyGame/MF_Example.MF_Example'
 //   @param node_id - The input node id (UMaterialExpression name) from add_material_function_input
 //   @param input_name - New pin name, stored as given: it is not made unique (the engine ValidateName only acts on nodes owned by a material).
@@ -1416,7 +1512,7 @@ TSharedPtr<FJsonObject> HandleAddMaterialFunctionCall(const TSharedPtr<FJsonObje
 
 // MCP:duplicate_material_expression - Copy one expression node of a UMaterial asset into the same material, optionally renamed, then recompile the material and mark it dirty without saving. The copy keeps the source position and settings (a parameter keeps its name) and its output is unwired. Returns duplicate_node and expression_count.
 //   @param material_path - Full asset path of the UMaterial.
-//   @param node_id - Object name of the expression to copy, as listed by get_material_expressions.
+//   @param node_id - Object name of the expression to copy, as listed by get_material_graph_info (nodes[].name).
 //   @param new_node_name - Object name for the copy; when taken, a unique variant is used (read duplicate_node). Default: a name the engine picks.
 //   @returns { material_path: string, source_node: string, duplicate_node: string, duplicate_class: string, expression_count: number }
 
@@ -1467,21 +1563,58 @@ TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJson
     return Result;
 }
 
-// MCP:get_material_graph_info - Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's name as the node reports it (GetInputName, e.g. A, B, Alpha), and node_count counts the nodes listed. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
-//   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a material instance is not accepted
-//   @returns { material_path: string, node_count: number, nodes: [{ name: string, class: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }
+// MCP:get_material_graph_info - Read the expression graph of a UMaterial asset -- or of a UMaterialFunction / material layer's internal graph -- without changing it: every expression node with its object name (the node_id other material tools take), class, class path and description, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's name as the node reports it (GetInputName, e.g. A, B, Alpha), and node_count counts the nodes listed. expression_count counts every expression object the asset owns, including orphan_nodes its expression collection does not list (a partial bulk delete or a duplicate leaves them behind, and duplicate parameter names hide there): it is the count to watch when deleting nodes one by one until 0. A material instance or a path that does not load is an error. Shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output, connect_material_function_pins.
+//   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a UMaterialFunction path is read as a function graph; a material instance is not accepted
+//   @param material_function_path - Alias of material_path that addresses a UMaterialFunction (or material layer / layer blend)
+//   @returns { material_path?: string (a material), material_name?: string, material_function_path?: string (a function), expression_count: number, orphan_count: number, orphan_nodes: [{ name: string, class: string }], node_count: number, nodes: [{ name: string, class: string, class_path: string, description: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }
 
 TSharedPtr<FJsonObject> HandleGetMaterialGraphInfo(const TSharedPtr<FJsonObject>& Params)
 {
-    FString MaterialPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), MaterialPath)) { return Missing; }
+    // material_path, else material_function_path; which key was used decides what is tried first.
+    FString GraphPath;
+    bool bFunctionKey = false;
+    if (!Params->TryGetStringField(TEXT("material_path"), GraphPath))
+    {
+        if (!Params->TryGetStringField(TEXT("material_function_path"), GraphPath))
+        {
+            return mcp_common::MissingParameterReply(TEXT("material_path"));
+        }
+        bFunctionKey = true;
+    }
 
     UMaterial* Material = nullptr;
-    if (TSharedPtr<FJsonObject> Error = UEAgentMaterialExtraImpl::FindMaterial(MaterialPath, Material)) { return Error; }
+    UMaterialFunction* Function = nullptr;
+    if (bFunctionKey)
+    {
+        Function = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(GraphPath);
+    }
+    if (Function == nullptr)
+    {
+        Material = AssetPathUtils::LoadOrLoadSoftPathString<UMaterial>(GraphPath);
+    }
+    if (Material == nullptr && Function == nullptr && !bFunctionKey)
+    {
+        Function = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(GraphPath);
+    }
+    if (Material == nullptr && Function == nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material or material function not found: %s"), *GraphPath));
+    }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("material_path"), Material->GetPathName());
-    UEAgentMaterialExtraImpl::AddGraphFields(Result, Material->GetExpressions());
+    if (Function != nullptr)
+    {
+        Result->SetStringField(TEXT("material_function_path"), Function->GetPathName());
+        UEAgentMaterialExtraImpl::AddOuterOwnedCensus(Result, Function, Function->GetExpressions());
+        UEAgentMaterialExtraImpl::AddGraphFields(Result, Function->GetExpressions());
+    }
+    else
+    {
+        Result->SetStringField(TEXT("material_path"), Material->GetPathName());
+        Result->SetStringField(TEXT("material_name"), Material->GetName());
+        UEAgentMaterialExtraImpl::AddOuterOwnedCensus(Result, Material, Material->GetExpressions());
+        UEAgentMaterialExtraImpl::AddGraphFields(Result, Material->GetExpressions());
+    }
     return Result;
 }
 // ========================================================================== //
@@ -1498,8 +1631,7 @@ TSharedPtr<FJsonObject> HandleGetMaterialGraphInfo(const TSharedPtr<FJsonObject>
 //   create_material_function_instance    UMaterialFunctionInstance via
 //                                       UMaterialFunctionInstanceFactoryNew.
 //   set_material_function_instance_parent  set Parent on the instance.
-//   get_material_function_inputs        enumerate UMaterialExpressionFunctionInput.
-//   delete_material_function            delete the UMaterialFunction asset.
+//   get_material_function_info        enumerate UMaterialExpressionFunctionInput.
 // ========================================================================== //
 
 // MCP:recompile_material_function - Recompile a material function, layer or function instance (UpdateMaterialFunction): loaded materials using it recompile and dependent function instances are marked dirty but not saved, then the function itself is saved; success requires that save. recompiled is always true, not a shader-error report.
@@ -1776,24 +1908,45 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionInstanceParent(const TSharedPtr
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_material_function_instance_parent"), SaveError);
 }
 
-// MCP:get_material_function_inputs - List the FunctionInput and FunctionOutput nodes of a UMaterialFunction asset: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs. Read-only. Function instances are not accepted; for the whole node graph use get_material_function_graph.
-//   @param material_function_path - Asset path of the UMaterialFunction or material layer, e.g. "/Game/Materials/MF_Blend".
-//   @returns { material_function_path: string, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }
+// MCP:get_material_function_info - Describe a material function asset -- a plain function, a material layer, a layer blend or a function instance -- without changing it: its class and usage ("Default", "MaterialLayer" or "MaterialLayerBlend"), is_layer / is_blend, the input and output pin counts it exposes (num_inputs, num_outputs; an instance reports its parent's) and num_expressions, plus, for a UMaterialFunction, its FunctionInput and FunctionOutput nodes: node_id, name, type, description, sort priority and preview value for inputs; name, description and sort priority for outputs (a function instance has no nodes of its own, so its lists are empty). For the whole node graph use get_material_graph_info.
+//   @param material_function_path - Asset path of the material function, layer, layer blend or function instance, e.g. "/Game/Materials/MF_Blend".
+//   @param layer_path - Alias of material_function_path
+//   @returns { material_function_path: string, asset_path: string, class: string, usage: string, is_layer: bool, is_blend: bool, num_inputs: number, num_outputs: number, num_expressions: number, input_count: number, output_count: number, inputs: [{ node_id: string, input_name: string, input_type: string, description: string, sort_priority: number, use_preview_value: bool, preview_value: {x,y,z,w} }], outputs: [{ node_id: string, output_name: string, description: string, sort_priority: number }] }
 TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonObject>& Params)
 {
     FString FunctionPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_function_path"), FunctionPath)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("material_function_path"), FunctionPath) && !Params->TryGetStringField(TEXT("layer_path"), FunctionPath))
+    {
+        return mcp_common::MissingParameterReply(TEXT("material_function_path"));
+    }
 
-    UMaterialFunction* Function = LoadObject<UMaterialFunction>(nullptr, *FunctionPath);
-    if (!Function)
+    // Any function interface (function, layer, blend or function instance), by path or soft path.
+    UMaterialFunctionInterface* FunctionInterface = LoadObject<UMaterialFunctionInterface>(nullptr, *FunctionPath);
+    if (!FunctionInterface)
+    {
+        const FSoftObjectPath SoftPath(FunctionPath);
+        if (SoftPath.IsValid())
+        {
+            FunctionInterface = Cast<UMaterialFunctionInterface>(SoftPath.TryLoad());
+        }
+    }
+    if (!FunctionInterface)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Material function not found: %s"), *FunctionPath));
     }
 
+    TArray<FFunctionExpressionInput> PinInputs;
+    TArray<FFunctionExpressionOutput> PinOutputs;
+    FunctionInterface->GetInputsAndOutputs(PinInputs, PinOutputs);
+    const EMaterialFunctionUsage Usage = FunctionInterface->GetMaterialFunctionUsage();
+
     TArray<TSharedPtr<FJsonValue>> Inputs;
     TArray<TSharedPtr<FJsonValue>> Outputs;
-    for (UMaterialExpression* Expr : Function->GetExpressions())
+    UMaterialFunction* Function = Cast<UMaterialFunction>(FunctionInterface);
+    const TConstArrayView<TObjectPtr<UMaterialExpression>> OwnNodes = Function != nullptr
+        ? Function->GetExpressions() : TConstArrayView<TObjectPtr<UMaterialExpression>>();
+    for (UMaterialExpression* Expr : OwnNodes)
     {
         if (!Expr) { continue; }
         if (UMaterialExpressionFunctionInput* In = Cast<UMaterialExpressionFunctionInput>(Expr))
@@ -1825,56 +1978,20 @@ TSharedPtr<FJsonObject> HandleGetMaterialFunctionInputs(const TSharedPtr<FJsonOb
     }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("material_function_path"), Function->GetPathName());
+    Result->SetStringField(TEXT("material_function_path"), FunctionInterface->GetPathName());
+    Result->SetStringField(TEXT("asset_path"), FunctionInterface->GetPathName());
+    Result->SetStringField(TEXT("class"), FunctionInterface->GetClass()->GetName());
+    Result->SetStringField(TEXT("usage"), MaterialExtra_FunctionUsageName(Usage));
+    Result->SetBoolField(TEXT("is_layer"), FunctionInterface->IsA<UMaterialFunctionMaterialLayer>() || Usage == EMaterialFunctionUsage::MaterialLayer);
+    Result->SetBoolField(TEXT("is_blend"), FunctionInterface->IsA<UMaterialFunctionMaterialLayerBlend>() || Usage == EMaterialFunctionUsage::MaterialLayerBlend);
+    Result->SetNumberField(TEXT("num_inputs"), PinInputs.Num());
+    Result->SetNumberField(TEXT("num_outputs"), PinOutputs.Num());
+    Result->SetNumberField(TEXT("num_expressions"), OwnNodes.Num());
     Result->SetNumberField(TEXT("input_count"), Inputs.Num());
     Result->SetNumberField(TEXT("output_count"), Outputs.Num());
     Result->SetArrayField(TEXT("inputs"), Inputs);
     Result->SetArrayField(TEXT("outputs"), Outputs);
     return mcp_common::MakeOkReply(Result);
-}
-
-// MCP:delete_material_function - Force-delete the material function asset at material_function_path with UEditorAssetLibrary::DeleteAsset: no reference check, open editors close and undo history may be cleared. Permanent. Typed: the asset must be a UMaterialFunctionInterface (a material function, layer, layer blend or function instance); any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A missing asset is an error, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
-//   @param material_function_path - Asset path of the UMaterialFunction to delete
-//   @returns { material_function_path: string, asset_class: string, deleted: bool, note?: string }
-TSharedPtr<FJsonObject> HandleDeleteMaterialFunction(const TSharedPtr<FJsonObject>& Params)
-{
-    FString FunctionPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_function_path"), FunctionPath)) { return Missing; }
-
-    if (!UEditorAssetLibrary::DoesAssetExist(FunctionPath))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Material function asset not found: %s"), *FunctionPath));
-    }
-
-    UObject* Asset = UEditorAssetLibrary::LoadAsset(FunctionPath);
-    if (!Asset)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(
-            TEXT("delete_material_function: the asset at %s does not load, so its class cannot be checked; nothing deleted"), *FunctionPath));
-    }
-    // Read before the delete, which can collect garbage and free the asset.
-    const FString AssetClassName = Asset->GetClass()->GetName();
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("material_function_path"), FunctionPath);
-    Result->SetStringField(TEXT("asset_class"), AssetClassName);
-    if (!Asset->IsA<UMaterialFunctionInterface>())
-    {
-        // The typed-delete guard: an asset of another class fails the call and is not deleted.
-        const FString Refusal = FString::Printf(
-            TEXT("asset is not a UMaterialFunctionInterface (got %s) - wrong type, refusing to delete"), *AssetClassName);
-        Result->SetBoolField(TEXT("deleted"), false);
-        Result->SetStringField(TEXT("note"), Refusal);
-        return mcp_common::MakeOutcomeReply(Result, false,
-            FString::Printf(TEXT("delete_material_function: %s at %s"), *Refusal, *FunctionPath));
-    }
-
-    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(FunctionPath);
-    Result->SetBoolField(TEXT("deleted"), bDeleted);
-    return mcp_common::MakeOutcomeReply(Result, bDeleted, bDeleted ? FString() : FString::Printf(
-        TEXT("delete_material_function: the asset at %s was not deleted (UEditorAssetLibrary::DeleteAsset returned false: a ")
-        TEXT("Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
-        TEXT("the Output Log names which)"), *FunctionPath));
 }
 
 // ========================================================================== //
@@ -2008,7 +2125,7 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionOutput(const TSharedPtr<FJso
 
 // create_subsurface_profile
 // ---------------------------------------------------------------------------- //
-// MCP:create_subsurface_profile - Create a USubsurfaceProfile asset named name in package_path (default /Game/Gameplay; trailing slashes trimmed) with the engine's default settings, then save it; mean_free_path_distance reads one of those settings back. Idempotent: an asset at that path that loads as a subsurface profile is returned as it is, with already_existed=true, created=false and saved=false, and nothing is saved; one of another class is an error, and so is an invalid package path. A failed save (PIE running, read-only file) makes success false with saved=false and save_error, but the new profile stays registered in memory, so a repeat call answers already_existed=true for an asset that is not on disk: persist it with save_asset. Edit its Settings struct with set_property_value or set_properties on the asset path, then save_asset.
+// MCP:create_subsurface_profile - Create a USubsurfaceProfile asset named name in package_path (default /Game/Gameplay; trailing slashes trimmed) with the engine's default settings, then save it; mean_free_path_distance reads one of those settings back. Idempotent: an asset at that path that loads as a subsurface profile is returned as it is, with already_existed=true, created=false and saved=false, and nothing is saved; one of another class is an error, and so is an invalid package path. A failed save (PIE running, read-only file) makes success false with saved=false and save_error, but the new profile stays registered in memory, so a repeat call answers already_existed=true for an asset that is not on disk: persist it with save_asset. Edit its Settings struct with set_properties on the asset path, then save_asset.
 //   @param name - Asset name (e.g. SSP_Example)
 //   @param package_path - Target /Game package path (optional, default "/Game/Gameplay")
 //   @returns { name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool, saved: bool, save_error?: string }
@@ -2083,121 +2200,6 @@ TSharedPtr<FJsonObject> HandleCreateSubsurfaceProfile(const TSharedPtr<FJsonObje
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_subsurface_profile"), SaveError);
 }
 
-// ========================================================================== //
-// MaterialFunction internal graph editing (get + create)
-//
-// The MaterialFunction handlers above are scoped to Input/Output pins
-// (add/delete_material_function_input/output, get_material_function_inputs) or
-// wire pins by name (connect_material_function_pins). None reach the
-// function's *internal* expression graph (Multiply, Power, Constant,
-// VertexNormalWS...) the way get_material_graph_info/create_material_expression
-// do for a plain UMaterial. These two commands are the function-scoped twins of
-// those two UMaterial commands, same response shape, same conventions:
-//   get_material_function_graph          Function->GetExpressions() walk,
-//                                         identical to get_material_graph_info.
-//   create_material_function_expression  UMaterialEditingLibrary::
-//                                         CreateMaterialExpressionInFunction —
-//                                         verified generic (any UMaterialExpression
-//                                         subclass, not limited to FunctionInput/
-//                                         Output; MaterialEditingLibrary.h).
-// ========================================================================== //
-
-// MCP:get_material_function_graph - Enumerate a UMaterialFunction's internal expression graph: every UMaterialExpression node plus the FExpressionInput connections between them (same shape as get_material_graph_info, scoped to a function instead of a material).
-//   @param material_function_path - Asset path of the UMaterialFunction
-//   @returns { material_function_path: string, node_count: number, nodes: [{name, class, inputs:[{index, input_name, source, source_output_index}], input_count}], connection_count: number, connections: [{from, from_output_index, to, to_input}] }
-TSharedPtr<FJsonObject> HandleGetMaterialFunctionGraph(const TSharedPtr<FJsonObject>& Params)
-{
-    FString FunctionPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_function_path"), FunctionPath)) { return Missing; }
-
-    UMaterialFunction* Function = nullptr;
-    if (TSharedPtr<FJsonObject> Error = UEAgentMaterialExtraImpl::FindFunction(FunctionPath, Function)) { return Error; }
-
-    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-    Result->SetStringField(TEXT("material_function_path"), Function->GetPathName());
-    UEAgentMaterialExtraImpl::AddGraphFields(Result, Function->GetExpressions());
-    return Result;
-}
-
-namespace UEAgentMaterialExtraImpl
-{
-    // Resolves an expression class from a short name (a class that is already loaded) or, when the text
-    // looks like an object path, by loading it. Classes that do not derive from UMaterialExpression are
-    // refused. On failure returns nullptr with OutError holding the reply.
-    UClass* ResolveExpressionClass(const FString& ClassName, TSharedPtr<FJsonObject>& OutError)
-    {
-        UClass* Resolved = FindObject<UClass>(nullptr, *ClassName);
-        if (Resolved == nullptr && ClassName.Contains(TEXT("/")))
-        {
-            Resolved = LoadClass<UMaterialExpression>(nullptr, *ClassName);
-        }
-
-        if (Resolved == nullptr)
-        {
-            OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Material expression class not found: %s. Use full path like '/Script/Engine.MaterialExpressionMultiply'"), *ClassName));
-        }
-        else if (!Resolved->IsChildOf(UMaterialExpression::StaticClass()))
-        {
-            OutError = mcp_common::MakeErrorReply(FString::Printf(TEXT("Class is not a MaterialExpression: %s"), *ClassName));
-            Resolved = nullptr;
-        }
-        return Resolved;
-    }
-}
-
-// MCP:create_material_function_expression - Create a new UMaterialExpression node inside a UMaterialFunction's internal graph (same shape as create_material_expression, scoped to a function instead of a material). Use connect_material_function_pins to wire it and recompile_material_function to recompile.
-//   @param material_function_path - Asset path of the UMaterialFunction
-//   @param expression_class_name - Class name of the UMaterialExpression to create, e.g. 'MaterialExpressionMultiply' or a full path like '/Script/Engine.MaterialExpressionPower'
-//   @param node_pos_x - Optional X position in the function's graph editor (default 0)
-//   @param node_pos_y - Optional Y position in the function's graph editor (default 0)
-//   @returns { material_function_path: string, expression_class_name: string, expression_name: string, node_pos_x: number, node_pos_y: number, success: bool }
-TSharedPtr<FJsonObject> HandleCreateMaterialFunctionExpression(const TSharedPtr<FJsonObject>& Params)
-{
-    FString FunctionPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_function_path"), FunctionPath)) { return Missing; }
-
-    FString ExpressionClassName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("expression_class_name"), ExpressionClassName)) { return Missing; }
-
-    // The function is resolved before the class, so an unknown function is reported first.
-    UMaterialFunction* Function = AssetPathUtils::LoadOrLoadSoftPathString<UMaterialFunction>(FunctionPath);
-    if (!Function)
-    {
-        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Material function not found: %s. Use full path like '/Game/Materials/MF_MyFunction.MF_MyFunction'"), *FunctionPath));
-    }
-
-    TSharedPtr<FJsonObject> ClassError;
-    UClass* ExpressionClass = UEAgentMaterialExtraImpl::ResolveExpressionClass(ExpressionClassName, ClassError);
-    if (!ExpressionClass)
-    {
-        return ClassError;
-    }
-
-    // Optional placement in the function graph; both coordinates default to the origin.
-    FIntPoint Placement(0, 0);
-    Params->TryGetNumberField(TEXT("node_pos_x"), Placement.X);
-    Params->TryGetNumberField(TEXT("node_pos_y"), Placement.Y);
-
-    // Function-scoped counterpart of UMaterialEditingLibrary::CreateMaterialExpression: it forwards to
-    // CreateMaterialExpressionEx with the function as owner, so any expression class can be placed here,
-    // not only the function input/output nodes.
-    UMaterialExpression* NewNode = UMaterialEditingLibrary::CreateMaterialExpressionInFunction(Function, ExpressionClass, Placement.X, Placement.Y);
-    if (!NewNode)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to create material expression in function"));
-    }
-    Function->MarkPackageDirty();
-
-    TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
-    Reply->SetBoolField(TEXT("success"), true);
-    Reply->SetStringField(TEXT("material_function_path"), Function->GetPathName());
-    Reply->SetStringField(TEXT("expression_name"), NewNode->GetName());
-    Reply->SetStringField(TEXT("expression_class_name"), ExpressionClassName);
-    Reply->SetNumberField(TEXT("node_pos_x"), Placement.X);
-    Reply->SetNumberField(TEXT("node_pos_y"), Placement.Y);
-    return Reply;
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_material_function_call"), &HandleAddMaterialFunctionCall },
@@ -2207,24 +2209,21 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("connect_material_function_pins"), &HandleConnectMaterialFunctionPins },
     { TEXT("connect_to_material_output"), &HandleConnectToMaterialOutput },
     { TEXT("create_material_function"), &HandleCreateMaterialFunction },
-    { TEXT("create_material_function_expression"), &HandleCreateMaterialFunctionExpression },
     { TEXT("create_material_function_instance"), &HandleCreateMaterialFunctionInstance },
     { TEXT("create_post_process_material"), &HandleCreatePostProcessMaterial },
     { TEXT("create_subsurface_profile"), &HandleCreateSubsurfaceProfile },
-    { TEXT("delete_material_function"), &HandleDeleteMaterialFunction },
     { TEXT("delete_material_function_input"), &HandleDeleteMaterialFunctionInput },
     { TEXT("delete_material_function_output"), &HandleDeleteMaterialFunctionOutput },
     { TEXT("disconnect_to_material_output"), &HandleDisconnectToMaterialOutput },
     { TEXT("duplicate_material_expression"), &HandleDuplicateMaterialExpression },
-    { TEXT("get_material_function_graph"), &HandleGetMaterialFunctionGraph },
-    { TEXT("get_material_function_inputs"), &HandleGetMaterialFunctionInputs },
+    { TEXT("get_material_function_info"), &HandleGetMaterialFunctionInputs },
     { TEXT("get_material_graph_info"), &HandleGetMaterialGraphInfo },
     { TEXT("recompile_material_function"), &HandleRecompileMaterialFunction },
     { TEXT("set_material_domain"), &HandleSetMaterialDomain },
     { TEXT("set_material_function_input_props"), &HandleSetMaterialFunctionInputProps },
     { TEXT("set_material_function_instance_parent"), &HandleSetMaterialFunctionInstanceParent },
     { TEXT("set_material_function_output_props"), &HandleSetMaterialFunctionOutputProps },
-    { TEXT("set_material_instance_param"), &HandleSetMaterialInstanceParam },
-    { TEXT("set_material_node_param"), &HandleSetMaterialNodeParam },
+    { TEXT("set_material_instance_parameter"), &HandleSetMaterialInstanceParam },
+    { TEXT("set_material_expression_property"), &HandleSetMaterialNodeParam },
 };
 } // namespace UEAgentMaterialExtraCommands

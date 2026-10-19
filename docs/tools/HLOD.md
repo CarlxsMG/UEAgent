@@ -2,17 +2,7 @@
 
 # HLOD
 
-9 tools. Back to the [index](README.md).
-
-## `build_hlod`
-
-*Destructive.*
-
-Triggers a world HLOD build for the current editor world.  This is a HEAVY/async operation that requires a World Partition world plus the WorldPartitionHLODsBuilder commandlet / a long-running editor build job, so it cannot be driven synchronously from a single request. The tool does the headless-safe part for real (resolves the editor world, detects World Partition) and returns an honest result: build_started is false with a note explaining why (not a World Partition map, or async/commandlet-only).
-
-No parameters.
-
-**Returns:** `{ world: string, is_world_partition: bool, build_started: bool, note?: string }`
+7 tools. Back to the [index](README.md).
 
 ## `create_hlod_layer`
 
@@ -63,18 +53,6 @@ Lists all UHLODLayer assets under a content path via the AssetRegistry.
 | `path` | string | no | Optional content path; defaults to /Game |
 
 **Returns:** `{ path: string, hlod_layers: [{ name, path, layer_type }], count: int }`
-
-## `remove_hlod_layer`
-
-*Destructive, idempotent.*
-
-Delete a UHLODLayer asset at a /Game path, the mirror of create_hlod_layer. Typed delete: it loads the asset first and refuses one that is not a UHLODLayer with success false, its asset_class and a note, deleting nothing, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent: a path with no asset is a no-op, success true with deleted=false and already_existed=false. The delete removes the asset and its file and cannot be undone; when the engine refuses it (Play-in-Editor running, an asset the Asset Registry does not list, a file it cannot delete) success is false with deleted=false. List layers with get_hlod_layers; inspect one with get_hlod_layer_info.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_path` | string | yes | Full /Game/.../LayerName asset path. |
-
-**Returns:** `{ asset_path, deleted, already_existed?, layer_type?, asset_class?, note? }`
 
 ## `set_hlod_layer_actors`
 

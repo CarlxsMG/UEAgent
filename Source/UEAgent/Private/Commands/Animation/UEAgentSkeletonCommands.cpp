@@ -11,10 +11,8 @@
 
 #include "Animation/Skeleton.h"                 // Engine: USkeleton, FVirtualBone, FAnimSlotGroup
 #include "Animation/BlendProfile.h"             // Engine: UBlendProfile (SetBoneBlendScale)
-#include "Engine/SkeletalMesh.h"                // Engine: USkeletalMesh (for is_skeleton_shared)
 #include "Engine/SkeletalMeshSocket.h"          // Engine: USkeletalMeshSocket
 #include "ReferenceSkeleton.h"                  // Engine: FReferenceSkeleton (GetNum / GetBoneName) + FReferenceSkeletonModifier
-#include "AssetRegistry/IAssetRegistry.h"       // IAssetRegistry::GetAssets(FARFilter)
 
 /**
  * Skeleton editing commands.
@@ -28,7 +26,6 @@
  *   - the bone tree: FReferenceSkeletonModifier (Add, Remove, Rename, UpdateRefPoseTransform, SetParent), the
  *     path USkeleton itself uses; its destructor rebuilds the reference skeleton and broadcasts the change
  *     without traversing assets;
- *   - is_skeleton_shared: an Asset Registry FARFilter for the skeletal meshes bound to the skeleton.
  *
  * Each mutation calls Modify() and MarkPackageDirty, then saves the package.
  */
@@ -70,7 +67,7 @@ namespace
 // ---------------------------------------------------------------------------
 // create_editable_skeleton
 // ---------------------------------------------------------------------------
-// MCP:create_editable_skeleton - Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false and saved=false. A package_path that does not start with a slash, a source that does not exist or is not a skeleton, or another kind of asset at the target is an error, and nothing is created. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: create_editable_skeletal_mesh; inspect the result: get_skeleton_asset_info.
+// MCP:create_editable_skeleton - Create a USkeleton at package_path/name by duplicating an existing skeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton), then save it, so add_bone, set_bone_transform, add_virtual_bone and the other bone tools edit a project copy instead of engine content. Idempotent by path: a skeleton already there is returned untouched with created=false and saved=false. A package_path that does not start with a slash, a source that does not exist or is not a skeleton, or another kind of asset at the target is an error, and nothing is created. A failed save, as during PIE, makes success false with save_error and keeps the new skeleton in memory. A mesh to go with it: duplicate_asset on a skeletal mesh (destination_path); inspect the result: get_skeleton_info (load_full_data=true).
 //   @param package_path - UE content folder starting with a slash, e.g. /Game/MyGame
 //   @param name - Asset name for the new skeleton, e.g. "SK_Creature_Skeleton"; with package_path it gives the asset path.
 //   @param source_skeleton - Asset path of the skeleton to duplicate, e.g. "/Engine/EngineMeshes/SkeletalCube_Skeleton", which is also the default.
@@ -142,7 +139,7 @@ TSharedPtr<FJsonObject> HandleCreateEditableSkeleton(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // add_virtual_bone
 // ---------------------------------------------------------------------------
-// MCP:add_virtual_bone - Add a virtual bone from source_bone to target_bone to a USkeleton asset loaded by asset path, then save the skeleton; the engine names it "VB <source>_<target>", returned as virtual_bone_name. An omitted source_bone is the first bone of the reference skeleton (usually the root) and an omitted target_bone the first other bone. Bone names are not checked against the skeleton, so a misspelt one is stored as given; the same bone for both, or a skeleton with fewer than 2 bones, is an error. Idempotent: a virtual bone that already joins that exact pair is returned with already_exists=true and saved=false, nothing written. A failed save (PIE running, read-only file) makes success false with save_error, the bone kept in memory. Inverse: remove_virtual_bone; list them: get_skeleton_asset_info; a project copy to edit: create_editable_skeleton.
+// MCP:add_virtual_bone - Add a virtual bone from source_bone to target_bone to a USkeleton asset loaded by asset path, then save the skeleton; the engine names it "VB <source>_<target>", returned as virtual_bone_name. An omitted source_bone is the first bone of the reference skeleton (usually the root) and an omitted target_bone the first other bone. Bone names are not checked against the skeleton, so a misspelt one is stored as given; the same bone for both, or a skeleton with fewer than 2 bones, is an error. Idempotent: a virtual bone that already joins that exact pair is returned with already_exists=true and saved=false, nothing written. A failed save (PIE running, read-only file) makes success false with save_error, the bone kept in memory. Inverse: remove_virtual_bone; list them: get_skeleton_info (load_full_data=true); a project copy to edit: create_editable_skeleton.
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param source_bone - Bone the virtual bone starts from (default the first bone, usually the root); not validated.
 //   @param target_bone - Bone the virtual bone points to (default the first bone that differs from source_bone); not validated.
@@ -267,9 +264,9 @@ TSharedPtr<FJsonObject> HandleAddAnimSlotGroup(const TSharedPtr<FJsonObject>& Pa
 }
 
 // ---------------------------------------------------------------------------
-// add_socket_to_skeleton_asset
+// add_skeleton_socket
 // ---------------------------------------------------------------------------
-// MCP:add_socket_to_skeleton_asset - Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save makes success false, with saved=false and save_error. A socket on a skeletal mesh asset (copied to its skeleton when that skeleton is project content): add_skeletal_mesh_socket.
+// MCP:add_skeleton_socket - Add a socket to a USkeleton asset on a bone (the root by default) at a bone-relative location and rotation, then save; an existing socket of that name is updated in place (already_existed true). A failed save makes success false, with saved=false and save_error. A socket on a skeletal mesh asset (copied to its skeleton when that skeleton is project content): add_skeletal_mesh_socket.
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param socket_name - Name of the socket; an existing socket with this name is updated instead of duplicated.
 //   @param bone_name - Bone to attach the socket to; must exist in the skeleton (default the root bone).
@@ -336,7 +333,7 @@ TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& P
         FString SaveErr;
         const bool bSaved = Skeleton_MarkDirtyAndSave(Skeleton, SaveErr);
         return mcp_common::MakeSavedReply(BuildPayload(Existing, /*bAdded=*/false, bSaved, SaveErr), bSaved,
-            TEXT("add_socket_to_skeleton_asset"), SaveErr);
+            TEXT("add_skeleton_socket"), SaveErr);
     }
 
     Skeleton->Modify();
@@ -356,67 +353,7 @@ TSharedPtr<FJsonObject> HandleAddSkeletonSocket(const TSharedPtr<FJsonObject>& P
     FString SaveErr;
     const bool bSaved = Skeleton_MarkDirtyAndSave(Skeleton, SaveErr);
     return mcp_common::MakeSavedReply(BuildPayload(NewSocket, /*bAdded=*/true, bSaved, SaveErr), bSaved,
-        TEXT("add_socket_to_skeleton_asset"), SaveErr);
-}
-
-// ---------------------------------------------------------------------------
-// get_skeleton_info
-// ---------------------------------------------------------------------------
-// MCP:get_skeleton_asset_info - Read a summary of a USkeleton asset: bone_count, the first 10 bone names only, every virtual bone with its source and target, slot_group_count and socket_count. Read-only; for up to 100 bone names use get_skeleton_info with load_full_data true.
-//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
-//   @returns { asset_path: string, bone_count: int, bones: [string], virtual_bone_count: int, virtual_bone_names: [string], virtual_bones: [{ name: string, source_bone: string, target_bone: string }], slot_group_count: int, socket_count: int }
-TSharedPtr<FJsonObject> HandleGetSkeletonInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeleton_path"), SkeletonPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
-
-    const FReferenceSkeleton& RefSkel = Skeleton->GetReferenceSkeleton();
-    const int32 NumBones = RefSkel.GetNum();
-
-    // First ~10 bone names.
-    TArray<TSharedPtr<FJsonValue>> Bones;
-    const int32 Limit = FMath::Min(NumBones, 10);
-    for (int32 i = 0; i < Limit; ++i)
-    {
-        Bones.Add(MakeShared<FJsonValueString>(RefSkel.GetBoneName(i).ToString()));
-    }
-
-    // Virtual bones, read-only: walk Skeleton->GetVirtualBones() once and populate TWO fields,
-    // deliberately kept separate
-    // instead of overloading one name with two shapes (a field named the same but returning a
-    // different type depending on the tool is a silent trap the plugin avoids everywhere):
-    //   - virtual_bone_names: [string] -- flat names, SAME shape as remove_virtual_bone's field
-    //     of the same name, kept for parity across the plugin (a caller that already does
-    //     `for n in resp["virtual_bone_names"]` against remove_virtual_bone gets the same shape
-    //     here).
-    //   - virtual_bones: [{name, source_bone, target_bone}] -- the per-bone detail.
-    // get_skeleton_info (in UEAgentAnimationCommands.cpp) intentionally does NOT surface
-    // virtual bones -- this is the one tool that does, avoiding a second overlapping surface.
-    TArray<TSharedPtr<FJsonValue>> VirtualBoneNames;
-    TArray<TSharedPtr<FJsonValue>> VirtualBones;
-    for (const FVirtualBone& VB : Skeleton->GetVirtualBones())
-    {
-        VirtualBoneNames.Add(MakeShared<FJsonValueString>(VB.VirtualBoneName.ToString()));
-
-        TSharedPtr<FJsonObject> VBObj = MakeShared<FJsonObject>();
-        VBObj->SetStringField(TEXT("name"), VB.VirtualBoneName.ToString());
-        VBObj->SetStringField(TEXT("source_bone"), VB.SourceBoneName.ToString());
-        VBObj->SetStringField(TEXT("target_bone"), VB.TargetBoneName.ToString());
-        VirtualBones.Add(MakeShared<FJsonValueObject>(VBObj));
-    }
-
-    TSharedPtr<FJsonObject> Resp = Skeleton_NewPayload(Skeleton);
-    Resp->SetNumberField(TEXT("bone_count"), NumBones);
-    Resp->SetArrayField(TEXT("bones"), Bones);
-    Resp->SetNumberField(TEXT("virtual_bone_count"), Skeleton->GetVirtualBones().Num());
-    Resp->SetArrayField(TEXT("virtual_bone_names"), VirtualBoneNames);
-    Resp->SetArrayField(TEXT("virtual_bones"), VirtualBones);
-    Resp->SetNumberField(TEXT("slot_group_count"), Skeleton->GetSlotGroups().Num());
-    Resp->SetNumberField(TEXT("socket_count"), Skeleton->Sockets.Num());
-    return mcp_common::MakeOkReply(Resp);
+        TEXT("add_skeleton_socket"), SaveErr);
 }
 
 // ---------------------------------------------------------------------------
@@ -563,7 +500,7 @@ TSharedPtr<FJsonObject> HandleRemoveAnimSlotGroup(const TSharedPtr<FJsonObject>&
 // ---------------------------------------------------------------------------
 // remove_skeleton_socket
 // ---------------------------------------------------------------------------
-// MCP:remove_socket_from_skeleton_asset - Remove a socket from the socket list of a USkeleton asset and save it. Idempotent: a missing socket returns removed false and already_absent true without saving. Returns socket_count and the remaining socket_names; sockets that exist only on a skeletal mesh are untouched (use remove_skeletal_mesh_socket).
+// MCP:remove_skeleton_socket - Remove a socket from the socket list of a USkeleton asset and save it. Idempotent: a missing socket returns removed false and already_absent true without saving. Returns socket_count and the remaining socket_names; sockets that exist only on a skeletal mesh are untouched (use remove_skeletal_mesh_socket).
 //   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
 //   @param socket_name - Name of the socket to remove (case-insensitive).
 //   @returns { asset_path: string, socket_name: string, removed: bool, already_absent: bool, socket_count: int, socket_names: [string], saved: bool }
@@ -609,7 +546,7 @@ TSharedPtr<FJsonObject> HandleRemoveSkeletonSocket(const TSharedPtr<FJsonObject>
 
     FString SaveErr;
     const bool bSaved = Skeleton_MarkDirtyAndSave(Skeleton, SaveErr);
-    return mcp_common::MakeSavedReply(BuildPayload(/*bRemoved=*/true), bSaved, TEXT("remove_socket_from_skeleton_asset"), SaveErr);
+    return mcp_common::MakeSavedReply(BuildPayload(/*bRemoved=*/true), bSaved, TEXT("remove_skeleton_socket"), SaveErr);
 }
 
 // ===========================================================================
@@ -971,49 +908,6 @@ TSharedPtr<FJsonObject> HandleSetBoneParent(const TSharedPtr<FJsonObject>& Param
 }
 
 // ---------------------------------------------------------------------------
-// is_skeleton_shared
-// ---------------------------------------------------------------------------
-// MCP:is_skeleton_shared - Find the skeletal mesh assets bound to a USkeleton asset through an Asset Registry query on their Skeleton tag, returning mesh_count, mesh_paths and shared (true when more than one mesh uses it). Read-only; only the skeleton itself is loaded.
-//   @param skeleton_path - USkeleton asset path, e.g. "/Game/Characters/SK_Hero_Skeleton".
-//   @returns { asset_path, mesh_count, shared, mesh_paths }
-TSharedPtr<FJsonObject> HandleIsSkeletonShared(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SkeletonPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeleton_path"), SkeletonPath, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadFlexibleOrError(SkeletonPath, TEXT("skeleton"), Skeleton)) { return Error; }
-
-    // AssetRegistry FARFilter on SkeletalMesh tag "Skeleton" == <export text of this skeleton>.
-    // Pattern mirrored from USkeleton::FindCompatibleMesh (Skeleton.cpp) —
-    // the engine's own canonical "which meshes use this skeleton" lookup.
-    IAssetRegistry& AR = mcp_common::AssetRegistry();
-
-    FARFilter Filter;
-    Filter.bRecursivePaths = true;
-    Filter.bRecursiveClasses = true;
-    Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
-    Filter.TagsAndValues.Add(USkeletalMesh::GetSkeletonMemberName(),
-                             FAssetData(Skeleton).GetExportTextName());
-
-    TArray<FAssetData> AssetList;
-    AR.GetAssets(Filter, AssetList);
-
-    TArray<TSharedPtr<FJsonValue>> Paths;
-    Paths.Reserve(AssetList.Num());
-    for (const FAssetData& AD : AssetList)
-    {
-        Paths.Add(MakeShared<FJsonValueString>(AD.GetObjectPathString()));
-    }
-
-    TSharedPtr<FJsonObject> Resp = Skeleton_NewPayload(Skeleton);
-    Resp->SetNumberField(TEXT("mesh_count"), AssetList.Num());
-    Resp->SetBoolField(TEXT("shared"), AssetList.Num() > 1);
-    Resp->SetArrayField(TEXT("mesh_paths"), Paths);
-    return mcp_common::MakeOkReply(Resp);
-}
-
-// ---------------------------------------------------------------------------
 // set_blend_profile_bone
 // ---------------------------------------------------------------------------
 // MCP:set_blend_profile_bone - Set a bone's blend scale on a UBlendProfile (creates profile if missing).
@@ -1335,18 +1229,16 @@ const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_anim_slot_group"), &HandleAddAnimSlotGroup },
     { TEXT("add_bone"), &HandleAddBone },
-    { TEXT("add_socket_to_skeleton_asset"), &HandleAddSkeletonSocket },
+    { TEXT("add_skeleton_socket"), &HandleAddSkeletonSocket },
     { TEXT("add_virtual_bone"), &HandleAddVirtualBone },
     { TEXT("commit_bone_changes"), &HandleCommitBoneChanges },
     { TEXT("create_editable_skeleton"), &HandleCreateEditableSkeleton },
     { TEXT("get_bone_transform"), &HandleGetBoneTransform },
-    { TEXT("get_skeleton_asset_info"), &HandleGetSkeletonInfo },
-    { TEXT("is_skeleton_shared"), &HandleIsSkeletonShared },
     { TEXT("remove_anim_curve_name"), &HandleRemoveAnimCurveName },
     { TEXT("remove_anim_slot_group"), &HandleRemoveAnimSlotGroup },
     { TEXT("remove_blend_profile"), &HandleRemoveBlendProfile },
     { TEXT("remove_bone"), &HandleRemoveBone },
-    { TEXT("remove_socket_from_skeleton_asset"), &HandleRemoveSkeletonSocket },
+    { TEXT("remove_skeleton_socket"), &HandleRemoveSkeletonSocket },
     { TEXT("remove_virtual_bone"), &HandleRemoveVirtualBone },
     { TEXT("rename_bone"), &HandleRenameBone },
     { TEXT("set_blend_profile_bone"), &HandleSetBlendProfileBone },

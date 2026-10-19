@@ -130,7 +130,8 @@ namespace
         return true;
     }
 
-    // Read the registry's protected DataSources array via reflection (for info reporting).
+    // Read the registry's protected DataSources array via reflection (for info reporting). Every slot is kept,
+    // a null one as nullptr, so an index into OutSources is the DataSources[] slot index.
     void ReadDataSourcesReflective(UDataRegistry* Registry, TArray<UDataRegistrySource*>& OutSources)
     {
         FArrayProperty* SourcesProp = FindFProperty<FArrayProperty>(
@@ -148,11 +149,32 @@ namespace
         }
         for (int32 i = 0; i < Helper.Num(); ++i)
         {
-            if (UObject* Obj = InnerObjProp->GetObjectPropertyValue(Helper.GetRawPtr(i)))
-            {
-                OutSources.Add(Cast<UDataRegistrySource>(Obj));
-            }
+            OutSources.Add(Cast<UDataRegistrySource>(InnerObjProp->GetObjectPropertyValue(Helper.GetRawPtr(i))));
         }
+    }
+
+    // The path of a source's SourceTable property, read reflectively whatever the source class (a hard or soft
+    // object property; the DataTable and CurveTable sources both have one). False when the class has none.
+    bool ReadSourceTableReflective(const UDataRegistrySource* Src, FString& OutPath)
+    {
+        FProperty* TableProp = Src ? Src->GetClass()->FindPropertyByName(TEXT("SourceTable")) : nullptr;
+        if (!TableProp)
+        {
+            return false;
+        }
+        const void* ValuePtr = TableProp->ContainerPtrToValuePtr<void>(Src);
+        if (const FSoftObjectProperty* SoftProp = CastField<FSoftObjectProperty>(TableProp))
+        {
+            OutPath = SoftProp->GetPropertyValue(ValuePtr).ToString();
+            return true;
+        }
+        if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(TableProp))
+        {
+            const UObject* TableObj = ObjProp->GetObjectPropertyValue(ValuePtr);
+            OutPath = TableObj ? TableObj->GetPathName() : FString();
+            return true;
+        }
+        return false;
     }
 
     // Count the DataSources array entries without copying them (avoids allocating
@@ -521,9 +543,9 @@ TSharedPtr<FJsonObject> HandleInitializeDataRegistry(
 // Reads registry type / item struct / id format / initialized state / item
 // names and the configured source list.
 // ---------------------------------------------------------------------------
-// MCP:get_data_registry_info - Read a UDataRegistry asset: registry_type, item_struct, initialized, its sources (name, class, data_table) and item_names. Read-only. item_names lists cached items only, so it stays empty until the registry is initialized (initialize_data_registry); null source slots are skipped, unlike get_data_registry_source_count.
+// MCP:get_data_registry_info - Read a UDataRegistry asset: registry_type, item_struct, initialized, every DataSources[] slot (index, name, class, data_table, source_table) and item_names. Read-only. source_count counts every slot, a null one included (listed with class "null"). source_table is the SourceTable of any source class that has one (DataTable and CurveTable sources). item_names lists cached items only, so it stays empty until the registry is initialized (initialize_data_registry).
 //   @param registry_path - Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items".
-//   @returns { registry_path: string, registry_type: string, item_struct: string, initialized: bool, sources: [{name, class, data_table}], source_count: int, item_names: [string], item_count: int }
+//   @returns { registry_path: string, registry_type: string, item_struct: string, initialized: bool, sources: [{index: int, class: string, name?: string, data_table?: string, source_table?: string}], source_count: int, item_names: [string], item_count: int }
 
 TSharedPtr<FJsonObject> HandleGetDataRegistryInfo(
     const TSharedPtr<FJsonObject>& Params)
@@ -543,22 +565,31 @@ TSharedPtr<FJsonObject> HandleGetDataRegistryInfo(
         ItemStruct ? ItemStruct->GetName() : TEXT("None"));
     ResultObj->SetBoolField(TEXT("initialized"), Registry->IsInitialized());
 
-    // Source list (read via reflection).
+    // Source list (read via reflection), one entry per DataSources[] slot, null slots included.
     TArray<UDataRegistrySource*> Sources;
     ReadDataSourcesReflective(Registry, Sources);
     TArray<TSharedPtr<FJsonValue>> SourcesArr;
-    for (UDataRegistrySource* Src : Sources)
+    for (int32 Index = 0; Index < Sources.Num(); ++Index)
     {
+        const UDataRegistrySource* Src = Sources[Index];
+        TSharedPtr<FJsonObject> SrcObj = MakeShared<FJsonObject>();
+        SrcObj->SetNumberField(TEXT("index"), Index);
         if (!Src)
         {
+            SrcObj->SetStringField(TEXT("class"), TEXT("null"));
+            SourcesArr.Add(MakeShared<FJsonValueObject>(SrcObj));
             continue;
         }
-        TSharedPtr<FJsonObject> SrcObj = MakeShared<FJsonObject>();
         SrcObj->SetStringField(TEXT("name"), Src->GetName());
         SrcObj->SetStringField(TEXT("class"), Src->GetClass()->GetName());
-        if (UDataRegistrySource_DataTable* DTSrc = Cast<UDataRegistrySource_DataTable>(Src))
+        if (const UDataRegistrySource_DataTable* DTSrc = Cast<UDataRegistrySource_DataTable>(Src))
         {
             SrcObj->SetStringField(TEXT("data_table"), DTSrc->SourceTable.ToString());
+        }
+        FString SourceTable;
+        if (ReadSourceTableReflective(Src, SourceTable))
+        {
+            SrcObj->SetStringField(TEXT("source_table"), SourceTable);
         }
         SourcesArr.Add(MakeShared<FJsonValueObject>(SrcObj));
     }
@@ -674,21 +705,17 @@ TSharedPtr<FJsonObject> HandleListDataRegistryTypes(
 // ===========================================================================
 // DataRegistry source management advanced
 //
-// The commands of this section, all headless:
+// The commands of this section, all headless (the sources themselves are
+// enumerated by get_data_registry_info):
 //
-//   1. list_data_registry_sources     -- enumerate the asset's DataSources[]
-//                                          (class, source_table, etc.).
-//   2. get_data_registry_source_count -- scalar count of DataSources[].
-//   3. clear_data_registry_sources    -- empty the asset's DataSources[] and
-//                                          save. Does NOT touch the subsystem
-//                                          registry map (no public
-//                                          UnregisterRegistry; the
-//                                          registry will still be queryable
-//                                          for already-cached items until
-//                                          the editor restarts).
-//   4. remove_data_registry_source    -- drop ONE source from DataSources[]
-//                                          and save (see its block below).
-//   5. refresh_data_registry_map      -- call UDataRegistrySubsystem::
+//   1. remove_data_registry_source    -- drop ONE source from DataSources[], or
+//                                          with all=true empty it, and save
+//                                          (see its block below). Does NOT touch
+//                                          the subsystem registry map (no public
+//                                          UnregisterRegistry; the registry will
+//                                          still be queryable for already-cached
+//                                          items until the editor restarts).
+//   2. refresh_data_registry_map      -- call UDataRegistrySubsystem::
 //                                          RefreshRegistryMap() to force the
 //                                          subsystem to re-read the registry
 //                                          map after asset edits.
@@ -696,115 +723,6 @@ TSharedPtr<FJsonObject> HandleListDataRegistryTypes(
 // We do NOT stub unregister-from-subsystem because the engine has no public
 // path for it.
 // ===========================================================================
-
-// MCP:list_data_registry_sources - List the DataTable sources attached to a UDataRegistry asset.  Reads UDataRegistry::DataSources[] via reflection (the UDataRegistrySource base class does not have a public SourceTable accessor; the UDataRegistrySource_DataTable subclass does, and we read it via FProperty lookup so this stays portable across DataTable source variants).
-//   @param registry_path - Content path to the UDataRegistry asset.
-//   @returns { registry_path: string, source_count: int, sources: [{index, class, source_table}] }
-
-TSharedPtr<FJsonObject> HandleListDataRegistrySources(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RegistryPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("registry_path"), RegistryPath)) { return Missing; }
-    UDataRegistry* Registry = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = DataRegistry_Load(RegistryPath, Registry)) { return LoadError; }
-
-    TArray<TSharedPtr<FJsonValue>> SourcesArr;
-    TArray<UDataRegistrySource*> Sources;
-    ReadDataSourcesReflective(Registry, Sources);
-    for (int32 i = 0; i < Sources.Num(); ++i)
-    {
-        const UDataRegistrySource* Src = Sources[i];
-        TSharedPtr<FJsonObject> SObj = MakeShared<FJsonObject>();
-        SObj->SetNumberField(TEXT("index"), i);
-        SObj->SetStringField(TEXT("class"), Src ? Src->GetClass()->GetName() : TEXT("null"));
-        if (Src)
-        {
-            // UDataRegistrySource has a virtual SourceTable accessor (override
-            // on UDataRegistrySource_DataTable). Use the public getter pattern:
-            // the UDataRegistrySource base class does NOT have SourceTable,
-            // but the DataTable subclass does. Reflective read is portable.
-            if (FProperty* TableProp = Src->GetClass()->FindPropertyByName(TEXT("SourceTable")))
-            {
-                if (FObjectProperty* ObjProp = CastField<FObjectProperty>(TableProp))
-                {
-                    UObject* TableObj = ObjProp->GetObjectPropertyValue(
-                        ObjProp->ContainerPtrToValuePtr<void>(Src));
-                    SObj->SetStringField(TEXT("source_table"),
-                        TableObj ? TableObj->GetPathName() : FString());
-                }
-            }
-        }
-        SourcesArr.Add(MakeShared<FJsonValueObject>(SObj));
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
-    ResultObj->SetNumberField(TEXT("source_count"), Sources.Num());
-    ResultObj->SetArrayField(TEXT("sources"), SourcesArr);
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:get_data_registry_source_count - Count the entries of DataSources[] on a UDataRegistry asset, null slots included. Read-only; returns registry_path and source_count. For the sources themselves (class, source table) use list_data_registry_sources or get_data_registry_info.
-//   @param registry_path - Asset path of the UDataRegistry, e.g. "/Game/Data/DR_Items".
-//   @returns { registry_path: string, source_count: int }
-
-TSharedPtr<FJsonObject> HandleGetDataRegistrySourceCount(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RegistryPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("registry_path"), RegistryPath)) { return Missing; }
-    UDataRegistry* Registry = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = DataRegistry_Load(RegistryPath, Registry)) { return LoadError; }
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
-    ResultObj->SetNumberField(TEXT("source_count"), CountDataSourcesReflective(Registry));
-    return mcp_common::MakeOkReply(ResultObj);
-}
-
-// MCP:clear_data_registry_sources - Empty the DataSources[] array on a UDataRegistry and save the asset.  Honest: UDataRegistrySubsystem has no public UnregisterRegistry, so this does NOT unregister the registry from the subsystem registry map. The already-loaded sources may still be queryable for their cached items until the editor restarts. Use refresh_data_registry_map() after editing to force the subsystem to re-read the registry map.
-//   @param registry_path - Content path to the UDataRegistry asset.
-//   @returns { registry_path: string, source_count_before: int, source_count_after: int, cleared: bool, save_error: string }
-
-TSharedPtr<FJsonObject> HandleClearDataRegistrySources(const TSharedPtr<FJsonObject>& Params)
-{
-    FString RegistryPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("registry_path"), RegistryPath)) { return Missing; }
-    UDataRegistry* Registry = nullptr;
-    if (TSharedPtr<FJsonObject> LoadError = DataRegistry_Load(RegistryPath, Registry)) { return LoadError; }
-    const int32 BeforeCount = CountDataSourcesReflective(Registry);
-    if (BeforeCount == 0)
-    {
-        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-        ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
-        ResultObj->SetNumberField(TEXT("source_count_before"), 0);
-        ResultObj->SetNumberField(TEXT("source_count_after"), 0);
-        ResultObj->SetBoolField(TEXT("cleared"), false);
-        ResultObj->SetStringField(TEXT("note"), TEXT("no sources to clear"));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    Registry->Modify();
-    ClearDataSourcesReflective(Registry);
-    Registry->MarkPackageDirty();
-
-    // Persist like the other handlers do.
-    UPackage* Package = Registry->GetPackage();
-    FString SaveError;
-    if (Package)
-    {
-        mcp_common::SaveAssetPackage(Package, Registry, SaveError);
-    }
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
-    ResultObj->SetNumberField(TEXT("source_count_before"), BeforeCount);
-    ResultObj->SetNumberField(TEXT("source_count_after"), CountDataSourcesReflective(Registry));
-    ResultObj->SetBoolField(TEXT("cleared"), CountDataSourcesReflective(Registry) == 0);
-    if (!SaveError.IsEmpty())
-    {
-        ResultObj->SetStringField(TEXT("save_error"), SaveError);
-    }
-    return mcp_common::MakeOkReply(ResultObj);
-}
 
 // ---------------------------------------------------------------------------
 // remove_data_registry_source
@@ -816,18 +734,19 @@ TSharedPtr<FJsonObject> HandleClearDataRegistrySources(const TSharedPtr<FJsonObj
 // Idempotent: if no matching source is found (e.g. already removed), returns
 // success with removed:false and an unchanged count.
 // ---------------------------------------------------------------------------
-// MCP:remove_data_registry_source - Remove a DataTable source from a UDataRegistry asset (the true inverse of add_data_registry_source).  Does a reflective RemoveAt on the registry's protected DataSources[] array and saves the asset. Select the source either by data_table_path (matched against each DataTable source's SourceTable) or by source_index. Does NOT unregister from the subsystem. Idempotent: if the source is not present it returns removed:false with an unchanged count.
+// MCP:remove_data_registry_source - Remove a DataTable source from a UDataRegistry asset (the true inverse of add_data_registry_source), or with all=true empty every DataSources[] slot.  Does a reflective RemoveAt (or Empty) on the registry's protected DataSources[] array and saves the asset. Select one source either by data_table_path (matched against each DataTable source's SourceTable) or by source_index. Does NOT unregister from the subsystem (there is no public UnregisterRegistry): already-cached items may stay queryable until the editor restarts; refresh_data_registry_map makes the subsystem re-read the registry map. Idempotent: a source that is not present, or all=true on a registry without sources, returns removed:false with an unchanged count.
 //   @param registry_path - Content path to the UDataRegistry asset.
-//   @param data_table_path - Content path of the source DataTable to remove (matched against SourceTable). Provide this OR source_index.
-//   @param source_index - Direct index into DataSources[] to remove. Provide this OR data_table_path.
-//   @returns { registry_path: string, source_index: int, data_table_path: string, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error: string, note: string }
+//   @param data_table_path - Content path of the source DataTable to remove (matched against SourceTable). Provide this OR source_index OR all.
+//   @param source_index - Direct index into DataSources[] to remove. Provide this OR data_table_path OR all.
+//   @param all - Optional bool, default false: true removes every source (null slots included) instead of one; it excludes data_table_path and source_index.
+//   @returns { registry_path: string, source_index?: int, data_table_path?: string, all?: bool, source_count_before: int, source_count_after: int, removed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObject>& Params)
 {
     FString RegistryPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("registry_path"), RegistryPath)) { return Missing; }
 
-    // Exactly one selector: data_table_path (match) OR source_index (direct).
+    // Exactly one selector: data_table_path (match) OR source_index (direct) OR all.
     FString TablePath;
     const bool bHasTablePath =
         Params->TryGetStringField(TEXT("data_table_path"), TablePath) && !TablePath.IsEmpty();
@@ -835,10 +754,18 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
     int32 RequestedIndex = INDEX_NONE;
     const bool bHasIndex = Params->TryGetNumberField(TEXT("source_index"), RequestedIndex);
 
-    if (!bHasTablePath && !bHasIndex)
+    bool bAll = false;
+    Params->TryGetBoolField(TEXT("all"), bAll);
+
+    if (bAll && (bHasTablePath || bHasIndex))
     {
         return mcp_common::MakeErrorReply(
-            TEXT("Provide exactly one of: data_table_path or source_index"));
+            TEXT("all=true removes every source; do not combine it with data_table_path or source_index"));
+    }
+    if (!bAll && !bHasTablePath && !bHasIndex)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Provide exactly one of: data_table_path, source_index or all=true"));
     }
     if (bHasTablePath && bHasIndex)
     {
@@ -850,6 +777,38 @@ TSharedPtr<FJsonObject> HandleRemoveDataRegistrySource(const TSharedPtr<FJsonObj
     if (TSharedPtr<FJsonObject> LoadError = DataRegistry_Load(RegistryPath, Registry)) { return LoadError; }
 
     const int32 BeforeCount = CountDataSourcesReflective(Registry);
+
+    if (bAll)
+    {
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
+        ResultObj->SetBoolField(TEXT("all"), true);
+        ResultObj->SetNumberField(TEXT("source_count_before"), BeforeCount);
+        if (BeforeCount == 0)
+        {
+            // Nothing to empty: idempotent no-op, nothing touched or saved.
+            ResultObj->SetNumberField(TEXT("source_count_after"), 0);
+            ResultObj->SetBoolField(TEXT("removed"), false);
+            ResultObj->SetBoolField(TEXT("saved"), false);
+            ResultObj->SetStringField(TEXT("note"), TEXT("no sources to remove"));
+            return mcp_common::MakeOkReply(ResultObj);
+        }
+
+        Registry->Modify();
+        ClearDataSourcesReflective(Registry);
+        Registry->MarkPackageDirty();
+
+        FString SaveError;
+        const bool bSaved = mcp_common::SaveAssetPackage(Registry->GetOutermost(), Registry, SaveError);
+        const int32 AfterCount = CountDataSourcesReflective(Registry);
+        ResultObj->SetNumberField(TEXT("source_count_after"), AfterCount);
+        ResultObj->SetBoolField(TEXT("removed"), AfterCount == 0);
+        if (!bSaved && !SaveError.IsEmpty())
+        {
+            ResultObj->SetStringField(TEXT("save_error"), SaveError);
+        }
+        return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_data_registry_source"));
+    }
 
     // Resolve the target index. -1 means "no matching source" (idempotent no-op).
     int32 TargetIndex = INDEX_NONE;
@@ -988,13 +947,10 @@ TSharedPtr<FJsonObject> HandleRefreshDataRegistryMap(const TSharedPtr<FJsonObjec
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_data_registry_source"), &HandleAddDataRegistrySource },
-    { TEXT("clear_data_registry_sources"), &HandleClearDataRegistrySources },
     { TEXT("create_data_registry"), &HandleCreateDataRegistry },
     { TEXT("get_data_registry_info"), &HandleGetDataRegistryInfo },
     { TEXT("get_data_registry_item"), &HandleGetDataRegistryItem },
-    { TEXT("get_data_registry_source_count"), &HandleGetDataRegistrySourceCount },
     { TEXT("initialize_data_registry"), &HandleInitializeDataRegistry },
-    { TEXT("list_data_registry_sources"), &HandleListDataRegistrySources },
     { TEXT("list_data_registry_types"), &HandleListDataRegistryTypes },
     { TEXT("refresh_data_registry_map"), &HandleRefreshDataRegistryMap },
     { TEXT("remove_data_registry_source"), &HandleRemoveDataRegistrySource },

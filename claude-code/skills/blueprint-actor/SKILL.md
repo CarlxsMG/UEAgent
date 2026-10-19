@@ -21,7 +21,7 @@ The actor to build: $ARGUMENTS
 3. **Add the components**: `add_component_to_blueprint` for each one, with `blueprint_name`,
    `component_type` (a short native name such as `StaticMesh`, `Box`, `Sphere`, `PointLight`),
    `component_name`, and optionally `location`, `rotation`, `scale` and `parent_component_name`.
-   Send them in one `batch` when there are several.
+   Send them in one `execute_batch` when there are several.
 4. **Build the logic**: `build_blueprint_graph` with `blueprint_name`, `nodes`, `connections` and
    `pin_defaults`, in one call. Read its schema first, and take the pin names from
    `get_function_pins` instead of guessing them.

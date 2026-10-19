@@ -1251,17 +1251,17 @@ namespace mcp_common
         if (!OverrideFunc || !OverrideFuncClass)
         {
             UE_LOG(LogTemp, Error,
-                TEXT("SpawnEventNode: '%s' is not an overridable event on '%s' (use custom_event for a new event, or implement_interface_function for a function with a return value)"),
+                TEXT("SpawnEventNode: '%s' is not an overridable event on '%s' (use custom_event for a new event, or add_blueprint_function with override=true for a function with a return value)"),
                 *EventName, *Blueprint->GetName());
             return nullptr;
         }
 
         // Event-shape only: a function with a return value / outputs cannot be an event node. Fail clearly rather
-        // than leaving a broken node behind -- such a function belongs in a function graph (implement_interface_function).
+        // than leaving a broken node behind -- such a function belongs in a function graph (add_blueprint_function with override=true).
         if (!UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(OverrideFunc))
         {
             UE_LOG(LogTemp, Error,
-                TEXT("SpawnEventNode: '%s' has a return value / outputs and cannot be an event; use implement_interface_function"),
+                TEXT("SpawnEventNode: '%s' has a return value / outputs and cannot be an event; use add_blueprint_function with override=true"),
                 *EventName);
             return nullptr;
         }
@@ -1382,7 +1382,7 @@ namespace mcp_common
                 // Self-context member var: SetFromProperty(bSelfContext=true) points/hides the node's
                 // `self` pin. A NOT-self reference here would leave a visible, unwired self pin ->
                 // compile purges it ("Variable node uses an invalid target ... got purged"). Silent:
-                // compile_blueprint returns ok; only get_compile_errors flags it.
+                // the compile still succeeds; only compile_blueprint's messages (return_messages) flag it.
                 Node->SetFromProperty(Property, /*bSelfContext=*/true, Property->GetOwnerClass());
                 return true;
             }

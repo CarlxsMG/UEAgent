@@ -202,7 +202,7 @@ namespace
     }
 }
 
-// MCP:audit_replication - Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_replication_info / get_actor_replication_info.
+// MCP:audit_replication - Project-wide replication audit: for every Blueprint under folder_path, which variables are Replicated (CPF_Net), whether the class itself replicates (AActor::GetIsReplicated on the GeneratedClass CDO), and which UFUNCTIONs are RPCs (FUNC_NetFuncFlags). It returns only a SUMMARY plus a report path -- the full per-Blueprint detail is written to Saved/MCPAudits/ and must be read back with read_mcp_audit_file. For one actor rather than a sweep, use get_actor_replication_info.
 //   @param folder_path [string] - Content-relative folder to scan. Defaults to "/Game".
 //   @param recursive [bool] - Recurse into subfolders. Defaults to true.
 //   @param max_results [number] - Cap on Blueprints processed (1-100000). Defaults to 1000.
@@ -217,7 +217,7 @@ TSharedPtr<FJsonObject> HandleAuditReplication(const TSharedPtr<FJsonObject>& Pa
 
     // Enumerate ALL assets under FolderPath, then filter to UBlueprint via AssetClassPath.
     // Avoid GetAssetsByClass(UBlueprint, bSearchSubClasses=true), which can hang on a large registry
-    // (same guardrail already used by get_blueprint_children in UEAgentAnalysisCommands.cpp).
+    // (same guardrail list_derived_classes uses).
     TArray<FAssetData> AllAssets;
     AR.GetAssetsByPath(FName(*FolderPath), AllAssets, bRecursive);
     const FTopLevelAssetPath BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
@@ -525,7 +525,7 @@ TSharedPtr<FJsonObject> HandleAuditAssetReferences(const TSharedPtr<FJsonObject>
 //   differ (e.g. 54 vs 53) purely because some system spawns its own components (Niagara, etc.)
 //   at runtime. Exposing that count here would invite exactly that false positive. The correct
 //   structural comparison is on the CDO/SCS (verify_reparent_success, diff_blueprint_components,
-//   get_blueprint_scs_tree).
+//   get_blueprint_components).
 //
 // The CPF_SaveGame half of the property filter below is NOT dead, and a 0 in
 //   savegame_property_count is a result to look at, not a foregone conclusion.
@@ -697,7 +697,7 @@ TSharedPtr<FJsonObject> HandleCapturePieState(const TSharedPtr<FJsonObject>& Par
     Report->SetStringField(TEXT("savegame_filter_note"),
         TEXT("Properties are included when CPF_Net OR CPF_SaveGame is set. CPF_SaveGame is no longer expected to be 0: no NATIVE UPROPERTY here sets it, but the \"SaveGame\" checkbox of a Blueprint variable does, and the compiler copies that onto the generated FProperty this filter iterates. savegame_property_count is a measurement either way -- a 0 on actors whose Blueprints DO tick that box means the flag did not survive the compile, which is a finding, not a quirk of the capture."));
     Report->SetStringField(TEXT("components_note"),
-        TEXT("No component data by design: PIE component counts are not a structural measure (runtime-spawned components, e.g. Niagara, make structurally identical actors differ). Use verify_reparent_success / diff_blueprint_components / get_blueprint_scs_tree for structure."));
+        TEXT("No component data by design: PIE component counts are not a structural measure (runtime-spawned components, e.g. Niagara, make structurally identical actors differ). Use verify_reparent_success / diff_blueprint_components / get_blueprint_components for structure."));
     Report->SetArrayField(TEXT("actors"), ActorArr);
 
     FString Path;

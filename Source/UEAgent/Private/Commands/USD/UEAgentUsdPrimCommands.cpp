@@ -158,7 +158,7 @@ namespace
 	}
 }
 
-// MCP:define_usd_prim - Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. The requested specifier is then authored at the edit target (specifier_set_ok); specifier reports it only when that write succeeded, and a failed write fails the call. An unknown specifier is refused before anything is authored. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_type changes only the type.
+// MCP:define_usd_prim - Define a prim (specifier def) of type_name at prim_path on a registered USD stage, at its current edit target, defining missing ancestors as typeless prims. On an existing prim of another type it replaces the type, so leaving type_name out retypes it to Xform. The requested specifier is then authored at the edit target (specifier_set_ok); specifier reports it only when that write succeeded, and a failed write fails the call. An unknown specifier is refused before anything is authored. In memory only: save_usd_stage writes it. override_usd_prim authors an over instead; set_usd_prim_metadata with key "typeName" changes only the type.
 //   @param stage_name [string!] - Name the stage was registered under
 //   @param prim_path [string!] - Absolute SdfPath, e.g. /World/Cube
 //   @param type_name [string] - USD type name (Xform, Mesh, Cube, Scope, Camera, DistantLight...). Default: Xform
@@ -250,7 +250,7 @@ TSharedPtr<FJsonObject> HandleOverrideUsdPrim(const TSharedPtr<FJsonObject>& Par
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:remove_usd_prim - Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_active with active=false is the reversible way to hide a prim. Not saved to disk.
+// MCP:remove_usd_prim - Remove a prim and its subtree from the current edit target layer of a registered USD stage, returning removed. Opinions in other layers or references can keep it composed; set_usd_prim_metadata with key "active" and value false is the reversible way to hide a prim. Not saved to disk.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of the prim to remove, e.g. "/World/Cube"; its descendants go with it.
 //   @returns { removed: bool, prim_path: string }
@@ -270,74 +270,6 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrim(const TSharedPtr<FJsonObject>& Param
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetBoolField(TEXT("removed"), Removed);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_usd_prim_type - Change the typeName of an existing prim on a registered USD stage (define_usd_prim creates new ones), at the current edit target. The name is written as given, not checked against the schema registry. Returns type_name and set; not saved to disk.
-//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path [string!] - Absolute SdfPath of the prim to retype, e.g. "/World/Cube"; it must exist.
-//   @param type_name [string!] - New USD schema type name, e.g. "Mesh", "Xform" or "Cube"; written as given.
-//   @returns { set: bool, type_name: string }
-TSharedPtr<FJsonObject> HandleSetUsdPrimType(const TSharedPtr<FJsonObject>& Params)
-{
-	UE::FUsdStage Stage;
-	FString StageName;
-	FString PrimPath;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
-	{
-		return Error;
-	}
-
-	FString TypeName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("type_name"), TypeName)) { return Missing; }
-
-	UE::FUsdPrim Prim;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_FindPrim(Stage, StageName, PrimPath, Prim, TEXT(" (DefinePrim first)")))
-	{
-		return Error;
-	}
-
-	const bool SetOk = Prim.SetTypeName(FName(*TypeName));
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("type_name"), TypeName);
-	Data->SetBoolField(TEXT("set"), SetOk);
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_usd_prim_active - Activate or deactivate an existing prim on a registered USD stage (active metadata on the current edit target). An inactive prim and its subtree leave composition but stay addressable, the reversible alternative to remove_usd_prim. Returns active and set; not saved to disk.
-//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
-//   @param active [bool!] - true to activate, false to deactivate; omitted means true.
-//   @returns { active: bool, prim_path: string }
-TSharedPtr<FJsonObject> HandleSetUsdPrimActive(const TSharedPtr<FJsonObject>& Params)
-{
-	UE::FUsdStage Stage;
-	FString StageName;
-	FString PrimPath;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
-	{
-		return Error;
-	}
-
-	bool Active = true;
-	Params->TryGetBoolField(TEXT("active"), Active);
-
-	UE::FUsdPrim Prim;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_FindPrim(Stage, StageName, PrimPath, Prim))
-	{
-		return Error;
-	}
-
-	const bool SetOk = Prim.SetActive(Active);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	// Report the EFFECTIVE active flag after the call (Prim.IsActive reflects
-	// the current truth). If SetActive returned false, the effective flag is
-	// still the prior value, but we report the request intent for clarity.
-	Data->SetStringField(TEXT("prim_path"), PrimPath);
-	Data->SetBoolField(TEXT("active"), SetOk ? Active : Prim.IsActive());
-	Data->SetBoolField(TEXT("set"), SetOk);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -389,12 +321,12 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimSpecifier(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOutcomeReply(Data, SetOk, mcp_common::MeasuredOutcomeError(TEXT("set_usd_prim_specifier"), TEXT("set")));
 }
 
-// MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "kind", "customData" or "apiSchemas") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's type, read from its resolved value or, for a standard field resolving to nothing (kind, comment, hidden, customData, apiSchemas, references...), the type Sdf registers: scalars, vectors, matrices and arrays as set_usd_attribute_value converts them; a dictionary from an object of entries; a list op from {explicit} or {prepended, appended, deleted, ordered, added} arrays of item texts, or of whole numbers for an integer list op such as inactiveIds. Any other field takes the type value names, else its JSON type. A value that does not fit writes nothing; if USD refuses the write, success is false with set=false and its errors. In memory: save_usd_stage writes it; get_usd_prim_metadata reads it back as USD resolves it.
+// MCP:set_usd_prim_metadata - Author one metadata field (e.g. "comment", "kind", "customData", "apiSchemas", or the well-known "active" (bool; false deactivates the prim and its subtree, the reversible alternative to remove_usd_prim), "instanceable" (bool, USD native instancing), "displayName" (string UI label; the prim name does not change) and "typeName" (token, written as given, not checked against the schema registry)) on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's type, read from its resolved value or, for a standard field resolving to nothing (kind, comment, hidden, customData, apiSchemas, references...), the type Sdf registers: scalars, vectors, matrices and arrays as set_usd_attribute_value converts them; a dictionary from an object of entries; a list op from {explicit} or {prepended, appended, deleted, ordered, added} arrays of item texts, or of whole numbers for an integer list op such as inactiveIds. Any other field takes the type value names, else its JSON type. A value that does not fit writes nothing; if USD refuses the write, success is false with set=false and its errors. In memory: save_usd_stage writes it; get_usd_prim_metadata reads it back as USD resolves it.
 //   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
 //   @param key [string!] - Registered USD prim metadata field, e.g. "comment", "kind", "customData" or "apiSchemas"; a key USD does not register as prim metadata fails with success false and set=false.
 //   @param value [object!] - The value itself (a scalar, an array, or an object of dictionary entries) or {type?, value}. It is converted to the field's type when that is known, and type is then not used; else type, or the JSON type, decides (bool, number as double, string, object as dictionary). A list op is {"explicit": [...]} or {"prepended": [...], "appended", "deleted", "ordered", "added"}, a reference item "@a.usda@</Prim>", an integer list op item a whole number.
-//   @returns { set: bool, key: string, value: object, declared_type?: string, errors?: [string] }
+//   @returns { set: bool, prim_path: string, key: string, value: object, declared_type?: string, errors?: [string] }
 TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& Params)
 {
 	UE::FUsdStage Stage;
@@ -460,6 +392,7 @@ TSharedPtr<FJsonObject> HandleSetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 	// The USD errors the write raises are the reason a refused write gives; they land in Data["errors"].
 	UEAgent::UsdCommon::CaptureUsdErrors([&Prim, &Key, &Vt, &SetOk]() { SetOk = Prim.SetMetadata(*Key, Vt); }, Data);
 
+	Data->SetStringField(TEXT("prim_path"), PrimPath);
 	Data->SetStringField(TEXT("key"), Key);
 	Data->SetObjectField(TEXT("value"), UsdPrim_VtValueToJson(Vt));
 	if (!DeclaredType.IsEmpty())
@@ -564,38 +497,6 @@ TSharedPtr<FJsonObject> HandleGetUsdPrimMetadata(const TSharedPtr<FJsonObject>& 
 			TEXT("%d of %d fields are left out (omitted_keys): with them the reply would pass the size one reply may take; read each with key=..."),
 			Omitted.Num(), Count));
 	}
-	return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_usd_prim_display_name - Author the displayName metadata (a UI label; the prim name does not change) on an existing prim of a registered USD stage, at the current edit target. An empty string is written as an empty displayName, not cleared. Returns display_name and set; not saved to disk.
-//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
-//   @param display_name [string!] - Label that UIs show instead of the prim name, e.g. "Hero Cube"; may be empty.
-//   @returns { set: bool, display_name: string }
-TSharedPtr<FJsonObject> HandleSetUsdPrimDisplayName(const TSharedPtr<FJsonObject>& Params)
-{
-	UE::FUsdStage Stage;
-	FString StageName;
-	FString PrimPath;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
-	{
-		return Error;
-	}
-
-	FString DisplayName;
-	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("display_name"), DisplayName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-
-	UE::FUsdPrim Prim;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_FindPrim(Stage, StageName, PrimPath, Prim))
-	{
-		return Error;
-	}
-
-	const bool SetOk = Prim.SetDisplayName(DisplayName);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("display_name"), DisplayName);
-	Data->SetBoolField(TEXT("set"), SetOk);
 	return mcp_common::MakeOkReply(Data);
 }
 
@@ -823,39 +724,6 @@ TSharedPtr<FJsonObject> HandleRemoveUsdPrimSchema(const TSharedPtr<FJsonObject>&
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_usd_prim_instanceable - Set or clear the instanceable metadata (USD native instancing) of an existing prim on a registered USD stage, at the current edit target. Returns instanceable (the requested value, or the current one when the write fails) and set. Not saved to disk.
-//   @param stage_name [string!] - Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier.
-//   @param prim_path [string!] - Absolute SdfPath of an existing prim, e.g. "/World/Cube".
-//   @param instanceable [bool!] - true to mark instanceable, false to clear; omitted means true.
-//   @returns { instanceable: bool, prim_path: string }
-TSharedPtr<FJsonObject> HandleSetUsdPrimInstanceable(const TSharedPtr<FJsonObject>& Params)
-{
-	UE::FUsdStage Stage;
-	FString StageName;
-	FString PrimPath;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_ResolveStageAndPrimPath(Params, Stage, StageName, PrimPath))
-	{
-		return Error;
-	}
-
-	bool Instanceable = true;
-	Params->TryGetBoolField(TEXT("instanceable"), Instanceable);
-
-	UE::FUsdPrim Prim;
-	if (TSharedPtr<FJsonObject> Error = UsdPrim_FindPrim(Stage, StageName, PrimPath, Prim))
-	{
-		return Error;
-	}
-
-	const bool SetOk = Prim.SetInstanceable(Instanceable);
-
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("prim_path"), PrimPath);
-	Data->SetBoolField(TEXT("instanceable"), SetOk ? Instanceable : Prim.IsInstanceable());
-	Data->SetBoolField(TEXT("set"), SetOk);
-	return mcp_common::MakeOkReply(Data);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
 	{ TEXT("apply_usd_prim_schema"), &HandleApplyUsdPrimSchema },
@@ -866,11 +734,7 @@ const McpCommandFamilies::FRegistrar Registration =
 	{ TEXT("override_usd_prim"), &HandleOverrideUsdPrim },
 	{ TEXT("remove_usd_prim"), &HandleRemoveUsdPrim },
 	{ TEXT("remove_usd_prim_schema"), &HandleRemoveUsdPrimSchema },
-	{ TEXT("set_usd_prim_active"), &HandleSetUsdPrimActive },
-	{ TEXT("set_usd_prim_display_name"), &HandleSetUsdPrimDisplayName },
-	{ TEXT("set_usd_prim_instanceable"), &HandleSetUsdPrimInstanceable },
 	{ TEXT("set_usd_prim_metadata"), &HandleSetUsdPrimMetadata },
 	{ TEXT("set_usd_prim_specifier"), &HandleSetUsdPrimSpecifier },
-	{ TEXT("set_usd_prim_type"), &HandleSetUsdPrimType },
 };
 } // namespace UEAgentUsdPrimCommands

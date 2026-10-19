@@ -895,9 +895,29 @@ TSharedPtr<FJsonObject> HandleCreateCamera(const TSharedPtr<FJsonObject>& Params
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_cameras - List all camera actors in the editor world with their transform and FOV.
+// Lookup helper shared by get_cameras and the handlers below: matches the object name or the editor label of a camera
+// actor in the editor world.
+ACameraActor* FindCameraByName(const FString& CameraName)
+{
+    UWorld* EditorWorld = mcp_common::GetEditorWorld();
+    if (EditorWorld == nullptr)
+    {
+        return nullptr;
+    }
+    for (TActorIterator<ACameraActor> Cam(EditorWorld); Cam; ++Cam)
+    {
+        if (UEAgentCameraImpl::IsNamed(*Cam, CameraName))
+        {
+            return *Cam;
+        }
+    }
+    return nullptr;
+}
+
+// MCP:get_cameras - List the camera actors (ACameraActor or CineCameraActor) in the editor world with their world location [X, Y, Z], rotation [Pitch, Yaw, Roll] in degrees and FOV, or with camera_name only the one camera found by object name or label (case-insensitive, first match; an unknown name is an error). set_camera_transform is the writer of the transform.
 //   @param max_results - Maximum number of cameras to return (optional, default 1000, valid 1-10000)
-//   @returns { cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool }
+//   @param camera_name - Optional camera to report alone, matched by actor name or label; a camera without a camera component reports fov 90
+//   @returns { cameras: [{ name: string, label: string, is_valid: bool, location: [number, number, number], rotation: [number, number, number], fov: number? }], total_count: number, max_results: number, truncated: bool, camera_name?: string }
 
 TSharedPtr<FJsonObject> HandleGetCameras(const TSharedPtr<FJsonObject>& Params)
 {
@@ -907,10 +927,37 @@ TSharedPtr<FJsonObject> HandleGetCameras(const TSharedPtr<FJsonObject>& Params)
     {
         return mcp_common::MakeErrorReply(TEXT("max_results must be between 1 and 10000"));
     }
+    FString Wanted;
+    const bool bOneCamera = Params->TryGetStringField(TEXT("camera_name"), Wanted) && !Wanted.IsEmpty();
     UWorld* EditorWorld = mcp_common::GetEditorWorld();
     if (EditorWorld == nullptr || !EditorWorld->IsValidLowLevel())
     {
         return mcp_common::MakeErrorReply(TEXT("No valid world found"));
+    }
+
+    // One named camera: the same entry as the listing, with the 90-degree default FOV for a camera actor
+    // that has no camera component.
+    if (bOneCamera)
+    {
+        ACameraActor* Camera = FindCameraByName(Wanted);
+        if (Camera == nullptr)
+        {
+            return mcp_common::MakeErrorReply(UEAgentCameraImpl::CameraNotFound(Wanted));
+        }
+        TSharedPtr<FJsonObject> Entry = UEAgentCameraImpl::DescribeCamera(Camera);
+        if (!Entry->HasField(TEXT("fov")))
+        {
+            Entry->SetNumberField(TEXT("fov"), 90.0);
+        }
+        TArray<TSharedPtr<FJsonValue>> One;
+        One.Add(MakeShared<FJsonValueObject>(Entry));
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("camera_name"), Wanted);
+        Data->SetArrayField(TEXT("cameras"), One);
+        Data->SetNumberField(TEXT("total_count"), 1);
+        Data->SetNumberField(TEXT("max_results"), Limit);
+        Data->SetBoolField(TEXT("truncated"), false);
+        return mcp_common::MakeOkReply(Data);
     }
 
     // The walk stops at the first camera past Limit, which is what makes the list truncated.
@@ -937,25 +984,6 @@ TSharedPtr<FJsonObject> HandleGetCameras(const TSharedPtr<FJsonObject>& Params)
     Data->SetNumberField(TEXT("max_results"), Limit);
     Data->SetBoolField(TEXT("truncated"), bTruncated);
     return mcp_common::MakeOkReply(Data);
-}
-
-// Lookup helper shared by the handlers below: matches the object name or the editor label of a camera
-// actor in the editor world.
-ACameraActor* FindCameraByName(const FString& CameraName)
-{
-    UWorld* EditorWorld = mcp_common::GetEditorWorld();
-    if (EditorWorld == nullptr)
-    {
-        return nullptr;
-    }
-    for (TActorIterator<ACameraActor> Cam(EditorWorld); Cam; ++Cam)
-    {
-        if (UEAgentCameraImpl::IsNamed(*Cam, CameraName))
-        {
-            return *Cam;
-        }
-    }
-    return nullptr;
 }
 
 // MCP:set_camera_transform - Update the location and/or rotation of an existing camera.
@@ -1008,30 +1036,7 @@ TSharedPtr<FJsonObject> HandleSetCameraTransform(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_camera_transform - Read the world location and rotation of a camera actor (ACameraActor or CineCameraActor) in the editor world, found by object name or label (case-insensitive, first match). Returns location [X, Y, Z] and rotation [Pitch, Yaw, Roll] in degrees; set_camera_transform is the writer.
-//   @param camera_name - Name of the camera to query (matches actor name or label).
-//   @returns { camera_name: string, location: [number, number, number], rotation: [number, number, number] }
-
-TSharedPtr<FJsonObject> HandleGetCameraTransform(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Wanted;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("camera_name"), Wanted, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    const ACameraActor* Camera = FindCameraByName(Wanted);
-    if (Camera == nullptr)
-    {
-        return mcp_common::MakeErrorReply(UEAgentCameraImpl::CameraNotFound(Wanted));
-    }
-
-    const FVector Where = Camera->GetActorLocation();
-    const FRotator Facing = Camera->GetActorRotation();
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("camera_name"), Wanted);
-    Data->SetArrayField(TEXT("location"), UEAgentCameraImpl::JsonTriple(Where.X, Where.Y, Where.Z));
-    Data->SetArrayField(TEXT("rotation"), UEAgentCameraImpl::JsonTriple(Facing.Pitch, Facing.Yaw, Facing.Roll));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_camera_fov - Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_camera_fov reads it.
+// MCP:set_camera_fov - Set the field of view (degrees, above 0 up to 180) of the camera component of an ACameraActor or CineCameraActor in the editor world, found by object name or label. No undo transaction and nothing is saved. Returns previous_fov, actual_fov and fov_set; get_cameras with camera_name reads it.
 //   @param camera_name - Name of the camera to modify (matches actor name or label).
 //   @param fov - Field of view in degrees. Must be between 0.0 and 180.0.
 //   @returns { camera_name: string, requested_fov: number, previous_fov: number, actual_fov: number, fov_set: bool, camera_valid: bool }
@@ -1075,28 +1080,6 @@ TSharedPtr<FJsonObject> HandleSetCameraFOV(const TSharedPtr<FJsonObject>& Params
     Data->SetNumberField(TEXT("actual_fov"), FovNow);
     Data->SetBoolField(TEXT("fov_set"), FMath::IsNearlyEqual(FovNow, FovApplied, 0.1f));
     Data->SetBoolField(TEXT("camera_valid"), IsValid(Lens));
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_camera_fov - Retrieve the current field of view (FOV) of a camera.
-//   @param camera_name - Name of the camera to query (matches actor name or label).
-//   @returns { camera_name: string, fov: number }
-
-TSharedPtr<FJsonObject> HandleGetCameraFOV(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Wanted;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("camera_name"), Wanted, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    const ACameraActor* Camera = FindCameraByName(Wanted);
-    if (Camera == nullptr)
-    {
-        return mcp_common::MakeErrorReply(UEAgentCameraImpl::CameraNotFound(Wanted));
-    }
-
-    // A camera actor without a camera component reports the 90-degree default.
-    const UCameraComponent* Lens = Camera->GetCameraComponent();
-    TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetStringField(TEXT("camera_name"), Wanted);
-    Data->SetNumberField(TEXT("fov"), Lens != nullptr ? Lens->FieldOfView : 90.0f);
     return mcp_common::MakeOkReply(Data);
 }
 
@@ -2685,10 +2668,8 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("create_camera_rig_rail"), &HandleCreateCameraRigRail },
     { TEXT("create_camera_shake_blueprint"), &HandleCreateCameraShakeBlueprint },
     { TEXT("get_camera_asset_info"), &HandleGetCameraAssetInfo },
-    { TEXT("get_camera_fov"), &HandleGetCameraFOV },
     { TEXT("get_camera_post_process"), &HandleGetCameraPostProcess },
     { TEXT("get_camera_rig_nodes"), &HandleGetCameraRigNodes },
-    { TEXT("get_camera_transform"), &HandleGetCameraTransform },
     { TEXT("get_cameras"), &HandleGetCameras },
     { TEXT("get_cine_camera_settings"), &HandleGetCineCameraSettings },
     { TEXT("list_camera_node_types"), &HandleListCameraNodeTypes },

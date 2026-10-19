@@ -47,7 +47,7 @@
 #include "NiagaraMeshRendererProperties.h"                   // UNiagaraMeshRendererProperties
 #include "NiagaraLightRendererProperties.h"                  // UNiagaraLightRendererProperties
 #include "NiagaraDecalRendererProperties.h"                  // UNiagaraDecalRendererProperties
-#include "Materials/MaterialInterface.h"                    // UMaterialInterface for set_niagara_decal_renderer_material
+#include "Materials/MaterialInterface.h"                    // UMaterialInterface for set_niagara_renderer_material
 // TObjectIterator<UClass> for list_niagara_renderer_classes.
 #include "UObject/UObjectIterator.h"
 #include "NiagaraMeshRendererMeshProperties.h"               // FNiagaraMeshRendererMeshProperties (.Mesh slot)
@@ -301,9 +301,9 @@ TSharedPtr<FJsonObject> HandleCreateNiagaraSystem(const TSharedPtr<FJsonObject>&
 // get_niagara_system_info
 // Reads emitter count, system name, warmup time and the number of user-exposed parameters.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_system_info - Reads metadata for a UNiagaraSystem: emitter count, warmup time and exposed user parameters.
+// MCP:get_niagara_system_info - Reads metadata for a UNiagaraSystem: emitter count, exposed user parameters, and its warmup and determinism settings (warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup, deterministic). Read-only; change the warmup with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count and set_niagara_system_warmup_tick_delta, determinism with set_niagara_system_deterministic.
 //   @param system_path - Asset path of the Niagara System (e.g. /Game/Niagara/NS_Example or /Game/Niagara/NS_Example.NS_Example)
-//   @returns { system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, user_parameters: [{ name, type }] }
+//   @returns { system_name: string, system_path: string, emitter_count: int, num_user_parameters: int, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool, user_parameters: [{ name, type }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraSystemInfo(const TSharedPtr<FJsonObject>& Params)
 {
@@ -323,6 +323,10 @@ TSharedPtr<FJsonObject> HandleGetNiagaraSystemInfo(const TSharedPtr<FJsonObject>
     Data->SetNumberField(TEXT("emitter_count"), System->GetEmitterHandles().Num());
     Data->SetNumberField(TEXT("num_user_parameters"), UserVars.Num());
     Data->SetNumberField(TEXT("warmup_time"), System->GetWarmupTime());
+    Data->SetNumberField(TEXT("warmup_tick_count"), System->GetWarmupTickCount());
+    Data->SetNumberField(TEXT("warmup_tick_delta"), System->GetWarmupTickDelta());
+    Data->SetBoolField(TEXT("needs_warmup"), System->NeedsWarmup());
+    Data->SetBoolField(TEXT("deterministic"), System->NeedsDeterminism());
 
     TArray<TSharedPtr<FJsonValue>> ParamArray;
     for (const FNiagaraVariable& Var : UserVars)
@@ -1007,11 +1011,11 @@ TSharedPtr<FJsonObject> HandleSetNiagaraComponentBool(const TSharedPtr<FJsonObje
 }
 
 // ---------------------------------------------------------------------------
-// set_niagara_system_fixed_bounds
+// set_niagara_component_fixed_bounds
 // Sets the per-component fixed bounds via UNiagaraComponent::SetSystemFixedBounds
 // (FBox in local space). Reads back via GetSystemFixedBounds to verify.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_system_fixed_bounds - Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
+// MCP:set_niagara_component_fixed_bounds - Sets fixed local-space bounds on a spawned Niagara component.  Resolves the UNiagaraComponent on the owner actor and calls UNiagaraComponent::SetSystemFixedBounds(FBox), then reads back via GetSystemFixedBounds.
 //   @param actor_name - Owner actor identifier (internal name or editor label).
 //   @param min [string!] - Local-space bounds minimum [X, Y, Z].
 //   @param max [string!] - Local-space bounds maximum [X, Y, Z].
@@ -1578,71 +1582,6 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// add_niagara_emitter_handle
-// Adds an emitter to a Niagara system from an existing UNiagaraEmitter asset.
-// Loads the emitter, gets its exposed version GUID, calls AddEmitterHandle.
-// ---------------------------------------------------------------------------
-// MCP:add_niagara_emitter_handle - Add an emitter to a Niagara system from an existing UNiagaraEmitter asset.  Loads the emitter asset, gets its exposed version GUID, and calls UNiagaraSystem::AddEmitterHandle. The system is saved after modification.
-//   @param system_path - Asset path of the target Niagara System (e.g. "/Game/Niagara/NS_Example").
-//   @param emitter_path - Asset path of the source UNiagaraEmitter to add.
-//   @param emitter_name - Optional desired name for the new handle; defaults to the source emitter's name
-//   @returns { system_path: string, emitter_handle_name: string, emitter_handle_id: string, is_valid: bool, is_enabled: bool, total_emitters: int, saved: bool, save_error?: string }
-
-TSharedPtr<FJsonObject> HandleAddNiagaraEmitterHandle(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SystemPath;
-    if (!ExtractNiagaraSystemPath(Params, SystemPath))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'system_path' parameter"));
-    }
-    FString EmitterPath;
-    if (!mcp_common::ExtractStringPath(Params, TEXT("emitter_path"), EmitterPath))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'emitter_path' parameter"));
-    }
-
-    FString Error;
-    UNiagaraSystem* System = Niagara_ResolveSystem(SystemPath, Error);
-    if (!System)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    // Load the source emitter asset.
-    UNiagaraEmitter* Emitter = mcp_common::ResolveAsset<UNiagaraEmitter>(EmitterPath);
-    if (!Emitter)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Niagara emitter not found: %s"), *EmitterPath));
-    }
-
-    // Get the emitter's current version GUID.
-    const FNiagaraAssetVersion ExposedVer = Emitter->GetExposedVersion();
-    const FGuid VersionGuid = ExposedVer.VersionGuid;
-
-    // Optional desired name; if empty, AddEmitterHandle generates a unique one.
-    FString DesiredName;
-    Params->TryGetStringField(TEXT("emitter_name"), DesiredName);
-    const FName EmitterName = DesiredName.IsEmpty() ? FName(*Emitter->GetName()) : FName(*DesiredName);
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddNiagaraEmitterHandle", "Add Niagara Emitter Handle"));
-    System->Modify();
-
-    const FNiagaraEmitterHandle NewHandle = System->AddEmitterHandle(*Emitter, EmitterName, VersionGuid);
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartSystemReply(System);
-    Data->SetStringField(TEXT("emitter_handle_name"), NewHandle.GetName().ToString());
-    Data->SetStringField(TEXT("emitter_handle_id"), NewHandle.GetId().ToString());
-    Data->SetBoolField(TEXT("is_valid"), NewHandle.IsValid());
-    Data->SetBoolField(TEXT("is_enabled"), NewHandle.GetIsEnabled());
-    Data->SetNumberField(TEXT("total_emitters"), System->GetEmitterHandles().Num());
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_niagara_emitter_handle"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
 // remove_niagara_emitter_handle
 // Removes an emitter handle by name or index from a Niagara system.
 // ---------------------------------------------------------------------------
@@ -1702,7 +1641,7 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraEmitterHandle(const TSharedPtr<FJsonO
 // duplicate_niagara_emitter_handle
 // Duplicates an existing emitter handle in a Niagara system.
 // ---------------------------------------------------------------------------
-// MCP:duplicate_niagara_emitter_handle - Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, in one undo step, then save the system. The source is found by display name (case-insensitive); an unknown system or source is an error and nothing changes. The stored name can differ from the one asked for, so read new_emitter_name. Returns the actual name and id of the copy plus total_emitters; a failed save makes success false, with saved=false and save_error, the copy kept in memory. Find handle names with get_niagara_emitter_handles; add an emitter asset instead with add_niagara_emitter_handle; rename the copy with rename_niagara_emitter_handle.
+// MCP:duplicate_niagara_emitter_handle - Duplicate an emitter handle of a Niagara System asset under a new name, keeping its enabled state, in one undo step, then save the system. The source is found by display name (case-insensitive); an unknown system or source is an error and nothing changes. The stored name can differ from the one asked for, so read new_emitter_name. Returns the actual name and id of the copy plus total_emitters; a failed save makes success false, with saved=false and save_error, the copy kept in memory. Find handle names with get_niagara_emitter_handles; add an emitter asset instead with add_niagara_emitter_from_template; rename the copy with rename_niagara_emitter_handle.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
 //   @param source_emitter_name - Display name of the emitter handle to copy (case-insensitive), as get_niagara_emitter_handles lists it.
 //   @param new_emitter_name - Name for the copy (default "<source_emitter_name>_Copy").
@@ -1753,9 +1692,11 @@ TSharedPtr<FJsonObject> HandleDuplicateNiagaraEmitterHandle(const TSharedPtr<FJs
 // get_niagara_emitter_handles
 // Lists all emitter handles on a Niagara system: name, ID, enabled state.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_handles - List every emitter handle of a Niagara System asset with its display name, id GUID, enabled and valid flags, plus emitter_count. Read-only; the names feed the other emitter tools, and get_niagara_emitter_handle_info gives one handle in detail.
+// MCP:get_niagara_emitter_handles - List every emitter handle of a Niagara System asset, or just one chosen by display name or 0-based index, with its display name, id GUID, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags, plus emitter_count (all handles of the system). Read-only; the names feed the other emitter tools. A name or index that matches no handle, or an emitter_index that is not a JSON number, is an error.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
-//   @returns { system_path: string, emitter_count: int, emitter_handles: [{ name, id, is_enabled, is_valid }] }
+//   @param emitter_name - Optional display name of one handle to return (case-insensitive); when non-empty it wins over emitter_index.
+//   @param emitter_index - Optional 0-based position in the emitter list of the system of one handle to return, used only when emitter_name is absent or empty.
+//   @returns { system_path: string, emitter_count: int, emitter_handles: [{ index: int, name: string, id: string, id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandles(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1764,17 +1705,50 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandles(const TSharedPtr<FJsonObj
     {
         return Error;
     }
+    // Optional single-handle filter: emitter_name (wins when non-empty) or emitter_index.
+    if (TSharedPtr<FJsonObject> Mistyped = Niagara_RefuseMistypedNumber(Params, TEXT("emitter_index"))) { return Mistyped; }
+    FString FilterName;
+    const bool bFilter = (Params->TryGetStringField(TEXT("emitter_name"), FilterName) && !FilterName.IsEmpty())
+        || Params->HasTypedField<EJson::Number>(TEXT("emitter_index"));
+    const FNiagaraEmitterHandle* Only = nullptr;
+    if (bFilter)
+    {
+        FString Error;
+        Only = Niagara_FindHandleByNameOrIndex(Params, System, Error);
+        if (!Only)
+        {
+            return mcp_common::MakeErrorReply(Error);
+        }
+    }
 
     const TArray<FNiagaraEmitterHandle>& Handles = System->GetEmitterHandles();
 
     TArray<TSharedPtr<FJsonValue>> HandleArray;
-    for (const FNiagaraEmitterHandle& H : Handles)
+    for (int32 Index = 0; Index < Handles.Num(); ++Index)
     {
+        const FNiagaraEmitterHandle& H = Handles[Index];
+        if (Only && Only != &H)
+        {
+            continue;
+        }
         TSharedPtr<FJsonObject> HObj = MakeShared<FJsonObject>();
+        HObj->SetNumberField(TEXT("index"), Index);
         HObj->SetStringField(TEXT("name"), H.GetName().ToString());
         HObj->SetStringField(TEXT("id"), H.GetId().ToString());
+        HObj->SetStringField(TEXT("id_name"), H.GetIdName().ToString());
         HObj->SetBoolField(TEXT("is_enabled"), H.GetIsEnabled());
         HObj->SetBoolField(TEXT("is_valid"), H.IsValid());
+        // The emitter data's version and flags, when the handle has data.
+        if (const FVersionedNiagaraEmitterData* EmitterData = H.GetEmitterData())
+        {
+            HObj->SetStringField(TEXT("emitter_version"), EmitterData->Version.VersionGuid.ToString());
+            HObj->SetBoolField(TEXT("is_local_space"), EmitterData->bLocalSpace);
+            HObj->SetBoolField(TEXT("is_deprecated"), EmitterData->bDeprecated);
+        }
+        else
+        {
+            HObj->SetStringField(TEXT("emitter_version"), TEXT("N/A"));
+        }
         HandleArray.Add(MakeShared<FJsonValueObject>(HObj));
     }
 
@@ -1844,53 +1818,6 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterEnabled(const TSharedPtr<FJsonObj
     Data->SetBoolField(TEXT("verified"), ReadBack == bEnabled);
     Data->SetBoolField(TEXT("is_enabled_read_back"), ReadBack);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_emitter_enabled"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// get_niagara_emitter_handle_info
-// Get detailed info for a specific emitter handle by name or index.
-// ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_handle_info - Read one emitter handle of a Niagara System asset, chosen by display name or 0-based index: its id, id name, enabled and valid flags, version GUID and, when it has emitter data, its local-space and deprecated flags. Read-only; list every handle with get_niagara_emitter_handles.
-//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
-//   @param emitter_name - Display name of the handle (case-insensitive); when non-empty it wins over emitter_index.
-//   @param emitter_index - 0-based position in the emitter list of the system, used only when emitter_name is absent or empty.
-//   @returns { system_path: string, emitter_name: string, emitter_id: string, emitter_id_name: string, is_enabled: bool, is_valid: bool, emitter_version: string, is_local_space?: bool, is_deprecated?: bool }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraEmitterHandleInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    UNiagaraSystem* System = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadSystem(Params, System))
-    {
-        return Error;
-    }
-
-    FString Error;
-    FNiagaraEmitterHandle* Target = Niagara_FindHandleByNameOrIndex(Params, System, Error);
-    if (!Target)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, Target->GetName().ToString());
-    Data->SetStringField(TEXT("emitter_id"), Target->GetId().ToString());
-    Data->SetStringField(TEXT("emitter_id_name"), Target->GetIdName().ToString());
-    Data->SetBoolField(TEXT("is_enabled"), Target->GetIsEnabled());
-    Data->SetBoolField(TEXT("is_valid"), Target->IsValid());
-
-    // Try to get emitter data version info.
-    FVersionedNiagaraEmitterData* EmitterData = Target->GetEmitterData();
-    if (EmitterData)
-    {
-        Data->SetStringField(TEXT("emitter_version"), EmitterData->Version.VersionGuid.ToString());
-        Data->SetBoolField(TEXT("is_local_space"), EmitterData->bLocalSpace);
-        Data->SetBoolField(TEXT("is_deprecated"), EmitterData->bDeprecated);
-    }
-    else
-    {
-        Data->SetStringField(TEXT("emitter_version"), TEXT("N/A"));
-    }
-
-    return mcp_common::MakeOkReply(Data);
 }
 
 // ---------------------------------------------------------------------------
@@ -2025,44 +1952,17 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// get_niagara_emitter_sim_target
-// Reads SimTarget, bLocalSpace and bDeterministic from the emitter's
-// FVersionedNiagaraEmitterData (accessed via FNiagaraEmitterHandle::GetEmitterData).
-// ---------------------------------------------------------------------------
-// MCP:get_niagara_emitter_sim_target - Get the simulation target configuration of a Niagara emitter.  Reads SimTarget, bLocalSpace and bDeterministic from the emitter's FVersionedNiagaraEmitterData.
-//   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
-//   @param emitter_name - Display name of the emitter handle.
-//   @returns { system_path: string, emitter_name: string, sim_target: string, is_local_space: bool, is_deterministic: bool }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraEmitterSimTarget(const TSharedPtr<FJsonObject>& Params)
-{
-    FString EmitterName;
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadEmitterData(Params, NiagaraNoEmitterDataUninitialised, EmitterName, System, EmitterData))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetStringField(TEXT("sim_target"), SimTargetToString(EmitterData->SimTarget));
-    Data->SetBoolField(TEXT("is_local_space"), EmitterData->bLocalSpace);
-    Data->SetBoolField(TEXT("is_deterministic"), EmitterData->bDeterminism);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
 // set_niagara_emitter_sim_target
 // Sets SimTarget, bLocalSpace and bDeterministic on the emitter's
 // FVersionedNiagaraEmitterData. Saves the system after modification.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_emitter_sim_target - Set the simulation target (CPUSim or GPUComputeSim, case-insensitive) of one emitter of a Niagara System asset, found by handle name, and optionally its local_space and deterministic flags, in one undo step, then save the system. Values already in place are a success with changed=false and saved=false, and nothing is written. An unknown sim_target, system or emitter is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back with get_niagara_emitter_sim_target; GPU spawn limit: set_niagara_emitter_max_gpu_particles; local space alone: set_niagara_emitter_local_space.
+// MCP:set_niagara_emitter_sim_target - Set the simulation target (CPUSim or GPUComputeSim, case-insensitive), the local-space flag (bLocalSpace: particles in the emitter's space, or world space) and the deterministic flag of one emitter of a Niagara System asset, found by handle name, in one undo step, then save the system. Each of the three is optional and only the supplied ones are written, but at least one is required. Values already in place are a success with changed=false and saved=false, and nothing is written. An unknown sim_target, system or emitter, or a call with none of the three, is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the three as read back. Read them back with get_niagara_emitter_runtime_summary; GPU spawn limit: set_niagara_emitter_max_gpu_particles.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Display name of the emitter handle.
-//   @param sim_target - Target type — "CPUSim" or "GPUComputeSim".
-//   @param local_space - Optional bool override for bLocalSpace
-//   @param deterministic - Optional bool override for bDeterminism
-//   @returns { system_path: string, emitter_name: string, sim_target: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
+//   @param sim_target - Optional target type, "CPUSim" or "GPUComputeSim"; omitted keeps the current one.
+//   @param local_space - Optional bool for bLocalSpace: true simulates the particles in the emitter's local space, false in world space; omitted keeps the current value.
+//   @param deterministic - Optional bool for bDeterminism; omitted keeps the current value.
+//   @returns { system_path: string, emitter_name: string, sim_target: string, local_space: bool, deterministic: bool, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2073,11 +1973,21 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    // Three optional settings; at least one must be supplied.
     FString SimTargetStr;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("sim_target"), SimTargetStr)) { return Missing; }
+    const bool bHasSimTarget = Params->TryGetStringField(TEXT("sim_target"), SimTargetStr) && !SimTargetStr.IsEmpty();
+    bool bLocalSpace = false;
+    const bool bHasLocalSpace = Params->TryGetBoolField(TEXT("local_space"), bLocalSpace);
+    bool bDeterministic = false;
+    const bool bHasDeterministic = Params->TryGetBoolField(TEXT("deterministic"), bDeterministic);
+    if (!bHasSimTarget && !bHasLocalSpace && !bHasDeterministic)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("Nothing to set: pass at least one of sim_target, local_space (bool) or deterministic (bool)"));
+    }
 
-    ENiagaraSimTarget NewTarget;
-    if (!StringToSimTarget(SimTargetStr, NewTarget))
+    ENiagaraSimTarget NewTarget = ENiagaraSimTarget::CPUSim;
+    if (bHasSimTarget && !StringToSimTarget(SimTargetStr, NewTarget))
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Invalid sim_target '%s' (expected CPUSim or GPUComputeSim)"), *SimTargetStr));
@@ -2092,11 +2002,10 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
         return mcp_common::MakeErrorReply(Error);
     }
 
-    // Optional bLocalSpace / bDeterminism overrides.
-    bool bLocalSpace = false;
-    const bool bHasLocalSpace = Params->TryGetBoolField(TEXT("local_space"), bLocalSpace);
-    bool bDeterministic = false;
-    const bool bHasDeterministic = Params->TryGetBoolField(TEXT("deterministic"), bDeterministic);
+    if (!bHasSimTarget)
+    {
+        NewTarget = EmitterData->SimTarget;
+    }
 
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
 
@@ -2106,6 +2015,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
         && (!bHasDeterministic || EmitterData->bDeterminism == bDeterministic))
     {
         Data->SetStringField(TEXT("sim_target"), SimTargetToString(EmitterData->SimTarget));
+        Data->SetBoolField(TEXT("local_space"), EmitterData->bLocalSpace);
+        Data->SetBoolField(TEXT("deterministic"), EmitterData->bDeterminism);
         Data->SetBoolField(TEXT("success"), true);
         Data->SetBoolField(TEXT("changed"), false);
         Data->SetBoolField(TEXT("saved"), false);
@@ -2131,6 +2042,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
     const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
 
     Data->SetStringField(TEXT("sim_target"), SimTargetToString(EmitterData->SimTarget));
+    Data->SetBoolField(TEXT("local_space"), EmitterData->bLocalSpace);
+    Data->SetBoolField(TEXT("deterministic"), EmitterData->bDeterminism);
     Data->SetBoolField(TEXT("success"), true);
     Data->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_emitter_sim_target"), SaveError);
@@ -2141,9 +2054,9 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterSimTarget(const TSharedPtr<FJsonO
 // Reads the UNiagaraEffectType associated with a UNiagaraSystem and returns
 // its key properties: UpdateFrequency, CullReaction, bAllowCullingForLocalPlayers.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_effect_type - Read which Niagara Effect Type asset a Niagara System asset uses, plus three of that effect type's settings: update_frequency and cull_reaction (as enum value names) and allows_culling (bAllowCullingForLocalPlayers). A system with no effect type is a success with an empty effect_type_path, None for both enums and allows_culling false. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the effect type's distance and instance-count limits: get_niagara_scalability_settings; the system's own flags and fixed bounds: get_niagara_system_properties.
+// MCP:get_niagara_effect_type - Read which Niagara Effect Type asset a Niagara System asset uses, plus that effect type's settings: update_frequency and cull_reaction (as enum value names), allows_culling (bAllowCullingForLocalPlayers), and the scalability limits of its first system and emitter scalability entries: max_distance and max_instances (system), cull_by_distance (max_distance above 0) and scale_spawn_count (emitter SpawnCountScale). A system with no effect type, or an effect type without those entries, is a success with the defaults: an empty effect_type_path, None for both enums, allows_culling false, max_distance 0, max_instances 0, cull_by_distance false and scale_spawn_count 1. Read-only; an unknown system path is an error. Assign one with set_niagara_effect_type; the system's own flags and fixed bounds: get_niagara_system_properties.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
-//   @returns { system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool }
+//   @returns { system_path: string, effect_type_path: string, update_frequency: string, cull_reaction: string, allows_culling: bool, max_distance: number, max_instances: int, cull_by_distance: bool, scale_spawn_count: number }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraEffectType(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2156,6 +2069,29 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEffectType(const TSharedPtr<FJsonObject>
     UNiagaraEffectType* EffectType = System->GetEffectType();
 
     TSharedPtr<FJsonObject> Data = Niagara_StartSystemReply(System);
+
+    // The scalability limits of the first system and emitter scalability entries, with defaults when absent.
+    float MaxDistance = 0.0f;
+    int32 MaxInstances = 0;
+    float ScaleSpawnCount = 1.0f;
+    if (EffectType)
+    {
+        const auto& SysSettings = EffectType->SystemScalabilitySettings.Settings;
+        if (SysSettings.Num() > 0)
+        {
+            MaxDistance = SysSettings[0].MaxDistance;
+            MaxInstances = SysSettings[0].MaxInstances;
+        }
+        const auto& EmtSettings = EffectType->EmitterScalabilitySettings.Settings;
+        if (EmtSettings.Num() > 0)
+        {
+            ScaleSpawnCount = EmtSettings[0].SpawnCountScale;
+        }
+    }
+    Data->SetNumberField(TEXT("max_distance"), MaxDistance);
+    Data->SetNumberField(TEXT("max_instances"), MaxInstances);
+    Data->SetBoolField(TEXT("cull_by_distance"), MaxDistance > 0.0f);
+    Data->SetNumberField(TEXT("scale_spawn_count"), ScaleSpawnCount);
 
     if (!EffectType)
     {
@@ -2187,7 +2123,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEffectType(const TSharedPtr<FJsonObject>
 // Assigns a UNiagaraEffectType asset to a UNiagaraSystem via SetEffectType
 // (editor-only API). Saves the system after modification.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_effect_type - Assign a Niagara Effect Type asset (the scalability and culling settings) to a Niagara System asset in one undo step, then save the system. effect_type_path is loaded as a UNiagaraEffectType; an unknown system or effect type is an error and nothing changes. A system that already uses that effect type is a success with changed=false and saved=false, and nothing is written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back with get_niagara_effect_type; the effect type's limits: get_niagara_scalability_settings.
+// MCP:set_niagara_effect_type - Assign a Niagara Effect Type asset (the scalability and culling settings) to a Niagara System asset in one undo step, then save the system. effect_type_path is loaded as a UNiagaraEffectType; an unknown system or effect type is an error and nothing changes. A system that already uses that effect type is a success with changed=false and saved=false, and nothing is written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Read it back, with the effect type's limits, with get_niagara_effect_type.
 //   @param system_path - Asset path of the Niagara System.
 //   @param effect_type_path - Asset path of the UNiagaraEffectType to assign.
 //   @returns { system_path: string, effect_type_path: string, success: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -2240,57 +2176,6 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEffectType(const TSharedPtr<FJsonObject>
 
     Data->SetBoolField(TEXT("changed"), true);
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_effect_type"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// get_niagara_scalability_settings
-// Reads scalability configuration from the system's UNiagaraEffectType.
-// Extracts MaxDistance / MaxInstances from the first system scalability entry
-// and ScaleSpawnCount from the first emitter scalability entry.
-// ---------------------------------------------------------------------------
-// MCP:get_niagara_scalability_settings - Get the scalability configuration of a Niagara system.  Reads scalability settings from the system's UNiagaraEffectType: MaxDistance, MaxInstances (system-level), ScaleSpawnCount (emitter-level), and whether distance culling is active.
-//   @param system_path - Asset path of the Niagara System.
-//   @returns { system_path: string, effect_type_path: string, has_scalability_settings: bool, max_distance: number, max_instances: int, scale_spawn_count: number, distance_culling_enabled: bool }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraScalabilitySettings(const TSharedPtr<FJsonObject>& Params)
-{
-    UNiagaraSystem* System = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadSystem(Params, System))
-    {
-        return Error;
-    }
-
-    UNiagaraEffectType* EffectType = System->GetEffectType();
-    if (!EffectType)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("System has no EffectType assigned; cannot read scalability settings"));
-    }
-
-    // Read system-level scalability (first entry, if any).
-    float MaxDistance = 0.0f;
-    int32 MaxInstances = 0;
-    const auto& SysSettings = EffectType->SystemScalabilitySettings.Settings;
-    if (SysSettings.Num() > 0)
-    {
-        MaxDistance = SysSettings[0].MaxDistance;
-        MaxInstances = SysSettings[0].MaxInstances;
-    }
-
-    // Read emitter-level scalability (first entry, if any).
-    float ScaleSpawnCount = 1.0f;
-    const auto& EmtSettings = EffectType->EmitterScalabilitySettings.Settings;
-    if (EmtSettings.Num() > 0)
-    {
-        ScaleSpawnCount = EmtSettings[0].SpawnCountScale;
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartSystemReply(System);
-    Data->SetNumberField(TEXT("max_distance"), MaxDistance);
-    Data->SetNumberField(TEXT("max_instances"), MaxInstances);
-    Data->SetBoolField(TEXT("cull_by_distance"), MaxDistance > 0.0f);
-    Data->SetNumberField(TEXT("scale_spawn_count"), ScaleSpawnCount);
-    return mcp_common::MakeOkReply(Data);
 }
 
 // ---------------------------------------------------------------------------
@@ -3084,9 +2969,8 @@ TSharedPtr<FJsonObject> HandleMoveNiagaraSimulationStage(const TSharedPtr<FJsonO
 // add_niagara_emitter_from_template uses the canonical editor path
 // FNiagaraEditorUtilities::AddEmitterToSystem (NIAGARAEDITOR_API static), which
 // rebuilds the emitter's nodes and syncs the system overview graph — the same
-// thing the editor's "Add Emitter" does. Unlike UNiagaraSystem::AddEmitterHandle
-// (used by add_niagara_emitter_handle), it always creates a standalone COPY of the
-// emitter inside the system.
+// thing the editor's "Add Emitter" does: it always creates a standalone COPY of the
+// emitter inside the system (emitter_name, when given, renames the new handle).
 //
 // add_niagara_module_to_stack inserts an engine module UNiagaraScript into the
 // ParticleSpawn or ParticleUpdate stack of an emitter via
@@ -3108,9 +2992,10 @@ TSharedPtr<FJsonObject> HandleMoveNiagaraSimulationStage(const TSharedPtr<FJsonO
 // has no editor data (e.g. a cooked/headless system without editor data) it asserts,
 // so we null-check GetEditorData() first and return a clean error.
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_emitter_from_template - Add a copy of a template emitter to a Niagara system (canonical path).  Loads the template/parent UNiagaraEmitter asset and adds a standalone copy of it to the system via FNiagaraEditorUtilities::AddEmitterToSystem — the same operation the Niagara editor's "Add Emitter" performs. This rebuilds the emitter's nodes and syncs the system overview graph, then requests a compile and saves the system.
+// MCP:add_niagara_emitter_from_template - Add a copy of a template emitter to a Niagara system (canonical path).  Loads the template/parent UNiagaraEmitter asset and adds a standalone copy of it to the system via FNiagaraEditorUtilities::AddEmitterToSystem — the same operation the Niagara editor's "Add Emitter" performs. This rebuilds the emitter's nodes and syncs the system overview graph, optionally names the new handle, then requests a compile and saves the system.
 //   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example")
 //   @param emitter_asset_path - Asset path of the source UNiagaraEmitter template (e.g. "/Niagara/DefaultAssets/Templates/Emitters/Fountain.Fountain")
+//   @param emitter_name - Optional name for the new emitter handle; absent or empty keeps the name the engine generates from the source emitter. The engine sanitizes it and makes it unique among the system's emitters, so read emitter_handle_name for the stored name.
 //   @returns { system_path: string, source_emitter_asset: string, emitter_handle_id: string, emitter_handle_name: string, is_valid: bool, is_enabled: bool, emitters_before: int, total_emitters: int, success: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddNiagaraEmitterFromTemplate(const TSharedPtr<FJsonObject>& Params)
@@ -3122,6 +3007,9 @@ TSharedPtr<FJsonObject> HandleAddNiagaraEmitterFromTemplate(const TSharedPtr<FJs
     }
     FString EmitterAssetPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("emitter_asset_path"), EmitterAssetPath)) { return Missing; }
+    // Optional name for the new handle; empty keeps the engine-generated one.
+    FString DesiredName;
+    Params->TryGetStringField(TEXT("emitter_name"), DesiredName);
 
     FString Error;
     UNiagaraSystem* System = Niagara_ResolveSystem(SystemPath, Error);
@@ -3153,6 +3041,19 @@ TSharedPtr<FJsonObject> HandleAddNiagaraEmitterFromTemplate(const TSharedPtr<FJs
     // Canonical add: creates a copy of the emitter, rebuilds nodes, syncs overview graph.
     const FGuid NewId = FNiagaraEditorUtilities::AddEmitterToSystem(
         *System, *Emitter, Emitter->GetExposedVersion().VersionGuid, /*bCreateCopy*/ true);
+
+    // Name the new handle when asked, inside the same transaction and before the compile and save.
+    if (NewId.IsValid() && !DesiredName.IsEmpty())
+    {
+        for (FNiagaraEmitterHandle& H : System->GetEmitterHandles())
+        {
+            if (H.GetId() == NewId)
+            {
+                H.SetName(FName(*DesiredName), *System);
+                break;
+            }
+        }
+    }
 
     // Trigger a compile so the freshly added emitter is valid.
     System->RequestCompile(false);
@@ -3245,12 +3146,13 @@ namespace
 // NOTE: only the module's script-default inputs are applied; per-instance input
 // overrides are out of scope (reported via added_with_defaults=true).
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_module_to_stack - Insert an engine module script into a Niagara emitter's particle stack.  Loads the module UNiagaraScript and inserts it at the end of the emitter's ParticleSpawn or ParticleUpdate stack via FNiagaraStackGraphUtilities::AddScriptModuleToStack, then recompiles and saves.  NOTE: only the module's script-default inputs are applied — per-instance input overrides are out of scope (the response reports added_with_defaults=true). Stateless emitters (no editable graph) return a clean error.
+// MCP:add_niagara_module_to_stack - Insert an engine module script into a Niagara emitter's particle stack.  Loads the module UNiagaraScript and inserts it into the emitter's ParticleSpawn or ParticleUpdate stack via FNiagaraStackGraphUtilities::AddScriptModuleToStack, at the end or at a chosen target_index, then recompiles and saves. Not idempotent: every call adds another module node.  NOTE: only the module's script-default inputs are applied — per-instance input overrides are out of scope (the response reports added_with_defaults=true). Stateless emitters (no editable graph) return a clean error.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Display name of the emitter handle to modify.
 //   @param module_script_path - Asset path of the module UNiagaraScript (e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce")
 //   @param script_group - Optional "spawn" (ParticleSpawnScript) or "update" (ParticleUpdateScript); defaults to "update"
-//   @returns { system_path: string, emitter_name: string, module_script_path: string, script_group: string, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }
+//   @param target_index - Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append. A value that is not a JSON number is an error.
+//   @returns { system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added_with_defaults: bool, success: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddNiagaraModuleToStack(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3269,6 +3171,10 @@ TSharedPtr<FJsonObject> HandleAddNiagaraModuleToStack(const TSharedPtr<FJsonObje
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    // Optional stack position; INDEX_NONE (the default) appends.
+    if (TSharedPtr<FJsonObject> Mistyped = Niagara_RefuseMistypedNumber(Params, TEXT("target_index"))) { return Mistyped; }
+    int32 TargetIndex = INDEX_NONE;
+    Params->TryGetNumberField(TEXT("target_index"), TargetIndex);
 
     UNiagaraSystem* System = nullptr;
     FVersionedNiagaraEmitterData* EmitterData =
@@ -3316,9 +3222,9 @@ TSharedPtr<FJsonObject> HandleAddNiagaraModuleToStack(const TSharedPtr<FJsonObje
     System->Modify();
     Src->NodeGraph->Modify();
 
-    // Insert at the end of the stack (INDEX_NONE). Only script-default inputs apply.
+    // Insert at TargetIndex (INDEX_NONE appends). Only script-default inputs apply.
     UNiagaraNodeFunctionCall* NewModule =
-        FNiagaraStackGraphUtilities::AddScriptModuleToStack(Mod, *Out, INDEX_NONE);
+        FNiagaraStackGraphUtilities::AddScriptModuleToStack(Mod, *Out, TargetIndex);
 
     if (!NewModule)
     {
@@ -3336,6 +3242,7 @@ TSharedPtr<FJsonObject> HandleAddNiagaraModuleToStack(const TSharedPtr<FJsonObje
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("module_script_path"), Mod->GetPathName());
     Data->SetStringField(TEXT("script_group"), ScriptGroup);
+    Data->SetNumberField(TEXT("target_index"), TargetIndex);
     Data->SetStringField(TEXT("module_node_name"), NewModule->GetFunctionName());
     Data->SetBoolField(TEXT("added_with_defaults"), true);
     Data->SetBoolField(TEXT("success"), true);
@@ -3880,7 +3787,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraModuleInput(const TSharedPtr<FJsonObject
 
 namespace
 {
-    // Resolve a renderer class from a string ("Sprite" / "Ribbon" / "Mesh" / "Light").
+    // Resolve a renderer class from a string ("Sprite" / "Ribbon" / "Mesh" / "Light" / "Decal").
     UClass* ResolveRendererClass(const FString& InType)
     {
         const FString T = InType.ToLower();
@@ -3899,6 +3806,10 @@ namespace
         if (T == TEXT("light") || T == TEXT("lightrenderer"))
         {
             return UNiagaraLightRendererProperties::StaticClass();
+        }
+        if (T == TEXT("decal") || T == TEXT("decalrenderer"))
+        {
+            return UNiagaraDecalRendererProperties::StaticClass();
         }
         return nullptr;
     }
@@ -3988,11 +3899,12 @@ namespace
             TEXT("MacroUVRadius"), TEXT("PivotInUVSpace"), TEXT("bCastShadows"), TEXT("RendererVisibility"),
             // mesh
             TEXT("bOverrideMaterials"), TEXT("MeshBoundsScale"), TEXT("LockedAxis"),
-            // light (add_niagara_light_renderer exists, so the generic
+            // light (add_niagara_renderer seeds them, so the generic
             // get_niagara_renderer_info dump must pick up these fields too).
             TEXT("RadiusScale"), TEXT("DefaultExponent"), TEXT("SpecularScale"), TEXT("DiffuseScale"),
             TEXT("bUseInverseSquaredFalloff"), TEXT("bAffectsTranslucency"),
             TEXT("bAllowMegaLights"), TEXT("bMegaLightsCastShadows"), TEXT("bAlphaScalesBrightness"),
+            TEXT("ColorAdd"),
             // decal
             TEXT("SourceMode"), TEXT("DecalScreenSizeFade"),
         };
@@ -4059,19 +3971,85 @@ namespace
     }
 }
 
+namespace
+{
+    // Map of accepted snake_case input keys -> exact UPROPERTY name on the renderer.
+    // Keys whose property is absent on the concrete renderer class are reported in
+    // "not_applicable" (honest: a Mesh-only key on a Sprite is not silently swallowed).
+    // FNiagaraVariableAttributeBinding struct fields (PositionBinding/ColorBinding/...)
+    // are DELIBERATELY not in this table — bindings are not part of this surface.
+    static const FNiagaraPropKey GRendererPropKeys[] = {
+        // base UNiagaraRendererProperties
+        { TEXT("enabled"),               TEXT("bIsEnabled") },
+        { TEXT("renderer_enabled"),      TEXT("bIsEnabled") },
+        { TEXT("sort_order_hint"),       TEXT("SortOrderHint") },
+        { TEXT("motion_vector_setting"), TEXT("MotionVectorSetting") },
+        { TEXT("allow_in_cull_proxies"), TEXT("bAllowInCullProxies") },
+        // sprite
+        { TEXT("alignment"),             TEXT("Alignment") },
+        { TEXT("sort_mode"),             TEXT("SortMode") },
+        { TEXT("sub_image_size"),        TEXT("SubImageSize") },
+        { TEXT("macro_uv_radius"),       TEXT("MacroUVRadius") },
+        { TEXT("pivot_in_uv_space"),     TEXT("PivotInUVSpace") },
+        { TEXT("cast_shadows"),          TEXT("bCastShadows") },
+        { TEXT("renderer_visibility"),   TEXT("RendererVisibility") },
+        // mesh (facing_mode is shared with sprite; resolves to whichever FacingMode
+        // exists on the concrete class — both are named "FacingMode")
+        { TEXT("facing_mode"),           TEXT("FacingMode") },
+        { TEXT("override_materials"),    TEXT("bOverrideMaterials") },
+        { TEXT("mesh_bounds_scale"),     TEXT("MeshBoundsScale") },
+        { TEXT("locked_axis"),           TEXT("LockedAxis") },
+        // light — UNiagaraLightRendererProperties (its
+        // 12 scalar fields). Bitfields (uint32:1) and
+        // FVector3f (ColorAdd, from {x,y,z}) are handled by the JSON converter.
+        { TEXT("use_inverse_squared_falloff"), TEXT("bUseInverseSquaredFalloff") },
+        { TEXT("affects_translucency"),        TEXT("bAffectsTranslucency") },
+        { TEXT("allow_mega_lights"),           TEXT("bAllowMegaLights") },
+        { TEXT("mega_lights_cast_shadows"),    TEXT("bMegaLightsCastShadows") },
+        { TEXT("alpha_scales_brightness"),     TEXT("bAlphaScalesBrightness") },
+        { TEXT("override_inverse_exposure_blend"), TEXT("bOverrideInverseExposureBlend") },
+        { TEXT("radius_scale"),                TEXT("RadiusScale") },
+        { TEXT("default_exponent"),            TEXT("DefaultExponent") },
+        { TEXT("specular_scale"),              TEXT("SpecularScale") },
+        { TEXT("diffuse_scale"),               TEXT("DiffuseScale") },
+        { TEXT("color_add"),                   TEXT("ColorAdd") },
+        { TEXT("inverse_exposure_blend"),      TEXT("InverseExposureBlend") },
+        // decal — UNiagaraDecalRendererProperties (its
+        // 3 scalar fields; renderer_visibility is already
+        // a base key above). SourceMode is an enum -> RendererPropNeedsPostEdit fires the
+        // decal's UpdateSourceModeDerivates via PostEditChangeProperty.
+        { TEXT("decal_screen_size_fade"),      TEXT("DecalScreenSizeFade") },
+        { TEXT("decal_source_mode"),           TEXT("SourceMode") },
+    };
+
+    // Enum-typed renderer props whose write drives derived state (e.g. the decal
+    // renderer's UpdateSourceModeDerivates on SourceMode) and therefore require a
+    // PostEditChangeProperty to take effect (material setter skips it).
+    bool RendererPropNeedsPostEdit(const TCHAR* PropName)
+    {
+        return FCString::Strcmp(PropName, TEXT("Alignment")) == 0
+            || FCString::Strcmp(PropName, TEXT("FacingMode")) == 0
+            || FCString::Strcmp(PropName, TEXT("SortMode")) == 0
+            || FCString::Strcmp(PropName, TEXT("MotionVectorSetting")) == 0
+            || FCString::Strcmp(PropName, TEXT("SourceMode")) == 0;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // add_niagara_renderer
-// Creates a UNiagaraSpriteRendererProperties / UNiagaraMeshRendererProperties /
-// UNiagaraRibbonRendererProperties and appends it to the emitter via the
-// public UNiagaraEmitter::AddRenderer (which honours the versioned-emitter
-// bookkeeping under the hood). Material is set via reflection.
+// Creates a UNiagaraSprite/Ribbon/Mesh/Light/DecalRendererProperties inside the
+// emitter and appends it via the public UNiagaraEmitter::AddRenderer (which honours
+// the versioned-emitter bookkeeping under the hood). Material is set via reflection;
+// the optional `properties` keys go through the same reflected merge
+// set_niagara_renderer_properties uses.
 // ---------------------------------------------------------------------------
-// MCP:add_niagara_renderer - Add a new renderer (Sprite / Ribbon / Mesh / Light) to a Niagara emitter.  Creates a UNiagaraRendererProperties instance of the requested concrete class (Sprite / Ribbon / Mesh / Light), optionally sets the Material UPROPERTY, and appends it to the emitter's RendererProperties array. Then requests a system compile and saves the asset; a failed save makes success false, with saved=false and save_error, the renderer kept in memory.
+// MCP:add_niagara_renderer - Add a new renderer (Sprite / Ribbon / Mesh / Light / Decal) to a Niagara emitter, optionally with its properties seeded in the same call.  Creates a UNiagaraRendererProperties instance of the requested concrete class inside the emitter, as the Niagara editor does, optionally sets the Material UPROPERTY and the supplied properties (the keys set_niagara_renderer_properties takes, converted and clamped by reflection; enum keys fire PostEditChangeProperty), and appends it to the emitter's RendererProperties array, in one undo step. A Light is seeded with affects_translucency and alpha_scales_brightness true (the engine defaults are false), as the dedicated light-renderer tool seeded it; properties overrides either. Then requests a system compile and saves the asset. verified is true when the renderer is in the emitter's list and resolves that emitter; properties reads the stored values back. Each call adds one more renderer. An unknown renderer_type, a material_path that does not load as a material, an unknown key in properties, a numeric property given something other than a JSON number, or a value that does not convert is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory.
 //   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
 //   @param emitter_name - Name of the emitter handle (the human-readable name in the system's emitter list).
-//   @param renderer_type - One of "Sprite" / "Ribbon" / "Mesh" / "Light" (case-insensitive).
-//   @param material_path - Optional asset path; sets the renderer's Material property. If omitted, the renderer is added with a null material (still a valid empty renderer).
-//   @returns { system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, renderer_count: int, saved: bool, save_error?: string }
+//   @param renderer_type - One of "Sprite" / "Ribbon" / "Mesh" / "Light" / "Decal" (case-insensitive).
+//   @param material_path - Optional asset path; sets the renderer's Material property (a class without one, such as Light, ignores it). If omitted, the renderer is added with a null material (still a valid empty renderer).
+//   @param properties [object] - Optional object of renderer properties to seed, with the keys and value forms of set_niagara_renderer_properties, e.g. {"radius_scale": 2, "use_inverse_squared_falloff": false, "color_add": {"X": 1, "Y": 0, "Z": 0}} for a Light (scales clamped at 0; affects_translucency and alpha_scales_brightness default to true) or {"decal_source_mode": "Emitter", "renderer_visibility": 1, "decal_screen_size_fade": 0.1} for a Decal. Keys the renderer class lacks are listed in not_applicable.
+//   @returns { system_path: string, emitter_name: string, renderer_type: string, renderer_class: string, renderer_index: int, material_path: string, applied: [string], not_applicable: [string], post_edit_fired: bool, properties: object, renderer_count: int, verified: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4085,10 +4063,34 @@ TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& 
     FString RendererType;
     if (!Params->TryGetStringField(TEXT("renderer_type"), RendererType) || RendererType.IsEmpty())
     {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'renderer_type' parameter ('Sprite'|'Ribbon'|'Mesh')"));
+        return mcp_common::MakeErrorReply(TEXT("Missing required 'renderer_type' parameter ('Sprite'|'Ribbon'|'Mesh'|'Light'|'Decal')"));
     }
     FString MaterialPath;
     Params->TryGetStringField(TEXT("material_path"), MaterialPath);
+    // Optional renderer properties to seed, keyed as set_niagara_renderer_properties takes them.
+    const TSharedPtr<FJsonObject>* PropertiesIn = nullptr;
+    const bool bPropertiesIsObject = Params->TryGetObjectField(TEXT("properties"), PropertiesIn);
+    if (!bPropertiesIsObject && Params->HasField(TEXT("properties")) && !Params->HasTypedField<EJson::Null>(TEXT("properties")))
+    {
+        return mcp_common::MakeErrorReply(TEXT("properties must be a JSON object of renderer property keys; nothing was created"));
+    }
+    if (PropertiesIn)
+    {
+        for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : (*PropertiesIn)->Values)
+        {
+            bool bKnown = false;
+            for (const FNiagaraPropKey& K : GRendererPropKeys)
+            {
+                bKnown |= Field.Key == K.JsonKey;
+            }
+            if (!bKnown)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Unknown renderer property key '%s' in properties (use the keys set_niagara_renderer_properties takes); nothing was created"),
+                    *Field.Key));
+            }
+        }
+    }
 
     UNiagaraSystem* System = nullptr;
     FNiagaraEmitterHandle* Handle = nullptr;
@@ -4098,6 +4100,8 @@ TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& 
     {
         return mcp_common::MakeErrorReply(Error);
     }
+    // The renderer is created inside the handle's UNiagaraEmitter, as the Niagara editor's renderer factories create
+    // one: UNiagaraRendererProperties::GetEmitterData finds the emitter through the outer chain.
     UNiagaraEmitter* Emitter = Cast<UNiagaraEmitter>(Handle->GetEmitterBase());
     if (!Emitter)
     {
@@ -4108,7 +4112,19 @@ TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& 
     if (!RendererClass)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unknown renderer_type: %s (expected 'Sprite'|'Ribbon'|'Mesh')"), *RendererType));
+            FString::Printf(TEXT("Unknown renderer_type: %s (expected 'Sprite'|'Ribbon'|'Mesh'|'Light'|'Decal')"), *RendererType));
+    }
+
+    // The material is resolved before the renderer is created, so a bad one is an error with nothing created.
+    UMaterialInterface* Mat = nullptr;
+    if (!MaterialPath.IsEmpty())
+    {
+        Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+        if (!Mat)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Material asset could not be loaded as UMaterialInterface: %s; nothing was created"), *MaterialPath));
+        }
     }
 
     UNiagaraRendererProperties* NewRenderer =
@@ -4117,13 +4133,61 @@ TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& 
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to instantiate UNiagaraRendererProperties"));
     }
-
-    if (!MaterialPath.IsEmpty())
+    if (Mat)
     {
-        UMaterialInterface* Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
-        if (Mat)
+        WriteRendererMaterial(NewRenderer, Mat);
+    }
+    // A Light starts as the dedicated light-renderer tool seeded it: affecting translucency and with its brightness
+    // scaled by the particle alpha (the engine defaults are false for both). properties, merged next, overrides them.
+    if (UNiagaraLightRendererProperties* NewLight = Cast<UNiagaraLightRendererProperties>(NewRenderer))
+    {
+        NewLight->bAffectsTranslucency = 1u;
+        NewLight->bAlphaScalesBrightness = 1u;
+    }
+
+    // The supplied properties, merged by UPROPERTY name the way set_niagara_renderer_properties merges them. Every
+    // field is converted before the renderer is added, so one that does not convert leaves the emitter untouched.
+    TSharedPtr<FJsonObject> MergeJson = MakeShared<FJsonObject>();
+    TArray<FString> AppliedProps;
+    TArray<TSharedPtr<FJsonValue>> NotApplicable;
+    FProperty* EnumPropForPostEdit = nullptr;
+    if (PropertiesIn)
+    {
+        EnumPropForPostEdit = Niagara_CollectSuppliedProps(*PropertiesIn, GRendererPropKeys, RendererClass,
+            &RendererPropNeedsPostEdit, MergeJson, AppliedProps, NotApplicable);
+        // A numeric (non-enum) property must get a JSON number: the reflected conversion would read text as 0.
+        for (const FString& PropName : AppliedProps)
         {
-            WriteRendererMaterial(NewRenderer, Mat);
+            const FNumericProperty* Num = CastField<FNumericProperty>(RendererClass->FindPropertyByName(FName(*PropName)));
+            const TSharedPtr<FJsonValue> Value = MergeJson->TryGetField(PropName);
+            if (Num && !Num->IsEnum() && Value.IsValid() && Value->Type != EJson::Number && Value->Type != EJson::Null)
+            {
+                // Named as the caller sent it (radius_scale), with the property it sets (RadiusScale).
+                FString SentKey = PropName;
+                for (const FNiagaraPropKey& K : GRendererPropKeys)
+                {
+                    if (PropName == K.PropName && (*PropertiesIn)->HasField(K.JsonKey))
+                    {
+                        SentKey = K.JsonKey;
+                        break;
+                    }
+                }
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("properties.%s (%s) must be a JSON number; nothing was created"), *SentKey, *PropName));
+            }
+        }
+        bool bFieldsChange = false;
+        FString CheckError;
+        if (!Niagara_CheckMergeFields(MergeJson, AppliedProps, NewRenderer, bFieldsChange, CheckError))
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Failed to apply renderer properties, nothing was created: %s"), *CheckError));
+        }
+        FString MergeError;
+        if (AppliedProps.Num() > 0 && !mcp_common::MergeJsonWithClamp(MergeJson, RendererClass, NewRenderer, MergeError))
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Failed to apply renderer properties, nothing was created: %s"), *MergeError));
         }
     }
 
@@ -4132,266 +4196,43 @@ TSharedPtr<FJsonObject> HandleAddNiagaraRenderer(const TSharedPtr<FJsonObject>& 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddNiagaraRenderer", "Add Niagara Renderer"));
     System->Modify();
     Emitter->AddRenderer(NewRenderer, EmitterData->Version.VersionGuid);
+
+    // Enum writes drive derived state (the decal's UpdateSourceModeDerivates on SourceMode), which needs the renderer
+    // in its emitter: notify it once it has been added.
+    if (EnumPropForPostEdit)
+    {
+        FPropertyChangedEvent ChangeEvent(EnumPropForPostEdit, EPropertyChangeType::ValueSet);
+        NewRenderer->PostEditChangeProperty(ChangeEvent);
+    }
     System->RequestCompile(true);
 
     FString SaveError;
     const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
+
+    // The reply reads the renderer back: its place in the emitter's list, the emitter it resolves and the values stored.
+    const bool bVerified = Niagara_VerifiedRendererIndex(NewRenderer, EmitterData) != INDEX_NONE;
+    TSharedPtr<FJsonObject> PropsObj = MakeShared<FJsonObject>();
+    DumpRendererProperties(NewRenderer, PropsObj);
 
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("renderer_type"), RendererType);
     Data->SetStringField(TEXT("renderer_class"), NewRenderer->GetClass()->GetName());
     Data->SetNumberField(TEXT("renderer_index"), IndexBefore);
     Data->SetStringField(TEXT("material_path"), ReadRendererMaterialPath(NewRenderer));
+    Data->SetArrayField(TEXT("applied"), mcp_common::StringsToJson(AppliedProps));
+    Data->SetArrayField(TEXT("not_applicable"), NotApplicable);
+    Data->SetBoolField(TEXT("post_edit_fired"), EnumPropForPostEdit != nullptr);
+    Data->SetObjectField(TEXT("properties"), PropsObj);
     Data->SetNumberField(TEXT("renderer_count"), EmitterData->GetRenderers().Num());
+    Data->SetBoolField(TEXT("verified"), bVerified);
+    // The verdict is BOTH things: the renderer is in place AND the system reached disk.
+    if (!bVerified)
+    {
+        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
+        return mcp_common::MakeOutcomeReply(Data, false,
+            mcp_common::MeasuredOutcomeError(TEXT("add_niagara_renderer"), TEXT("verified")));
+    }
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_niagara_renderer"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// add_niagara_light_renderer companion.
-// ---------------------------------------------------------------------------
-// MCP:add_niagara_light_renderer - Add a Light renderer (UNiagaraLightRendererProperties) to one emitter of a Niagara System asset, found by handle name, with its light settings seeded in the same call, in one undo step, then save the system. The renderer is created inside the emitter, as the Niagara editor creates one; verified is true when it is in the emitter's renderer list and resolves that emitter, and the reply reads the stored settings back. radius_scale, default_exponent, specular_scale and diffuse_scale below 0 become 0, and one that is not a JSON number is an error. Each call adds one more renderer; an unknown system or emitter is an error and nothing changes. A failed save makes success false, with saved=false and save_error, the renderer kept in memory. A Light renderer with engine defaults: add_niagara_renderer with renderer_type='Light'; change it later with set_niagara_renderer_properties.
-//   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
-//   @param emitter_name - Name of the emitter handle.
-//   @param use_inverse_squared_falloff - Optional bool (default true). True => UE physical light; false => use DefaultExponent below.
-//   @param affects_translucency - Optional bool (default true). Set false for cheaper lights that shouldn't bleed through translucent surfaces.
-//   @param allow_mega_lights - Optional bool (default false). True => MegaLights path (Lumen); see bMegaLightsCastShadows below.
-//   @param mega_lights_cast_shadows - Optional bool (default false).
-//   @param alpha_scales_brightness - Optional bool (default true). When true, particle color alpha modulates brightness.
-//   @param radius_scale - Optional float (default 1.0, ClampMin=0).
-//   @param default_exponent - Optional float (default 1.0, ClampMin=0); only used when use_inverse_squared_falloff=false.
-//   @param specular_scale - Optional float (default 1.0, ClampMin=0).
-//   @param diffuse_scale - Optional float (default 1.0, ClampMin=0).
-//   @param color_add - Optional [r, g, b] static color shift.
-//   @returns { system_path, emitter_name, renderer_index, renderer_class, radius_scale, default_exponent, specular_scale, diffuse_scale, color_add_x, color_add_y, color_add_z, renderer_count, verified: bool, saved: bool, save_error? }
-TSharedPtr<FJsonObject> HandleAddNiagaraLightRenderer(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString EmitterName;
-    UNiagaraSystem* System = nullptr;
-    FNiagaraEmitterHandle* Handle = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadEmitterData(Params, NiagaraNoEmitterDataTemplate, EmitterName, System, EmitterData, &Handle))
-    {
-        return Error;
-    }
-
-    // Read all 10 optional light-config fields. Defaults match the engine UPROPERTY defaults.
-    bool bInverse = true;
-    if (Params->HasField(TEXT("use_inverse_squared_falloff"))) { Params->TryGetBoolField(TEXT("use_inverse_squared_falloff"), bInverse); }
-    bool bTranslucency = true;
-    if (Params->HasField(TEXT("affects_translucency"))) { Params->TryGetBoolField(TEXT("affects_translucency"), bTranslucency); }
-    bool bMega = false;
-    if (Params->HasField(TEXT("allow_mega_lights"))) { Params->TryGetBoolField(TEXT("allow_mega_lights"), bMega); }
-    bool bMegaShadows = false;
-    if (Params->HasField(TEXT("mega_lights_cast_shadows"))) { Params->TryGetBoolField(TEXT("mega_lights_cast_shadows"), bMegaShadows); }
-    bool bAlphaBrightness = true;
-    if (Params->HasField(TEXT("alpha_scales_brightness"))) { Params->TryGetBoolField(TEXT("alpha_scales_brightness"), bAlphaBrightness); }
-    // A number field that is present must be a JSON number: a lenient read would keep the default for it.
-    for (const TCHAR* Key : { TEXT("radius_scale"), TEXT("default_exponent"), TEXT("specular_scale"), TEXT("diffuse_scale") })
-    {
-        if (TSharedPtr<FJsonObject> Mistyped = Niagara_RefuseMistypedNumber(Params, Key)) { return Mistyped; }
-    }
-    double RadiusScale = 1.0;
-    Params->TryGetNumberField(TEXT("radius_scale"), RadiusScale);
-    double DefaultExponent = 1.0;
-    Params->TryGetNumberField(TEXT("default_exponent"), DefaultExponent);
-    double SpecularScale = 1.0;
-    Params->TryGetNumberField(TEXT("specular_scale"), SpecularScale);
-    double DiffuseScale = 1.0;
-    Params->TryGetNumberField(TEXT("diffuse_scale"), DiffuseScale);
-    FVector3f ColorAdd = FVector3f::ZeroVector;
-    if (Params->HasField(TEXT("color_add")))
-    {
-        const FVector CA = mcp_common::ReadJsonVector(Params, TEXT("color_add"));
-        ColorAdd = FVector3f(static_cast<float>(CA.X), static_cast<float>(CA.Y), static_cast<float>(CA.Z));
-    }
-
-    // The renderer is created inside the handle's UNiagaraEmitter, as the Niagara editor's renderer factories create
-    // one: UNiagaraRendererProperties::GetEmitterData and GetOuterEmitter find the emitter through the outer chain,
-    // so a renderer outered to the system resolves no emitter data and its bindings are never cached.
-    UNiagaraEmitter* Emitter = Cast<UNiagaraEmitter>(Handle->GetEmitterBase());
-    if (!Emitter)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Handle->GetEmitterBase() did not resolve to UNiagaraEmitter"));
-    }
-    UNiagaraLightRendererProperties* NewRenderer =
-        NewObject<UNiagaraLightRendererProperties>(Emitter, NAME_None, RF_Transactional);
-    if (!NewRenderer)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to create UNiagaraLightRendererProperties"));
-    }
-
-    // Apply all 10 fields via the typed setters (avoids reflection on the bitfields). The four scales carry
-    // ClampMin=0, which the details panel and set_niagara_renderer_properties apply, so they are clamped here too.
-    NewRenderer->bUseInverseSquaredFalloff      = bInverse       ? 1u : 0u;
-    NewRenderer->bAffectsTranslucency           = bTranslucency  ? 1u : 0u;
-    NewRenderer->bAllowMegaLights               = bMega          ? 1u : 0u;
-    NewRenderer->bMegaLightsCastShadows         = bMegaShadows   ? 1u : 0u;
-    NewRenderer->bAlphaScalesBrightness         = bAlphaBrightness ? 1u : 0u;
-    NewRenderer->RadiusScale    = FMath::Max(0.0f, static_cast<float>(RadiusScale));
-    NewRenderer->DefaultExponent = FMath::Max(0.0f, static_cast<float>(DefaultExponent));
-    NewRenderer->SpecularScale  = FMath::Max(0.0f, static_cast<float>(SpecularScale));
-    NewRenderer->DiffuseScale   = FMath::Max(0.0f, static_cast<float>(DiffuseScale));
-    NewRenderer->ColorAdd       = ColorAdd;
-
-    // Bookkeeping via the public UNiagaraEmitter::AddRenderer (versioned-emitter-aware); it Modify()s the emitter
-    // before the write, so the dispatcher's undo transaction records it.
-    Emitter->AddRenderer(NewRenderer, EmitterData->Version.VersionGuid);
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    // The reply reads the renderer back: its place in the emitter's list, the emitter it resolves and the values stored.
-    const int32 RendererIndex = Niagara_VerifiedRendererIndex(NewRenderer, EmitterData);
-    const bool bVerified = RendererIndex != INDEX_NONE;
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetNumberField(TEXT("renderer_index"), RendererIndex);
-    Data->SetStringField(TEXT("renderer_class"), NewRenderer->GetClass()->GetName());
-    Data->SetNumberField(TEXT("radius_scale"), NewRenderer->RadiusScale);
-    Data->SetNumberField(TEXT("default_exponent"), NewRenderer->DefaultExponent);
-    Data->SetNumberField(TEXT("specular_scale"), NewRenderer->SpecularScale);
-    Data->SetNumberField(TEXT("diffuse_scale"), NewRenderer->DiffuseScale);
-    Data->SetNumberField(TEXT("color_add_x"), NewRenderer->ColorAdd.X);
-    Data->SetNumberField(TEXT("color_add_y"), NewRenderer->ColorAdd.Y);
-    Data->SetNumberField(TEXT("color_add_z"), NewRenderer->ColorAdd.Z);
-    Data->SetNumberField(TEXT("renderer_count"), EmitterData->GetRenderers().Num());
-    Data->SetBoolField(TEXT("verified"), bVerified);
-    // The verdict is BOTH things: the renderer is in place AND the system reached disk.
-    if (!bVerified)
-    {
-        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
-        return mcp_common::MakeOutcomeReply(Data, false,
-            mcp_common::MeasuredOutcomeError(TEXT("add_niagara_light_renderer"), TEXT("verified")));
-    }
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_niagara_light_renderer"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// add_niagara_decal_renderer
-// Companion to add_niagara_light_renderer for the Decal renderer class. Seeds
-// the Decal-renderer specific UPROPERTYs (material, source mode, visibility,
-// screen-size fade) in one call, mirroring the add_niagara_light_renderer shape.
-// ---------------------------------------------------------------------------
-// MCP:add_niagara_decal_renderer - Add a Decal renderer (UNiagaraDecalRendererProperties) to one emitter of a Niagara System asset, found by handle name, with its material, source mode, visibility tag and screen-size fade seeded, in one undo step, then save the system. The renderer is created inside the emitter, as the Niagara editor creates one; verified is true when it is in the emitter's renderer list and resolves that emitter, and the reply reads the stored values back. Each call adds one more renderer. A material_path that does not load as a material, a number field that is not a JSON number, or an unknown source_mode, system or emitter is an error and nothing is created. A failed save makes success false, with saved=false and save_error, the renderer kept in memory. add_niagara_renderer has no Decal type; change this one later with set_niagara_renderer_properties or set_niagara_decal_renderer_material.
-//   @param system_path - Asset path of the Niagara System (e.g. "/Game/Niagara/NS_Example").
-//   @param emitter_name - Name of the emitter handle (the human-readable name in the system's emitter list).
-//   @param material_path - Optional asset path; sets the renderer's Material UPROPERTY.
-//   @param source_mode - Optional ENiagaraRendererSourceDataMode name (Particles/Emitter). Default Particles.
-//   @param renderer_visibility - Optional int32 visibility tag (default 0).
-//   @param decal_screen_size_fade - Optional float fade threshold (default 0.0).
-//   @returns { system_path, emitter_name, renderer_index, renderer_class, material_path, source_mode, renderer_visibility, decal_screen_size_fade, renderer_count, verified: bool, saved: bool, save_error? }
-TSharedPtr<FJsonObject> HandleAddNiagaraDecalRenderer(
-    const TSharedPtr<FJsonObject>& Params)
-{
-    FString EmitterName;
-    UNiagaraSystem* System = nullptr;
-    FNiagaraEmitterHandle* Handle = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadEmitterData(Params, NiagaraNoEmitterDataTemplate, EmitterName, System, EmitterData, &Handle))
-    {
-        return Error;
-    }
-    FString MaterialPath;
-    Params->TryGetStringField(TEXT("material_path"), MaterialPath);
-
-    // source_mode defaults to "Particles" — the engine UPROPERTY default for UNiagaraDecalRendererProperties.
-    FString SourceModeStr = TEXT("Particles");
-    Params->TryGetStringField(TEXT("source_mode"), SourceModeStr);
-
-    // A number field that is present must be a JSON number: a lenient read would write 0 or keep the default for it.
-    for (const TCHAR* Key : { TEXT("renderer_visibility"), TEXT("decal_screen_size_fade") })
-    {
-        if (TSharedPtr<FJsonObject> Mistyped = Niagara_RefuseMistypedNumber(Params, Key)) { return Mistyped; }
-    }
-    int32 RendererVisibility = 0;
-    Params->TryGetNumberField(TEXT("renderer_visibility"), RendererVisibility);
-    double DecalScreenSizeFadeD = 0.0;
-    Params->TryGetNumberField(TEXT("decal_screen_size_fade"), DecalScreenSizeFadeD);
-
-    // The material and the source mode are resolved before the renderer is created, so a bad one is an error
-    // with nothing created or added.
-    UMaterialInterface* Mat = nullptr;
-    if (!MaterialPath.IsEmpty())
-    {
-        Mat = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
-        if (!Mat)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Material asset could not be loaded as UMaterialInterface: %s"), *MaterialPath));
-        }
-    }
-
-    // Resolve the enum value from string. Default "Particles" is the engine UPROPERTY default,
-    // so passing it explicitly is a no-op semantically (but we still emit the right value to
-    // ensure round-trip symmetry with get_niagara_renderer_info dumps).
-    const UEnum* SrcEnum = StaticEnum<ENiagaraRendererSourceDataMode>();
-    int64 SrcEnumValue = SrcEnum ? SrcEnum->GetValueByNameString(SourceModeStr) : INDEX_NONE;
-    if (SrcEnumValue == INDEX_NONE)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid source_mode '%s' (expected one of the ENiagaraRendererSourceDataMode names like Particles / Emitter)"), *SourceModeStr));
-    }
-
-    // The renderer is created inside the handle's UNiagaraEmitter, as the Niagara editor's renderer factories create
-    // one: UNiagaraRendererProperties::GetEmitterData and GetOuterEmitterBase find the emitter through the outer
-    // chain, so a renderer outered to the system resolves no emitter data and UpdateSourceModeDerivates caches nothing.
-    UNiagaraEmitter* Emitter = Cast<UNiagaraEmitter>(Handle->GetEmitterBase());
-    if (!Emitter)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("Handle->GetEmitterBase() did not resolve to UNiagaraEmitter"));
-    }
-    UNiagaraDecalRendererProperties* NewRenderer =
-        NewObject<UNiagaraDecalRendererProperties>(Emitter, NAME_None, RF_Transactional);
-    if (!NewRenderer)
-    {
-        return mcp_common::MakeErrorReply(TEXT("Failed to create UNiagaraDecalRendererProperties"));
-    }
-    NewRenderer->Material = Mat;
-    NewRenderer->SourceMode = static_cast<ENiagaraRendererSourceDataMode>(SrcEnumValue);
-    NewRenderer->RendererVisibility = RendererVisibility;
-    NewRenderer->DecalScreenSizeFade = static_cast<float>(DecalScreenSizeFadeD);
-
-    // Bookkeeping via the public UNiagaraEmitter::AddRenderer; it Modify()s the emitter before the write, so the
-    // dispatcher's undo transaction records it.
-    Emitter->AddRenderer(NewRenderer, EmitterData->Version.VersionGuid);
-
-    // SourceMode is one of the four enum-driven props that require PostEditChangeProperty to
-    // propagate (drives UpdateSourceModeDerivates). Skip it for the default value (no real
-    // change), but fire it when the caller picked another mode.
-    if (NewRenderer->SourceMode != ENiagaraRendererSourceDataMode::Particles)
-    {
-        FPropertyChangedEvent ChangeEvent(
-            UNiagaraDecalRendererProperties::StaticClass()->FindPropertyByName(TEXT("SourceMode")),
-            EPropertyChangeType::ValueSet);
-        NewRenderer->PostEditChangeProperty(ChangeEvent);
-    }
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    // The reply reads the renderer back: its place in the emitter's list, the emitter it resolves and the values stored.
-    const int32 RendererIndex = Niagara_VerifiedRendererIndex(NewRenderer, EmitterData);
-    const bool bVerified = RendererIndex != INDEX_NONE;
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetNumberField(TEXT("renderer_index"), RendererIndex);
-    Data->SetStringField(TEXT("renderer_class"), NewRenderer->GetClass()->GetName());
-    Data->SetStringField(TEXT("material_path"), NewRenderer->Material ? NewRenderer->Material->GetPathName() : FString());
-    Data->SetStringField(TEXT("source_mode"),
-        SrcEnum ? SrcEnum->GetNameStringByValue(static_cast<int64>(NewRenderer->SourceMode)) : SourceModeStr);
-    Data->SetNumberField(TEXT("renderer_visibility"), NewRenderer->RendererVisibility);
-    Data->SetNumberField(TEXT("decal_screen_size_fade"), NewRenderer->DecalScreenSizeFade);
-    Data->SetNumberField(TEXT("renderer_count"), EmitterData->GetRenderers().Num());
-    Data->SetBoolField(TEXT("verified"), bVerified);
-    // The verdict is BOTH things: the renderer is in place AND the system reached disk.
-    if (!bVerified)
-    {
-        mcp_common::AddSaveOutcome(Data, bSaved, SaveError);
-        return mcp_common::MakeOutcomeReply(Data, false,
-            mcp_common::MeasuredOutcomeError(TEXT("add_niagara_decal_renderer"), TEXT("verified")));
-    }
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_niagara_decal_renderer"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -4524,17 +4365,13 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRenderers(const TSharedPtr<FJsonO
 }
 
 // ---------------------------------------------------------------------------
-// list_niagara_simulation_stages / get_niagara_simulation_stages
+// get_niagara_simulation_stages
 // Read-only enumeration of an emitter's simulation stages via
 // the const FVersionedNiagaraEmitterData::GetSimulationStages() (NiagaraEmitter.h,
 // inline; returns const TArray<UNiagaraSimulationStageBase*>&). Same
 // resolution chain as HandleGetNiagaraEmitterRenderers, honest-empty arrays.
-//
-// list vs get (renderers precedent — the renderers pair exposes only ONE reader
-// shape, the whole array): both readers build the SAME per-stage array; the only
-// difference is get_niagara_simulation_stages accepts an OPTIONAL stage_index /
-// stage_name filter and returns just the matching stage(s). No stage identifier
-// => get behaves identically to list (full array).
+// An OPTIONAL stage_index / stage_name filter returns just the matching stage;
+// no stage identifier => the full array.
 // ---------------------------------------------------------------------------
 namespace
 {
@@ -4584,43 +4421,7 @@ namespace
     }
 }
 
-// MCP:list_niagara_simulation_stages - List all simulation stages on a Niagara emitter (read-only). Resolves the system by path and the emitter by name, then enumerates FVersionedNiagaraEmitterData::GetSimulationStages(). Each entry reports index, stage_name (SimulationStageName), class, enabled, and (for UNiagaraSimulationStageGeneric stages) iteration_source. Honest-empty: returns simulation_stages:[] / simulation_stage_count:0 when the emitter has no stages.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @returns { system_path: string, emitter_name: string, simulation_stage_count: int, simulation_stages: [{ index, stage_name, class, enabled, iteration_source? }] }
-
-TSharedPtr<FJsonObject> HandleListNiagaraSimulationStages(const TSharedPtr<FJsonObject>& Params)
-{
-    UE_LOG(LogTemp, Verbose, TEXT("list_niagara_simulation_stages: enter"));
-    FString SystemPath;
-    FString EmitterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndEmitterNames(Params, SystemPath, EmitterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData =
-        Niagara_ResolveEmitterData(SystemPath, EmitterName, NiagaraNoEmitterDataTemplate, System, Error);
-    if (!EmitterData)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    const TArray<UNiagaraSimulationStageBase*>& Stages = EmitterData->GetSimulationStages();
-    UE_LOG(LogTemp, Verbose, TEXT("list_niagara_simulation_stages: %s/%s has %d stage(s)"),
-        *SystemPath, *EmitterName, Stages.Num());
-    TArray<TSharedPtr<FJsonValue>> StageArray =
-        BuildNiagaraSimulationStageArray(Stages, /*bHasFilter*/ false, INDEX_NONE, FString());
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetNumberField(TEXT("simulation_stage_count"), Stages.Num());
-    Data->SetArrayField(TEXT("simulation_stages"), StageArray);
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_niagara_simulation_stages - Read the simulation stages of a Niagara emitter (read-only). Same enumeration as list_niagara_simulation_stages, but accepts an OPTIONAL stage_index (preferred) or stage_name to return just the matching stage; with no identifier it returns the full array. Each entry reports index, stage_name, class, enabled, and (for UNiagaraSimulationStageGeneric) iteration_source. Honest-empty when the emitter has no stages or the filter matches nothing.
+// MCP:get_niagara_simulation_stages - Read the simulation stages of a Niagara emitter (read-only): every stage of FVersionedNiagaraEmitterData::GetSimulationStages(), or, with the OPTIONAL stage_index (preferred) or stage_name, just the matching stage. Each entry reports index, stage_name, class, enabled, and (for UNiagaraSimulationStageGeneric) iteration_source. Honest-empty when the emitter has no stages or the filter matches nothing.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param stage_index - Optional 0-based index of a single stage to return.
@@ -4647,7 +4448,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraSimulationStages(const TSharedPtr<FJsonO
     }
 
     // Optional single-item filter: stage_index (preferred) or stage_name. No
-    // identifier => full array (identical to list_niagara_simulation_stages).
+    // identifier => the full array.
     int32 FilterIndex = INDEX_NONE;
     bool bHasIndex = Params->TryGetNumberField(TEXT("stage_index"), FilterIndex);
     FString FilterName;
@@ -4673,12 +4474,12 @@ TSharedPtr<FJsonObject> HandleGetNiagaraSimulationStages(const TSharedPtr<FJsonO
 // Sets the Material UPROPERTY on a renderer (Sprite / Ribbon / Mesh all expose
 // a TObjectPtr<UMaterialInterface> Material; we look it up via reflection).
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_renderer_material - Set the Material UPROPERTY on a Niagara renderer (Sprite/Ribbon/Mesh).  Loads the material, sets it on the renderer's public Material field, requests a system compile and saves; a failed save makes success false, with saved=false and save_error. A renderer that already uses that material is a success with changed=false and saved=false, and nothing is written. A renderer_index that is not a JSON number is an error. Reads back to verify the material path is now bound.
+// MCP:set_niagara_renderer_material - Set the Material UPROPERTY on a Niagara renderer (Sprite, Ribbon, Mesh or Decal: any renderer class with a Material property).  Loads the material, sets it on the renderer's public Material field, requests a system compile and saves; a failed save makes success false, with saved=false and save_error. A renderer that already uses that material is a success with changed=false and saved=false, and nothing is written. A renderer_index that is not a JSON number, or a renderer class without a Material property (Light), is an error. Reads back to verify the material path is now bound, and returns the material it replaced.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param renderer_index - 0-based index of the renderer (use get_niagara_emitter_renderers to find the index)
 //   @param material_path - Asset path of the UMaterialInterface to assign.
-//   @returns { system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }
+//   @returns { system_path: string, emitter_name: string, renderer_index: int, renderer_class: string, previous_material_path: string, material_path: string, verified: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleSetNiagaraRendererMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -4720,6 +4521,8 @@ TSharedPtr<FJsonObject> HandleSetNiagaraRendererMaterial(const TSharedPtr<FJsonO
     TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetNumberField(TEXT("renderer_index"), RendererIndex);
     Data->SetStringField(TEXT("renderer_class"), R->GetClass()->GetName());
+    // The material bound before the write ("" when none).
+    Data->SetStringField(TEXT("previous_material_path"), ReadRendererMaterialPath(R));
 
     // A renderer that already uses this material is a valid no-op: nothing is modified, dirtied or saved.
     // verified compares the bound material with the object loaded, so a package path counts as its object path.
@@ -4769,74 +4572,11 @@ TSharedPtr<FJsonObject> HandleSetNiagaraRendererMaterial(const TSharedPtr<FJsonO
 //   SaveModifiedNiagaraSystem. Enum writes additionally call PostEditChangeProperty
 //   (Alignment/FacingMode drive UpdateSourceModeDerivates).
 // ===========================================================================
-namespace
-{
-    // Map of accepted snake_case input keys -> exact UPROPERTY name on the renderer.
-    // Keys whose property is absent on the concrete renderer class are reported in
-    // "not_applicable" (honest: a Mesh-only key on a Sprite is not silently swallowed).
-    // FNiagaraVariableAttributeBinding struct fields (PositionBinding/ColorBinding/...)
-    // are DELIBERATELY not in this table — bindings are not part of this surface.
-    static const FNiagaraPropKey GRendererPropKeys[] = {
-        // base UNiagaraRendererProperties
-        { TEXT("enabled"),               TEXT("bIsEnabled") },
-        { TEXT("renderer_enabled"),      TEXT("bIsEnabled") },
-        { TEXT("sort_order_hint"),       TEXT("SortOrderHint") },
-        { TEXT("motion_vector_setting"), TEXT("MotionVectorSetting") },
-        { TEXT("allow_in_cull_proxies"), TEXT("bAllowInCullProxies") },
-        // sprite
-        { TEXT("alignment"),             TEXT("Alignment") },
-        { TEXT("sort_mode"),             TEXT("SortMode") },
-        { TEXT("sub_image_size"),        TEXT("SubImageSize") },
-        { TEXT("macro_uv_radius"),       TEXT("MacroUVRadius") },
-        { TEXT("pivot_in_uv_space"),     TEXT("PivotInUVSpace") },
-        { TEXT("cast_shadows"),          TEXT("bCastShadows") },
-        { TEXT("renderer_visibility"),   TEXT("RendererVisibility") },
-        // mesh (facing_mode is shared with sprite; resolves to whichever FacingMode
-        // exists on the concrete class — both are named "FacingMode")
-        { TEXT("facing_mode"),           TEXT("FacingMode") },
-        { TEXT("override_materials"),    TEXT("bOverrideMaterials") },
-        { TEXT("mesh_bounds_scale"),     TEXT("MeshBoundsScale") },
-        { TEXT("locked_axis"),           TEXT("LockedAxis") },
-        // light — UNiagaraLightRendererProperties (its
-        // 12 scalar fields). Bitfields (uint32:1) and
-        // FVector3f (ColorAdd, from {x,y,z}) are handled by the JSON converter.
-        { TEXT("use_inverse_squared_falloff"), TEXT("bUseInverseSquaredFalloff") },
-        { TEXT("affects_translucency"),        TEXT("bAffectsTranslucency") },
-        { TEXT("allow_mega_lights"),           TEXT("bAllowMegaLights") },
-        { TEXT("mega_lights_cast_shadows"),    TEXT("bMegaLightsCastShadows") },
-        { TEXT("alpha_scales_brightness"),     TEXT("bAlphaScalesBrightness") },
-        { TEXT("override_inverse_exposure_blend"), TEXT("bOverrideInverseExposureBlend") },
-        { TEXT("radius_scale"),                TEXT("RadiusScale") },
-        { TEXT("default_exponent"),            TEXT("DefaultExponent") },
-        { TEXT("specular_scale"),              TEXT("SpecularScale") },
-        { TEXT("diffuse_scale"),               TEXT("DiffuseScale") },
-        { TEXT("color_add"),                   TEXT("ColorAdd") },
-        { TEXT("inverse_exposure_blend"),      TEXT("InverseExposureBlend") },
-        // decal — UNiagaraDecalRendererProperties (its
-        // 3 scalar fields; renderer_visibility is already
-        // a base key above). SourceMode is an enum -> RendererPropNeedsPostEdit fires the
-        // decal's UpdateSourceModeDerivates via PostEditChangeProperty.
-        { TEXT("decal_screen_size_fade"),      TEXT("DecalScreenSizeFade") },
-        { TEXT("decal_source_mode"),           TEXT("SourceMode") },
-    };
-
-    // Enum-typed renderer props whose write drives derived state (e.g. the decal
-    // renderer's UpdateSourceModeDerivates on SourceMode) and therefore require a
-    // PostEditChangeProperty to take effect (material setter skips it).
-    bool RendererPropNeedsPostEdit(const TCHAR* PropName)
-    {
-        return FCString::Strcmp(PropName, TEXT("Alignment")) == 0
-            || FCString::Strcmp(PropName, TEXT("FacingMode")) == 0
-            || FCString::Strcmp(PropName, TEXT("SortMode")) == 0
-            || FCString::Strcmp(PropName, TEXT("MotionVectorSetting")) == 0
-            || FCString::Strcmp(PropName, TEXT("SourceMode")) == 0;
-    }
-}
 
 // ---------------------------------------------------------------------------
 // set_niagara_renderer_properties
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_renderer_properties - Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material or set_niagara_decal_renderer_material; read back with get_niagara_renderer_info.
+// MCP:set_niagara_renderer_properties - Set properties of one renderer (Sprite, Mesh, Ribbon, Light or Decal) of a Niagara emitter by reflection, in one undo step, then request a system compile and save. Only the supplied fields are written, with ClampMin/ClampMax applied; enum fields (alignment, facing_mode, sort_mode, motion_vector_setting, decal_source_mode) also fire PostEditChangeProperty so derived state updates. Every field is converted before the first write, so a value that does not convert (an unknown enum name, an array for a struct field) is an error and nothing changes. Values the renderer already holds are a success with changed=false and saved=false, nothing written. A renderer_index that is not a JSON number is an error. Keys the renderer class lacks are listed in not_applicable. A failed save makes success false, with saved=false and save_error. Materials: set_niagara_renderer_material; read back with get_niagara_renderer_info.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param renderer_index - 0-based index of the renderer (use get_niagara_emitter_renderers).
@@ -5403,9 +5143,10 @@ TSharedPtr<FJsonObject> HandleRemoveNiagaraDataInterface(const TSharedPtr<FJsonO
 // ---------------------------------------------------------------------------
 // get_niagara_data_interfaces  - list all user-param DIs on the system.
 // ---------------------------------------------------------------------------
-// MCP:get_niagara_data_interfaces - List all UNiagaraDataInterface user-parameter bindings on a Niagara system. parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store.
+// MCP:get_niagara_data_interfaces - List all UNiagaraDataInterface user-parameter bindings on a Niagara system, or just the one named parameter_name, each with the name and property class of its UPROPERTYs (Transient and DuplicateTransient ones skipped). parameter_name is the user parameter's short name (no "User." prefix), the name the other data interface tools take; object_name and path_name name the data interface object itself; index is its slot in the system's data interface store. Read-only; a parameter_name that is not a data interface user parameter of the system is an error.
 //   @param system_path - Asset path of the Niagara System.
-//   @returns { system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name }] }
+//   @param parameter_name - Optional short name (no "User." prefix, case-insensitive) of one data interface user parameter to return.
+//   @returns { system_path: string, count: int, data_interfaces: [{ index, parameter_name, object_name, data_interface_class, data_interface_class_path, path_name, properties: [{ name, type }], property_count: int }] }
 
 TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObject>& Params)
 {
@@ -5414,6 +5155,11 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
     {
         return Error;
     }
+
+    // Optional single-binding filter by the user parameter's short name.
+    FString FilterName;
+    Params->TryGetStringField(TEXT("parameter_name"), FilterName);
+    FilterName.RemoveFromStart(TEXT("User."));
 
     const FNiagaraUserRedirectionParameterStore& Exposed = System->GetExposedParameters();
     const TArray<UNiagaraDataInterface*>& DIs = Exposed.GetDataInterfaces();
@@ -5438,7 +5184,7 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
     {
         // A slot no user parameter points at is not a binding, and no other tool can reach it.
         const FString* ParameterName = ParameterNameByOffset.Find(Idx);
-        if (!DI || !ParameterName)
+        if (!DI || !ParameterName || (!FilterName.IsEmpty() && !ParameterName->Equals(FilterName, ESearchCase::IgnoreCase)))
         {
             ++Idx;
             continue;
@@ -5450,8 +5196,28 @@ TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaces(const TSharedPtr<FJsonObj
         DObj->SetStringField(TEXT("data_interface_class"), DI->GetClass()->GetName());
         DObj->SetStringField(TEXT("data_interface_class_path"), DI->GetClass()->GetPathName());
         DObj->SetStringField(TEXT("path_name"), DI->GetPathName());
+        // Every UPROPERTY of the DI, Transient and DuplicateTransient ones skipped: a light introspection of its state.
+        TArray<TSharedPtr<FJsonValue>> PropsArray;
+        for (TFieldIterator<FProperty> It(DI->GetClass()); It; ++It)
+        {
+            const FProperty* Prop = *It;
+            if (!Prop || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient))
+            {
+                continue;
+            }
+            TSharedPtr<FJsonObject> PObj = MakeShared<FJsonObject>();
+            PObj->SetStringField(TEXT("name"), Prop->GetName());
+            PObj->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
+            PropsArray.Add(MakeShared<FJsonValueObject>(PObj));
+        }
+        DObj->SetArrayField(TEXT("properties"), PropsArray);
+        DObj->SetNumberField(TEXT("property_count"), PropsArray.Num());
         DIArray.Add(MakeShared<FJsonValueObject>(DObj));
         ++Idx;
+    }
+    if (!FilterName.IsEmpty() && DIArray.Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Data interface not found: %s"), *FilterName));
     }
 
     TSharedPtr<FJsonObject> Result = Niagara_StartSystemReply(System);
@@ -5569,7 +5335,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceAsset(const TSharedPtr<FJso
 // on the DI's user-exposed defaults, distinct from the bound asset above).
 // Uses ImportText_Direct against an arbitrary property by name.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_default - Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interface_info; for asset references use set_niagara_data_interface_asset.
+// MCP:set_niagara_data_interface_default - Writes one property of a user-parameter data interface on a Niagara system from text parsed by the property's ImportText, so any type it accepts works ("1.5", "(X=1,Y=2,Z=3)", "(R=1,G=0,B=0,A=1)", an enum name), inside an undo transaction, then requests a system recompile and saves the system; success requires the save. A missing DI or property, or text that does not parse, is an error and the DI is left untouched. value echoes the request; value_read_back is the stored value exported as text. List the DI's properties with get_niagara_data_interfaces; for asset references use set_niagara_data_interface_asset.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter DI to mutate
 //   @param property_name - Name of the FProperty on the DI to set
@@ -5634,55 +5400,6 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceDefault(const TSharedPtr<FJ
     Result->SetStringField(TEXT("value_read_back"), ReadBack);
     Result->SetBoolField(TEXT("set"), true);
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("set_niagara_data_interface_default"), SaveError);
-}
-
-// ---------------------------------------------------------------------------
-// get_niagara_data_interface_info  - detail of one user-param DI.
-// ---------------------------------------------------------------------------
-// MCP:get_niagara_data_interface_info - Get detail and a UPROPERTY dump for one UNiagaraDataInterface user-parameter binding on a Niagara system.
-//   @param system_path - Asset path of the Niagara System.
-//   @param parameter_name - Short name of the user-parameter DI
-//   @returns { system_path: string, parameter_name: string, data_interface_class: string, data_interface_class_path: string, path_name: string, properties: [{ name, type }], property_count: int }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraDataInterfaceInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SystemPath;
-    FString ParameterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndParameterNames(Params, SystemPath, ParameterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    UNiagaraSystem* System = nullptr;
-    UNiagaraDataInterface* DI = Niagara_ResolveUserDataInterface(SystemPath, ParameterName, System, Error);
-    if (!DI)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    TSharedPtr<FJsonObject> Result = Niagara_StartParameterReply(System, ParameterName);
-    Result->SetStringField(TEXT("data_interface_class"), DI->GetClass()->GetName());
-    Result->SetStringField(TEXT("data_interface_class_path"), DI->GetClass()->GetPathName());
-    Result->SetStringField(TEXT("path_name"), DI->GetPathName());
-
-    // Dump every UPROPERTY on the DI - lightweight introspection of its state.
-    TArray<TSharedPtr<FJsonValue>> PropsArray;
-    for (TFieldIterator<FProperty> It(DI->GetClass()); It; ++It)
-    {
-        FProperty* Prop = *It;
-        if (!Prop) { continue; }
-        // Skip editor-only / transient meta and only show "data" properties.
-        if (Prop->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient)) { continue; }
-
-        TSharedPtr<FJsonObject> PObj = MakeShared<FJsonObject>();
-        PObj->SetStringField(TEXT("name"), Prop->GetName());
-        PObj->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
-        PropsArray.Add(MakeShared<FJsonValueObject>(PObj));
-    }
-    Result->SetArrayField(TEXT("properties"), PropsArray);
-    Result->SetNumberField(TEXT("property_count"), PropsArray.Num());
-
-    return mcp_common::MakeOkReply(Result);
 }
 
 // ---------------------------------------------------------------------------
@@ -5800,7 +5517,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceCurve(const TSharedPtr<FJso
 // require a numeric inner; struct-element arrays (Vector/Color/Position) carry an
 // LWC editor/runtime split and are rejected with an honest error.
 // ---------------------------------------------------------------------------
-// MCP:set_niagara_data_interface_array - Replace the contents of a numeric array on an array user-parameter data interface of a Niagara System asset (FloatData by default, IntData on the int32 array DI) with values, in an undo transaction that records the DI, then request a recompile and save the system; success requires the save. Every value must be a finite JSON number; an int array stores it truncated toward zero. A value of another type, an unknown system or data interface, an array_property the DI lacks, or an array of structs (Vector, Color, Position) is an error and nothing changes. There is no no-op check: the same values are written and saved again. The reply reads the stored array back. The DI must exist (add_niagara_data_interface); curve DIs: set_niagara_data_interface_curve; inspect it with get_niagara_data_interface_info.
+// MCP:set_niagara_data_interface_array - Replace the contents of a numeric array on an array user-parameter data interface of a Niagara System asset (FloatData by default, IntData on the int32 array DI) with values, in an undo transaction that records the DI, then request a recompile and save the system; success requires the save. Every value must be a finite JSON number; an int array stores it truncated toward zero. A value of another type, an unknown system or data interface, an array_property the DI lacks, or an array of structs (Vector, Color, Position) is an error and nothing changes. There is no no-op check: the same values are written and saved again. The reply reads the stored array back. The DI must exist (add_niagara_data_interface); curve DIs: set_niagara_data_interface_curve; inspect it with get_niagara_data_interfaces.
 //   @param system_path - Asset path of the Niagara System.
 //   @param parameter_name - Short name of the user-parameter array DI (no "User." prefix)
 //   @param values - Array of finite JSON numbers to store (replaces all existing array contents); any other element is an error
@@ -5904,7 +5621,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraDataInterfaceArray(const TSharedPtr<FJso
 //                                         ResolveWarmupTickCount auto-derives from WarmupTime).
 //   set_niagara_system_warmup_tick_delta  UNiagaraSystem::SetWarmupTickDelta(float)
 //   set_niagara_system_deterministic      bDeterminism UPROPERTY
-//   get_niagara_system_warmup_time        GetWarmupTime() + GetWarmupTickCount()
+//   (read back by get_niagara_system_info: GetWarmupTime() + GetWarmupTickCount() + ...)
 //   set_niagara_emitter_template_description
 //                                         UNiagaraEmitter::TemplateAssetDescription (FText)
 // ========================================================================== //
@@ -5931,7 +5648,7 @@ namespace
     }
 }
 
-// MCP:set_niagara_system_warmup_time - Set the warmup time in seconds (simulated ahead when the system activates; 0 turns warmup off) of a Niagara System asset in one undo step, then save the asset. The engine re-derives warmup_tick_count as floor(warmup_time / warmup_tick_delta) and rounds the time down to whole ticks, so a time that is not a multiple of the delta comes back shorter in new_warmup_time; with a delta of 0 no warmup runs. A time that is not a finite JSON number of 0 or more, a missing param or an unknown system is an error and nothing changes. A time that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A failed save makes success false with saved=false and save_error, the change kept in memory. Set the delta first with set_niagara_system_warmup_tick_delta; read back with get_niagara_system_warmup_time.
+// MCP:set_niagara_system_warmup_time - Set the warmup time in seconds (simulated ahead when the system activates; 0 turns warmup off) of a Niagara System asset in one undo step, then save the asset. The engine re-derives warmup_tick_count as floor(warmup_time / warmup_tick_delta) and rounds the time down to whole ticks, so a time that is not a multiple of the delta comes back shorter in new_warmup_time; with a delta of 0 no warmup runs. A time that is not a finite JSON number of 0 or more, a missing param or an unknown system is an error and nothing changes. A time that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A failed save makes success false with saved=false and save_error, the change kept in memory. Set the delta first with set_niagara_system_warmup_tick_delta; read back with get_niagara_system_info.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
 //   @param warmup_time - Warmup time in seconds (>= 0; 0 disables warmup); the call fails without it.
 //   @returns { system_path: string, old_warmup_time: number, new_warmup_time: number, warmup_tick_count: int, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -5992,7 +5709,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTime(const TSharedPtr<FJsonO
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_warmup_time"), SaveError);
 }
 
-// MCP:set_niagara_system_warmup_tick_count - Recompute the warmup tick count of a Niagara System asset, found by asset path, from its current warmup time and tick delta, in one undo step, then save the asset; it takes no count. The engine stores floor(warmup_time / warmup_tick_delta) and rounds warmup_time down to whole ticks; a delta near zero is reset to 0 with a count of 0, so no warmup runs. Settings that are already consistent are a success with changed=false and saved=false, nothing written. An unknown system is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. For N ticks, set the delta with set_niagara_system_warmup_tick_delta, then N times it with set_niagara_system_warmup_time and check warmup_tick_count; read back with get_niagara_system_warmup_time.
+// MCP:set_niagara_system_warmup_tick_count - Recompute the warmup tick count of a Niagara System asset, found by asset path, from its current warmup time and tick delta, in one undo step, then save the asset; it takes no count. The engine stores floor(warmup_time / warmup_tick_delta) and rounds warmup_time down to whole ticks; a delta near zero is reset to 0 with a count of 0, so no warmup runs. Settings that are already consistent are a success with changed=false and saved=false, nothing written. An unknown system is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. For N ticks, set the delta with set_niagara_system_warmup_tick_delta, then N times it with set_niagara_system_warmup_time and check warmup_tick_count; read back with get_niagara_system_info.
 //   @param system_path - Asset path of the Niagara System.
 //   @returns { system_path: string, old_warmup_tick_count: int, new_warmup_tick_count: int, warmup_time: number, warmup_tick_delta: number, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
@@ -6043,7 +5760,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickCount(const TSharedPtr<F
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_warmup_tick_count"), SaveError);
 }
 
-// MCP:set_niagara_system_warmup_tick_delta - Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_warmup_time. A delta that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A missing delta, one that is not a finite JSON number above 0, or an unknown system, is an error and nothing changes; a failed save makes success false with saved=false and save_error. Set the delta before calling set_niagara_system_warmup_time.
+// MCP:set_niagara_system_warmup_tick_delta - Set the warmup tick delta (seconds simulated per warmup tick) of a Niagara System asset in one undo step, then save it. The engine re-derives the tick count as floor(warmup_time / delta) and rounds warmup_time down to a whole number of ticks, so a delta that does not divide the warmup time shortens it and one larger than it zeroes the warmup; the reply does not show this, so read warmup_time and warmup_tick_count back with get_niagara_system_info. A delta that leaves the warmup settings as they are is a success with changed=false and saved=false, nothing written. A missing delta, one that is not a finite JSON number above 0, or an unknown system, is an error and nothing changes; a failed save makes success false with saved=false and save_error. Set the delta before calling set_niagara_system_warmup_time.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @param warmup_tick_delta - Seconds per warmup tick, > 0, e.g. 0.0333 for 30 ticks per second; the call fails without it.
 //   @returns { system_path: string, old_warmup_tick_delta: number, new_warmup_tick_delta: number, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -6100,7 +5817,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemWarmupTickDelta(const TSharedPtr<F
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_warmup_tick_delta"), SaveError);
 }
 
-// MCP:set_niagara_system_deterministic - Set the system-wide determinism flag (bDeterminism, written by reflection) of a Niagara System asset, found by asset path, in one undo step, then save the asset. When true, every instance seeds its random numbers from the system's RandomSeed plus the component's RandomSeedOffset, so runs are repeatable; when false, each instance draws a new seed on reset. deterministic is required. A value the system already holds is a success with changed=false and saved=false, nothing written. A missing param or unknown system is an error; a failed save (for example while PIE runs) makes success false with saved=false and save_error, the change kept in memory. Read it back with get_niagara_system_warmup_time; one emitter's determinism: set_niagara_emitter_sim_target.
+// MCP:set_niagara_system_deterministic - Set the system-wide determinism flag (bDeterminism, written by reflection) of a Niagara System asset, found by asset path, in one undo step, then save the asset. When true, every instance seeds its random numbers from the system's RandomSeed plus the component's RandomSeedOffset, so runs are repeatable; when false, each instance draws a new seed on reset. deterministic is required. A value the system already holds is a success with changed=false and saved=false, nothing written. A missing param or unknown system is an error; a failed save (for example while PIE runs) makes success false with saved=false and save_error, the change kept in memory. Read it back with get_niagara_system_info; one emitter's determinism: set_niagara_emitter_sim_target.
 //   @param system_path - Asset path of the Niagara System.
 //   @param deterministic - Boolean to assign to bDeterminism
 //   @returns { system_path: string, old_deterministic: bool, new_deterministic: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -6163,28 +5880,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraSystemDeterministic(const TSharedPtr<FJs
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_system_deterministic"), SaveError);
 }
 
-// MCP:get_niagara_system_warmup_time - Read the warmup and determinism settings of a Niagara System asset: warmup_time in seconds, warmup_tick_count, warmup_tick_delta, needs_warmup and deterministic. Read-only; change them with set_niagara_system_warmup_time, set_niagara_system_warmup_tick_count, set_niagara_system_warmup_tick_delta and set_niagara_system_deterministic.
-//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
-//   @returns { system_path: string, warmup_time: number, warmup_tick_count: int, warmup_tick_delta: number, needs_warmup: bool, deterministic: bool }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraSystemWarmupTime(const TSharedPtr<FJsonObject>& Params)
-{
-    UNiagaraSystem* System = nullptr;
-    if (TSharedPtr<FJsonObject> Error = Niagara_LoadSystem(Params, System))
-    {
-        return Error;
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartSystemReply(System);
-    Data->SetNumberField(TEXT("warmup_time"), System->GetWarmupTime());
-    Data->SetNumberField(TEXT("warmup_tick_count"), System->GetWarmupTickCount());
-    Data->SetNumberField(TEXT("warmup_tick_delta"), System->GetWarmupTickDelta());
-    Data->SetBoolField(TEXT("needs_warmup"), System->NeedsWarmup());
-    Data->SetBoolField(TEXT("deterministic"), System->NeedsDeterminism());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:set_niagara_emitter_template_description - Set the TemplateAssetDescription text (shown when the emitter is picked as a template) of a standalone Niagara Emitter asset, not an emitter inside a system, in one undo step, then save the asset. description is stored as FText; an empty string clears it. A description the property system already finds identical is a success with changed=false and saved=false, nothing written. An unknown emitter asset or a missing param is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns old_description and new_description as read back. Emitters inside a system: get_niagara_emitter_handles; add one from an emitter asset with add_niagara_emitter_handle.
+// MCP:set_niagara_emitter_template_description - Set the TemplateAssetDescription text (shown when the emitter is picked as a template) of a standalone Niagara Emitter asset, not an emitter inside a system, in one undo step, then save the asset. description is stored as FText; an empty string clears it. A description the property system already finds identical is a success with changed=false and saved=false, nothing written. An unknown emitter asset or a missing param is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns old_description and new_description as read back. Emitters inside a system: get_niagara_emitter_handles; add one from an emitter asset with add_niagara_emitter_from_template.
 //   @param emitter_asset_path - Asset path of the UNiagaraEmitter, e.g. "/Game/FX/NE_Sparks" (an emitter asset, not a system path).
 //   @param description - New description text, stored as FText; an empty string clears it.
 //   @returns { emitter_asset_path: string, old_description: string, new_description: string, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
@@ -6252,8 +5948,6 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterTemplateDescription(const TShared
 //                                            ManualEstimate | FixedCount) + PreAllocationCount.
 //   set_niagara_emitter_max_gpu_particles   MaxGPUParticlesSpawnPerFrame override
 //                                            (only meaningful when SimTarget == GPUComputeSim).
-//   set_niagara_emitter_local_space         toggle bLocalSpace (particles in emitter-local
-//                                            vs world space).
 //   set_niagara_emitter_requires_persistent_ids
 //                                            toggle bRequiresPersistentIDs (stable
 //                                            Particles.ID across frames; small perf cost).
@@ -6269,7 +5963,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterTemplateDescription(const TShared
 //   4. SaveModifiedNiagaraSystem(System, SaveError)
 // ========================================================================== //
 
-// MCP:set_niagara_emitter_bounds - Set how one emitter of a Niagara System asset, found by handle name, computes its bounds (bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed) and optionally its fixed box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 per axis) and the other modes keep it; min <= max is not checked. An unknown mode, system or emitter, or a corner without X=, Y= and Z=, is an error and nothing changes. A mode and box already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_system_fixed_bounds.
+// MCP:set_niagara_emitter_bounds - Set how one emitter of a Niagara System asset, found by handle name, computes its bounds (bounds_mode Dynamic, Fixed or Programmable, case-insensitive, default Fixed) and optionally its fixed box, in one undo step, then save the system. bounds_min and bounds_max are FVector strings like "X=-50 Y=-50 Z=0", not arrays; one alone keeps the other corner. With neither, Fixed resets the box to the engine default (-100 to 100 per axis) and the other modes keep it; min <= max is not checked. An unknown mode, system or emitter, or a corner without X=, Y= and Z=, is an error and nothing changes. A mode and box already in place are a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error. Read back with get_niagara_emitter_runtime_summary; for a placed Niagara component use set_niagara_component_fixed_bounds.
 //   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
 //   @param emitter_name - Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive).
 //   @param bounds_mode - One of "Dynamic", "Fixed", or "Programmable"; defaults to "Fixed"
@@ -6557,61 +6251,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraEmitterMaxGPUParticles(const TSharedPtr<
     return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_emitter_max_gpu_particles"), SaveError);
 }
 
-// MCP:set_niagara_emitter_local_space - Set whether one emitter of a Niagara System asset, found by handle name, simulates in local space (bLocalSpace on its emitter data), in one undo step, then save the system. local_space is required: true keeps the particles in the space of the emitter, false in world space. A value already in place is a success with changed=false and saved=false, nothing written. An unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns local_space as read back. Read it back with get_niagara_emitter_runtime_summary; the simulation target: set_niagara_emitter_sim_target.
-//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire"; the call fails without it.
-//   @param emitter_name - Display name of the emitter handle (case-insensitive).
-//   @param local_space - true to simulate the particles of the emitter in its local space, false for world space; the call fails without it.
-//   @returns { system_path: string, emitter_name: string, local_space: bool, applied: bool, changed: bool, saved: bool, save_error?: string, note?: string }
-
-TSharedPtr<FJsonObject> HandleSetNiagaraEmitterLocalSpace(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SystemPath;
-    FString EmitterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndEmitterNames(Params, SystemPath, EmitterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    bool bLocalSpace = false;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredBool(Params, TEXT("local_space"), bLocalSpace)) { return Missing; }
-
-    // The emitter data lives in the handle's UNiagaraEmitter, which the transaction must record for an undo.
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    UNiagaraEmitter* Emitter = Niagara_ResolveEditableEmitter(SystemPath, EmitterName, System, EmitterData, Error);
-    if (!Emitter)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-
-    // A value already in place is a valid no-op: nothing is modified, dirtied or saved.
-    if (EmitterData->bLocalSpace == bLocalSpace)
-    {
-        Data->SetBoolField(TEXT("local_space"), EmitterData->bLocalSpace);
-        Data->SetBoolField(TEXT("applied"), false);
-        Data->SetBoolField(TEXT("changed"), false);
-        Data->SetBoolField(TEXT("saved"), false);
-        Data->SetStringField(TEXT("note"), TEXT("The emitter already simulates in that space; nothing changed, nothing saved"));
-        return mcp_common::MakeOkReply(Data);
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetNiagaraEmitterLocalSpace", "Set Niagara Emitter Local Space"));
-    System->Modify();
-    Emitter->Modify();
-    EmitterData->bLocalSpace = bLocalSpace;
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    Data->SetBoolField(TEXT("local_space"), EmitterData->bLocalSpace);
-    Data->SetBoolField(TEXT("applied"), true);
-    Data->SetBoolField(TEXT("changed"), true);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_niagara_emitter_local_space"), SaveError);
-}
-
-// MCP:set_niagara_emitter_requires_persistent_ids - Set whether one emitter of a Niagara System asset, found by handle name, gives its particles persistent IDs (bRequiresPersistentIDs: a Particles.ID stable across frames, at a small cost), in one undo step, then save the system. requires_persistent_ids is required. A value already in place is a success with changed=false and saved=false, nothing written. A missing param or an unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the flag as read back; read it later with get_niagara_emitter_runtime_summary; local space: set_niagara_emitter_local_space.
+// MCP:set_niagara_emitter_requires_persistent_ids - Set whether one emitter of a Niagara System asset, found by handle name, gives its particles persistent IDs (bRequiresPersistentIDs: a Particles.ID stable across frames, at a small cost), in one undo step, then save the system. requires_persistent_ids is required. A value already in place is a success with changed=false and saved=false, nothing written. A missing param or an unknown system or emitter is an error. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the flag as read back; read it later with get_niagara_emitter_runtime_summary; local space: set_niagara_emitter_sim_target with local_space.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param requires_persistent_ids - true to give every particle a persistent ID, false to drop them; the call fails without it
@@ -6748,12 +6388,9 @@ TSharedPtr<FJsonObject> HandleGetNiagaraEmitterRuntimeSummary(const TSharedPtr<F
 // Niagara module stack graph CRUD
 //
 // The commands of this section operate on the UNiagaraGraph that backs the ParticleSpawn /
-// ParticleUpdate stack of an emitter. add_niagara_module_to_graph differs from
-// add_niagara_module_to_stack in that it accepts an explicit
-// target_index (insert at position N rather than only at the end) and is the
-// insertion path the duplicate / reorder commands also rely on.
-// remove / duplicate / enable / info round-trip the same node graph directly
-// via FNiagaraStackGraphUtilities.
+// ParticleUpdate stack of an emitter (add_niagara_module_to_stack inserts, with an
+// optional target_index). remove / duplicate / enable / reorder round-trip the same
+// node graph directly via FNiagaraStackGraphUtilities.
 //
 // Engine APIs (NiagaraStackGraphUtilities.h):
 //   FNiagaraStackGraphUtilities::AddScriptModuleToStack(UNiagaraScript*, UNiagaraNodeOutput&, int32, FString, const FGuid&)
@@ -6872,80 +6509,6 @@ namespace
             Src->NodeGraph->Modify();
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// add_niagara_module_to_graph
-// Same underlying API as add_niagara_module_to_stack (FNiagaraStackGraphUtilities::
-// AddScriptModuleToStack) but accepts an explicit target_index so callers can
-// place the module anywhere in the stack. INDEX_NONE appends to the end.
-// ---------------------------------------------------------------------------
-// MCP:add_niagara_module_to_graph - Insert a module script (a UNiagaraScript, by asset path) into the particle spawn or update stack of one emitter of a Niagara System asset (emitter by handle name) at a chosen position, in one undo step; then request a recompile of the system and save it. target_index is the 0-based position in that stack: -1, the default, appends, and an index past the end is clamped to it. The module starts with its script's default inputs. Not idempotent: every call adds another module node, named in module_node_name. A target_index that is not a JSON number, an emitter without an editable graph, or an unknown system, emitter or script is an error; a failed save makes success false with saved=false and save_error. Append only: add_niagara_module_to_stack; move: reorder_niagara_modules; inputs: set_niagara_module_input; list: list_niagara_modules; take out: remove_niagara_module_from_stack.
-//   @param system_path - Niagara System asset path, e.g. "/Game/FX/NS_Fire" (the object path form also works).
-//   @param emitter_name - Emitter handle name as shown in the system, e.g. "Sparks" (case-insensitive).
-//   @param module_script_path - Module UNiagaraScript asset path, e.g. "/Niagara/Modules/Update/Forces/GravityForce.GravityForce"; the call fails without it.
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"; case-insensitive, any other value is an error.
-//   @param target_index - Optional 0-based position in the stack; -1 (INDEX_NONE, the default) and any index past the end append, and an index below -1 inserts first.
-//   @returns { system_path: string, emitter_name: string, module_script_path: string, script_group: string, target_index: int, module_node_name: string, added: bool, saved: bool, save_error?: string }
-
-TSharedPtr<FJsonObject> HandleAddNiagaraModuleToGraph(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SystemPath;
-    FString EmitterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndEmitterNames(Params, SystemPath, EmitterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    FString ModuleScriptPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("module_script_path"), ModuleScriptPath)) { return Missing; }
-    FString ScriptGroup;
-    ENiagaraScriptUsage Usage = ENiagaraScriptUsage::ParticleUpdateScript;
-    if (!Niagara_ReadStrictScriptGroup(Params, ScriptGroup, Usage, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    if (TSharedPtr<FJsonObject> Mistyped = Niagara_RefuseMistypedNumber(Params, TEXT("target_index"))) { return Mistyped; }
-    int32 TargetIndex = INDEX_NONE;
-    Params->TryGetNumberField(TEXT("target_index"), TargetIndex);
-
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    UNiagaraNodeOutput* Out = Niagara_ResolveStackOutput(SystemPath, EmitterName, Usage, System, EmitterData, Error);
-    if (!Out)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    UNiagaraScript* Mod = mcp_common::ResolveAsset<UNiagaraScript>(ModuleScriptPath);
-    if (!Mod)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Niagara module script not found: %s"), *ModuleScriptPath));
-    }
-
-    FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddNiagaraModuleToGraph", "Add Niagara Module To Graph"));
-    System->Modify();
-    Niagara_ModifyEmitterGraph(EmitterData);
-
-    UNiagaraNodeFunctionCall* NewModule =
-        FNiagaraStackGraphUtilities::AddScriptModuleToStack(Mod, *Out, TargetIndex);
-    if (!NewModule)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("AddScriptModuleToStack returned null (module could not be inserted into the graph)"));
-    }
-    System->RequestCompile(true);
-
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(System, SaveError);
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetStringField(TEXT("module_script_path"), Mod->GetPathName());
-    Data->SetStringField(TEXT("script_group"), ScriptGroup);
-    Data->SetNumberField(TEXT("target_index"), TargetIndex);
-    Data->SetStringField(TEXT("module_node_name"), NewModule->GetFunctionName());
-    Data->SetBoolField(TEXT("added"), true);
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_niagara_module_to_graph"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -7177,7 +6740,7 @@ TSharedPtr<FJsonObject> HandleSetNiagaraModuleEnabled(const TSharedPtr<FJsonObje
 // handler). This gives full positional control without depending on MoveModule
 // (which moves across scripts, not within a single stack).
 // ---------------------------------------------------------------------------
-// MCP:reorder_niagara_modules - Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as get_niagara_module_info reports stack_index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_graph.
+// MCP:reorder_niagara_modules - Move a module node, found by function name (case-sensitive, as list_niagara_modules gives it) anywhere in the graph of one emitter of a Niagara System asset, to target_index by reordering the graph node array in place (pins and inputs kept), in one undo step, then request a system compile and save. target_index, old_index and new_index count all module nodes of the emitter graph in node order, as list_niagara_modules reports index; target_index is required, a JSON number of 0 or more, and one past the last is clamped to it. A module already in place is still saved and reordered is always true, so compare old_index with new_index. An unknown system, emitter or module is an error; a failed save makes success false, with saved=false and save_error. Insert at a position: add_niagara_module_to_stack with target_index.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
 //   @param module_name - Function name of the module node to move, case-sensitive, as list_niagara_modules gives module_name
@@ -7247,7 +6810,7 @@ TSharedPtr<FJsonObject> HandleReorderNiagaraModules(const TSharedPtr<FJsonObject
     // (UEdGraph ENGINE_API) replaces the non-exported
     // FNiagaraStackGraphUtilities::RelayoutGraph — the editor refreshes
     // visual layout on next view, which is sufficient for a one-shot CLI
-    // reordering. The project's get_niagara_module_info measures stack_index
+    // reordering. list_niagara_modules measures each module's index
     // via UNiagaraGraph::GetNodesOfClass (array iteration), so swapping the
     // filtered position in Nodes is the source of truth the rest of the
     // subsystem reads.
@@ -7335,127 +6898,18 @@ TSharedPtr<FJsonObject> HandleReorderNiagaraModules(const TSharedPtr<FJsonObject
 }
 
 // ---------------------------------------------------------------------------
-// get_niagara_module_info
-// Flat readback for a single UNiagaraNodeFunctionCall on the spawn OR update
-// graph: script class, function name, position in the ordered stack, enabled
-// state, input pin count, and the node GUID.
-// ---------------------------------------------------------------------------
-// MCP:get_niagara_module_info - Read detail for a single UNiagaraNodeFunctionCall module in a Niagara emitter's spawn or update graph.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @param module_name - Display name of the module function-call node
-//   @param script_group - Optional "spawn" or "update"; defaults to "update"
-//   @returns { system_path: string, emitter_name: string, script_group: string, module_name: string, node_guid: string, stack_index: int, total_modules_in_stack: int, function_script?: string, function_script_class?: string, is_enabled?: bool, input_pin_count: int, output_pin_count: int, is_deprecated: bool }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraModuleInfo(const TSharedPtr<FJsonObject>& Params)
-{
-    FString SystemPath;
-    FString EmitterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndEmitterNames(Params, SystemPath, EmitterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    FString ModuleName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("module_name"), ModuleName)) { return Missing; }
-    const FString ScriptGroup = Niagara_ReadScriptGroup(Params);
-    const ENiagaraScriptUsage Usage = Niagara_ScriptGroupUsage(ScriptGroup);
-
-    UNiagaraSystem* System = nullptr;
-    FVersionedNiagaraEmitterData* EmitterData = nullptr;
-    UNiagaraNodeOutput* Out = Niagara_ResolveStackOutput(SystemPath, EmitterName, Usage, System, EmitterData, Error);
-    if (!Out)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    TArray<UNiagaraNodeFunctionCall*> Ordered;
-    if (UNiagaraGraph* NiagaraGraph = Cast<UNiagaraGraph>(Out->GetGraph()))
-    {
-        // Public UNiagaraGraph::GetNodesOfClass (inherited from UEdGraph,
-        // ENGINE_API) replaces the non-exported
-        // FNiagaraStackGraphUtilities::GetOrderedModuleNodes.
-        NiagaraGraph->GetNodesOfClass<UNiagaraNodeFunctionCall>(Ordered);
-    }
-    UNiagaraNodeFunctionCall* Target = nullptr;
-    int32 StackIndex = INDEX_NONE;
-    for (int32 i = 0; i < Ordered.Num(); ++i)
-    {
-        if (Ordered[i] && Ordered[i]->GetFunctionName().Equals(ModuleName, ESearchCase::CaseSensitive))
-        {
-            Target = Ordered[i];
-            StackIndex = i;
-            break;
-        }
-    }
-    if (!Target)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Module '%s' not found on %s graph"), *ModuleName, *ScriptGroup));
-    }
-
-    int32 InputPinCount = 0;
-    int32 OutputPinCount = 0;
-    for (UEdGraphPin* Pin : Target->Pins)
-    {
-        if (!Pin)
-        {
-            continue;
-        }
-        if (Pin->Direction == EGPD_Input)
-        {
-            ++InputPinCount;
-        }
-        else if (Pin->Direction == EGPD_Output)
-        {
-            ++OutputPinCount;
-        }
-    }
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetStringField(TEXT("script_group"), ScriptGroup);
-    Data->SetStringField(TEXT("module_name"), Target->GetFunctionName());
-    Data->SetStringField(TEXT("node_guid"), Target->NodeGuid.ToString());
-    Data->SetNumberField(TEXT("stack_index"), StackIndex);
-    Data->SetNumberField(TEXT("total_modules_in_stack"), Ordered.Num());
-    if (Target->FunctionScript)
-    {
-        Data->SetStringField(TEXT("function_script"), Target->FunctionScript->GetPathName());
-        Data->SetStringField(TEXT("function_script_class"), Target->FunctionScript->GetClass()->GetName());
-    }
-    // FNiagaraStackGraphUtilities::GetModuleIsEnabled is NOT exported; for a
-    // single module node UEdGraphNode::IsNodeEnabled() (inherited by
-    // UNiagaraNode) returns the same single-module state the internal helper
-    // would have surfaced.
-    const TOptional<bool> Enabled = TOptional<bool>(Target->IsNodeEnabled());
-    if (Enabled.IsSet())
-    {
-        Data->SetBoolField(TEXT("is_enabled"), Enabled.GetValue());
-    }
-    Data->SetNumberField(TEXT("input_pin_count"), InputPinCount);
-    Data->SetNumberField(TEXT("output_pin_count"), OutputPinCount);
-    Data->SetBoolField(TEXT("is_deprecated"), Target->IsDeprecated());
-    return mcp_common::MakeOkReply(Data);
-}
-
-// ---------------------------------------------------------------------------
-// list_niagara_modules / get_niagara_module_stack
+// list_niagara_modules
 // Read-only enumeration of the UNiagaraNodeFunctionCall modules
-// on an emitter's spawn/update stack. Same export-SAFE ordered-node path as
-// HandleGetNiagaraModuleInfo (ResolveEmitterOutputNode +
-// UNiagaraGraph::GetNodesOfClass). It deliberately AVOIDS
+// on an emitter's spawn/update stack, through the export-SAFE ordered-node path
+// (ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass). It deliberately AVOIDS
 // FNiagaraStackGraphUtilities::GetOrderedModuleNodes / GetAllModuleNodes /
-// GetModuleIsEnabled (NOT exported -> LNK2019); the stale comment block naming
-// them above is wrong. Honest-empty arrays when a group has no modules.
-//
-// list_niagara_modules = ONE script_group (spawn|update, default update).
-// get_niagara_module_stack = BOTH spawn AND update, grouped as spawn:[]/update:[].
+// GetModuleIsEnabled (NOT exported -> LNK2019). Honest-empty arrays when a group
+// has no modules. script_group "all" reads BOTH stacks, grouped as spawn:[]/update:[].
 // ---------------------------------------------------------------------------
 namespace
 {
     // Enumerate the ordered UNiagaraNodeFunctionCall modules of an emitter's
-    // spawn/update group graph into a JSON array. Fields mirror
-    // HandleGetNiagaraModuleInfo exactly. On resolution failure returns an empty
+    // spawn/update group graph into a JSON array. On resolution failure returns an empty
     // array and sets OutError (caller decides whether to surface it) — the
     // per-group entry stays honest-empty rather than faking modules.
     TArray<TSharedPtr<FJsonValue>> BuildNiagaraModuleArray(
@@ -7524,11 +6978,12 @@ namespace
     }
 }
 
-// MCP:list_niagara_modules - List the module function-call nodes on ONE stack of a Niagara emitter (read-only). Resolves the emitter's spawn OR update group graph (script_group, default "update") via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index, module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned).
+// MCP:list_niagara_modules - List the module function-call nodes on one stack, or both stacks, of a Niagara emitter (read-only), optionally just the module with a given name. Resolves the emitter's spawn or update group graph (script_group, default "update"; "all" reads both and also groups them as spawn[] and update[]) via the export-safe ResolveEmitterOutputNode + UNiagaraGraph::GetNodesOfClass path, then reports each UNiagaraNodeFunctionCall: index (its position in its stack), module_name (GetFunctionName), node_guid, function_script(+class), is_enabled (IsNodeEnabled), is_deprecated, input/output pin counts. Honest-empty modules:[] when the stack has no modules or the graph is not resolvable (a note is returned); a module_name that matches no module is an error.
 //   @param system_path - Asset path of the Niagara System.
 //   @param emitter_name - Name of the emitter handle.
-//   @param script_group - Optional "spawn" or "update"; defaults to "update".
-//   @returns { system_path: string, emitter_name: string, script_group: string, module_count: int, total_modules_in_stack: int, modules: [{ index, script_group, module_name, node_guid, function_script?, function_script_class?, is_enabled, is_deprecated, input_pin_count, output_pin_count, total_modules_in_stack }], note?: string }
+//   @param script_group - Optional "spawn", "update" or "all" (both stacks); defaults to "update".
+//   @param module_name - Optional module name (GetFunctionName, case-sensitive): return only that module; an error when no module of the stack(s) has it.
+//   @returns { system_path: string, emitter_name: string, script_group: string, module_count: int, total_modules_in_stack: int, modules: [{ index, script_group, module_name, node_guid, function_script?, function_script_class?, is_enabled, is_deprecated, input_pin_count, output_pin_count, total_modules_in_stack }], note?: string, spawn?: [{...}], update?: [{...}], spawn_module_count?: int, update_module_count?: int, spawn_note?: string, update_note?: string }
 
 TSharedPtr<FJsonObject> HandleListNiagaraModules(const TSharedPtr<FJsonObject>& Params)
 {
@@ -7541,7 +6996,11 @@ TSharedPtr<FJsonObject> HandleListNiagaraModules(const TSharedPtr<FJsonObject>& 
         return mcp_common::MakeErrorReply(Error);
     }
     const FString ScriptGroup = Niagara_ReadScriptGroup(Params);
+    const bool bAllGroups = ScriptGroup.Equals(TEXT("all"), ESearchCase::IgnoreCase);
     const ENiagaraScriptUsage Usage = Niagara_ScriptGroupUsage(ScriptGroup);
+    // Optional single-module filter, by exact (case-sensitive) module name.
+    FString ModuleNameFilter;
+    Params->TryGetStringField(TEXT("module_name"), ModuleNameFilter);
 
     UNiagaraSystem* System = nullptr;
     FNiagaraEmitterHandle* Handle = Niagara_ResolveEmitterHandle(SystemPath, EmitterName, System, Error);
@@ -7551,6 +7010,62 @@ TSharedPtr<FJsonObject> HandleListNiagaraModules(const TSharedPtr<FJsonObject>& 
     }
     FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
 
+    // Keeps only the entries named ModuleNameFilter, when one was given.
+    auto FilterByName = [&ModuleNameFilter](TArray<TSharedPtr<FJsonValue>>& Modules)
+    {
+        if (!ModuleNameFilter.IsEmpty())
+        {
+            Modules.RemoveAll([&ModuleNameFilter](const TSharedPtr<FJsonValue>& Entry)
+            {
+                return !Entry->AsObject()->GetStringField(TEXT("module_name")).Equals(ModuleNameFilter, ESearchCase::CaseSensitive);
+            });
+        }
+    };
+
+    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
+    if (bAllGroups)
+    {
+        // Both stacks, each through the same export-safe enumeration.
+        FString SpawnError;
+        int32 SpawnTotal = 0;
+        TArray<TSharedPtr<FJsonValue>> SpawnArray = BuildNiagaraModuleArray(
+            EmitterData, ENiagaraScriptUsage::ParticleSpawnScript, TEXT("spawn"), SpawnTotal, SpawnError);
+        FString UpdateError;
+        int32 UpdateTotal = 0;
+        TArray<TSharedPtr<FJsonValue>> UpdateArray = BuildNiagaraModuleArray(
+            EmitterData, ENiagaraScriptUsage::ParticleUpdateScript, TEXT("update"), UpdateTotal, UpdateError);
+        FilterByName(SpawnArray);
+        FilterByName(UpdateArray);
+        if (!ModuleNameFilter.IsEmpty() && SpawnArray.Num() == 0 && UpdateArray.Num() == 0)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Module '%s' not found on the spawn or update stack of emitter '%s'"), *ModuleNameFilter, *EmitterName));
+        }
+        UE_LOG(LogTemp, Verbose, TEXT("list_niagara_modules: %s/%s [all] -> spawn:%d update:%d"),
+            *SystemPath, *EmitterName, SpawnTotal, UpdateTotal);
+
+        TArray<TSharedPtr<FJsonValue>> AllModules = SpawnArray;
+        AllModules.Append(UpdateArray);
+        Data->SetStringField(TEXT("script_group"), TEXT("all"));
+        Data->SetNumberField(TEXT("module_count"), AllModules.Num());
+        Data->SetNumberField(TEXT("total_modules_in_stack"), SpawnTotal + UpdateTotal);
+        Data->SetArrayField(TEXT("modules"), AllModules);
+        Data->SetArrayField(TEXT("spawn"), SpawnArray);
+        Data->SetArrayField(TEXT("update"), UpdateArray);
+        Data->SetNumberField(TEXT("spawn_module_count"), SpawnArray.Num());
+        Data->SetNumberField(TEXT("update_module_count"), UpdateArray.Num());
+        // Honest per-group notes if a graph could not be resolved (arrays stay empty).
+        if (!SpawnError.IsEmpty())
+        {
+            Data->SetStringField(TEXT("spawn_note"), SpawnError);
+        }
+        if (!UpdateError.IsEmpty())
+        {
+            Data->SetStringField(TEXT("update_note"), UpdateError);
+        }
+        return mcp_common::MakeOkReply(Data);
+    }
+
     FString ResolveError;
     int32 TotalModules = 0;
     TArray<TSharedPtr<FJsonValue>> ModuleArray =
@@ -7558,8 +7073,14 @@ TSharedPtr<FJsonObject> HandleListNiagaraModules(const TSharedPtr<FJsonObject>& 
     UE_LOG(LogTemp, Verbose, TEXT("list_niagara_modules: %s/%s [%s] -> %d module(s)%s"),
         *SystemPath, *EmitterName, *ScriptGroup, TotalModules,
         ResolveError.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (note: %s)"), *ResolveError));
+    FilterByName(ModuleArray);
+    if (!ModuleNameFilter.IsEmpty() && ModuleArray.Num() == 0)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Module '%s' not found on the %s stack of emitter '%s'%s"),
+            *ModuleNameFilter, *ScriptGroup, *EmitterName,
+            ResolveError.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *ResolveError)));
+    }
 
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
     Data->SetStringField(TEXT("script_group"), ScriptGroup);
     Data->SetNumberField(TEXT("module_count"), ModuleArray.Num());
     Data->SetNumberField(TEXT("total_modules_in_stack"), TotalModules);
@@ -7569,60 +7090,6 @@ TSharedPtr<FJsonObject> HandleListNiagaraModules(const TSharedPtr<FJsonObject>& 
     if (!ResolveError.IsEmpty())
     {
         Data->SetStringField(TEXT("note"), ResolveError);
-    }
-    return mcp_common::MakeOkReply(Data);
-}
-
-// MCP:get_niagara_module_stack - Read BOTH the spawn AND update module stacks of a Niagara emitter in one call (read-only). Runs the same export-safe enumeration as list_niagara_modules twice, returning the modules grouped as spawn:[...] and update:[...] (each entry also carries its own script_group tag). Honest-empty arrays per group, with a spawn_note/update_note if a graph could not be resolved.
-//   @param system_path - Asset path of the Niagara System.
-//   @param emitter_name - Name of the emitter handle.
-//   @returns { system_path: string, emitter_name: string, spawn: [{...}], update: [{...}], spawn_module_count: int, update_module_count: int, total_modules_in_stack: int, spawn_note?: string, update_note?: string }
-
-TSharedPtr<FJsonObject> HandleGetNiagaraModuleStack(const TSharedPtr<FJsonObject>& Params)
-{
-    UE_LOG(LogTemp, Verbose, TEXT("get_niagara_module_stack: enter"));
-    FString SystemPath;
-    FString EmitterName;
-    FString Error;
-    if (!Niagara_ReadSystemAndEmitterNames(Params, SystemPath, EmitterName, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-
-    UNiagaraSystem* System = nullptr;
-    FNiagaraEmitterHandle* Handle = Niagara_ResolveEmitterHandle(SystemPath, EmitterName, System, Error);
-    if (!Handle)
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    FVersionedNiagaraEmitterData* EmitterData = Handle->GetEmitterData();
-
-    // Run the export-safe enumeration chain twice — once per group.
-    FString SpawnError;
-    int32 SpawnTotal = 0;
-    TArray<TSharedPtr<FJsonValue>> SpawnArray = BuildNiagaraModuleArray(
-        EmitterData, ENiagaraScriptUsage::ParticleSpawnScript, TEXT("spawn"), SpawnTotal, SpawnError);
-    FString UpdateError;
-    int32 UpdateTotal = 0;
-    TArray<TSharedPtr<FJsonValue>> UpdateArray = BuildNiagaraModuleArray(
-        EmitterData, ENiagaraScriptUsage::ParticleUpdateScript, TEXT("update"), UpdateTotal, UpdateError);
-    UE_LOG(LogTemp, Verbose, TEXT("get_niagara_module_stack: %s/%s -> spawn:%d update:%d"),
-        *SystemPath, *EmitterName, SpawnTotal, UpdateTotal);
-
-    TSharedPtr<FJsonObject> Data = Niagara_StartEmitterReply(System, EmitterName);
-    Data->SetArrayField(TEXT("spawn"), SpawnArray);
-    Data->SetArrayField(TEXT("update"), UpdateArray);
-    Data->SetNumberField(TEXT("spawn_module_count"), SpawnArray.Num());
-    Data->SetNumberField(TEXT("update_module_count"), UpdateArray.Num());
-    Data->SetNumberField(TEXT("total_modules_in_stack"), SpawnTotal + UpdateTotal);
-    // Honest per-group notes if a graph could not be resolved (arrays stay empty).
-    if (!SpawnError.IsEmpty())
-    {
-        Data->SetStringField(TEXT("spawn_note"), SpawnError);
-    }
-    if (!UpdateError.IsEmpty())
-    {
-        Data->SetStringField(TEXT("update_note"), UpdateError);
     }
     return mcp_common::MakeOkReply(Data);
 }
@@ -8371,153 +7838,11 @@ TSharedPtr<FJsonObject> HandleGetNiagaraRendererInfo(
     return mcp_common::MakeOkReply(Data);
 }
 
-// ---------------------------------------------------------------------------
-// Typed setter on an existing
-// UNiagaraDecalRendererProperties instance.
-//
-// Scalar renderer properties go through the reflective
-// set_niagara_renderer_properties route. set_niagara_decal_renderer_material is a
-// typed setter because it resolves a UMaterialInterface by asset path (object-ref),
-// which the reflective route cannot LoadObject. It uses the existing
-// LoadNiagaraSystem + SaveModifiedNiagaraSystem helpers and the ResolveRendererAtIndex
-// template below. Renderer index is 0-based; matches the array order returned by
-// FVersionedNiagaraEmitterData::GetRenderers().
-// ---------------------------------------------------------------------------
-
-namespace
-{
-    // Resolve + return the specific renderer at Index in the named emitter,
-    // casting to the expected TSubclassOf. On any failure (system missing,
-    // emitter missing, index out of range, type mismatch) returns nullptr
-    // and writes a precise error to OutError.
-    template <typename TRenderer>
-    TRenderer* ResolveRendererAtIndex(
-        const TSharedPtr<FJsonObject>& Params,
-        const TCHAR* ExpectedClass,
-        TRenderer*& OutTyped,
-        FString& OutError)
-    {
-        OutTyped = nullptr;
-        FString SystemPath;
-        FString EmitterName;
-        if (!ExtractNiagaraSystemPath(Params, SystemPath))
-        {
-            OutError = TEXT("Missing required parameter: system_path");
-            return nullptr;
-        }
-        if (!Params->TryGetStringField(TEXT("emitter_name"), EmitterName) || EmitterName.IsEmpty())
-        {
-            OutError = TEXT("Missing required parameter: emitter_name");
-            return nullptr;
-        }
-        // A bool would read as 0 or 1 and pick a renderer the caller never named.
-        if (Niagara_IsMistypedNumber(Params, TEXT("renderer_index")))
-        {
-            OutError = TEXT("renderer_index must be a JSON number; nothing was changed");
-            return nullptr;
-        }
-        double IndexD = 0.0;
-        if (!Params->TryGetNumberField(TEXT("renderer_index"), IndexD))
-        {
-            OutError = TEXT("Missing required parameter: renderer_index");
-            return nullptr;
-        }
-        const int32 RendererIndex = static_cast<int32>(IndexD);
-        if (RendererIndex < 0)
-        {
-            OutError = FString::Printf(TEXT("renderer_index must be >= 0 (got %d)"), RendererIndex);
-            return nullptr;
-        }
-
-        UNiagaraSystem* System = nullptr;
-        FVersionedNiagaraEmitterData* EmitterData =
-            Niagara_ResolveEmitterData(SystemPath, EmitterName, NiagaraNoEmitterDataTemplate, System, OutError);
-        if (!EmitterData)
-        {
-            return nullptr;
-        }
-        const TArray<UNiagaraRendererProperties*>& Renderers = EmitterData->GetRenderers();
-        if (RendererIndex >= Renderers.Num())
-        {
-            OutError = FString::Printf(TEXT("renderer_index %d out of range (emitter has %d renderers)"),
-                RendererIndex, Renderers.Num());
-            return nullptr;
-        }
-        UNiagaraRendererProperties* Renderer = Renderers[RendererIndex];
-        if (!Renderer || !Renderer->IsA<TRenderer>())
-        {
-            OutError = FString::Printf(
-                TEXT("Renderer at index %d is not a %s (actual: %s)"),
-                RendererIndex, ExpectedClass,
-                Renderer ? *Renderer->GetClass()->GetName() : TEXT("null"));
-            return nullptr;
-        }
-        OutTyped = Cast<TRenderer>(Renderer);
-        return OutTyped;
-    }
-}
-
-// MCP:set_niagara_decal_renderer_material - Assign a material to the Decal renderer at renderer_index of one emitter in a Niagara System asset, in one undo step, then save the system. material_path is loaded as a UMaterialInterface; a missing or unknown material, system or emitter, a renderer_index that is not a JSON number or is out of range, or a renderer that is not a Decal renderer is an error and nothing changes. A renderer that already uses that material is a success with changed=false and saved=false, nothing written. A failed save makes success false, with saved=false and save_error, the change kept in memory. Returns the previous and new material paths. For sprite, ribbon or mesh renderers use set_niagara_renderer_material; add a Decal renderer with add_niagara_decal_renderer.
-//   @param system_path - Niagara System asset path, e.g. "/Game/Niagara/NS_Example"; the call fails without it.
-//   @param emitter_name - Display name of the emitter handle that owns the renderer (case-insensitive); the call fails without it.
-//   @param renderer_index - 0-based index in the renderer list of the emitter, in get_niagara_emitter_renderers order; that renderer must be a Decal renderer. The call fails without it.
-//   @param material_path - Object path of the UMaterialInterface to assign, e.g. "/Game/Decals/M_Blood.M_Blood".
-//   @returns { system_path, emitter_name, renderer_index, previous_material_path, new_material_path, changed, saved, save_error?, note? }
-TSharedPtr<FJsonObject> HandleSetNiagaraDecalRendererMaterial(const TSharedPtr<FJsonObject>& Params)
-{
-    FString Error;
-    UNiagaraDecalRendererProperties* Renderer = nullptr;
-    // TRenderer is deduced from Renderer: an explicit <...> would hide the call, and the param reads in
-    // ResolveRendererAtIndex, from the catalog generator.
-    if (!ResolveRendererAtIndex(Params, TEXT("UNiagaraDecalRendererProperties"), Renderer, Error))
-    {
-        return mcp_common::MakeErrorReply(Error);
-    }
-    FString MaterialPath;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("material_path"), MaterialPath)) { return Missing; }
-    UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
-    if (!Material)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("UMaterialInterface not found: %s"), *MaterialPath));
-    }
-    const FString PreviousPath = Renderer->Material ? Renderer->Material->GetPathName() : FString();
-
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("system_path"), Params->GetStringField(TEXT("system_path")));
-    ResultObj->SetStringField(TEXT("emitter_name"), Params->GetStringField(TEXT("emitter_name")));
-    ResultObj->SetNumberField(TEXT("renderer_index"), Params->GetNumberField(TEXT("renderer_index")));
-    ResultObj->SetStringField(TEXT("previous_material_path"), PreviousPath);
-
-    // A renderer that already uses this material is a valid no-op: nothing is modified, dirtied or saved.
-    if (Renderer->Material == Material)
-    {
-        ResultObj->SetStringField(TEXT("new_material_path"), PreviousPath);
-        ResultObj->SetBoolField(TEXT("changed"), false);
-        ResultObj->SetBoolField(TEXT("saved"), false);
-        ResultObj->SetStringField(TEXT("note"), TEXT("The renderer already uses this material; nothing changed, nothing saved"));
-        return mcp_common::MakeOkReply(ResultObj);
-    }
-
-    Renderer->Modify();
-    Renderer->Material = Material;
-    FString SaveError;
-    const bool bSaved = SaveModifiedNiagaraSystem(mcp_common::ResolveAsset<UNiagaraSystem>(Params->GetStringField(TEXT("system_path"))), SaveError);
-
-    ResultObj->SetStringField(TEXT("new_material_path"), Renderer->Material ? Renderer->Material->GetPathName() : FString());
-    ResultObj->SetBoolField(TEXT("changed"), true);
-    return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_niagara_decal_renderer_material"), SaveError);
-}
-
 const McpCommandFamilies::FRegistrar Registration =
 {
     { TEXT("add_niagara_data_interface"), &HandleAddNiagaraDataInterface },
-    { TEXT("add_niagara_decal_renderer"), &HandleAddNiagaraDecalRenderer },
     { TEXT("add_niagara_emitter_from_template"), &HandleAddNiagaraEmitterFromTemplate },
-    { TEXT("add_niagara_emitter_handle"), &HandleAddNiagaraEmitterHandle },
     { TEXT("add_niagara_event_handler"), &HandleAddNiagaraEventHandler },
-    { TEXT("add_niagara_light_renderer"), &HandleAddNiagaraLightRenderer },
-    { TEXT("add_niagara_module_to_graph"), &HandleAddNiagaraModuleToGraph },
     { TEXT("add_niagara_module_to_stack"), &HandleAddNiagaraModuleToStack },
     { TEXT("add_niagara_renderer"), &HandleAddNiagaraRenderer },
     { TEXT("add_niagara_simulation_stage"), &HandleAddNiagaraSimulationStage },
@@ -8525,30 +7850,22 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("duplicate_niagara_emitter_handle"), &HandleDuplicateNiagaraEmitterHandle },
     { TEXT("duplicate_niagara_module_in_stack"), &HandleDuplicateNiagaraModuleInStack },
     { TEXT("get_niagara_component_matrix"), &HandleGetNiagaraComponentMatrix },
-    { TEXT("get_niagara_data_interface_info"), &HandleGetNiagaraDataInterfaceInfo },
     { TEXT("get_niagara_data_interfaces"), &HandleGetNiagaraDataInterfaces },
     { TEXT("get_niagara_effect_type"), &HandleGetNiagaraEffectType },
     { TEXT("get_niagara_emitter_data_interfaces"), &HandleGetNiagaraEmitterDataInterfaces },
-    { TEXT("get_niagara_emitter_handle_info"), &HandleGetNiagaraEmitterHandleInfo },
     { TEXT("get_niagara_emitter_handles"), &HandleGetNiagaraEmitterHandles },
     { TEXT("get_niagara_emitter_renderers"), &HandleGetNiagaraEmitterRenderers },
     { TEXT("get_niagara_emitter_runtime_summary"), &HandleGetNiagaraEmitterRuntimeSummary },
-    { TEXT("get_niagara_emitter_sim_target"), &HandleGetNiagaraEmitterSimTarget },
     { TEXT("get_niagara_event_handlers"), &HandleGetNiagaraEventHandlers },
-    { TEXT("get_niagara_module_info"), &HandleGetNiagaraModuleInfo },
     { TEXT("get_niagara_module_input"), &HandleGetNiagaraModuleInput },
-    { TEXT("get_niagara_module_stack"), &HandleGetNiagaraModuleStack },
     { TEXT("get_niagara_renderer_info"), &HandleGetNiagaraRendererInfo },
-    { TEXT("get_niagara_scalability_settings"), &HandleGetNiagaraScalabilitySettings },
     { TEXT("get_niagara_simulation_stages"), &HandleGetNiagaraSimulationStages },
     { TEXT("get_niagara_system_info"), &HandleGetNiagaraSystemInfo },
     { TEXT("get_niagara_system_properties"), &HandleGetNiagaraSystemProperties },
-    { TEXT("get_niagara_system_warmup_time"), &HandleGetNiagaraSystemWarmupTime },
     { TEXT("get_niagara_user_parameter"), &HandleGetNiagaraUserParameter },
     { TEXT("list_niagara_data_interface_classes"), &HandleListNiagaraDataInterfaceClasses },
     { TEXT("list_niagara_modules"), &HandleListNiagaraModules },
     { TEXT("list_niagara_renderer_classes"), &HandleListNiagaraRendererClasses },
-    { TEXT("list_niagara_simulation_stages"), &HandleListNiagaraSimulationStages },
     { TEXT("move_niagara_simulation_stage"), &HandleMoveNiagaraSimulationStage },
     { TEXT("remove_niagara_data_interface"), &HandleRemoveNiagaraDataInterface },
     { TEXT("remove_niagara_emitter_handle"), &HandleRemoveNiagaraEmitterHandle },
@@ -8573,12 +7890,10 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_niagara_data_interface_asset"), &HandleSetNiagaraDataInterfaceAsset },
     { TEXT("set_niagara_data_interface_curve"), &HandleSetNiagaraDataInterfaceCurve },
     { TEXT("set_niagara_data_interface_default"), &HandleSetNiagaraDataInterfaceDefault },
-    { TEXT("set_niagara_decal_renderer_material"), &HandleSetNiagaraDecalRendererMaterial },
     { TEXT("set_niagara_effect_type"), &HandleSetNiagaraEffectType },
     { TEXT("set_niagara_emitter_allocation_mode"), &HandleSetNiagaraEmitterAllocationMode },
     { TEXT("set_niagara_emitter_bounds"), &HandleSetNiagaraEmitterBounds },
     { TEXT("set_niagara_emitter_enabled"), &HandleSetNiagaraEmitterEnabled },
-    { TEXT("set_niagara_emitter_local_space"), &HandleSetNiagaraEmitterLocalSpace },
     { TEXT("set_niagara_emitter_max_gpu_particles"), &HandleSetNiagaraEmitterMaxGPUParticles },
     { TEXT("set_niagara_emitter_requires_persistent_ids"), &HandleSetNiagaraEmitterRequiresPersistentIds },
     { TEXT("set_niagara_emitter_sim_target"), &HandleSetNiagaraEmitterSimTarget },
@@ -8590,7 +7905,7 @@ const McpCommandFamilies::FRegistrar Registration =
     { TEXT("set_niagara_renderer_properties"), &HandleSetNiagaraRendererProperties },
     { TEXT("set_niagara_simulation_stage_properties"), &HandleSetNiagaraSimulationStageProperties },
     { TEXT("set_niagara_system_deterministic"), &HandleSetNiagaraSystemDeterministic },
-    { TEXT("set_niagara_system_fixed_bounds"), &HandleSetNiagaraSystemFixedBounds },
+    { TEXT("set_niagara_component_fixed_bounds"), &HandleSetNiagaraSystemFixedBounds },
     { TEXT("set_niagara_system_properties"), &HandleSetNiagaraSystemProperties },
     { TEXT("set_niagara_system_warmup_tick_count"), &HandleSetNiagaraSystemWarmupTickCount },
     { TEXT("set_niagara_system_warmup_tick_delta"), &HandleSetNiagaraSystemWarmupTickDelta },
