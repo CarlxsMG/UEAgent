@@ -671,7 +671,13 @@ def _int_range(types: list) -> tuple[int, int] | None:
 # The same rule, without the description half, judges the keys of objects INSIDE an argument (a
 # rename row, a node spec): the catalog publishes it as `nameLikeRule` (name_like_rule), and the
 # dispatcher refuses a string that long under a key it passes, at any depth (FMcpToolCatalog::
-# IsNameLikeKey, which lower-cases the key first).
+# IsNameLikeKey). A name is split into words at "_" and at each camelCase hump (_split_words), so a
+# nested "newName" or "AssetPath" is judged like new_name and asset_path.
+#
+# The marks also bound a pair: the longest name-like argument that is a content path (it starts with
+# "/") plus the longest other name-like string plus 160 must stay under NAME_SIZE, since an object a
+# tool creates inside an asset is named after both ("<asset>_C:<name>_GEN_VARIABLE") and recording
+# its creation makes an FName of that path (FMcpToolCatalog::SubobjectPathMargin).
 #
 # The param's NAME says what it carries: its last word, once a trailing number or single letter is
 # dropped (object_path_1, table_a), is one of _NAME_WORDS; or its description calls it an FName, an
@@ -718,11 +724,30 @@ def name_like_rule() -> dict:
     }
 
 
+def _split_words(name: str) -> list[str]:
+    """The words of a name, in lower case: split at each "_" (empty words kept) and at each camelCase hump, before an
+    upper-case letter that follows a lower-case letter or a digit, or that starts a word after a run of capitals
+    ("newName" -> new, name; "HTTPServer" -> http, server). FMcpToolCatalog::IsNameLikeKey splits the same way."""
+    words: list[str] = []
+    for part in name.split("_"):
+        word = ""
+        for i, c in enumerate(part):
+            if c.isupper() and word:
+                previous = part[i - 1]
+                next_is_lower = i + 1 < len(part) and part[i + 1].islower()
+                if previous.islower() or previous.isdigit() or (previous.isupper() and next_is_lower):
+                    words.append(word.lower())
+                    word = ""
+            word += c
+        words.append(word.lower())
+    return words
+
+
 def _is_name_like(name: str, json_type: str, description: str, domain: str) -> bool:
     """Whether the param carries a name the engine makes an FName of (see the block above)."""
     if json_type not in _NAME_LIKE_TYPES:
         return False
-    words = name.split("_")
+    words = _split_words(name)
     while len(words) > 1 and (words[-1].isdigit() or len(words[-1]) == 1):
         words.pop()
     if domain in _NOT_NAME_DOMAINS and _NOT_NAME_DOMAIN_KEEP_WORD not in words:

@@ -59,8 +59,15 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    aborts the editor when it builds a longer one, and a tool may add up to 64 characters around a
    name before it builds one (a class prefix, `/Game/Blueprints/`, a `_Font` suffix; the longest the
    commands add is 36). Inside an object of an argument (a rename row, a node spec), a string that
-   long under a key the same word rule passes is refused too, at any depth; the catalog publishes
-   the rule as `nameLikeRule`. Disk paths, USD paths and free text are not names; a `batch` item
+   long under a key the same word rule passes is refused too, at any depth, the key split at `_` and
+   at camelCase humps (`newName` reads as new name); the catalog publishes the rule as
+   `nameLikeRule`. An asset path and a name are also refused together: an object a tool creates
+   inside an asset (a component template `<asset>_C:<name>_GEN_VARIABLE`, a widget
+   `<asset>:WidgetTree.<name>`, the graphs under a named state machine) is named after both, and
+   recording its creation makes an FName of its whole path, so the longest name-like argument that
+   starts with `/` (an object path counted up to its asset) plus the longest other name argument
+   must stay under 864 characters, 160 under the limit as for the asset's own objects. Disk paths,
+   USD paths and free text are not names; a `batch` item
    whose `command_type` is 1024 characters or more refuses the whole batch, and each item's own
    arguments are checked when it is dispatched. And so is a vector of another shape in a parameter
    every read of which is one of the vector readers (`vectorShape` in the catalog: `vector` for
