@@ -11,6 +11,7 @@
 #include "WaterBodyRiverComponent.h"
 #include "WaterBodyOceanComponent.h"
 #include "WaterSplineComponent.h"
+#include "WaterSplineMetadata.h"
 #include "Components/SplineComponent.h"
 #include "WaterBodyLakeActor.h"
 #include "WaterBodyOceanActor.h"
@@ -123,6 +124,47 @@ namespace
 	}
 
 	/**
+	 * The zone's raw struct UPROPERTY PropertyName, read by reflection (GetZoneExtent applies the actor scale and
+	 * GetRenderTargetResolution is not exported), or null when the property is missing or is not the struct named
+	 * StructName.
+	 */
+	template <typename T>
+	const T* Water_ZoneStructProperty(const AWaterZone* Zone, const TCHAR* PropertyName, const TCHAR* StructName)
+	{
+		const FStructProperty* Prop = CastField<FStructProperty>(AWaterZone::StaticClass()->FindPropertyByName(PropertyName));
+		if (Prop && Prop->Struct && Prop->Struct->GetFName() == FName(StructName))
+		{
+			return Prop->ContainerPtrToValuePtr<T>(Zone);
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Empty when the engine's setters can write Curve at InputKey, else why not. They write the point
+	 * FInterpCurve::GetPointIndexForInputValue returns, which is -1 for a key before the first point and asserts
+	 * on an empty curve: either would kill the editor, so both are refused before anything is written.
+	 */
+	FString Water_CurveKeyError(const FInterpCurveFloat& Curve, float InputKey, const TCHAR* CurveName)
+	{
+		if (Curve.Points.Num() == 0)
+		{
+			return FString::Printf(TEXT("The water spline metadata has no %s points; nothing was changed"), CurveName);
+		}
+		if (InputKey < Curve.Points[0].InVal)
+		{
+			return FString::Printf(TEXT("input_key %g is before the first spline point (key %g); nothing was changed"),
+				InputKey, Curve.Points[0].InVal);
+		}
+		return FString();
+	}
+
+	/** Whether the engine's setter would change the value it writes for InputKey (Curve already validated). */
+	bool Water_CurveKeyDiffers(const FInterpCurveFloat& Curve, float InputKey, float Value)
+	{
+		return Curve.Points[Curve.GetPointIndexForInputValue(InputKey)].OutVal != Value;
+	}
+
+	/**
 	 * The component of the body the water_body_label param names, with the zone the water_zone_label param names in
 	 * OutZone (both params required); on failure returns nullptr and fills OutError.
 	 */
@@ -194,6 +236,14 @@ namespace
 		// Recompute the cached wave array + max height before wiring to the body
 		// (headless path: no BP script).
 		Waves->RecomputeWaves(/*bAllowBPScript*/ false);
+		// The waves object is a property of the actor, which is recorded before the write so the call is one undo
+		// step and dirties the actor's package. The component is recorded too: its PreEditUndo/PostEditUndo are what
+		// re-register the restored waves and rebuild the body on undo.
+		Body->Modify();
+		if (UWaterBodyComponent* Comp = Body->GetWaterBodyComponent())
+		{
+			Comp->Modify();
+		}
 		Body->SetWaterWaves(Waves);
 	}
 
@@ -612,7 +662,7 @@ TSharedPtr<FJsonObject> HandleGetWaterBodyInfo(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_water_body_material - Set the surface water material on a water body's UWaterBodyComponent (body found by actor label in the editor world, material loaded by asset path) and rebuild its material instances. The component is written without Modify: no undo step, dirty flag or save. The material it already has changes nothing and still answers set=true; set confirms the component now holds the requested material, and material is that material's short name, not its path. An unknown label, a body without a water body component, or a path that does not load as a UMaterialInterface is an error. Read it back with get_water_body_info; other body settings: set_water_body_properties; waves: set_water_body_gerstner_waves.
+// MCP:set_water_body_material - Set the surface water material on a water body's UWaterBodyComponent (body found by actor label in the editor world, material loaded by asset path) and rebuild its material instances. The change is one undo step and dirties the level; nothing is saved. The material it already has changes nothing, adds no undo step and still answers set=true; set confirms the component now holds the requested material, and material is that material's short name, not its path. An unknown label, a body without a water body component, or a path that does not load as a UMaterialInterface is an error. Read it back with get_water_body_info; other body settings: set_water_body_properties; waves: set_water_body_gerstner_waves.
 //   @param water_body_label - Actor label of the AWaterBody in the editor world (case-insensitive; the object name does not match).
 //   @param material_path - Asset path of the UMaterialInterface (a material or material instance), e.g. "/Game/Water/M_Water" (the object path form also works).
 //   @returns { water_body_label: string, material: string, set: bool }
@@ -636,7 +686,13 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyMaterial(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
 	}
-	Comp->SetWaterMaterial(Mat);
+	// The material is a property of the component: recording it before the write makes the call one undo step and
+	// dirties the actor's package. The material it already has is left alone, so that call dirties nothing.
+	if (Comp->GetWaterMaterial() != Mat)
+	{
+		Comp->Modify();
+		Comp->SetWaterMaterial(Mat);
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("water_body_label"), BodyLabel);
@@ -676,7 +732,6 @@ TSharedPtr<FJsonObject> HandleConfigureWaterZone(
 	if (Params->TryGetArrayField(TEXT("extent"), ExtArr) && ExtArr && ExtArr->Num() >= 2)
 	{
 		RequestedExtent = FVector2D((*ExtArr)[0]->AsNumber(), (*ExtArr)[1]->AsNumber());
-		Zone->SetZoneExtent(RequestedExtent);
 		bExtentRequested = true;
 	}
 	bool bResolutionRequested = false;
@@ -686,8 +741,27 @@ TSharedPtr<FJsonObject> HandleConfigureWaterZone(
 	{
 		RequestedResolution = FIntPoint(
 			static_cast<int32>((*ResArr)[0]->AsNumber()), static_cast<int32>((*ResArr)[1]->AsNumber()));
-		Zone->SetRenderTargetResolution(RequestedResolution);
 		bResolutionRequested = true;
+	}
+
+	// Both values are UPROPERTYs of the zone actor, recorded before the first write so the call is one undo step
+	// and dirties the actor's package. A value the zone already holds (its raw property, before actor scale) is not
+	// written, so a call that changes nothing dirties nothing.
+	const FVector2D* StoredExtent = Water_ZoneStructProperty<FVector2D>(Zone, TEXT("ZoneExtent"), TEXT("Vector2D"));
+	const FIntPoint* StoredResolution = Water_ZoneStructProperty<FIntPoint>(Zone, TEXT("RenderTargetResolution"), TEXT("IntPoint"));
+	const bool bWriteExtent = bExtentRequested && !(StoredExtent && *StoredExtent == RequestedExtent);
+	const bool bWriteResolution = bResolutionRequested && !(StoredResolution && *StoredResolution == RequestedResolution);
+	if (bWriteExtent || bWriteResolution)
+	{
+		Zone->Modify();
+	}
+	if (bWriteExtent)
+	{
+		Zone->SetZoneExtent(RequestedExtent);
+	}
+	if (bWriteResolution)
+	{
+		Zone->SetRenderTargetResolution(RequestedResolution);
 	}
 
 	// --- everything below is a RE-READ of the actor ------------------------
@@ -716,17 +790,9 @@ TSharedPtr<FJsonObject> HandleConfigureWaterZone(
 	// from this module does not link; the property itself is reachable. This is the raw
 	// authored value, i.e. before the r.Water.WaterInfo.RenderTargetResolutionMax clamp
 	// the getter would apply.
-	bool bResolutionRead = false;
-	FIntPoint ActualResolution(0, 0);
-	if (const FStructProperty* ResProp =
-			CastField<FStructProperty>(AWaterZone::StaticClass()->FindPropertyByName(TEXT("RenderTargetResolution"))))
-	{
-		if (ResProp->Struct && ResProp->Struct->GetFName() == FName(TEXT("IntPoint")))
-		{
-			ActualResolution = *ResProp->ContainerPtrToValuePtr<FIntPoint>(Zone);
-			bResolutionRead = true;
-		}
-	}
+	const FIntPoint* ResolutionValue = Water_ZoneStructProperty<FIntPoint>(Zone, TEXT("RenderTargetResolution"), TEXT("IntPoint"));
+	const bool bResolutionRead = (ResolutionValue != nullptr);
+	const FIntPoint ActualResolution = bResolutionRead ? *ResolutionValue : FIntPoint(0, 0);
 	if (bResolutionRead)
 	{
 		Data->SetArrayField(TEXT("render_target_resolution_actual"), mcp_common::Vector2DToJsonArray(ActualResolution));
@@ -816,6 +882,14 @@ TSharedPtr<FJsonObject> HandleSetRiverSplinePoints(
 	}
 
 	const int32 RequestedCount = Pts.Num();
+	// The points live on the spline component and the per-point water values on its metadata, which SetSplinePoints
+	// resets and the synchronization below fixes up: both are recorded before the write, as the editor's spline
+	// visualizer does, so the call is one undo step and dirties the actor's package.
+	Spline->Modify();
+	if (USplineMetadata* Metadata = Spline->GetSplinePointsMetadata())
+	{
+		Metadata->Modify();
+	}
 	Spline->SetSplinePoints(Pts, ESplineCoordinateSpace::World, /*bUpdateSpline*/ true);
 	// Propagate to the water spline metadata (required when editing points
 	// outside the editor UI; verified WATER_API).
@@ -875,9 +949,9 @@ TSharedPtr<FJsonObject> HandleGetRiverSplinePoints(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_river_width_depth_at_point - Set a river's width and/or depth at a spline input key (river water bodies only); reads them back.
+// MCP:set_river_width_depth_at_point - Set the width and/or depth of a river water body, found by actor label in the editor world, at one spline input key, reading both back; nothing is saved. The engine writes the spline point at or before input_key (point i sits at key i; past the last point, the last one), while the read-back evaluates the curve at the key, so a fractional key reads an interpolated value. A value already held is not written; otherwise the call is one undo step that dirties the actor's package, with no spline-change broadcast. applied is always true, even with neither width nor depth. A non-river body, unknown label or key before the first point is an error and nothing changes. All points at once, with a spline sync: set_river_widths_depths; point positions: get_river_spline_points.
 //   @param water_body_label - Label of the AWaterBodyRiver actor
-//   @param input_key - Spline input key at which to set width/depth
+//   @param input_key - Spline input key at which to set width/depth; a key before the first spline point (below 0) is an error and nothing is changed
 //   @param width - Optional new river width at the key
 //   @param depth - Optional new river depth at the key
 //   @returns { water_body_label: string, input_key: number, width: number, depth: number, applied: bool }
@@ -901,16 +975,46 @@ TSharedPtr<FJsonObject> HandleSetRiverWidthDepthAtPoint(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("%s is not a river water body"), *BodyLabel));
 	}
+	// The engine's setters write the per-point curves of the component's water spline metadata.
+	UWaterSplineMetadata* Metadata = River->GetWaterSplineMetadata();
+	if (!Metadata)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s has no water spline metadata"), *BodyLabel));
+	}
 
 	double WidthD = 0.0;
-	if (Params->TryGetNumberField(TEXT("width"), WidthD))
-	{
-		River->SetRiverWidthAtSplineInputKey(InputKey, static_cast<float>(WidthD));
-	}
+	const bool bHasWidth = Params->TryGetNumberField(TEXT("width"), WidthD);
 	double DepthD = 0.0;
-	if (Params->TryGetNumberField(TEXT("depth"), DepthD))
+	const bool bHasDepth = Params->TryGetNumberField(TEXT("depth"), DepthD);
+	const float Width = static_cast<float>(WidthD);
+	const float Depth = static_cast<float>(DepthD);
+
+	// Both curves are checked before anything is written.
+	FString KeyError = bHasWidth ? Water_CurveKeyError(Metadata->RiverWidth, InputKey, TEXT("river width")) : FString();
+	if (KeyError.IsEmpty() && bHasDepth)
 	{
-		River->SetRiverDepthAtSplineInputKey(InputKey, static_cast<float>(DepthD));
+		KeyError = Water_CurveKeyError(Metadata->Depth, InputKey, TEXT("depth"));
+	}
+	if (!KeyError.IsEmpty())
+	{
+		return mcp_common::MakeErrorReply(KeyError);
+	}
+
+	// The metadata is recorded before the first write, so the call is one undo step and dirties the actor's package;
+	// a value the point already holds is not written, so a call that changes nothing dirties nothing.
+	const bool bWriteWidth = bHasWidth && Water_CurveKeyDiffers(Metadata->RiverWidth, InputKey, Width);
+	const bool bWriteDepth = bHasDepth && Water_CurveKeyDiffers(Metadata->Depth, InputKey, Depth);
+	if (bWriteWidth || bWriteDepth)
+	{
+		Metadata->Modify();
+	}
+	if (bWriteWidth)
+	{
+		River->SetRiverWidthAtSplineInputKey(InputKey, Width);
+	}
+	if (bWriteDepth)
+	{
+		River->SetRiverDepthAtSplineInputKey(InputKey, Depth);
 	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -965,21 +1069,53 @@ TSharedPtr<FJsonObject> HandleSetRiverWidthsDepths(
 		return mcp_common::MakeErrorReply(FString::Printf(
 			TEXT("'depths' has %d entries but the river has %d spline points"), DepthsArr->Num(), PointCount));
 	}
-
-	for (int32 i = 0; i < PointCount; ++i)
+	// The engine's setters write the per-point curves of the component's water spline metadata; an empty curve, or
+	// one whose first point is past key 0, would make them write out of range, so both are refused up front.
+	UWaterSplineMetadata* Metadata = River->GetWaterSplineMetadata();
+	if (!Metadata)
 	{
-		const float InputKey = static_cast<float>(i);
-		if (bHasWidths)
+		return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s has no water spline metadata"), *BodyLabel));
+	}
+	if (PointCount > 0)
+	{
+		FString KeyError = bHasWidths ? Water_CurveKeyError(Metadata->RiverWidth, 0.0f, TEXT("river width")) : FString();
+		if (KeyError.IsEmpty() && bHasDepths)
 		{
-			River->SetRiverWidthAtSplineInputKey(InputKey, static_cast<float>((*WidthsArr)[i]->AsNumber()));
+			KeyError = Water_CurveKeyError(Metadata->Depth, 0.0f, TEXT("depth"));
 		}
-		if (bHasDepths)
+		if (!KeyError.IsEmpty())
 		{
-			River->SetRiverDepthAtSplineInputKey(InputKey, static_cast<float>((*DepthsArr)[i]->AsNumber()));
+			return mcp_common::MakeErrorReply(KeyError);
 		}
 	}
-	// One metadata sync after the whole batch (same propagate idiom as set_river_spline_points).
-	Spline->K2_SynchronizeAndBroadcastDataChange();
+
+	// The metadata is recorded before the first write, so the call is one undo step and dirties the actor's package;
+	// arrays equal to what the points already hold write nothing, so that call dirties nothing.
+	bool bChanges = false;
+	for (int32 i = 0; i < PointCount && !bChanges; ++i)
+	{
+		const float InputKey = static_cast<float>(i);
+		bChanges = (bHasWidths && Water_CurveKeyDiffers(Metadata->RiverWidth, InputKey, static_cast<float>((*WidthsArr)[i]->AsNumber())))
+			|| (bHasDepths && Water_CurveKeyDiffers(Metadata->Depth, InputKey, static_cast<float>((*DepthsArr)[i]->AsNumber())));
+	}
+	if (bChanges)
+	{
+		Metadata->Modify();
+		for (int32 i = 0; i < PointCount; ++i)
+		{
+			const float InputKey = static_cast<float>(i);
+			if (bHasWidths)
+			{
+				River->SetRiverWidthAtSplineInputKey(InputKey, static_cast<float>((*WidthsArr)[i]->AsNumber()));
+			}
+			if (bHasDepths)
+			{
+				River->SetRiverDepthAtSplineInputKey(InputKey, static_cast<float>((*DepthsArr)[i]->AsNumber()));
+			}
+		}
+		// One metadata sync after the whole batch (same propagate idiom as set_river_spline_points).
+		Spline->K2_SynchronizeAndBroadcastDataChange();
+	}
 
 	TArray<TSharedPtr<FJsonValue>> WidthsOut;
 	TArray<TSharedPtr<FJsonValue>> DepthsOut;
@@ -1167,7 +1303,7 @@ TSharedPtr<FJsonObject> HandleCreateWaterBodyExclusionVolume(
 // Gerstner spectrum generator + per-wave detail read-back
 // ---------------------------------------------------------------------------
 
-// MCP:set_water_body_gerstner_waves_spectrum - Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. The body is written without Modify: no undo step, dirty flag or save. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
+// MCP:set_water_body_gerstner_waves_spectrum - Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. One undo step restores the waves it had; nothing is saved. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
 //   @param water_body_label - Actor label of a Lake or Ocean AWaterBody in the editor world (case-insensitive); a river is refused.
 //   @param spectrum_type - Wave spectrum: Phillips (default), PiersonMoskowitz, or JONSWAP; any other name is an error.
 //   @param octaves - Optional array of octave objects { num_waves (>= 1, default 16), amplitude_scale (default 1), main_direction (default 0), spread_angle (default 0), uniform_spread (default false) }; entries that are not objects are skipped, and one default octave is used when none is given.
@@ -1179,9 +1315,6 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyGerstnerWavesSpectrum(
 	AWaterBody* Body = nullptr; TSharedPtr<FJsonObject> Err;
 	UWaterBodyComponent* Comp = Water_ResolveBodyComponent(Params, /*bRequireWaveSupport*/ true, Body, Err);
 	if (!Comp) { return Err; }
-
-	UGerstnerWaterWaves* Waves = NewObject<UGerstnerWaterWaves>(Body);
-	UGerstnerWaterWaveGeneratorSpectrum* Generator = NewObject<UGerstnerWaterWaveGeneratorSpectrum>(Waves);
 
 	FString SpectrumStr = TEXT("Phillips");
 	Params->TryGetStringField(TEXT("spectrum_type"), SpectrumStr);
@@ -1196,6 +1329,10 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyGerstnerWavesSpectrum(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Unknown spectrum_type: %s (expected Phillips|PiersonMoskowitz|JONSWAP)"), *SpectrumStr));
 	}
+
+	// Created only once the request is valid, so a refused call leaves no orphan objects inside the actor.
+	UGerstnerWaterWaves* Waves = NewObject<UGerstnerWaterWaves>(Body);
+	UGerstnerWaterWaveGeneratorSpectrum* Generator = NewObject<UGerstnerWaterWaveGeneratorSpectrum>(Waves);
 	Generator->SpectrumType = static_cast<EWaveSpectrumType>(SpecVal);
 
 	const TArray<TSharedPtr<FJsonValue>>* OctArr = nullptr;
@@ -1294,22 +1431,29 @@ namespace
 	/** Float equality for idempotence short-circuit (read-back may round-trip through floats). */
 	bool FloatEquals(float A, float B) { return FMath::Abs(A - B) <= KINDA_SMALL_NUMBER; }
 
-	/** Write Value into Member, then report it in Fields under Key (with whether Member already held it) and in Applied. */
+	/**
+	 * Write Value into Member, calling BeforeWrite first, unless Member already holds it exactly; then report it in
+	 * Fields under Key (with whether Member already held it) and in Applied.
+	 */
 	void Water_ApplyFloat(float& Member, float Value, const TCHAR* Key, const TSharedPtr<FJsonObject>& Fields,
-		TArray<TSharedPtr<FJsonValue>>& Applied)
+		TArray<TSharedPtr<FJsonValue>>& Applied, TFunctionRef<void()> BeforeWrite)
 	{
 		const bool bAlready = FloatEquals(Member, Value);
-		Member = Value;
+		if (Member != Value)
+		{
+			BeforeWrite();
+			Member = Value;
+		}
 		EmitFloatField(Fields, Key, Member, bAlready);
 		Applied.Add(MakeShared<FJsonValueString>(Key));
 	}
 }
 
-// MCP:set_water_body_properties - Partial-update a water body's properties (only the keys present are applied); each applied field is read back with already_set when it already matched.
+// MCP:set_water_body_properties - Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. water_velocity and audio_intensity go to the spline point at or before input_key, which only they need; other keys are component fields stored directly (no PostEditChange, so no rebuild). water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value already held is not written; otherwise the call is one undo step that dirties the actor's package. River width/depth: set_river_width_depth_at_point; type, zone, material: get_water_body_info; waves: set_water_body_gerstner_waves.
 //   @param water_body_label [!] - Label of the AWaterBody actor (Lake/Ocean/River)
 //   @param water_velocity [number] - River/spline water velocity to set at input_key (requires input_key)
 //   @param audio_intensity [number] - Spline audio intensity to set at input_key (requires input_key)
-//   @param input_key [number] - Spline input key for water_velocity/audio_intensity (required only when either is set)
+//   @param input_key [number] - Spline input key for water_velocity/audio_intensity (required only when either is set); a key before the first spline point (below 0) is an error and nothing is changed
 //   @param target_wave_mask_depth [number] - Water depth at which waves start being attenuated
 //   @param max_wave_height_offset [number] - Offset added to the automatically calculated max wave height bounds
 //   @param collision_height_offset [number] - Distance above the water surface where collision checks still occur
@@ -1331,42 +1475,106 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyProperties(
 		return Error;
 	}
 
-	TSharedPtr<FJsonObject> Fields = MakeShared<FJsonObject>();
-	TArray<TSharedPtr<FJsonValue>> Applied;
-	auto MarkApplied = [&Applied](const TCHAR* Key) { Applied.Add(MakeShared<FJsonValueString>(Key)); };
-
-	// --- Group A: spline setters (water_velocity / audio_intensity) ---------
-	// Both require input_key; the setter writes the nearest spline point's OutVal
-	// while the getter Evals the curve, so verify with a key on a spline point.
+	// --- Validation: every check runs before the first write, so a refused call changes nothing ---------
+	// water_velocity / audio_intensity are written into the component's water spline metadata at input_key; the
+	// engine's setters write the point at or before the key, which a key before the first point puts out of range.
 	const bool bWantsVelocity = Params->HasField(TEXT("water_velocity"));
 	const bool bWantsAudio    = Params->HasField(TEXT("audio_intensity"));
+	UWaterSplineMetadata* Metadata = Comp->GetWaterSplineMetadata();
+	float InputKey = 0.0f;
+	// input_key is read unconditionally so that only the two spline fields need it: the other fields work without it.
+	double InputKeyD = 0.0;
+	const bool bHasInputKey = Params->TryGetNumberField(TEXT("input_key"), InputKeyD);
 	if (bWantsVelocity || bWantsAudio)
 	{
-		double InputKeyD = 0.0;
-		if (!Params->TryGetNumberField(TEXT("input_key"), InputKeyD))
+		if (!bHasInputKey)
 		{
 			return mcp_common::MakeErrorReply(
 				TEXT("input_key is required when setting water_velocity or audio_intensity"));
 		}
-		const float InputKey = static_cast<float>(InputKeyD);
-		if (bWantsVelocity)
+		InputKey = static_cast<float>(InputKeyD);
+		if (!Metadata)
 		{
-			double V = 0.0; Params->TryGetNumberField(TEXT("water_velocity"), V);
-			const float Want = static_cast<float>(V);
-			const bool bAlready = FloatEquals(Comp->GetWaterVelocityAtSplineInputKey(InputKey), Want);
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("%s has no water spline metadata to hold water_velocity or audio_intensity"), *Body->GetActorLabel()));
+		}
+		FString KeyError = bWantsVelocity
+			? Water_CurveKeyError(Metadata->WaterVelocityScalar, InputKey, TEXT("water velocity")) : FString();
+		if (KeyError.IsEmpty() && bWantsAudio)
+		{
+			KeyError = Water_CurveKeyError(Metadata->AudioIntensity, InputKey, TEXT("audio intensity"));
+		}
+		if (!KeyError.IsEmpty())
+		{
+			return mcp_common::MakeErrorReply(KeyError);
+		}
+	}
+	// The base UWaterBodyComponent::SetHeightOffset is a stub `{ check(false); }`;
+	// only UWaterBodyOceanComponent overrides it (clamps >= 0, fires OnWaterBodyChanged).
+	UWaterBodyOceanComponent* Ocean = nullptr;
+	if (Params->HasField(TEXT("water_height_offset")))
+	{
+		Ocean = Cast<UWaterBodyOceanComponent>(Comp);
+		if (!Ocean)
+		{
+			return mcp_common::MakeErrorReply(
+				TEXT("water_height_offset only applies to ocean water bodies"));
+		}
+	}
+
+	TSharedPtr<FJsonObject> Fields = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> Applied;
+	auto MarkApplied = [&Applied](const TCHAR* Key) { Applied.Add(MakeShared<FJsonValueString>(Key)); };
+
+	// Each object is recorded once, right before its first write that changes a value: the call is one undo step
+	// and dirties the actor's package, and a call that only repeats the current values dirties nothing.
+	bool bCompRecorded = false;
+	auto RecordComp = [Comp, &bCompRecorded]()
+	{
+		if (!bCompRecorded)
+		{
+			Comp->Modify();
+			bCompRecorded = true;
+		}
+	};
+	bool bMetadataRecorded = false;
+	auto RecordMetadata = [Metadata, &bMetadataRecorded]()
+	{
+		if (!bMetadataRecorded)
+		{
+			Metadata->Modify();
+			bMetadataRecorded = true;
+		}
+	};
+
+	// --- Group A: spline setters (water_velocity / audio_intensity) ---------
+	// The setter writes the spline point at or before input_key while the getter Evals the curve, so verify with a
+	// key on a spline point.
+	if (bWantsVelocity)
+	{
+		double V = 0.0; Params->TryGetNumberField(TEXT("water_velocity"), V);
+		const float Want = static_cast<float>(V);
+		const bool bAlready = FloatEquals(Comp->GetWaterVelocityAtSplineInputKey(InputKey), Want);
+		if (Water_CurveKeyDiffers(Metadata->WaterVelocityScalar, InputKey, Want))
+		{
+			RecordMetadata();
 			Comp->SetWaterVelocityAtSplineInputKey(InputKey, Want);
-			EmitFloatField(Fields, TEXT("water_velocity"), Comp->GetWaterVelocityAtSplineInputKey(InputKey), bAlready);
-			MarkApplied(TEXT("water_velocity"));
 		}
-		if (bWantsAudio)
+		EmitFloatField(Fields, TEXT("water_velocity"), Comp->GetWaterVelocityAtSplineInputKey(InputKey), bAlready);
+		MarkApplied(TEXT("water_velocity"));
+	}
+	if (bWantsAudio)
+	{
+		double V = 0.0; Params->TryGetNumberField(TEXT("audio_intensity"), V);
+		const float Want = static_cast<float>(V);
+		const bool bAlready = FloatEquals(Comp->GetAudioIntensityAtSplineInputKey(InputKey), Want);
+		if (Water_CurveKeyDiffers(Metadata->AudioIntensity, InputKey, Want))
 		{
-			double V = 0.0; Params->TryGetNumberField(TEXT("audio_intensity"), V);
-			const float Want = static_cast<float>(V);
-			const bool bAlready = FloatEquals(Comp->GetAudioIntensityAtSplineInputKey(InputKey), Want);
+			RecordMetadata();
 			Comp->SetAudioIntensityAtSplineInputKey(InputKey, Want);
-			EmitFloatField(Fields, TEXT("audio_intensity"), Comp->GetAudioIntensityAtSplineInputKey(InputKey), bAlready);
-			MarkApplied(TEXT("audio_intensity"));
 		}
+		EmitFloatField(Fields, TEXT("audio_intensity"), Comp->GetAudioIntensityAtSplineInputKey(InputKey), bAlready);
+		MarkApplied(TEXT("audio_intensity"));
 	}
 
 	// --- Group B: public UPROPERTY data members (last-write-wins) ------------
@@ -1374,51 +1582,54 @@ TSharedPtr<FJsonObject> HandleSetWaterBodyProperties(
 		double D = 0.0;
 		if (Params->TryGetNumberField(TEXT("target_wave_mask_depth"), D))
 		{
-			Water_ApplyFloat(Comp->TargetWaveMaskDepth, static_cast<float>(D), TEXT("target_wave_mask_depth"), Fields, Applied);
+			Water_ApplyFloat(Comp->TargetWaveMaskDepth, static_cast<float>(D), TEXT("target_wave_mask_depth"), Fields, Applied,
+				RecordComp);
 		}
 		if (Params->TryGetNumberField(TEXT("max_wave_height_offset"), D))
 		{
-			Water_ApplyFloat(Comp->MaxWaveHeightOffset, static_cast<float>(D), TEXT("max_wave_height_offset"), Fields, Applied);
+			Water_ApplyFloat(Comp->MaxWaveHeightOffset, static_cast<float>(D), TEXT("max_wave_height_offset"), Fields, Applied,
+				RecordComp);
 		}
 		if (Params->TryGetNumberField(TEXT("collision_height_offset"), D))
 		{
-			Water_ApplyFloat(Comp->CollisionHeightOffset, static_cast<float>(D), TEXT("collision_height_offset"), Fields, Applied);
+			Water_ApplyFloat(Comp->CollisionHeightOffset, static_cast<float>(D), TEXT("collision_height_offset"), Fields, Applied,
+				RecordComp);
 		}
 		if (Params->TryGetNumberField(TEXT("shape_dilation"), D))
 		{
-			Water_ApplyFloat(Comp->ShapeDilation, static_cast<float>(D), TEXT("shape_dilation"), Fields, Applied);
+			Water_ApplyFloat(Comp->ShapeDilation, static_cast<float>(D), TEXT("shape_dilation"), Fields, Applied, RecordComp);
 		}
 		if (Params->TryGetNumberField(TEXT("post_process_blend_weight"), D))
 		{
 			Water_ApplyFloat(Comp->UnderwaterPostProcessSettings.BlendWeight, static_cast<float>(D),
-				TEXT("post_process_blend_weight"), Fields, Applied);
+				TEXT("post_process_blend_weight"), Fields, Applied, RecordComp);
 		}
 		bool B = false;
 		if (Params->TryGetBoolField(TEXT("affects_landscape"), B))
 		{
 			const bool bAlready = (Comp->bAffectsLandscape == B);
-			Comp->bAffectsLandscape = B;
+			if (!bAlready)
+			{
+				RecordComp();
+				Comp->bAffectsLandscape = B;
+			}
 			EmitBoolField(Fields, TEXT("affects_landscape"), Comp->bAffectsLandscape, bAlready);
 			MarkApplied(TEXT("affects_landscape"));
 		}
 	}
 
-	// --- Ocean-only: water_height_offset (HONEST gate) ----------------------
-	// The base UWaterBodyComponent::SetHeightOffset is a stub `{ check(false); }`;
-	// only UWaterBodyOceanComponent overrides it (clamps >= 0, fires OnWaterBodyChanged).
+	// --- Ocean-only: water_height_offset (HONEST gate, checked above) -------
 	bool bOceanNote = false;
-	if (Params->HasField(TEXT("water_height_offset")))
+	if (Ocean)
 	{
-		UWaterBodyOceanComponent* Ocean = Cast<UWaterBodyOceanComponent>(Comp);
-		if (!Ocean)
-		{
-			return mcp_common::MakeErrorReply(
-				TEXT("water_height_offset only applies to ocean water bodies"));
-		}
 		double D = 0.0; Params->TryGetNumberField(TEXT("water_height_offset"), D);
 		const float Want = FMath::Max(0.0f, static_cast<float>(D)); // mirror the engine clamp for the already_set check
 		const bool bAlready = FloatEquals(Ocean->GetHeightOffset(), Want);
-		Ocean->SetHeightOffset(static_cast<float>(D));
+		if (Ocean->GetHeightOffset() != Want)
+		{
+			RecordComp();
+			Ocean->SetHeightOffset(static_cast<float>(D));
+		}
 		EmitFloatField(Fields, TEXT("water_height_offset"), Ocean->GetHeightOffset(), bAlready);
 		MarkApplied(TEXT("water_height_offset"));
 		bOceanNote = true;

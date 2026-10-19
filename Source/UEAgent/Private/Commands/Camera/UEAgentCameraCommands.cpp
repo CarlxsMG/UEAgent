@@ -29,7 +29,9 @@
 #include "Directors/SingleCameraDirector.h"
 #include "GameFramework/GameplayCameraComponent.h"
 #include "Build/CameraBuildStatus.h"
-#include "Core/CameraNode.h"          // UCameraNode (rig RootNode + node-authoring)
+#include "Build/CameraBuildLog.h"      // FCameraBuildLog: the messages of build_camera_rig
+#include "Build/CameraBuildContext.h"  // FCameraBuildContext: UCameraRigAsset::BuildCameraRig with our own log
+#include "Core/CameraNode.h"         // UCameraNode (rig RootNode + node-authoring)
 #include "Nodes/Common/ArrayCameraNode.h"  // composite rig node whose Children we populate
 #include "UObject/Package.h"
 // Camera shake Blueprint authoring.
@@ -199,9 +201,9 @@ TSharedPtr<FJsonObject> HandleSetCameraAssetDirector(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOutcomeReply(Data, bSet && bSaved, mcp_common::SavedOutcomeError(TEXT("set_camera_asset_director")));
 }
 
-// MCP:build_camera_rig - Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true whenever the rig resolves; the outcome to read is build_status -- Clean, CleanWithWarnings or WithErrors -- with the build messages in the editor log. Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
+// MCP:build_camera_rig - Build a Gameplay Cameras UCameraRigAsset, found by content path, in memory as the rig editor's Build does: its node hierarchy, interface and parameters are rebuilt from the current nodes, replacing the previous build data. built is true when build_status comes back Clean or CleanWithWarnings; WithErrors fails the call with the build errors in its message, and messages lists every build message with its severity (the editor log gets them too). Nothing is saved (saving the rig builds it again anyway); what the build changes is recorded in the call's undo step. A rig that does not resolve is an error. Edit the rig first with set_camera_rig_root_node, set_camera_node_parameters or add_camera_node_child; read its nodes with get_camera_rig_nodes; create one with create_camera_rig_asset.
 //   @param camera_rig_path - Content path to the UCameraRigAsset, e.g. "/Game/Cameras/CR_Player" (required)
-//   @returns { camera_rig_path, built, build_status }
+//   @returns { camera_rig_path, built, build_status, messages: [{ severity, message }] }
 TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Params)
 {
     FString RigPath;
@@ -210,14 +212,47 @@ TSharedPtr<FJsonObject> HandleBuildCameraRig(const TSharedPtr<FJsonObject>& Para
     if (!Rig)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("UCameraRigAsset not found: %s"), *RigPath));
 
-    Rig->BuildCameraRig();
+    // UCameraRigAsset::BuildCameraRig() builds with a log of its own and drops it; building with ours
+    // (forwarding to the editor log as that one does) keeps the messages for the reply. The builder sets
+    // the build status from this log: WithErrors when it holds an error.
+    UE::Cameras::FCameraBuildLog BuildLog;
+    BuildLog.SetForwardMessagesToLogging(true);
+    UE::Cameras::FCameraBuildContext BuildContext(BuildLog);
+    Rig->BuildCameraRig(BuildContext);
 
+    const ECameraBuildStatus Status = Rig->GetBuildStatus();
+    const bool bBuilt = !BuildLog.HasErrors()
+        && (Status == ECameraBuildStatus::Clean || Status == ECameraBuildStatus::CleanWithWarnings);
+
+    TArray<TSharedPtr<FJsonValue>> Messages;
+    TArray<FString> ErrorTexts;
+    for (const UE::Cameras::FCameraBuildLogMessage& Message : BuildLog.GetMessages())
+    {
+        const TCHAR* Severity = TEXT("Info");
+        if (Message.Severity == EMessageSeverity::Error)
+        {
+            Severity = TEXT("Error");
+            ErrorTexts.Add(Message.ToString());
+        }
+        else if (Message.Severity == EMessageSeverity::Warning || Message.Severity == EMessageSeverity::PerformanceWarning)
+        {
+            Severity = TEXT("Warning");
+        }
+        TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("severity"), Severity);
+        Entry->SetStringField(TEXT("message"), Message.ToString());
+        Messages.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+
+    const FString StatusName = StaticEnum<ECameraBuildStatus>()->GetNameStringByValue(static_cast<int64>(Status));
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("camera_rig_path"), Rig->GetPathName());
-    Data->SetBoolField(TEXT("built"), true);
-    Data->SetStringField(TEXT("build_status"),
-        StaticEnum<ECameraBuildStatus>()->GetNameStringByValue(static_cast<int64>(Rig->GetBuildStatus())));
-    return mcp_common::MakeOkReply(Data);
+    Data->SetBoolField(TEXT("built"), bBuilt);
+    Data->SetStringField(TEXT("build_status"), StatusName);
+    Data->SetArrayField(TEXT("messages"), Messages);
+    return mcp_common::MakeOutcomeReply(Data, bBuilt, bBuilt ? FString() : FString::Printf(
+        TEXT("build_camera_rig: the rig did not build cleanly (build_status %s): %s"), *StatusName,
+        ErrorTexts.Num() > 0 ? *FString::Join(ErrorTexts, TEXT("; ")) : TEXT("see messages in this payload")));
 }
 
 // MCP:add_gameplay_camera_component - Adds a UGameplayCameraComponent to an actor and points it at a UCameraAsset. Idempotent. Note: activation needs a running game/PIE and is out of scope here.

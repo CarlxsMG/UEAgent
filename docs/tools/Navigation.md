@@ -22,7 +22,7 @@ Adds a UEnvQueryGenerator subclass to a UEnvQuery option. If the option has no g
 
 *Additive.*
 
-Append a new empty option (no generator, no tests) after the existing options of the UEnvQuery asset at query_path and return its option_index, always the last one. Each call adds another option (not idempotent). The asset is only marked dirty, not saved (save_asset), and no undo step is recorded; a query that does not load is an error. An option without a generator is skipped, with an error log, when the query runs: give it one with add_eqs_generator (which can also append the option itself when option_index equals the option count), then add tests with add_eqs_test. Inspect with get_eqs_query_info; inverse: remove_eqs_option; a new query: create_eqs_query.
+Append a new empty option (no generator, no tests) after the existing options of the UEnvQuery asset at query_path and return its option_index, always the last one. Each call adds another option (not idempotent). The asset is only marked dirty, not saved (save_asset), and the append is one undo step; a query that does not load is an error. An option without a generator is skipped, with an error log, when the query runs: give it one with add_eqs_generator (which can also append the option itself when option_index equals the option count), then add tests with add_eqs_test. Inspect with get_eqs_query_info; inverse: remove_eqs_option; a new query: create_eqs_query.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -46,9 +46,9 @@ Add a test of test_class to an option of a UEnvQuery asset, after the option's e
 
 ## `create_eqs_query`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates and saves an empty Environment Query System (EQS) asset (UEnvQuery)
+Create an empty Environment Query System asset (UEnvQuery) named name in package_path (default /Game/EQS), with no options yet, and save it. Idempotent: a query already at that path is returned as it is, with already_exists=true and saved=false, and nothing is saved; an asset of another class there is an error. A failed save (PIE running, read-only file) makes success false with saved=false, the new query kept in memory. Then give it an option and a generator with add_eqs_generator and tests with add_eqs_test, tune them with set_eqs_test_scoring, inspect it with get_eqs_query_info and run it with run_eqs_query.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -180,7 +180,7 @@ Clears the generator on a query option. Idempotent (removed=false if the option 
 
 *Destructive.*
 
-Remove the option at option_index, with its generator and tests, from a UEnvQuery asset; later options shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range index is an error, not a no-op. Returns removed and option_count.
+Remove the option at option_index from a UEnvQuery asset loaded by asset path, together with its generator and all its tests; the options after it shift down one index, and option_count is what remains. One undo step puts it back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option_index out of range, is an error and nothing changes. Not idempotent: repeating the call removes the option that moved into that index, so read the indices with get_eqs_query_info first. Inverse: add_eqs_option; keep the option but drop its generator: remove_eqs_generator; a single test: remove_eqs_test.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -193,7 +193,7 @@ Remove the option at option_index, with its generator and tests, from a UEnvQuer
 
 *Destructive.*
 
-Remove the test at test_index from one option of a UEnvQuery asset; later tests shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range option or test index is an error, not a no-op. Returns removed and test_count.
+Remove the test at test_index from the option at option_index (default 0) of a UEnvQuery asset loaded by asset path; the tests after it shift down one index, and test_count is what the option keeps. One undo step puts the test back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Not idempotent: repeating the call removes the test that moved into that index, so read the indices with get_eqs_query_info first. Inverse: add_eqs_test; retune a test instead: set_eqs_test_scoring; a whole option: remove_eqs_option; the generator: remove_eqs_generator.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -236,7 +236,7 @@ Set properties of the generator of one option of a UEnvQuery asset by reflection
 
 *Destructive, idempotent.*
 
-Sets scoring/filter parameters on a test within a query option and PERSISTS them on the asset (TestPurpose, FilterType, ScoringEquation, ScoringFactor, FloatValue bounds are all real UEnvQueryTest UPROPERTYs). The response reports the values read back from the test object.
+Set the scoring and filter settings of the test at test_index in the option at option_index of a UEnvQuery asset loaded by asset path, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1), and an unknown enum name falls back to its default too: the reply reads the stored values back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

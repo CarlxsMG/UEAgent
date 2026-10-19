@@ -246,11 +246,11 @@ TSharedPtr<FJsonObject> HandleGetSubsystemClassInfo(
 // ---------------------------------------------------------------------------
 // create_subsystem_class_bp
 // ---------------------------------------------------------------------------
-// MCP:create_subsystem_class_bp - Create a Blueprint subclass of a USubsystem class at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, which compiles it; the package is marked dirty but not saved (save it with save_asset), there is no undo step, and it is refused while PIE runs unless force is set. A repeat call is idempotent: a Blueprint already at that path is returned as it is with already_exists true, without checking its parent, and parent_class then echoes the request rather than its real parent; another asset type there is an error. parent_class must resolve to a USubsystem class or nothing is created. lifetime is the family of the generated class: Editor, Engine, GameInstance, World, LocalPlayer or Unknown. Parent candidates: list_subsystem_classes; inspect: get_subsystem_class_info; inverse: remove_subsystem_class_bp; live instance check: is_subsystem_class_active.
+// MCP:create_subsystem_class_bp - Create a Blueprint subclass of a USubsystem class at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, which compiles it, then save it; there is no undo step, and it is refused while PIE runs unless force is set. A failed save makes success false with save_error, the new Blueprint staying in memory. A repeat call is idempotent: a Blueprint already there whose parent is parent_class or derives from it is returned as it is, with already_exists true, saved false and its real parent_class, and nothing is saved; one with another parent, or another asset type there, is an error. parent_class must resolve to a USubsystem class or nothing is created. lifetime is the family of the generated class: Editor, Engine, GameInstance, World, LocalPlayer or Unknown. Parent candidates: list_subsystem_classes; inspect: get_subsystem_class_info; inverse: remove_subsystem_class_bp; live instance check: is_subsystem_class_active.
 //   @param asset_name - Name for the new Blueprint asset, e.g. "BP_ScoreSubsystem"
 //   @param parent_class - Parent USubsystem class: short name with or without the U prefix (e.g. "GameInstanceSubsystem"), a /Script path, or a Blueprint asset path
 //   @param package_path - Optional content folder; defaults to /Game/MCP
-//   @returns { asset_name: string, asset_path: string, package_path: string, parent_class: string, lifetime: string, already_exists: bool }
+//   @returns { asset_name: string, asset_path: string, package_path: string, parent_class: string, lifetime: string, already_exists: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreateSubsystemClassBp(
 	const TSharedPtr<FJsonObject>& Params)
@@ -289,32 +289,54 @@ TSharedPtr<FJsonObject> HandleCreateSubsystemClassBp(
 
 	// FKismetEditorUtilities::CreateBlueprint ASSERTS (Kismet2.cpp) if a
 	// UBlueprint of this name still lives in the package (in-editor delete does
-	// not reliably unload a loaded Blueprint). Return the existing asset
-	// idempotently instead of crashing the editor.
-	UBlueprint* BP = FindObject<UBlueprint>(Package, *AssetName);
-	const bool bAlreadyExists = (BP != nullptr);
+	// not reliably unload a loaded Blueprint). An existing Blueprint is answered
+	// instead of crashing the editor: as it is when its parent is the requested
+	// subsystem class or derives from it, and as an error otherwise.
+	if (UBlueprint* Existing = FindObject<UBlueprint>(Package, *AssetName))
+	{
+		UClass* ExistingParent = Existing->ParentClass;
+		if (ExistingParent == nullptr || !ExistingParent->IsChildOf(ParentCls))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("A Blueprint already exists at %s with parent %s, which is not %s or a class derived from it; nothing was changed. Pick another asset_name, or remove it with remove_subsystem_class_bp."),
+				*Existing->GetPathName(), ExistingParent != nullptr ? *ExistingParent->GetName() : TEXT("(none)"), *ParentCls->GetName()));
+		}
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("asset_name"), Existing->GetName());
+		Data->SetStringField(TEXT("asset_path"), Existing->GetPathName());
+		Data->SetStringField(TEXT("package_path"), TargetFolder);
+		Data->SetStringField(TEXT("parent_class"), ExistingParent->GetName());
+		Data->SetStringField(TEXT("lifetime"), DetectLifetimeCategory(Existing->GeneratedClass));
+		Data->SetBoolField(TEXT("already_exists"), true);
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("A Blueprint of that subsystem kind already exists there; nothing was changed or saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	UBlueprint* BP = Cast<UBlueprint>(
+		FKismetEditorUtilities::CreateBlueprint(
+			ParentCls, Package, FName(*AssetName),
+			BPTYPE_Normal, FName(TEXT("CreateSubsystemBP"))));
 	if (!BP)
 	{
-		BP = Cast<UBlueprint>(
-			FKismetEditorUtilities::CreateBlueprint(
-				ParentCls, Package, FName(*AssetName),
-				BPTYPE_Normal, FName(TEXT("CreateSubsystemBP"))));
-		if (!BP)
-		{
-			return mcp_common::MakeErrorReply(TEXT("Failed to create subsystem Blueprint"));
-		}
-		FAssetRegistryModule::AssetCreated(BP);
-		BP->MarkPackageDirty();
+		return mcp_common::MakeErrorReply(TEXT("Failed to create subsystem Blueprint"));
 	}
+	FAssetRegistryModule::AssetCreated(BP);
+	BP->MarkPackageDirty();
+
+	// A failed save leaves the new Blueprint in memory, as the sibling create tools do.
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Package, BP, SaveError);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("asset_name"), BP->GetName());
 	Data->SetStringField(TEXT("asset_path"), BP->GetPathName());
 	Data->SetStringField(TEXT("package_path"), TargetFolder);
-	Data->SetStringField(TEXT("parent_class"), ParentCls->GetName());
+	const UClass* NewParent = BP->ParentClass;
+	Data->SetStringField(TEXT("parent_class"), NewParent != nullptr ? NewParent->GetName() : FString());
 	Data->SetStringField(TEXT("lifetime"), DetectLifetimeCategory(BP->GeneratedClass));
-	Data->SetBoolField(TEXT("already_exists"), bAlreadyExists);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("already_exists"), false);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_subsystem_class_bp"), SaveError);
 }
 
 // ---------------------------------------------------------------------------

@@ -1724,11 +1724,11 @@ TSharedPtr<FJsonObject> WidgetToTreeJson(UWidget* Widget, const FTreeDumpOptions
 // ---------------------------------------------------------------------------
 // create_widget_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_widget_blueprint - Create a UWidgetBlueprint at package_path/name with the editor Widget Blueprint factory, parented to parent_class (a class path such as /Game/UI/WBP_Base.WBP_Base_C, or a short class name), give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: a Widget Blueprint already there is returned untouched (created=false, already_existed=true) with nothing compiled or saved, and its parent is not checked against parent_class, which that reply only echoes. A parent that is not a UUserWidget subclass, an invalid path, or another kind of asset at that path is an error. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Then add widgets with add_widget_to_blueprint and read the tree with get_widget_blueprint_tree; an Editor Utility Widget is create_editor_utility_widget_blueprint.
+// MCP:create_widget_blueprint - Create a UWidgetBlueprint at package_path/name with the editor Widget Blueprint factory, parented to parent_class (a class path such as /Game/UI/WBP_Base.WBP_Base_C, or a short class name), give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: a Widget Blueprint already there is returned untouched (created=false, already_existed=true, saved=false), nothing compiled or saved; that reply gives the parent_class it really has, with a note when it is not the requested one. A parent that is not a UUserWidget subclass, an invalid path, or another kind of asset at that path is an error. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Then add widgets with add_widget_to_blueprint and read the tree with get_widget_blueprint_tree; an Editor Utility Widget is create_editor_utility_widget_blueprint.
 //   @param package_path - /Game folder to create the asset in (e.g. /Game/UI)
 //   @param name - Asset name (no extension), e.g. "WBP_MainMenu"; with package_path it gives the asset path.
 //   @param parent_class - Parent UUserWidget subclass (default "UUserWidget").
-//   @returns { name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created?: bool, root_widget: string, root_widget_class: string, saved: bool, save_error?: string }
+//   @returns { name: string, package_path: string, asset_path: string, parent_class: string, created: bool, already_existed: bool, root_created?: bool, root_widget: string, root_widget_class: string, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1753,28 +1753,49 @@ TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *NormalizedPath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load and return it.
+    // An asset of another kind at that path is an error before anything is created: the factory would
+    // otherwise meet it in CreateAsset, which asks to overwrite it.
+    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UWidgetBlueprint::StaticClass());
+    if (!Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Idempotent: an existing Widget Blueprint is returned as it is, with nothing compiled or saved.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         FString LoadErr;
         UWidgetBlueprint* Existing = UMGWidgetUtils::LoadWidgetBlueprint(FullPath, LoadErr);
-        if (Existing)
+        if (!Existing)
         {
-            TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-            Resp->SetStringField(TEXT("name"), Name);
-            Resp->SetStringField(TEXT("package_path"), PackagePath);
-            Resp->SetStringField(TEXT("asset_path"), Existing->GetPathName());
-            Resp->SetStringField(TEXT("parent_class"), ParentClass->GetName());
-            Resp->SetBoolField(TEXT("created"), false);
-            Resp->SetBoolField(TEXT("already_existed"), true);
-            const UWidget* Root = Existing->WidgetTree ? Existing->WidgetTree->RootWidget : nullptr;
-            Resp->SetStringField(TEXT("root_widget"), Root ? Root->GetName() : TEXT(""));
-            // Mirror the freshly-created payload so callers/tests get a stable shape
-            // regardless of idempotent reuse.
-            Resp->SetStringField(TEXT("root_widget_class"), Root ? Root->GetClass()->GetName() : TEXT(""));
-            Resp->SetBoolField(TEXT("saved"), true);
-            return mcp_common::MakeOkReply(Resp);
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("an asset already exists at %s but does not load as a Widget Blueprint (%s); nothing was created"),
+                *FullPath, *LoadErr));
         }
+
+        // The parent the existing Blueprint really has, which may differ from the requested one.
+        const FString ExistingParent = Existing->ParentClass ? Existing->ParentClass->GetName() : FString();
+
+        TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+        Resp->SetStringField(TEXT("name"), Name);
+        Resp->SetStringField(TEXT("package_path"), PackagePath);
+        Resp->SetStringField(TEXT("asset_path"), Existing->GetPathName());
+        Resp->SetStringField(TEXT("parent_class"), ExistingParent);
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        const UWidget* Root = Existing->WidgetTree ? Existing->WidgetTree->RootWidget : nullptr;
+        Resp->SetStringField(TEXT("root_widget"), Root ? Root->GetName() : TEXT(""));
+        // Mirror the freshly-created payload so callers/tests get a stable shape
+        // regardless of idempotent reuse.
+        Resp->SetStringField(TEXT("root_widget_class"), Root ? Root->GetClass()->GetName() : TEXT(""));
+        Resp->SetBoolField(TEXT("saved"), false);
+        if (Existing->ParentClass.Get() != ParentClass)
+        {
+            Resp->SetStringField(TEXT("note"), FString::Printf(
+                TEXT("the existing Widget Blueprint has parent %s, not the requested %s; it was left unchanged"),
+                *ExistingParent, *ParentClass->GetName()));
+        }
+        return mcp_common::MakeOkReply(Resp);
     }
 
     // Create via the real editor factory so the generated class + widget tree are
@@ -2305,10 +2326,10 @@ TSharedPtr<FJsonObject> HandleAddWidgetExtended(const TSharedPtr<FJsonObject>& P
 // UWidgetBlueprint::Animations and UWidgetAnimation::MovieScene are both
 // WITH_EDITORONLY_DATA but accessible to editor-module code.
 // ---------------------------------------------------------------------------
-// MCP:add_widget_animation - Add a UWidgetAnimation (with an inner UMovieScene) to a Widget Blueprint.  Mirrors the editor's "New Animation" flow: constructs a UWidgetAnimation on the blueprint, gives it an inner UMovieScene (20fps, 0..5s range), sets the display label, appends to WidgetBP->Animations, then compiles and saves.
+// MCP:add_widget_animation - Add a UWidgetAnimation called animation_name to a Widget Blueprint loaded by asset path, as the editor's New Animation button does: an inner UMovieScene at 20 fps with a 0 to 5 s playback range, the display label set to animation_name and the animation registered as a Blueprint variable, then compile and save the Blueprint. object_name can differ from animation_name when a stale object already holds that name. Idempotent: an animation whose object name or display label equals animation_name (ignoring case) is returned with added=false, already_existed=true and saved=false, nothing compiled or saved. A missing Blueprint is an error; a failed save makes success false with save_error, the animation kept in memory. Refused during PIE unless force=true. Animate it with add_widget_animation_track and add_widget_animation_keyframe; list: get_widget_animations; inverse: remove_widget_animation.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param animation_name - name/display label for the new animation
-//   @returns { widget_bp_path: string, animation_name: string, object_name: string, display_name: string, added: bool, already_existed: bool, has_movie_scene: bool, animation_count: int, saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, animation_name: string, object_name: string, display_name: string, added: bool, already_existed: bool, has_movie_scene: bool, animation_count: int, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleAddWidgetAnimation(const TSharedPtr<FJsonObject>& Params)
 {
@@ -2319,15 +2340,17 @@ TSharedPtr<FJsonObject> HandleAddWidgetAnimation(const TSharedPtr<FJsonObject>& 
         return Failure;
     }
 
-    // Idempotent: if an animation with this name already exists, return it.
+    // Idempotent: an animation with this name already there is returned as it is, with nothing compiled or saved.
     if (UWidgetAnimation* Existing = FindWidgetAnimationByName(WidgetBP, AnimationName))
     {
         TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("animation_name"), AnimationName);
         Resp->SetStringField(TEXT("object_name"), Existing->GetName());
-        Resp->SetBoolField(TEXT("added"), true);
+        Resp->SetStringField(TEXT("display_name"), Existing->GetDisplayLabel());
+        Resp->SetBoolField(TEXT("added"), false);
         Resp->SetBoolField(TEXT("already_existed"), true);
+        Resp->SetBoolField(TEXT("has_movie_scene"), Existing->MovieScene != nullptr);
         Resp->SetNumberField(TEXT("animation_count"), WidgetBP->Animations.Num());
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -3381,11 +3404,11 @@ TSharedPtr<FJsonObject> HandleSetPieWidgetValue(const TSharedPtr<FJsonObject>& P
 // VerifyWidgetRename is called FIRST for an honest, engine-faithful diagnostic (matches this file's
 // "never a silent/unexplained failure" convention).
 // ---------------------------------------------------------------------------
-// MCP:rename_widget - Rename a widget in a Widget Blueprint's tree (WidgetTree membership, blueprint variable map, bindings, and animation bindings all updated in one call -- the same path as the Designer's F2).
+// MCP:rename_widget - Rename the widget old_name in the tree of a Widget Blueprint loaded by asset path, with the Designer's F2 rename: its variable, graph references, bindings and navigation links follow, then the Blueprint is compiled and saved in one undo step. Characters an object name cannot hold are dropped from the name but kept in the display label; resolved_name is the name the widget got, with a note when it differs. An empty, too-long or taken name (another widget or Blueprint member), a BindWidget name of the wrong type, or a missing Blueprint or old_name is an error, and nothing changes. A new_name identical to the current name renames nothing (renamed=false, saved=false, a note); a case change is a rename. A failed save makes success false with save_error. Refused during PIE unless force=true. Move it: reparent_widget; read the tree: get_widget_blueprint_tree.
 //   @param widget_bp_path - /Game path of the Widget Blueprint asset
 //   @param old_name - current name of the widget in the tree
 //   @param new_name - desired new name
-//   @returns { widget_bp_path: string, old_name: string, new_name: string, resolved_name: string, renamed: bool, saved: bool, save_error: string }
+//   @returns { widget_bp_path: string, old_name: string, new_name: string, resolved_name: string, renamed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params)
 {
@@ -3403,16 +3426,18 @@ TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params
     {
         return mcp_common::MakeErrorReply(Error);
     }
-    UWidgetTree* WidgetTree = WidgetBP->WidgetTree;
 
-    // Idempotent no-op when the names already match (honestly reported, no engine call needed).
-    if (OldName == NewName)
+    // Idempotent no-op when new_name is exactly the widget's current name, case included (old_name finds the widget
+    // in any case): nothing is renamed, compiled or saved. A change of case alone is a rename: VerifyWidgetRename
+    // takes the same widget under the new case as itself, and UObject::Rename allows a case-only change.
+    if (Widget->GetName().Equals(NewName, ESearchCase::CaseSensitive))
     {
         TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("old_name"), OldName);
         Resp->SetStringField(TEXT("new_name"), NewName);
         Resp->SetStringField(TEXT("resolved_name"), Widget->GetName());
-        Resp->SetBoolField(TEXT("renamed"), true);
-        Resp->SetBoolField(TEXT("saved"), true);
+        Resp->SetBoolField(TEXT("renamed"), false);
+        Resp->SetBoolField(TEXT("saved"), false);
+        Resp->SetStringField(TEXT("note"), TEXT("new_name is the current name: nothing was renamed or saved"));
         return mcp_common::MakeOkReply(Resp);
     }
 
@@ -3430,16 +3455,23 @@ TSharedPtr<FJsonObject> HandleRenameWidget(const TSharedPtr<FJsonObject>& Params
             FString::Printf(TEXT("RenameWidget failed for '%s' -> '%s' (unexpected: VerifyWidgetRename passed)"), *OldName, *NewName));
     }
 
+    // The name the widget really got: RenameWidget drops the characters an object name cannot hold
+    // (SlugStringForValidName), so "My Button" names the object MyButton and only the display label keeps the space.
+    const FString ResolvedName = Widget->GetName();
+
     FString SaveErr;
     const bool bSaved = SaveWidgetBlueprint(WidgetBP, SaveErr);
 
-    // Re-resolve to report the actual (name-sanitized) result.
-    UWidget* Renamed = WidgetTree->FindWidget(FName(*NewName));
-
     TSharedPtr<FJsonObject> Resp = StartReply_Widget(WidgetBPPath, TEXT("old_name"), OldName);
     Resp->SetStringField(TEXT("new_name"), NewName);
-    Resp->SetStringField(TEXT("resolved_name"), Renamed ? Renamed->GetName() : NewName);
+    Resp->SetStringField(TEXT("resolved_name"), ResolvedName);
     Resp->SetBoolField(TEXT("renamed"), true);
+    if (!ResolvedName.Equals(NewName, ESearchCase::CaseSensitive))
+    {
+        Resp->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("characters an object name cannot hold were dropped: the widget is named %s, and its display label is %s"),
+            *ResolvedName, *NewName));
+    }
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("rename_widget"), SaveErr);
 }
 

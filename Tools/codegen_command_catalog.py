@@ -584,6 +584,8 @@ _INT_RANGES = {
 }
 _NUMERIC_TYPE_ALT = "|".join((*_INT_RANGES, "int64", "uint64", "float", "double", "bool"))
 _NUM_READ_RE = re.compile(r'\bParams\s*->\s*(Try)?Get(Number|Integer)Field\s*\(\s*TEXT\("([^"]+)"\)')
+# mcp_common::ReadRequiredNumber is a TryGetNumberField into its third argument, whatever its type.
+_REQUIRED_NUM_READ_RE = re.compile(r'\bReadRequiredNumber\s*\(\s*Params\s*,\s*TEXT\("([^"]+)"\)\s*,\s*(\w+)\s*\)')
 
 
 def _declared_type(scope: str, target: str) -> str | None:
@@ -739,6 +741,8 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
     if num_types is not None:                         # the C++ type each number read lands in
         for m in _NUM_READ_RE.finditer(body):
             num_types.setdefault(m.group(3), []).append(_numeric_read_type(sig + body, body, m))
+        for m in _REQUIRED_NUM_READ_RE.finditer(body):  # ReadRequiredNumber(Params, TEXT("k"), Var) reads into Var
+            num_types.setdefault(m.group(1), []).append(_declared_type(sig + body, m.group(2)))
     if depth <= 0:
         return
     for callee in CALLEE_RE.findall(body):

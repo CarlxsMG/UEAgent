@@ -452,7 +452,7 @@ Adds a possessable binding to a Level Sequence for an existing editor-world acto
 
 *Additive.*
 
-Bind a component of an editor-world actor to a Level Sequence and add a typed property track, with a section spanning the playback range, to that new binding. It runs bind_component_to_sequence (always a new component possessable, parented to the actor's binding only when the actor is already bound) and then add_property_track, each saving the sequence, then saves once more; when the track step fails the new binding stays. That step finds the sequence by the last segment of sequence_path, so an object path with a dot fails there. An unknown actor, component or property_type is an error. Only binding_guid is reliable in the reply: actor_name, component_name, track_class and section_class come back empty and parented_to_actor false, so confirm with get_binding_tracks. For an existing binding use add_property_track; for the actor itself, bind_actor_property_to_sequence.
+Bind a component of an editor-world actor to a Level Sequence and add a typed property track, with a section spanning the playback range, to that new binding. It runs bind_component_to_sequence (always a new component possessable, parented to the actor's binding only when the actor is already bound) and then add_property_track, each saving the sequence, then saves once more; when the track step fails the new binding stays. That step finds the sequence by the last segment of sequence_path, so an object path with a dot fails there. An unknown actor, component or property_type is an error. The reply carries the actor label, component name and parented_to_actor of the bind step and the track_class and section_class of the track step; confirm with get_binding_tracks. For an existing binding use add_property_track; for the actor itself, bind_actor_property_to_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1013,17 +1013,17 @@ Set playback properties on an audio section (UMovieSceneAudioSection).  Optional
 
 *Destructive, idempotent.*
 
-Set the start offset (how far into the clip playback begins) of one audio section on the first root audio track of a Level Sequence, given as a /Game path or a bare asset name, in one undo step, then save the sequence. One of the two offsets is required: start_offset_frames wins when both are given and is written as-is, fractions truncated; start_offset_seconds is converted to frames at the sequence's display rate and rounded. Every call writes and saves, even an unchanged offset; old_start_offset_frames is the value before. No root audio track, an out-of-range section_index or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Add the section with add_audio_section; its other settings: set_audio_section_properties; read start_offset back with get_audio_section_properties.
+Set the start offset (how far into the clip playback begins) of one audio section on the first root audio track of a Level Sequence, given as a /Game path or a bare asset name, in one undo step, then save the sequence. One of the two offsets is required: start_offset_frames wins when both are given and is written as-is in tick-resolution frames, the engine's unit, fractions truncated; start_offset_seconds is converted at the tick resolution and rounded. Every call writes and saves, even an unchanged offset; old_start_offset_frames is the value before. No root audio track, an out-of-range section_index or offset, or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Add the section with add_audio_section; its other settings: set_audio_section_properties; read start_offset back with get_audio_section_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sequence_path` | string | yes | Full /Game path OR bare asset name of the Level Sequence; a path that does not load falls back to its asset name. |
 | `sequence_name` | string | no | Alias for sequence_path. |
 | `section_index` | number | no | Index of the section on the sequence's first root audio track (default 0). |
-| `start_offset_seconds` | number | no | Optional offset into the clip in seconds, converted to frames at the display rate and rounded; ignored when start_offset_frames is given. |
-| `start_offset_frames` | number | no | Optional raw frame offset, written as-is with fractions truncated; wins over start_offset_seconds. |
+| `start_offset_seconds` | number | no | Optional offset into the clip in seconds, converted to tick-resolution frames and rounded; ignored when start_offset_frames is given. |
+| `start_offset_frames` | number | no | Optional offset in tick-resolution frames (the unit get_audio_section_properties reports), written as-is with fractions truncated; wins over start_offset_seconds. |
 
-**Returns:** `{ sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, applied: bool, saved: bool, save_error?: string }`
+**Returns:** `{ sequence_path: string, section_index: int, old_start_offset_frames: int, new_start_offset_frames: int, new_start_offset_seconds: number, applied: bool, saved: bool, save_error?: string }`
 
 ## `set_audio_track_pitch`
 
@@ -1163,7 +1163,7 @@ Resize a property track's first section to exactly N keys evenly spaced from the
 
 *Destructive, idempotent.*
 
-Toggle whether a sequencer section is active (evaluated) or muted.  Maps to UMovieSceneSection::SetIsActive; reports the actual is_active read back (SetIsActive is a no-op on a LOCKED section).
+Mute or unmute one section on an object-binding track of a Level Sequence (UMovieSceneSection::SetIsActive: an inactive section is not evaluated), in one undo step, then save the sequence. The section is resolved like get_section_info: binding_guid, then the first track of track_type or the track_index-th track, then section_index. A locked section, or one in a read-only movie scene, is refused before anything changes, since the engine ignores the change there: unlock it with set_section_locked first. is_active and set are read back from the section. Every call saves; a failed save makes success false with saved=false and save_error. Read back with get_section_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1182,7 +1182,7 @@ Toggle whether a sequencer section is active (evaluated) or muted.  Maps to UMov
 
 *Destructive, idempotent.*
 
-Set the blend type (absolute|additive|relative|additive_from_base|override, case-insensitive) of one section on an object-binding track of a Level Sequence (a /Game path or a bare asset name), in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. blend_type in the reply is read back from the section: the engine ignores a type the section does not support, so a value that differs from the request means it was not applied, although set is still true. Every call saves. A bad GUID, a binding without tracks, an index out of range or an unknown blend_type is an error. Read back with get_section_info; siblings: set_section_easing, set_section_completion_mode.
+Set the blend type (absolute|additive|relative|additive_from_base|override, case-insensitive) of one section on an object-binding track of a Level Sequence (a /Game path or a bare asset name), in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. A type the section's track does not support is refused before anything changes, the error listing the supported types; blend_type and set are read back from the section. Every call saves. A bad GUID, a binding without tracks, an index out of range or an unknown blend_type is an error. Read back with get_section_info; siblings: set_section_easing, set_section_completion_mode.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1242,7 +1242,7 @@ Set how a sequencer section handles state when no longer evaluated (keep_state|r
 
 *Destructive, idempotent.*
 
-Set the ease-in and ease-out durations of one section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. With use_manual (default true) each duration given turns manual easing on for its side and sets the manual duration; false turns it off and writes the auto duration. An omitted or negative value leaves that side as it is; values are rounded raw frames. Every call saves, even with no duration. The reply reads the effective durations back, but its section_index is always 0. A bad GUID, a binding without tracks or an index out of range is an error. Read back with get_section_info; blending: set_section_blend_type; range: set_section_range.
+Set the ease-in and ease-out durations of one section on an object-binding track of a Level Sequence, in one undo step, then save the sequence. The section is section_index on the binding's first track of track_type, or on its track_index-th track when track_type is omitted or unrecognised; root tracks are not reachable. With use_manual (default true) each duration given turns manual easing on for its side and sets the manual duration; false turns it off and writes the auto duration. An omitted or negative value leaves that side as it is; values are rounded raw frames. Every call saves, even with no duration. The reply reads the effective durations back, with the section_index edited. A bad GUID, a binding without tracks or an index out of range is an error. Read back with get_section_info; blending: set_section_blend_type; range: set_section_range.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1446,14 +1446,14 @@ Set the playback parameters (FMovieSceneSkeletalAnimationParams) of one skeletal
 
 *Destructive, idempotent.*
 
-Set the spawn ownership (ESpawnOwnership) of a spawnable custom binding in a Level Sequence found by asset name under /Game: whether the spawned actor's lifetime is managed by the sequence that spawned it (InnerSequence), by the outermost sequence (RootSequence) or externally once spawned (External). MasterSequence is accepted for RootSequence, and the ESpawnOwnership:: prefix is allowed. Done in one undo step, then the sequence is saved; every call writes and saves, also when the value is unchanged, and ownership is read back. A binding that is not a spawnable custom binding (a possessable, an unknown GUID), an invalid ownership or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Find GUIDs and current ownership with get_sequence_spawnables; add a spawnable with add_spawnable_to_sequence.
+Set the spawn ownership (ESpawnOwnership) of a spawnable custom binding in a Level Sequence given as a /Game path or a bare asset name: whether the spawned actor's lifetime is managed by the sequence that spawned it (InnerSequence), by the outermost sequence (RootSequence) or externally once spawned (External). MasterSequence is accepted for RootSequence, and the ESpawnOwnership:: prefix is allowed. Done in one undo step, then the sequence is saved; every call writes and saves, also when the value is unchanged, and ownership is read back. A binding that is not a spawnable custom binding (a possessable, an unknown GUID), an invalid ownership or a missing sequence is an error; a failed save makes success false with saved=false and save_error. Find GUIDs and current ownership with get_sequence_spawnables; add a spawnable with add_spawnable_to_sequence.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `sequence_name` | string | yes | Asset name (not a path) of the Level Sequence, e.g. "LS_Intro"; the first match under /Game is used, ignoring case. |
-| `sequence_path` | string | yes | Alias for sequence_name, read only when sequence_name is absent or empty; it is matched as an asset name too, so a /Game path does not resolve. |
+| `sequence_name` | string | yes | Level Sequence as a /Game path, e.g. "/Game/Cine/LS_Intro", or a bare asset name, e.g. "LS_Intro", whose first match under /Game is used ignoring case; a path that does not load falls back to its asset name. |
 | `binding_guid` | string | yes | GUID of the spawnable binding (from add_spawnable_to_sequence / get_sequence_spawnables). |
 | `ownership` | string | yes | One of: InnerSequence \| RootSequence \| External. MasterSequence is accepted as RootSequence. |
+| `sequence_path` | string | no | Alias for sequence_name, read only when sequence_name is absent or empty; it takes the same /Game path or bare asset name. |
 
 **Returns:** `{ sequence_name: string, binding_guid: string, ownership: string, saved: bool, save_error?: string }`
 

@@ -53,6 +53,8 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Serialization/ObjectWriter.h"    // FObjectWriter: the before/after state of a multi-field light edit
+#include "UObject/Package.h"                // UPackage dirty flag, given back by a light edit that changed nothing
 #include "HAL/IConsoleManager.h"
 #include "Engine/RendererSettings.h"
 #include "GameFramework/GameUserSettings.h"
@@ -212,6 +214,103 @@ namespace UEAgentLightingImpl
         }
         return Lookup;
     }
+
+    // =============================================================================================
+    // Writes to a light
+    // =============================================================================================
+
+    // Whether the engine's runtime light setters leave Light as it is: a registered component of Static mobility.
+    // This is USceneComponent::AreDynamicDataChangesAllowed (protected) outside a construction script.
+    bool IsStaticLight(const ULightComponentBase& Light)
+    {
+        return Light.IsRegistered() && Light.Mobility == EComponentMobility::Static;
+    }
+
+    // The refusal of a change the engine's setters ignore on a static light; Fields names what was asked for.
+    TSharedPtr<FJsonObject> StaticLightReply(const FString& LightName, const FString& Fields)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Light '%s' has Static mobility, and the engine's setters do not change %s on a registered static light; ")
+            TEXT("nothing was changed. Make the light Stationary or Movable first."), *LightName, *Fields));
+    }
+
+    // The serialized state of Object, compared before and after a multi-field edit to tell a call that changed nothing.
+    // PPF_DuplicateVerbatim keeps the writer from adding a localization namespace to the package's metadata.
+    TArray<uint8> SerializedState(UObject& Object)
+    {
+        TArray<uint8> Bytes;
+        FObjectWriter Writer(&Object, Bytes, /*bIgnoreClassRef=*/false, /*bIgnoreArchetypeRef=*/false, /*bDoDelta=*/true, PPF_DuplicateVerbatim);
+        return Bytes;
+    }
+
+    // Whether the request carries Field with a value; an empty asset path leaves its field unchanged.
+    bool HasRequestedValue(const FJsonObject& Params, const TCHAR* Field)
+    {
+        const TSharedPtr<FJsonValue> Value = Params.TryGetField(Field);
+        return Value.IsValid() && Value->Type != EJson::Null && !(Value->Type == EJson::String && Value->AsString().IsEmpty());
+    }
+
+    // The set_light_properties fields this light takes through an engine setter that ignores a static light.
+    TArray<FString> RequestedMobilityGatedFields(const FJsonObject& Params, const ULightComponent& Light)
+    {
+        TArray<FString> Requested;
+        const auto Collect = [&Params, &Requested](std::initializer_list<const TCHAR*> Fields)
+        {
+            for (const TCHAR* Field : Fields)
+            {
+                if (HasRequestedValue(Params, Field))
+                {
+                    Requested.Add(Field);
+                }
+            }
+        };
+        Collect({ TEXT("ies_texture"), TEXT("use_ies_brightness"), TEXT("ies_brightness_scale"), TEXT("light_function_material"),
+            TEXT("light_function_scale"), TEXT("light_function_fade_distance"), TEXT("light_function_disabled_brightness"),
+            TEXT("shadow_bias"), TEXT("cast_shadows"), TEXT("cast_volumetric_shadow") });
+        if (Light.IsA<UPointLightComponent>())
+        {
+            Collect({ TEXT("use_inverse_squared_falloff"), TEXT("falloff_exponent") });
+        }
+        if (Light.IsA<URectLightComponent>())
+        {
+            Collect({ TEXT("source_width"), TEXT("source_height"), TEXT("barn_door_angle"), TEXT("barn_door_length"), TEXT("source_texture") });
+        }
+        return Requested;
+    }
+
+    // Opens a multi-field edit of Object: one Modify() so the edit is undoable and dirties its package, plus the
+    // state Finish compares against, so a call that changed nothing gives the dirty flag and the undo step back.
+    struct FLightEdit
+    {
+        UObject& Object;
+        UPackage* Package;
+        bool bPackageWasDirty;
+        TArray<uint8> Before;
+
+        explicit FLightEdit(UObject& InObject)
+            : Object(InObject)
+            , Package(InObject.GetPackage())
+            , bPackageWasDirty(Package != nullptr && Package->IsDirty())
+            , Before(SerializedState(InObject))
+        {
+            Object.Modify();
+        }
+
+        // Whether the edit changed the object.
+        bool Finish()
+        {
+            if (SerializedState(Object) != Before)
+            {
+                return true;
+            }
+            if (Package != nullptr)
+            {
+                Package->SetDirtyFlag(bPackageWasDirty);
+            }
+            mcp_common::DiscardUndoStepOfThisCall();
+            return false;
+        }
+    };
 
     // =============================================================================================
     // Light state shared by the per-light replies
@@ -1026,13 +1125,10 @@ namespace UEAgentLightingImpl
     {
         enum Type : int32
         {
-            AntiAliasing,
             Bloom,
             MotionBlur,
             DepthOfField,
             AmbientOcclusion,
-            GlobalIllumination,
-            ColorGrading,
             LensFlare,
             ScreenSpaceReflections,
             Count
@@ -1045,40 +1141,37 @@ namespace UEAgentLightingImpl
         const TCHAR* ReplyKey;
     };
 
+    // The UE 5.8 renderer variables of the features, each of which a level of 0 switches off. Anti-aliasing,
+    // global illumination and color grading have no such variable (the anti-aliasing method is r.AntiAliasingMethod,
+    // global illumination a scalability group, sg.GlobalIlluminationQuality), so the presets do not drive them.
     const FPostFeatureInfo PostFeatures[PostFeature::Count] =
     {
-        { TEXT("r.PostProcessAAQuality"),      TEXT("anti_aliasing_enabled") },
-        { TEXT("r.BloomQuality"),              TEXT("bloom_enabled") },
-        { TEXT("r.MotionBlurQuality"),         TEXT("motion_blur_enabled") },
-        { TEXT("r.DepthOfFieldQuality"),       TEXT("depth_of_field_enabled") },
-        { TEXT("r.AmbientOcclusionLevels"),    TEXT("ambient_occlusion_enabled") },
-        { TEXT("r.GlobalIlluminationQuality"), TEXT("global_illumination_enabled") },
-        { TEXT("r.ColorGradingQuality"),       TEXT("color_grading_enabled") },
-        { TEXT("r.LensFlareQuality"),          TEXT("lens_flare_enabled") },
-        { TEXT("r.SSRQuality"),                TEXT("screen_space_reflections_enabled") },
+        { TEXT("r.BloomQuality"),           TEXT("bloom_enabled") },
+        { TEXT("r.MotionBlurQuality"),      TEXT("motion_blur_enabled") },
+        { TEXT("r.DepthOfFieldQuality"),    TEXT("depth_of_field_enabled") },
+        { TEXT("r.AmbientOcclusionLevels"), TEXT("ambient_occlusion_enabled") },
+        { TEXT("r.LensFlareQuality"),       TEXT("lens_flare_enabled") },
+        { TEXT("r.SSR.Quality"),            TEXT("screen_space_reflections_enabled") },
     };
 
-    // A preset writes Levels[i] to the console variable of feature i (PostFeature order); a feature is
-    // reported as enabled when its level is above zero. bPostProcessing is reported as is: "Low" writes
-    // the same zeros as "Disabled" yet still counts as post-processing on.
+    // A preset writes Levels[i] to the console variable of feature i (PostFeature order).
     struct FPostProcessPreset
     {
         const TCHAR* Name;
-        bool bPostProcessing;
         int32 Levels[PostFeature::Count];
         const TCHAR* Message;
     };
 
-    // Preset names compare with FString ==, so case is ignored.
+    // Preset names compare with FString ==, so case is ignored. An unknown name is null.
     const FPostProcessPreset* FindPostProcessPreset(const FString& Requested)
     {
         static const FPostProcessPreset Presets[] =
         {
-            { TEXT("Enabled"),  true,  { 2, 2, 2, 2, 2, 2, 2, 2, 2 }, TEXT("Post processing configured successfully using official APIs") },
-            { TEXT("Disabled"), false, { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, TEXT("Post processing disabled successfully using official APIs") },
-            { TEXT("High"),     true,  { 2, 2, 2, 2, 2, 2, 2, 2, 2 }, TEXT("High quality post processing configured successfully using official APIs") },
-            { TEXT("Medium"),   true,  { 1, 1, 0, 1, 1, 0, 1, 0, 0 }, TEXT("Medium quality post processing configured successfully using official APIs") },
-            { TEXT("Low"),      true,  { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, TEXT("Low quality post processing configured successfully using official APIs") },
+            { TEXT("Enabled"),  { 2, 2, 2, 2, 2, 2 }, TEXT("Post processing configured successfully using official APIs") },
+            { TEXT("Disabled"), { 0, 0, 0, 0, 0, 0 }, TEXT("Post processing disabled successfully using official APIs") },
+            { TEXT("High"),     { 2, 2, 2, 2, 2, 2 }, TEXT("High quality post processing configured successfully using official APIs") },
+            { TEXT("Medium"),   { 1, 0, 1, 1, 0, 0 }, TEXT("Medium quality post processing configured successfully using official APIs") },
+            { TEXT("Low"),      { 0, 0, 0, 0, 0, 0 }, TEXT("Low quality post processing configured successfully using official APIs") },
         };
         for (const FPostProcessPreset& Preset : Presets)
         {
@@ -1090,34 +1183,84 @@ namespace UEAgentLightingImpl
         return nullptr;
     }
 
-    // What configure_post_processing reports; the defaults describe an unrecognised preset name.
-    struct FPostProcessState
+    // One console variable of a preset: its value before the write, the preset's level and the value read back.
+    struct FPostVariableReading
     {
-        bool bConfigured = false;
-        bool bPostProcessing = false;
-        bool Features[PostFeature::Count] = {};
-        const TCHAR* Message = TEXT("Invalid post-processing settings. Use 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'");
+        int32 Previous = 0;
+        int32 Requested = 0;
+        int32 Value = 0;
+        bool bApplied = false;
     };
 
-    // Applies the named preset through console variables. An unknown name changes nothing.
-    FPostProcessState ApplyPostProcessSettings(UWorld& World, const FString& Requested)
+    // What configure_post_processing reports, every field from the read-back of the console variables.
+    struct FPostProcessState
     {
-        FPostProcessState State;
-        const FPostProcessPreset* Preset = FindPostProcessPreset(Requested);
-        if (Preset == nullptr)
-        {
-            return State;
-        }
+        bool bConfigured = false;     // every variable reads the preset's level
+        bool bPostProcessing = false; // at least one feature reads above 0
+        bool Features[PostFeature::Count] = {};
+        FPostVariableReading Readings[PostFeature::Count];
+        const TCHAR* Message = TEXT("");
+    };
+
+    // The console variables of the presets, or the error reply naming those this engine does not register or
+    // marks read-only (the console refuses to set those). Checked before any is written, so a missing one
+    // changes nothing.
+    TSharedPtr<FJsonObject> ResolvePostVariables(IConsoleVariable* (&OutVariables)[PostFeature::Count])
+    {
+        TArray<FString> Unusable;
         for (int32 Index = 0; Index < PostFeature::Count; ++Index)
         {
-            const int32 Level = Preset->Levels[Index];
-            GEngine->Exec(&World, *FString::Printf(TEXT("%s %d"), PostFeatures[Index].ConsoleVariable, Level));
-            State.Features[Index] = Level > 0;
+            IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(PostFeatures[Index].ConsoleVariable);
+            OutVariables[Index] = (Variable != nullptr && !Variable->TestFlags(ECVF_ReadOnly)) ? Variable : nullptr;
+            if (OutVariables[Index] == nullptr)
+            {
+                Unusable.Add(PostFeatures[Index].ConsoleVariable);
+            }
         }
+        if (Unusable.IsEmpty())
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("This engine has no writable console variable %s, which the preset sets; nothing was changed"),
+            *FString::Join(Unusable, TEXT(", "))));
+    }
+
+    // Writes the preset's levels with console priority, as the console does, then reads each variable back.
+    FPostProcessState ApplyPostProcessPreset(const FPostProcessPreset& Preset, IConsoleVariable* const (&Variables)[PostFeature::Count])
+    {
+        FPostProcessState State;
         State.bConfigured = true;
-        State.bPostProcessing = Preset->bPostProcessing;
-        State.Message = Preset->Message;
+        for (int32 Index = 0; Index < PostFeature::Count; ++Index)
+        {
+            FPostVariableReading& Reading = State.Readings[Index];
+            Reading.Previous = Variables[Index]->GetInt();
+            Reading.Requested = Preset.Levels[Index];
+            Variables[Index]->Set(Reading.Requested, ECVF_SetByConsole);
+            Reading.Value = Variables[Index]->GetInt();
+            Reading.bApplied = Reading.Value == Reading.Requested;
+            State.bConfigured &= Reading.bApplied;
+            State.Features[Index] = Reading.Value > 0;
+            State.bPostProcessing |= State.Features[Index];
+        }
+        State.Message = State.bConfigured ? Preset.Message : TEXT("Some console variables did not take the preset's level; see post_processing_variables");
         return State;
+    }
+
+    // The error of a preset whose read-back differs from its levels: each such variable with what it reads.
+    FString PostProcessMismatchError(const FPostProcessState& State)
+    {
+        TArray<FString> Mismatches;
+        for (int32 Index = 0; Index < PostFeature::Count; ++Index)
+        {
+            const FPostVariableReading& Reading = State.Readings[Index];
+            if (!Reading.bApplied)
+            {
+                Mismatches.Add(FString::Printf(TEXT("%s reads %d, not %d"), PostFeatures[Index].ConsoleVariable, Reading.Value, Reading.Requested));
+            }
+        }
+        return FString::Printf(TEXT("configure_post_processing: the preset did not apply: %s. post_processing_variables carries every reading"),
+            *FString::Join(Mismatches, TEXT("; ")));
     }
 
     struct FFeatureCost
@@ -1141,9 +1284,6 @@ namespace UEAgentLightingImpl
             { PostFeature::MotionBlur, 0.2f },
             { PostFeature::DepthOfField, 0.2f },
             { PostFeature::AmbientOcclusion, 0.3f },
-            { PostFeature::GlobalIllumination, 0.4f },
-            { PostFeature::AntiAliasing, 0.1f },
-            { PostFeature::ColorGrading, 0.1f },
             { PostFeature::LensFlare, 0.1f },
             { PostFeature::ScreenSpaceReflections, 0.3f },
         };
@@ -1181,10 +1321,21 @@ namespace UEAgentLightingImpl
         Reply->SetBoolField(TEXT("post_processing_configured"), State.bConfigured);
         Reply->SetStringField(TEXT("post_processing_message"), State.Message);
         Reply->SetBoolField(TEXT("post_processing_enabled"), State.bPostProcessing);
+        TArray<TSharedPtr<FJsonValue>> VariableEntries;
         for (int32 Index = 0; Index < PostFeature::Count; ++Index)
         {
             Reply->SetBoolField(PostFeatures[Index].ReplyKey, State.Features[Index]);
+
+            const FPostVariableReading& Reading = State.Readings[Index];
+            TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+            Entry->SetStringField(TEXT("variable"), PostFeatures[Index].ConsoleVariable);
+            Entry->SetNumberField(TEXT("previous"), Reading.Previous);
+            Entry->SetNumberField(TEXT("requested"), Reading.Requested);
+            Entry->SetNumberField(TEXT("value"), Reading.Value);
+            Entry->SetBoolField(TEXT("applied"), Reading.bApplied);
+            VariableEntries.Add(MakeShared<FJsonValueObject>(Entry));
         }
+        Reply->SetArrayField(TEXT("post_processing_variables"), VariableEntries);
 
         Reply->SetStringField(TEXT("world_name"), World.GetName());
         const int32 VolumeCount = Volumes.Num();
@@ -1200,7 +1351,6 @@ namespace UEAgentLightingImpl
         TArray<TSharedPtr<FJsonValue>> Advice;
         AddAdviceIf(Advice, VolumeCount > 10, TEXT("High post-process volume count - consider reducing for performance"));
         AddAdviceIf(Advice, State.bPostProcessing && VolumeCount == 0, TEXT("Post-processing enabled but no volumes found - consider adding volumes"));
-        AddAdviceIf(Advice, On[PostFeature::GlobalIllumination] && VolumeCount > 5, TEXT("Global illumination enabled with many volumes - high performance impact"));
         AddAdviceIf(Advice, On[PostFeature::MotionBlur] && On[PostFeature::DepthOfField], TEXT("Motion blur and depth of field both enabled - consider reducing for performance"));
         AddAdviceIf(Advice, !State.bPostProcessing && VolumeCount > 0, TEXT("Post-processing disabled but volumes exist - consider removing unused volumes"));
         Reply->SetArrayField(TEXT("post_processing_recommendations"), Advice);
@@ -1274,7 +1424,7 @@ TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& 
     return UEAgentLightingImpl::DescribeLight(LightName, *Found.Actor, *Found.Light);
 }
 
-// MCP:set_light_properties - Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. Verify by read-back via get_light_properties (light_* keys).
+// MCP:set_light_properties - Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. On a Static-mobility light a field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors) is an error and nothing is written. Verify by read-back via get_light_properties (light_* keys).
 //   @param light_name - Name of the light actor to modify.
 //   @param attenuation_radius - float, light reach — local lights only (Point/Spot/Rect).
 //   @param source_radius - float, soft source radius (Point/Spot).
@@ -1306,7 +1456,7 @@ TSharedPtr<FJsonObject> HandleGetLightProperties(const TSharedPtr<FJsonObject>& 
 //   @param barn_door_angle - float degrees, RectLight barn-door opening angle (Rect only).
 //   @param barn_door_length - float, RectLight barn-door length (Rect only).
 //   @param source_texture [string] - asset path to a UTexture for the RectLight surface; omit/empty leaves it unchanged (Rect only).
-//   @returns { light_name, light_subtype, settings_applied: {...}, notes: [string], applied_count }
+//   @returns { light_name, light_subtype, settings_applied: {...}, notes: [string], applied_count, changed }
 TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& Params)
 {
     FString LightName;
@@ -1319,9 +1469,24 @@ TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& 
     }
     ULightComponent* LightComponent = Target.Light;
 
+    // The engine setters some fields go through leave a registered static light as it is, so asking for any of
+    // them on one is refused before anything is written.
+    if (UEAgentLightingImpl::IsStaticLight(*LightComponent))
+    {
+        const TArray<FString> Refused = UEAgentLightingImpl::RequestedMobilityGatedFields(*Params, *LightComponent);
+        if (Refused.Num() > 0)
+        {
+            return UEAgentLightingImpl::StaticLightReply(LightName, FString::Join(Refused, TEXT(", ")));
+        }
+    }
+
     TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
     TArray<TSharedPtr<FJsonValue>> Notes;
     double Num; bool B;
+
+    // Modify() before the first write makes the call one undo step; Finish() below gives the step and the dirty
+    // flag back when nothing changed.
+    UEAgentLightingImpl::FLightEdit Edit(*LightComponent);
 
     // Authoring writes: set the fields directly (as the editor details panel does) so they
     // apply regardless of the light's Mobility. The runtime SetX() helpers gate by mobility —
@@ -1487,6 +1652,7 @@ TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& 
     }
 
     LightComponent->MarkRenderStateDirty();
+    const bool bChanged = Edit.Finish();
 
     FString Subtype = TEXT("Light");
     if (Cast<UDirectionalLightComponent>(LightComponent)) { Subtype = TEXT("DirectionalLight"); }
@@ -1501,13 +1667,14 @@ TSharedPtr<FJsonObject> HandleSetLightProperties(const TSharedPtr<FJsonObject>& 
     ResultObj->SetObjectField(TEXT("settings_applied"), Applied);
     ResultObj->SetArrayField(TEXT("notes"), Notes);
     ResultObj->SetNumberField(TEXT("applied_count"), Applied->Values.Num());
+    ResultObj->SetBoolField(TEXT("changed"), bChanged);
     return ResultObj;
 }
 
-// MCP:set_light_intensity - Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The engine refuses runtime changes on a Static-mobility light, so it keeps its intensity and intensity_set is false while success stays true; old_intensity and new_intensity show what happened. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or a missing intensity is an error. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
+// MCP:set_light_intensity - Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The change is one undo step that marks the level dirty; nothing is saved. A request equal to the current intensity changes nothing, records no undo step and answers intensity_changed false. The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or a missing intensity is an error too. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
 //   @param light_name - Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched
 //   @param intensity - New intensity as a float in the light's own units (lux for a directional light, its intensity units for a local light); not clamped
-//   @returns { light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }
+//   @returns { light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_changed, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }
 TSharedPtr<FJsonObject> HandleSetLightIntensity(const TSharedPtr<FJsonObject>& Params)
 {
     FString LightName;
@@ -1523,8 +1690,19 @@ TSharedPtr<FJsonObject> HandleSetLightIntensity(const TSharedPtr<FJsonObject>& P
     }
     ULightComponent& Light = *Found.Light;
 
+    // SetIntensity skips an unchanged value, so a request equal to the current intensity writes nothing, and
+    // nothing is recorded or dirtied for it. A change to a static light is refused before anything is written.
     const float Before = Light.Intensity;
-    Light.SetIntensity(Requested);
+    const bool bChange = Before != Requested;
+    if (bChange)
+    {
+        if (UEAgentLightingImpl::IsStaticLight(Light))
+        {
+            return UEAgentLightingImpl::StaticLightReply(LightName, TEXT("the intensity"));
+        }
+        Light.Modify();
+        Light.SetIntensity(Requested);
+    }
     const float After = Light.Intensity;
     const bool bApplied = FMath::IsNearlyEqual(After, Requested, 0.001f);
 
@@ -1535,18 +1713,26 @@ TSharedPtr<FJsonObject> HandleSetLightIntensity(const TSharedPtr<FJsonObject>& P
         { TEXT("new_intensity"), After },
         { TEXT("requested_intensity"), Requested } });
     Reply->SetBoolField(TEXT("intensity_set"), bApplied);
-    Reply->SetStringField(TEXT("intensity_message"), bApplied ? TEXT("Light intensity set successfully") : TEXT("Failed to set light intensity"));
+    Reply->SetBoolField(TEXT("intensity_changed"), After != Before);
+    Reply->SetStringField(TEXT("intensity_message"), !bChange
+        ? TEXT("The light already has that intensity; nothing was changed")
+        : (bApplied ? TEXT("Light intensity set successfully") : TEXT("Failed to set light intensity")));
     UEAgentLightingImpl::WriteLightStatus(Light, *Reply, true, false);
     UEAgentLightingImpl::WriteSetterTypeBlock(Light, *Reply, false);
     Reply->SetObjectField(TEXT("light_position"), mcp_common::VectorToJsonObject(Found.Actor->GetActorLocation()));
     Reply->SetObjectField(TEXT("light_color"), mcp_common::LinearColorToJsonObject(FLinearColor(Light.LightColor)));
+    if (!bApplied)
+    {
+        Reply->SetBoolField(TEXT("success"), false);
+        Reply->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("set_light_intensity"), TEXT("intensity_set")));
+    }
     return Reply;
 }
 
-// MCP:set_light_color - Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The engine refuses runtime changes on a Static-mobility light, which keeps its color with color_set false and success still true. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or unparsable color is an error. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
+// MCP:set_light_color - Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The change is one undo step that marks the level dirty, and nothing is saved; a request that quantizes to the stored color changes nothing (color_changed false). The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or unparsable color is an error too. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
 //   @param light_name - Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched
 //   @param color - Color in 'R,G,B,A' or 'R,G,B' format (values 0-1) or hex '#RRGGBB' format; alpha defaults to 1, and in the comma form a part that is not a number reads as 0
-//   @returns { light_name, requested_color, color_set, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }
+//   @returns { light_name, requested_color, color_set, color_changed, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }
 TSharedPtr<FJsonObject> HandleSetLightColor(const TSharedPtr<FJsonObject>& Params)
 {
     FString LightName;
@@ -1570,29 +1756,50 @@ TSharedPtr<FJsonObject> HandleSetLightColor(const TSharedPtr<FJsonObject>& Param
     // LightColor is stored as an 8-bit sRGB FColor, so the request is quantized the way SetLightColor
     // quantizes it and the two FColors are compared exactly. Comparing the linear readings at a 0.001
     // tolerance (finer than the quantization step) would report most colors as not set.
+    // SetLightColor skips an unchanged color, so a request that quantizes to the stored color writes nothing, and
+    // nothing is recorded or dirtied for it. A change to a static light is refused before anything is written.
     ULightComponent& Light = *Found.Light;
-    const FLinearColor Before(Light.LightColor);
-    Light.SetLightColor(Wanted);
+    const FColor WantedColor = Wanted.ToFColor(/*bSRGB=*/true);
+    const FColor BeforeColor = Light.LightColor;
+    const FLinearColor Before(BeforeColor);
+    const bool bChange = BeforeColor != WantedColor;
+    if (bChange)
+    {
+        if (UEAgentLightingImpl::IsStaticLight(Light))
+        {
+            return UEAgentLightingImpl::StaticLightReply(LightName, TEXT("the color"));
+        }
+        Light.Modify();
+        Light.SetLightColor(Wanted);
+    }
     const FLinearColor After(Light.LightColor);
-    const bool bApplied = Light.LightColor == Wanted.ToFColor(/*bSRGB=*/true);
+    const bool bApplied = Light.LightColor == WantedColor;
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
     Reply->SetStringField(TEXT("light_name"), LightName);
     Reply->SetStringField(TEXT("requested_color"), ColorText);
     Reply->SetBoolField(TEXT("color_set"), bApplied);
-    Reply->SetStringField(TEXT("color_message"), bApplied ? TEXT("Light color set successfully") : TEXT("Failed to set light color"));
+    Reply->SetBoolField(TEXT("color_changed"), Light.LightColor != BeforeColor);
+    Reply->SetStringField(TEXT("color_message"), !bChange
+        ? TEXT("The light already has that color; nothing was changed")
+        : (bApplied ? TEXT("Light color set successfully") : TEXT("Failed to set light color")));
     Reply->SetObjectField(TEXT("old_color"), mcp_common::LinearColorToJsonObject(Before));
     Reply->SetObjectField(TEXT("new_color"), mcp_common::LinearColorToJsonObject(After));
     UEAgentLightingImpl::WriteLightStatus(Light, *Reply, true, true);
     UEAgentLightingImpl::WriteSetterTypeBlock(Light, *Reply, false);
     Reply->SetObjectField(TEXT("light_position"), mcp_common::VectorToJsonObject(Found.Actor->GetActorLocation()));
+    if (!bApplied)
+    {
+        Reply->SetBoolField(TEXT("success"), false);
+        Reply->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("set_light_color"), TEXT("color_set")));
+    }
     return Reply;
 }
 
-// MCP:configure_light_shadows - Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world.
+// MCP:configure_light_shadows - Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world. The change is one undo step that marks the level dirty, and nothing is saved; a light that already has the preset changes nothing and answers shadows_changed false. Changing cast shadows or the bias of a Static-mobility light, which the engine's setters ignore, is an error and nothing is written. Single fields: set_light_properties; cascades: set_directional_light_cascade_settings.
 //   @param light_name - Name of the light actor to configure
 //   @param shadow_settings - Shadow configuration: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error
-//   @returns { light_name, shadow_settings, shadows_configured, shadow_message, old_cast_shadows, new_cast_shadows, old_affect_world, new_affect_world, shadows_enabled, affect_world, bias_applied, shadow_bias, shadow_slope_bias, shadow_filter_sharpen, light_enabled, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_cascade_distribution_exponent, light_cascade_transition_fraction, light_attenuation_radius, light_source_radius, light_source_length, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }
+//   @returns { light_name, shadow_settings, shadows_configured, shadows_changed, shadow_message, old_cast_shadows, new_cast_shadows, old_affect_world, new_affect_world, shadows_enabled, affect_world, bias_applied, shadow_bias, shadow_slope_bias, shadow_filter_sharpen, light_enabled, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_cascade_distribution_exponent, light_cascade_transition_fraction, light_attenuation_radius, light_source_radius, light_source_length, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }
 TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject>& Params)
 {
     FString LightName;
@@ -1617,6 +1824,17 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
 
     const bool bCastBefore = Light.CastShadows != 0;
     const bool bAffectBefore = Light.bAffectsWorld != 0;
+    // CastShadows, ShadowBias and ShadowSlopeBias go through engine setters that ignore a static light, so a preset
+    // that changes any of them on one is refused before anything is written; ShadowSharpen has no setter. A light
+    // that already has the preset's values is left as it is, with nothing recorded or dirtied.
+    const bool bSetterChange = bCastBefore != Preset.bCastShadows
+        || (Preset.bSetsBias && (Light.ShadowBias != Preset.Bias || Light.ShadowSlopeBias != Preset.SlopeBias));
+    const bool bChange = bSetterChange || (Preset.bSetsBias && Light.ShadowSharpen != Preset.FilterSharpen);
+    if (bSetterChange && UEAgentLightingImpl::IsStaticLight(Light))
+    {
+        return UEAgentLightingImpl::StaticLightReply(LightName, TEXT("cast shadows or the shadow bias"));
+    }
+    if (bChange)
     {
         const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "ConfigureLightShadows", "MCP: Configure Light Shadows"));
         Light.Modify();
@@ -1639,7 +1857,10 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
     Reply->SetStringField(TEXT("light_name"), LightName);
     Reply->SetStringField(TEXT("shadow_settings"), ShadowSettings);
     Reply->SetBoolField(TEXT("shadows_configured"), bConfigured);
-    Reply->SetStringField(TEXT("shadow_message"), bConfigured ? TEXT("Light shadows configured successfully") : TEXT("Failed to configure light shadows"));
+    Reply->SetBoolField(TEXT("shadows_changed"), bChange);
+    Reply->SetStringField(TEXT("shadow_message"), !bChange
+        ? TEXT("The light already has these shadow settings; nothing was changed")
+        : (bConfigured ? TEXT("Light shadows configured successfully") : TEXT("Failed to configure light shadows")));
     Reply->SetBoolField(TEXT("old_cast_shadows"), bCastBefore);
     Reply->SetBoolField(TEXT("new_cast_shadows"), Light.CastShadows != 0);
     Reply->SetBoolField(TEXT("old_affect_world"), bAffectBefore);
@@ -1655,6 +1876,11 @@ TSharedPtr<FJsonObject> HandleConfigureLightShadows(const TSharedPtr<FJsonObject
     UEAgentLightingImpl::WriteSetterTypeBlock(Light, *Reply, true);
     Reply->SetObjectField(TEXT("light_position"), mcp_common::VectorToJsonObject(Found.Actor->GetActorLocation()));
     Reply->SetObjectField(TEXT("light_color"), mcp_common::LinearColorToJsonObject(FLinearColor(Light.LightColor)));
+    if (!bConfigured)
+    {
+        Reply->SetBoolField(TEXT("success"), false);
+        Reply->SetStringField(TEXT("error"), mcp_common::MeasuredOutcomeError(TEXT("configure_light_shadows"), TEXT("shadows_configured")));
+    }
     return Reply;
 }
 
@@ -1708,9 +1934,9 @@ TSharedPtr<FJsonObject> HandleGetRenderingSettings(const TSharedPtr<FJsonObject>
     return Report;
 }
 
-// MCP:configure_post_processing - Apply a post-processing quality preset with console commands that set nine renderer variables (r.PostProcessAAQuality, r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.GlobalIlluminationQuality, r.ColorGradingQuality, r.LensFlareQuality, r.SSRQuality). Enabled and High set all to 2; Medium sets anti-aliasing, bloom, depth of field, ambient occlusion and color grading to 1 and the rest to 0; Disabled and Low set all to 0, yet Low reports post_processing_enabled true. The change is engine-wide for this session: no volume is edited, no config written, nothing saved or undoable. An unknown preset changes nothing and still succeeds, with post_processing_configured false. The *_enabled flags echo the preset, not a read-back, so a variable this engine lacks (r.SSRQuality is r.SSR.Quality in UE5) still reads as set. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
+// MCP:configure_post_processing - Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have no such variable in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1 and the rest to 0; Disabled and Low set all to 0. Each variable is read back: post_processing_variables lists it, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
 //   @param post_process_settings - Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'; case is ignored
-//   @returns { post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, anti_aliasing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, global_illumination_enabled, color_grading_enabled, lens_flare_enabled, screen_space_reflections_enabled, world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }
+//   @returns { post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, lens_flare_enabled, screen_space_reflections_enabled, post_processing_variables: [{ variable, previous, requested, value, applied }], world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }
 TSharedPtr<FJsonObject> HandleConfigurePostProcessing(const TSharedPtr<FJsonObject>& Params)
 {
     FString PostProcessSettings;
@@ -1722,6 +1948,19 @@ TSharedPtr<FJsonObject> HandleConfigurePostProcessing(const TSharedPtr<FJsonObje
         return mcp_common::MakeErrorReply(TEXT("No world found"));
     }
 
+    // The preset and every console variable it sets are checked before any is written.
+    const UEAgentLightingImpl::FPostProcessPreset* Preset = UEAgentLightingImpl::FindPostProcessPreset(PostProcessSettings);
+    if (Preset == nullptr)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown post_process_settings '%s': use Enabled, Disabled, High, Medium or Low; nothing was changed"), *PostProcessSettings));
+    }
+    IConsoleVariable* Variables[UEAgentLightingImpl::PostFeature::Count] = {};
+    if (TSharedPtr<FJsonObject> Unusable = UEAgentLightingImpl::ResolvePostVariables(Variables))
+    {
+        return Unusable;
+    }
+
     // The volume list is taken before the preset touches any console variable.
     TArray<APostProcessVolume*> Volumes;
     for (APostProcessVolume* Volume : TActorRange<APostProcessVolume>(World))
@@ -1729,8 +1968,14 @@ TSharedPtr<FJsonObject> HandleConfigurePostProcessing(const TSharedPtr<FJsonObje
         Volumes.Add(Volume);
     }
 
-    const UEAgentLightingImpl::FPostProcessState State = UEAgentLightingImpl::ApplyPostProcessSettings(*World, PostProcessSettings);
-    return UEAgentLightingImpl::PostProcessReply(PostProcessSettings, State, *World, Volumes);
+    const UEAgentLightingImpl::FPostProcessState State = UEAgentLightingImpl::ApplyPostProcessPreset(*Preset, Variables);
+    TSharedPtr<FJsonObject> Reply = UEAgentLightingImpl::PostProcessReply(PostProcessSettings, State, *World, Volumes);
+    if (!State.bConfigured)
+    {
+        Reply->SetBoolField(TEXT("success"), false);
+        Reply->SetStringField(TEXT("error"), UEAgentLightingImpl::PostProcessMismatchError(State));
+    }
+    return Reply;
 }
 
 // MCP:get_shader_info - Read the shading setup the editor runs with, from console variables and the RHI, plus a census of the engine's first world context (normally the editor level); nothing is changed or compiled. shader_type is forward or deferred (r.ForwardShading), shader_api the RHI in use, shader_quality the r.MaterialQualityLevel level; each shader_*_enabled switch, vsync, frame-rate limit and screen percentage comes from its console variable and is omitted when the build lacks it, while shaders_enabled, shader_quality_auto and the platform architecture and OS are fixed. World counts are of actors owning a static mesh, skeletal mesh, light or FX component, plus post-process volumes; material_details lists each distinct material on their first mesh components. The complexity score, rating and recommendations are a heuristic of those counts, not a shader measurement. Renderer summary: get_rendering_settings; lights: get_lighting_quality; one variable: get_cvar.
@@ -1808,7 +2053,7 @@ UDirectionalLightComponent* ResolveDirectionalLightComponent(const TSharedPtr<FJ
 // Cascaded Shadow Map (CSM) settings on a UDirectionalLightComponent. They get dedicated commands because
 // set_light_properties works across light types and writes no CSM field.
 
-// MCP:set_directional_light_cascade_settings - Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Partial update (idempotent): only fields present are written; the engine setters auto-dedup, and the inset-shadows bit (no setter) is guarded by hand. Errors honestly if the actor is not a directional light. Verify by read-back (every field is echoed) or via get_directional_light_cascade_settings.
+// MCP:set_directional_light_cascade_settings - Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Partial update (idempotent): only fields present are written; the engine setters auto-dedup, and the inset-shadows bit (no setter) is guarded by hand. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. Errors honestly if the actor is not a directional light. Verify by read-back (every field is echoed) or via get_directional_light_cascade_settings.
 //   @param light_name [string!] - Name of the directional light actor to modify
 //   @param dynamic_shadow_distance_movable [number] - How far CSM dynamic shadows cover for a movable light, measured from the camera (0 disables)
 //   @param dynamic_shadow_distance_stationary [number] - How far CSM dynamic shadows cover for a stationary light, measured from the camera (0 disables)
@@ -1817,7 +2062,7 @@ UDirectionalLightComponent* ResolveDirectionalLightComponent(const TSharedPtr<FJ
 //   @param cascade_transition_fraction [number] - Proportion of the blended fade region between cascades (0 = hard transitions)
 //   @param shadow_distance_fadeout_fraction [number] - Size of the fade-out region at the far extent of the dynamic shadow, as a fraction of the shadow distance
 //   @param use_inset_shadows_for_movable_objects [bool] - Stationary lights: use per-object inset shadows for movable components even though CSM is enabled
-//   @returns { light_name, light_subtype, settings_applied: {...}, applied_count, dynamic_shadow_distance_movable, dynamic_shadow_distance_stationary, num_dynamic_shadow_cascades, cascade_distribution_exponent, cascade_transition_fraction, shadow_distance_fadeout_fraction, use_inset_shadows_for_movable_objects }
+//   @returns { light_name, light_subtype, settings_applied: {...}, applied_count, changed, dynamic_shadow_distance_movable, dynamic_shadow_distance_stationary, num_dynamic_shadow_cascades, cascade_distribution_exponent, cascade_transition_fraction, shadow_distance_fadeout_fraction, use_inset_shadows_for_movable_objects }
 TSharedPtr<FJsonObject> HandleSetDirectionalLightCascadeSettings(const TSharedPtr<FJsonObject>& Params)
 {
     TSharedPtr<FJsonObject> Error;
@@ -1832,6 +2077,10 @@ TSharedPtr<FJsonObject> HandleSetDirectionalLightCascadeSettings(const TSharedPt
 
     TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
     double Num; bool B;
+
+    // Modify() before the first write makes the call one undo step; Finish() below gives the step and the dirty
+    // flag back when nothing changed.
+    UEAgentLightingImpl::FLightEdit Edit(*Directional);
 
     // The six ENGINE_API setters guard internally (if (X != NewValue) { ...; MarkRenderStateDirty(); }),
     // so re-applying the same value is a true no-op (idempotent). Partial update: only present keys.
@@ -1880,10 +2129,13 @@ TSharedPtr<FJsonObject> HandleSetDirectionalLightCascadeSettings(const TSharedPt
         Applied->SetBoolField(TEXT("use_inset_shadows_for_movable_objects"), Directional->bUseInsetShadowsForMovableObjects != 0);
     }
 
+    const bool bChanged = Edit.Finish();
+
     // Full read-back of every CSM field so the change is verifiable from this call alone.
     TSharedPtr<FJsonObject> ResultObj = UEAgentLightingImpl::MakeCascadeReply(LightName, *Directional);
     ResultObj->SetObjectField(TEXT("settings_applied"), Applied);
     ResultObj->SetNumberField(TEXT("applied_count"), Applied->Values.Num());
+    ResultObj->SetBoolField(TEXT("changed"), bChanged);
     return ResultObj;
 }
 

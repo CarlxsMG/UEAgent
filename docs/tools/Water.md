@@ -198,12 +198,12 @@ Set ANY water body's spline path from world points, then synchronize the water s
 
 *Destructive, idempotent.*
 
-Set a river's width and/or depth at a spline input key (river water bodies only); reads them back.
+Set the width and/or depth of a river water body, found by actor label in the editor world, at one spline input key, reading both back; nothing is saved. The engine writes the spline point at or before input_key (point i sits at key i; past the last point, the last one), while the read-back evaluates the curve at the key, so a fractional key reads an interpolated value. A value already held is not written; otherwise the call is one undo step that dirties the actor's package, with no spline-change broadcast. applied is always true, even with neither width nor depth. A non-river body, unknown label or key before the first point is an error and nothing changes. All points at once, with a spline sync: set_river_widths_depths; point positions: get_river_spline_points.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `water_body_label` | string | yes | Label of the AWaterBodyRiver actor |
-| `input_key` | number | yes | Spline input key at which to set width/depth |
+| `input_key` | number | yes | Spline input key at which to set width/depth; a key before the first spline point (below 0) is an error and nothing is changed |
 | `width` | number | no | Optional new river width at the key |
 | `depth` | number | no | Optional new river depth at the key |
 
@@ -248,7 +248,7 @@ Build a Gerstner wave set (UGerstnerWaterWaves + simple parametric generator) an
 
 *Destructive, idempotent.*
 
-Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. The body is written without Modify: no undo step, dirty flag or save. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
+Give a Lake or Ocean water body (found by actor label in the editor world) a new Gerstner waves object driven by the engine's spectrum generator, configured from spectrum_type and octaves, in place of the waves it had. In UE 5.8 that generator is an unimplemented engine stub, so the body is left with NO waves: num_waves and max_wave_height come back 0, and note says so. Use set_water_body_gerstner_waves for real waves. One undo step restores the waves it had; nothing is saved. A river, an unknown label or an unknown spectrum_type is an error. Read back with get_water_body_wave_info or get_water_body_gerstner_wave_detail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -262,7 +262,7 @@ Give a Lake or Ocean water body (found by actor label in the editor world) a new
 
 *Destructive, idempotent.*
 
-Set the surface water material on a water body's UWaterBodyComponent (body found by actor label in the editor world, material loaded by asset path) and rebuild its material instances. The component is written without Modify: no undo step, dirty flag or save. The material it already has changes nothing and still answers set=true; set confirms the component now holds the requested material, and material is that material's short name, not its path. An unknown label, a body without a water body component, or a path that does not load as a UMaterialInterface is an error. Read it back with get_water_body_info; other body settings: set_water_body_properties; waves: set_water_body_gerstner_waves.
+Set the surface water material on a water body's UWaterBodyComponent (body found by actor label in the editor world, material loaded by asset path) and rebuild its material instances. The change is one undo step and dirties the level; nothing is saved. The material it already has changes nothing, adds no undo step and still answers set=true; set confirms the component now holds the requested material, and material is that material's short name, not its path. An unknown label, a body without a water body component, or a path that does not load as a UMaterialInterface is an error. Read it back with get_water_body_info; other body settings: set_water_body_properties; waves: set_water_body_gerstner_waves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -275,14 +275,14 @@ Set the surface water material on a water body's UWaterBodyComponent (body found
 
 *Destructive, idempotent.*
 
-Partial-update a water body's properties (only the keys present are applied); each applied field is read back with already_set when it already matched.
+Set only the given settings of a lake, ocean or river water body, found by actor label in the editor world, reading each back with already_set; nothing is saved. water_velocity and audio_intensity go to the spline point at or before input_key, which only they need; other keys are component fields stored directly (no PostEditChange, so no rebuild). water_height_offset is ocean-only; the ocean's setter clamps it to >= 0 and rebuilds the body. All checks run before any write: a spline value without input_key, a key before the first spline point, water_height_offset on a non-ocean body or an unknown label is an error that changes nothing. A value already held is not written; otherwise the call is one undo step that dirties the actor's package. River width/depth: set_river_width_depth_at_point; type, zone, material: get_water_body_info; waves: set_water_body_gerstner_waves.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `water_body_label` | string | yes | Label of the AWaterBody actor (Lake/Ocean/River) |
-| `input_key` | number | yes | Spline input key for water_velocity/audio_intensity (required only when either is set) |
 | `water_velocity` | number | no | River/spline water velocity to set at input_key (requires input_key) |
 | `audio_intensity` | number | no | Spline audio intensity to set at input_key (requires input_key) |
+| `input_key` | number | no | Spline input key for water_velocity/audio_intensity (required only when either is set); a key before the first spline point (below 0) is an error and nothing is changed |
 | `target_wave_mask_depth` | number | no | Water depth at which waves start being attenuated |
 | `max_wave_height_offset` | number | no | Offset added to the automatically calculated max wave height bounds |
 | `collision_height_offset` | number | no | Distance above the water surface where collision checks still occur |

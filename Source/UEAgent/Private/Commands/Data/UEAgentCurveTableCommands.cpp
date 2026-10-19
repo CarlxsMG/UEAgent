@@ -148,7 +148,7 @@ namespace UEAgentCurveTableCommandsImpl
 // --------------------------------------------------------------------------- //
 // create_curve_table
 // --------------------------------------------------------------------------- //
-// MCP:create_curve_table - Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a curve table already at that path, a composite one included, is returned untouched with created=false and already_exists=true; any other asset there, or an invalid package name, is an error. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
+// MCP:create_curve_table - Create an empty UCurveTable asset (a table of named curve rows) at package_path/name and save it. Idempotent: a plain curve table already at that path is returned untouched with created=false, already_exists=true and saved=false, and nothing is saved; a composite curve table or any other asset there, or an invalid package name, is an error naming what is there. A failed save makes success false with saved=false and the cause in message, the new table staying in memory. The table starts in Empty mode and turns RichCurves when add_curve_table_row adds its first row. Add keys with add_curve_table_key; read back with get_curve_table_info; stack tables with create_composite_curve_table; a standalone float, vector or color curve is create_curve_asset, and a table of struct rows is create_data_table.
 //   @param name - Name of the new CurveTable asset, e.g. "CT_Damage"; also the last segment of its path.
 //   @param package_path - Content folder for the asset, e.g. "/Game/Data"; defaults to /Game/CurveTables
 //   @returns { name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, message?: string }
@@ -169,18 +169,18 @@ TSharedPtr<FJsonObject> HandleCreateCurveTable(const TSharedPtr<FJsonObject>& Pa
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load it and return a STABLE payload.
+    // Idempotent: a plain curve table already there is returned unchanged and nothing is saved. A composite one
+    // also loads as a UCurveTable, but its rows come from its parents, so it is not the table asked for.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         UCurveTable* Existing = LoadCurveTableAt(FullPath);
-        if (Existing)
+        if (Existing && Existing->GetClass() == UCurveTable::StaticClass())
         {
             TSharedPtr<FJsonObject> ExistObj = Impl::CreatedTableReply(Name, PackagePath, *Existing);
-            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("CurveTable"));
             return mcp_common::MakeOkReply(ExistObj);
         }
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Asset already exists at %s but could not be loaded as UCurveTable"), *FullPath));
+        return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UCurveTable::StaticClass());
     }
 
     FString CreateError;
@@ -436,11 +436,11 @@ TSharedPtr<FJsonObject> HandleRemoveCurveTableKey(const TSharedPtr<FJsonObject>&
 // --------------------------------------------------------------------------- //
 // create_composite_curve_table
 // --------------------------------------------------------------------------- //
-// MCP:create_composite_curve_table - Creates a UCompositeCurveTable at package_path/name that stacks the given UCurveTables as parents, and saves it. An existing composite there is reused and only gets parents if it has none; parents that fail to load are skipped and listed in missing_parents. Returns parent_count, row_count, created, saved.
+// MCP:create_composite_curve_table - Creates a UCompositeCurveTable at package_path/name that stacks the given UCurveTables as parents, and saves it. An existing composite there is reused and only gets parents if it has none; when it gets none it is returned unchanged with already_exists=true and saved=false, and nothing is saved. Any other asset class at that path is an error. Parents that fail to load are skipped and listed in missing_parents. A failed save makes success false with saved=false and save_error. Returns parent_count, row_count, created, saved. A plain table is create_curve_table; read back with get_curve_table_info.
 //   @param name - Name of the new CompositeCurveTable asset.
 //   @param package_path - Content folder; defaults to /Game/CurveTables
 //   @param parent_table_paths - Optional list of UCurveTable asset paths to stack as parents
-//   @returns { name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, parent_count: int, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, missing_parents?: [string] }
+//   @returns { name: string, package_path: string, asset_path: string, curve_table_path: string, curve_class: string, parent_count: int, row_count: int, curve_table_mode: string, created: bool, already_exists: bool, saved: bool, missing_parents?: [string], message?: string, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateCompositeCurveTable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -486,12 +486,28 @@ TSharedPtr<FJsonObject> HandleCreateCompositeCurveTable(const TSharedPtr<FJsonOb
     {
         Composite = Cast<UCompositeCurveTable>(
             StaticLoadObject(UCompositeCurveTable::StaticClass(), nullptr, *FullPath));
-        if (!Composite)
+        if (!Composite || Composite->GetClass() != UCompositeCurveTable::StaticClass())
         {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Asset already exists at %s but is not a UCompositeCurveTable"), *FullPath));
+            return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Composite, UCompositeCurveTable::StaticClass());
         }
         bAlreadyExists = true;
+    }
+
+    // AppendParentTables appends raw, so an existing composite only gets the requested parents when it has none:
+    // appending to one that has parents would stack duplicates.
+    const bool bAppendParents = ParentTables.Num() > 0 && (!bAlreadyExists || ReadParentTableCount(Composite) == 0);
+
+    // An existing composite that gets no parents is left exactly as it was: not modified, dirtied or saved.
+    if (bAlreadyExists && !bAppendParents)
+    {
+        TSharedPtr<FJsonObject> ExistObj = UEAgentCurveTableCommandsImpl::CreatedTableReply(
+            Name, PackagePath, *Composite, ReadParentTableCount(Composite));
+        DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("CompositeCurveTable"));
+        if (MissingParents.Num() > 0)
+        {
+            ExistObj->SetArrayField(TEXT("missing_parents"), mcp_common::StringsToJson(MissingParents));
+        }
+        return mcp_common::MakeOkReply(ExistObj);
     }
 
     if (!Composite)
@@ -507,20 +523,12 @@ TSharedPtr<FJsonObject> HandleCreateCompositeCurveTable(const TSharedPtr<FJsonOb
     }
     UPackage* Package = Composite->GetOutermost();
 
-    // Append the requested parents. AppendParentTables() updates the cached row map
-    // and wires change delegates. On an idempotent re-run this appends again, so we
-    // guard: only append parents not already referenced.
-    const int32 ExistingParentCount = ReadParentTableCount(Composite);
-    if (ParentTables.Num() > 0)
+    // AppendParentTables() updates the cached row map and wires change delegates. Modify() runs first, so the
+    // dispatcher's undo step holds the change.
+    if (bAppendParents)
     {
         Composite->Modify();
-        // On a brand-new asset there are no parents yet; on re-run, AddUnique-style
-        // dedupe is handled by AppendParentTables appending raw, so only append when
-        // the asset was freshly created to avoid duplicate entries.
-        if (!bAlreadyExists || ExistingParentCount == 0)
-        {
-            Composite->AppendParentTables(ParentTables);
-        }
+        Composite->AppendParentTables(ParentTables);
     }
 
     Composite->MarkPackageDirty();

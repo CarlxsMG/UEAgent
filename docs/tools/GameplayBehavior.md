@@ -22,14 +22,14 @@ Create a UGameplayBehaviorConfig asset at package_path/config_name, or load the 
 
 *Destructive, idempotent.*
 
-Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every tracked behavior that is a behavior_class (subclasses included) gets EndBehavior with interrupted=true, and with behavior_class omitted every behavior on the pawn ends. behavior_class must be a full class path (a short name does not resolve), and one that does not resolve to a UGameplayBehavior subclass falls back silently to all of them; the reply behavior_class names the class used. ended carries the engine StopBehavior result, always false in UE 5.8, so it does not tell whether anything stopped. Runtime only: nothing is saved or undoable, and a repeat call finds nothing left to stop (idempotent). A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
+Interrupt the gameplay behaviors that the editor world UGameplayBehaviorSubsystem runs on a Pawn found by its label: every running behavior that is a behavior_class (subclasses included), or every one when behavior_class is omitted, gets EndBehavior with interrupted=true. behavior_class must be the full class path of a UGameplayBehavior subclass; a short name, or a path that does not resolve to one, is an error and nothing stops. ended is read back from the subsystem: true once every matching behavior stopped, while still_running counts the ones that did not and makes success false. With none running it succeeds with ended false and a note, so a repeat call is idempotent. Runtime only: nothing is saved or undoable. A missing actor, a non-Pawn or no subsystem is an error. Start one: trigger_behavior_on_actor; subsystem check: get_behavior_subsystem_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Label of the Pawn actor in the editor world. |
-| `behavior_class` | string | no | Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted, or a path that does not resolve, stops every behavior on the pawn |
+| `behavior_class` | string | no | Optional full path of the UGameplayBehavior subclass to stop, e.g. "/Script/GameplayBehaviorsModule.GameplayBehavior_AnimationBased"; omitted stops every behavior on the pawn, and a path that does not resolve to such a class is an error |
 
-**Returns:** `{ actor_label: string, behavior_class: string, ended: bool }`
+**Returns:** `{ actor_label: string, behavior_class: string, ended: bool, stopped_count: int, still_running: int, note?: string }`
 
 ## `get_behavior_config_info`
 

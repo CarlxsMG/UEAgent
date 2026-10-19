@@ -8,6 +8,7 @@
 #include "MetasoundDocumentInterface.h"                         // IMetaSoundDocumentInterface
 #include "MetasoundFrontendDocument.h"                          // FMetasoundFrontendDocument / class metadata + interface
 #include "MetasoundFrontendLiteral.h"                           // FMetasoundFrontendLiteral
+#include "MetasoundFrontendDataTypeRegistry.h"                  // IDataTypeRegistry::IsRegistered / IsLiteralTypeSupported
 #include "Interfaces/MetasoundOutputFormatInterfaces.h"         // EMetaSoundOutputAudioFormat
 
 // MetaSound editor (MetasoundEditor — UncookedOnly module, editor only)
@@ -137,31 +138,134 @@ namespace
         return EMetaSoundOutputAudioFormat::Mono;
     }
 
-    // Build an FMetasoundFrontendLiteral from the request's value field (one of
-    // bool_value / int_value / string_value / value-float). Shared by the graph-input
-    // and node-input default setters.
-    void BuildLiteralFromParams(const TSharedPtr<FJsonObject>& Params, FMetasoundFrontendLiteral& Literal, FString& ValueType)
+    // The literal kinds a typed value field of the default setters stands for.
+    enum class EMetaSoundValueKind : uint8 { Bool, Int32, String, Float };
+
+    // The name of the literal type of Kind, as the replies report it in value_type.
+    const TCHAR* MetaSound_ValueKindName(EMetaSoundValueKind Kind)
     {
-        if (Params->HasField(TEXT("bool_value")))
+        switch (Kind)
+        {
+        case EMetaSoundValueKind::Bool:   return TEXT("Bool");
+        case EMetaSoundValueKind::Int32:  return TEXT("Int32");
+        case EMetaSoundValueKind::String: return TEXT("String");
+        default:                          return TEXT("Float");
+        }
+    }
+
+    // The JSON value of the optional param Field when the request carries it and it is not null, else null.
+    TSharedPtr<FJsonValue> MetaSound_PresentField(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field)
+    {
+        const TSharedPtr<FJsonValue> Value = Params->TryGetField(Field);
+        return (Value.IsValid() && !Value->IsNull()) ? Value : nullptr;
+    }
+
+    // The typed value field a request carries: the first of bool_value, int_value, string_value and FloatField that is
+    // present and not null, with the literal kind its name stands for; null when there is none.
+    TSharedPtr<FJsonValue> MetaSound_PickValueField(const TSharedPtr<FJsonObject>& Params, const TCHAR* FloatField,
+        const TCHAR*& OutField, EMetaSoundValueKind& OutKind)
+    {
+        struct FValueField
+        {
+            const TCHAR* Name;
+            EMetaSoundValueKind Kind;
+        };
+        const FValueField Fields[] = {
+            { TEXT("bool_value"), EMetaSoundValueKind::Bool },
+            { TEXT("int_value"), EMetaSoundValueKind::Int32 },
+            { TEXT("string_value"), EMetaSoundValueKind::String },
+            { FloatField, EMetaSoundValueKind::Float },
+        };
+        for (const FValueField& Candidate : Fields)
+        {
+            if (TSharedPtr<FJsonValue> Value = MetaSound_PresentField(Params, Candidate.Name))
+            {
+                OutField = Candidate.Name;
+                OutKind = Candidate.Kind;
+                return Value;
+            }
+        }
+        return nullptr;
+    }
+
+    // Why Value cannot be the literal of Kind as it is, or empty when it can: a JSON boolean for Bool, a whole number
+    // within int32 for Int32, a string for String, a finite number within the float range for Float. FJsonObject's
+    // TryGet*Field would convert any other value (a number to a bool, a non-numeric string to 0) instead of refusing it.
+    FString MetaSound_ValueKindError(const FJsonValue& Value, EMetaSoundValueKind Kind)
+    {
+        switch (Kind)
+        {
+        case EMetaSoundValueKind::Bool:
+            return Value.Type == EJson::Boolean ? FString() : FString(TEXT("must be a JSON boolean (true or false)"));
+        case EMetaSoundValueKind::String:
+            return Value.Type == EJson::String ? FString() : FString(TEXT("must be a JSON string"));
+        default:
+            break;
+        }
+        if (Value.Type != EJson::Number)
+        {
+            return TEXT("must be a JSON number");
+        }
+        const double Number = Value.AsNumber();
+        if (Kind == EMetaSoundValueKind::Int32)
+        {
+            const bool bWholeInt32 = FMath::IsFinite(Number) && Number == FMath::FloorToDouble(Number)
+                && Number >= static_cast<double>(MIN_int32) && Number <= static_cast<double>(MAX_int32);
+            return bWholeInt32 ? FString() : FString(TEXT("must be a whole number within the int32 range"));
+        }
+        const bool bFloat = FMath::IsFinite(Number) && FMath::Abs(Number) <= static_cast<double>(TNumericLimits<float>::Max());
+        return bFloat ? FString() : FString(TEXT("must be a finite number within the float range"));
+    }
+
+    // Build an FMetasoundFrontendLiteral from the request's value field: the first of bool_value, int_value and
+    // string_value present and not null, else value (a float). Shared by the graph-input and node-input default
+    // setters. Null on success; otherwise the error reply, with nothing to write: no value field at all, or one whose
+    // JSON type is not the one its name says.
+    TSharedPtr<FJsonObject> BuildLiteralFromParams(const TSharedPtr<FJsonObject>& Params, FMetasoundFrontendLiteral& Literal, FString& ValueType)
+    {
+        const TCHAR* Field = nullptr;
+        EMetaSoundValueKind Kind = EMetaSoundValueKind::Float;
+        const TSharedPtr<FJsonValue> Value = MetaSound_PickValueField(Params, TEXT("value"), Field, Kind);
+        if (!Value.IsValid())
+        {
+            return mcp_common::MakeErrorReply(
+                TEXT("Missing value: give one of value (a float), int_value, bool_value or string_value. Nothing was written."));
+        }
+        const FString KindError = MetaSound_ValueKindError(*Value, Kind);
+        if (!KindError.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s %s. Nothing was written."), Field, *KindError));
+        }
+        // The field is known to hold its JSON type, so each read below takes it as it is.
+        switch (Kind)
+        {
+        case EMetaSoundValueKind::Bool:
         {
             bool B = false; Params->TryGetBoolField(TEXT("bool_value"), B);
-            Literal.Set(B); ValueType = TEXT("Bool");
+            Literal.Set(B);
+            break;
         }
-        else if (Params->HasField(TEXT("int_value")))
+        case EMetaSoundValueKind::Int32:
         {
             int32 I = 0; Params->TryGetNumberField(TEXT("int_value"), I);
-            Literal.Set(I); ValueType = TEXT("Int32");
+            Literal.Set(I);
+            break;
         }
-        else if (Params->HasField(TEXT("string_value")))
+        case EMetaSoundValueKind::String:
         {
             FString S; Params->TryGetStringField(TEXT("string_value"), S);
-            Literal.Set(S); ValueType = TEXT("String");
+            Literal.Set(S);
+            break;
         }
-        else
+        default:
         {
             double V = 0.0; Params->TryGetNumberField(TEXT("value"), V);
-            Literal.Set(static_cast<float>(V)); ValueType = TEXT("Float");
+            Literal.Set(static_cast<float>(V));
+            break;
         }
+        }
+        ValueType = MetaSound_ValueKindName(Kind);
+        return nullptr;
     }
 
     // Parse a node_id (FGuid string from metasound_add_node_by_classname) into a node handle.
@@ -551,14 +655,14 @@ TSharedPtr<FJsonObject> HandleMetaSoundAddInterface(const TSharedPtr<FJsonObject
 // named graph input's default literal via SetGraphInputDefault, then reads it
 // back to verify and saves. Supports float / int / bool / string values.
 // ---------------------------------------------------------------------------
-// MCP:metasound_set_input_default - Sets the default literal value of a MetaSound Source graph input.  Obtains a builder for the existing asset (FindOrBeginBuilding) and calls SetGraphInputDefault with an FMetasoundFrontendLiteral built from the supplied value, then reads the value back to verify and saves the asset. Provide exactly one of ``value`` (float, default), ``int_value``, ``bool_value`` or ``string_value``.
+// MCP:metasound_set_input_default - Set the default value of one graph input of a MetaSound Source asset through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs: get_metasound_info; a node pin: metasound_set_node_input_default; a preset by parameter_type: set_metasound_preset_parameter.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param input_name - Name of the graph input whose default to set.
-//   @param value - Float default value (optional, used if no other *_value is provided)
-//   @param int_value - Int32 default value (optional, mutually exclusive with value/bool_value/string_value)
-//   @param bool_value - Bool default value (optional, mutually exclusive with value/int_value/string_value)
-//   @param string_value - String default value (optional, mutually exclusive with value/int_value/bool_value)
-//   @returns { asset_path: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }
+//   @param value - Float default value, a JSON number (optional, used if no other *_value is provided); another JSON type is an error
+//   @param int_value - Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value)
+//   @param bool_value - Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value)
+//   @param string_value - String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value)
+//   @returns { asset_path: string, input_name: string, value_type: string, value_set: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObject>& Params)
 {
@@ -568,6 +672,12 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
     FString InputName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("input_name"), InputName)) { return Missing; }
 
+    // The value is read and checked before anything is opened or written: a missing value, or one of the wrong JSON
+    // type, would otherwise be written as 0, false or an empty string.
+    FMetasoundFrontendLiteral Literal;
+    FString ValueType;
+    if (TSharedPtr<FJsonObject> ValueError = BuildLiteralFromParams(Params, Literal, ValueType)) { return ValueError; }
+
     UMetaSoundSource* Source = nullptr;
     TSharedPtr<FJsonObject> Error;
     UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error, /*bNameSourceIfNoSubsystem=*/false);
@@ -576,36 +686,86 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetInputDefault(const TSharedPtr<FJsonObj
         return Error;
     }
 
-    // Build the literal from the supplied value (float default).
-    FMetasoundFrontendLiteral Literal;
-    FString ValueType;
-    BuildLiteralFromParams(Params, Literal, ValueType);
+    // The checks FMetaSoundFrontendDocumentBuilder::SetGraphInputDefault makes, made before anything changes: the
+    // input exists in the root graph's interface and its data type takes this literal type.
+    const FName InputFName(*InputName);
+    const TArray<FMetasoundFrontendClassInput>& Inputs = Source->GetConstDocument().RootGraph.GetDefaultInterface().Inputs;
+    const FMetasoundFrontendClassInput* Input =
+        Inputs.FindByPredicate([&InputFName](const FMetasoundFrontendClassInput& In) { return In.Name == InputFName; });
+    if (!Input)
+    {
+        TArray<FString> InputNames;
+        for (const FMetasoundFrontendClassInput& In : Inputs)
+        {
+            InputNames.Add(In.Name.ToString());
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("No graph input named '%s' on '%s' (inputs: %s). Nothing was written."), *InputName, *MetaSoundPath,
+            InputNames.Num() > 0 ? *FString::Join(InputNames, TEXT(", ")) : TEXT("none")));
+    }
+    if (!Metasound::Frontend::IDataTypeRegistry::Get().IsLiteralTypeSupported(Input->TypeName, Literal.GetType()))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Graph input '%s' is of type %s, which takes no %s value. Nothing was written."),
+            *InputName, *Input->TypeName.ToString(), *ValueType));
+    }
+
+    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
+    Data->SetStringField(TEXT("input_name"), InputName);
+    Data->SetStringField(TEXT("value_type"), ValueType);
+
+    // An input already holding this value is a no-op: nothing is written, dirtied or saved.
+    EMetaSoundBuilderResult BeforeResult = EMetaSoundBuilderResult::Failed;
+    const FMetasoundFrontendLiteral Before = Builder->GetGraphInputDefault(InputFName, BeforeResult);
+    if (BeforeResult == EMetaSoundBuilderResult::Succeeded && Before.IsEqual(Literal))
+    {
+        Data->SetBoolField(TEXT("value_set"), true);
+        Data->SetBoolField(TEXT("changed"), false);
+        Data->SetBoolField(TEXT("verified"), true);
+        Data->SetStringField(TEXT("value_read_back"), Before.ToString());
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("note"), TEXT("The input already holds this value; nothing changed, nothing saved"));
+        return mcp_common::MakeOkReply(Data);
+    }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundSetInputDefault", "MetaSound Set Input Default"));
     Source->Modify();
 
     EMetaSoundBuilderResult SetResult = EMetaSoundBuilderResult::Failed;
-    Builder->SetGraphInputDefault(FName(*InputName), Literal, SetResult);
+    Builder->SetGraphInputDefault(InputFName, Literal, SetResult);
     if (SetResult != EMetaSoundBuilderResult::Succeeded)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("SetGraphInputDefault failed for input '%s' (input may not exist)"), *InputName));
     }
 
-    // Read the value back to verify.
+    // The write succeeded when the default read back is the literal sent.
     EMetaSoundBuilderResult GetResult = EMetaSoundBuilderResult::Failed;
-    const FMetasoundFrontendLiteral ReadBack = Builder->GetGraphInputDefault(FName(*InputName), GetResult);
+    const FMetasoundFrontendLiteral ReadBack = Builder->GetGraphInputDefault(InputFName, GetResult);
+    const bool bVerified = GetResult == EMetaSoundBuilderResult::Succeeded;
+    const bool bWritten = bVerified && ReadBack.IsEqual(Literal);
+    const bool bChanged = !(bVerified && BeforeResult == EMetaSoundBuilderResult::Succeeded && ReadBack.IsEqual(Before));
 
+    // Only a value that reads back is saved.
     FString SaveErr;
-    const bool bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    bool bSaved = false;
+    if (bWritten)
+    {
+        bSaved = MetaSound_MarkDirtyAndSave(Source, SaveErr);
+    }
+    else
+    {
+        SaveErr = TEXT("not saved: the default read back is not the value sent");
+    }
 
-    TSharedPtr<FJsonObject> Data = MetaSound_NewPayload(Source);
-    Data->SetStringField(TEXT("input_name"), InputName);
-    Data->SetStringField(TEXT("value_type"), ValueType);
-    Data->SetBoolField(TEXT("value_set"), true);
-    Data->SetBoolField(TEXT("verified"), GetResult == EMetaSoundBuilderResult::Succeeded);
+    Data->SetBoolField(TEXT("value_set"), bWritten);
+    Data->SetBoolField(TEXT("changed"), bChanged);
+    Data->SetBoolField(TEXT("verified"), bVerified);
     Data->SetStringField(TEXT("value_read_back"), ReadBack.ToString());
-    return mcp_common::MakeSavedReply(Data, bSaved, TEXT("metasound_set_input_default"));
+    mcp_common::AddSaveOutcome(Data, bSaved, SaveErr);
+    return mcp_common::MakeOutcomeReply(Data, bWritten && bSaved, !bWritten
+        ? mcp_common::MeasuredOutcomeError(TEXT("metasound_set_input_default"), TEXT("value_set"))
+        : mcp_common::SavedOutcomeError(TEXT("metasound_set_input_default")));
 }
 
 // ---------------------------------------------------------------------------
@@ -654,14 +814,14 @@ TSharedPtr<FJsonObject> HandleGetMetaSoundInfo(const TSharedPtr<FJsonObject>& Pa
 // member). Saves the asset. Supports an optional default value (float/int/bool/
 // string) baked into the literal.
 // ---------------------------------------------------------------------------
-// MCP:add_metasound_graph_input - Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
+// MCP:add_metasound_graph_input - Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error, and so is a default of the wrong JSON type or one data_type takes no literal of, with nothing written. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
 //   @param metasound_path - Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example"
 //   @param input_name - Name of the graph input node to add.
 //   @param data_type - Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float")
-//   @param default_value - Float default baked into the literal (optional)
-//   @param int_value - Int32 default baked into the literal (optional, mutually exclusive with other defaults)
-//   @param bool_value - Bool default baked into the literal (optional, mutually exclusive with other defaults)
-//   @param string_value - String default baked into the literal (optional, mutually exclusive with other defaults)
+//   @param default_value - Float default baked into the literal, a JSON number (optional)
+//   @param int_value - Int32 default baked into the literal, a whole JSON number (optional, mutually exclusive with other defaults)
+//   @param bool_value - Bool default baked into the literal, JSON true or false (optional, mutually exclusive with other defaults)
+//   @param string_value - String default baked into the literal, a JSON string (optional, mutually exclusive with other defaults)
 //   @returns { asset_path: string, input_name: string, data_type: string, added: bool, already_exists?: bool, has_default: bool, note?: string, saved: bool, save_error: string? }
 
 TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObject>& Params)
@@ -675,36 +835,69 @@ TSharedPtr<FJsonObject> HandleAddMetaSoundGraphInput(const TSharedPtr<FJsonObjec
     FString DataType = TEXT("Float");
     Params->TryGetStringField(TEXT("data_type"), DataType);
 
+    // Optional typed default value baked into the literal: the first of bool_value, int_value, string_value and
+    // default_value present and not null. No default is valid; one of the wrong JSON type, or one the data type takes no
+    // literal of, is refused here, before anything is opened or written, instead of being baked in as 0, false or "".
+    FMetasoundFrontendLiteral DefaultLiteral;
+    bool bHasDefault = false;
+    {
+        const TCHAR* Field = nullptr;
+        EMetaSoundValueKind Kind = EMetaSoundValueKind::Float;
+        if (const TSharedPtr<FJsonValue> Value = MetaSound_PickValueField(Params, TEXT("default_value"), Field, Kind))
+        {
+            const FString KindError = MetaSound_ValueKindError(*Value, Kind);
+            if (!KindError.IsEmpty())
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(TEXT("%s %s. Nothing was written."), Field, *KindError));
+            }
+            // The field is known to hold its JSON type, so each read below takes it as it is.
+            switch (Kind)
+            {
+            case EMetaSoundValueKind::Bool:
+            {
+                bool B = false; Params->TryGetBoolField(TEXT("bool_value"), B);
+                DefaultLiteral.Set(B);
+                break;
+            }
+            case EMetaSoundValueKind::Int32:
+            {
+                int32 I = 0; Params->TryGetNumberField(TEXT("int_value"), I);
+                DefaultLiteral.Set(I);
+                break;
+            }
+            case EMetaSoundValueKind::String:
+            {
+                FString S; Params->TryGetStringField(TEXT("string_value"), S);
+                DefaultLiteral.Set(S);
+                break;
+            }
+            default:
+            {
+                double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
+                DefaultLiteral.Set(static_cast<float>(V));
+                break;
+            }
+            }
+            bHasDefault = true;
+
+            // An unregistered data type is left to AddGraphInputNode, which refuses it.
+            const Metasound::Frontend::IDataTypeRegistry& Registry = Metasound::Frontend::IDataTypeRegistry::Get();
+            const FName DataTypeName(*DataType);
+            if (Registry.IsRegistered(DataTypeName) && !Registry.IsLiteralTypeSupported(DataTypeName, DefaultLiteral.GetType()))
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Data type '%s' takes no %s default (%s). Nothing was written."),
+                    *DataType, MetaSound_ValueKindName(Kind), Field));
+            }
+        }
+    }
+
     UMetaSoundSource* Source = nullptr;
     TSharedPtr<FJsonObject> Error;
     UMetaSoundBuilderBase* Builder = MetaSound_OpenSourceBuilder(MetaSoundPath, Source, Error);
     if (!Builder)
     {
         return Error;
-    }
-
-    // Optional typed default value baked into the literal.
-    FMetasoundFrontendLiteral DefaultLiteral;
-    bool bHasDefault = false;
-    if (Params->HasField(TEXT("bool_value")))
-    {
-        bool B = false; Params->TryGetBoolField(TEXT("bool_value"), B);
-        DefaultLiteral.Set(B); bHasDefault = true;
-    }
-    else if (Params->HasField(TEXT("int_value")))
-    {
-        int32 I = 0; Params->TryGetNumberField(TEXT("int_value"), I);
-        DefaultLiteral.Set(I); bHasDefault = true;
-    }
-    else if (Params->HasField(TEXT("string_value")))
-    {
-        FString S; Params->TryGetStringField(TEXT("string_value"), S);
-        DefaultLiteral.Set(S); bHasDefault = true;
-    }
-    else if (Params->HasField(TEXT("default_value")))
-    {
-        double V = 0.0; Params->TryGetNumberField(TEXT("default_value"), V);
-        DefaultLiteral.Set(static_cast<float>(V)); bHasDefault = true;
     }
 
     // AddGraphInputNode hands back an input that already has this name, whatever its type, without touching it
@@ -959,14 +1152,14 @@ TSharedPtr<FJsonObject> HandleMetaSoundAddNodeByClassName(const TSharedPtr<FJson
 // then reads it back to verify. Mirrors metasound_set_input_default but for process
 // nodes, not graph inputs.
 // ---------------------------------------------------------------------------
-// MCP:metasound_set_node_input_default - Set the default literal of a named input pin on a concrete node (by node_id from metasound_add_node_by_classname).  Reads the value back to verify and saves. Provide exactly one of ``value`` (float, default), ``int_value``, ``bool_value`` or ``string_value``.
+// MCP:metasound_set_node_input_default - Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from metasound_add_node_by_classname) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error. A failed save makes success false. For a graph input use metasound_set_input_default.
 //   @param metasound_path - Asset path of the MetaSound Source.
 //   @param node_id - GUID of the node (from metasound_add_node_by_classname).
 //   @param input_name - Name of the node input pin (discover via the node's enumerated inputs).
-//   @param value - Float default (optional, used if no other *_value is provided).
-//   @param int_value - Int32 default (optional, mutually exclusive).
-//   @param bool_value - Bool default (optional, mutually exclusive).
-//   @param string_value - String default (optional, mutually exclusive).
+//   @param value - Float default, a JSON number (optional, used if no other *_value is provided).
+//   @param int_value - Int32 default, a whole JSON number (optional, mutually exclusive).
+//   @param bool_value - Bool default, JSON true or false (optional, mutually exclusive).
+//   @param string_value - String default, a JSON string (optional, mutually exclusive).
 //   @returns { asset_path: string, node_id: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }
 
 TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJsonObject>& Params)
@@ -998,7 +1191,7 @@ TSharedPtr<FJsonObject> HandleMetaSoundSetNodeInputDefault(const TSharedPtr<FJso
 
     FMetasoundFrontendLiteral Literal;
     FString ValueType;
-    BuildLiteralFromParams(Params, Literal, ValueType);
+    if (TSharedPtr<FJsonObject> ValueError = BuildLiteralFromParams(Params, Literal, ValueType)) { return ValueError; }
 
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "MetaSoundSetNodeInputDefault", "MetaSound Set Node Input Default"));
     Source->Modify();

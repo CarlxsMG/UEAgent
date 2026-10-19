@@ -119,7 +119,7 @@ namespace
 
 // Data Layer asset authoring.
 
-// MCP:create_data_layer_asset - Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true; type and color are not applied, and saved reads true though nothing is written), so repeat calls are idempotent; another asset class there, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
+// MCP:create_data_layer_asset - Create a UDataLayerAsset (the World Partition data layer definition) at package_path/name with its type and debug color, and save it. This is only the asset: put it in a map with create_data_layer_instance and add actors with assign_actor_to_data_layer_instance. data_layer_type is matched without case and anything but Runtime gives Editor; a debug_color missing or shorter than 3 numbers gives the default color. A data layer asset already at that path is returned unchanged (created=false, already_exists=true, saved=false; type and color are not applied) and nothing is saved, so repeat calls are idempotent; another asset class there, an external data layer asset included, or an invalid path, is an error. No undo step is recorded; a failed save, as during PIE, makes success false. Later changes: set_data_layer_type or set_data_layer_debug_color; read back: get_data_layer_asset_info; list them: get_data_layer_assets.
 //   @param name - Name of the new data layer asset, also its package name under package_path.
 //   @param package_path - Target /Game package path (optional, default "/Game/DataLayers")
 //   @param data_layer_type - Data layer type: "Editor" or "Runtime" (optional, default "Editor"); matched without case, any other value gives Editor
@@ -150,18 +150,18 @@ TSharedPtr<FJsonObject> HandleCreateDataLayerAsset(const TSharedPtr<FJsonObject>
     FColor DebugColor(0, 128, 255, 255);
     ReadColorParam(Params, TEXT("debug_color"), DebugColor);
 
-    // Idempotent: if it already exists, load and return a STABLE payload.
+    // Idempotent: a data layer asset already there is returned unchanged and nothing is saved. An external data
+    // layer asset also loads as a UDataLayerAsset, but it is not the asset asked for, nor is any other class.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         UDataLayerAsset* Existing = DataAuthoringUtils::LoadDataLayerAsset(FullPath);
-        if (Existing)
+        if (Existing && Existing->GetClass() == UDataLayerAsset::StaticClass())
         {
             TSharedPtr<FJsonObject> ExistObj = DataLayer_CreatedReply(AssetName, PackagePath, Existing);
-            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("Data layer asset"));
             return mcp_common::MakeOkReply(ExistObj);
         }
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Data layer asset already exists at %s but could not be loaded"), *FullPath));
+        return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UDataLayerAsset::StaticClass());
     }
 
     // Create a real /Game package + UDataLayerAsset inside it, then save. The asset

@@ -83,13 +83,12 @@ namespace
 // ----------------------------------------------------------------------------
 // create_eqs_query
 // UEnvQuery is a plain UDataAsset (Runtime/AIModule/Classes/EnvironmentQuery/EnvQuery.h,
-// UCLASS(BlueprintType, MinimalAPI)). The generator/test graph nodes can only be added
-// through the EQS editor (UEdGraph), which is not available headless, so we create and
-// persist the empty query asset. We DO set QueryName via the asset's own name so the
-// asset is at least internally consistent (QueryName is patched from the asset name on
-// PostLoad anyway). Honest about emptiness: returns has_options=false.
+// UCLASS(BlueprintType, MinimalAPI)). This creates and persists the empty query asset;
+// its options, generators and tests are added afterwards by add_eqs_generator and
+// add_eqs_test. QueryName follows the asset's own name (it is patched from the asset name
+// on PostLoad anyway). Honest about emptiness: returns has_options=false.
 // ----------------------------------------------------------------------------
-// MCP:create_eqs_query - Creates and saves an empty Environment Query System (EQS) asset (UEnvQuery)
+// MCP:create_eqs_query - Create an empty Environment Query System asset (UEnvQuery) named name in package_path (default /Game/EQS), with no options yet, and save it. Idempotent: a query already at that path is returned as it is, with already_exists=true and saved=false, and nothing is saved; an asset of another class there is an error. A failed save (PIE running, read-only file) makes success false with saved=false, the new query kept in memory. Then give it an option and a generator with add_eqs_generator and tests with add_eqs_test, tune them with set_eqs_test_scoring, inspect it with get_eqs_query_info and run it with run_eqs_query.
 //   @param name - Asset name for the new UEnvQuery
 //   @param package_path - Target content package path where the asset is created (default /Game/EQS)
 //   @returns { name, package_path, asset_path, asset_class, query_name, has_options, option_count, already_exists, saved, success, message }
@@ -108,17 +107,17 @@ TSharedPtr<FJsonObject> HandleCreateEQSQuery(const TSharedPtr<FJsonObject>& Para
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load it and return a stable payload shape.
+    // Idempotent: an existing query is returned as it is, in a stable payload shape, with nothing saved.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         if (UEnvQuery* Existing = Cast<UEnvQuery>(StaticLoadObject(UEnvQuery::StaticClass(), nullptr, *FullPath)))
         {
             TSharedPtr<FJsonObject> ResultObj = NavEqs_CreatedQueryReply(Name, PackagePath, Existing);
             ResultObj->SetBoolField(TEXT("already_exists"), true);
-            ResultObj->SetBoolField(TEXT("saved"), true);
+            ResultObj->SetBoolField(TEXT("saved"), false);
             ResultObj->SetBoolField(TEXT("success"), true);
             ResultObj->SetStringField(TEXT("message"),
-                TEXT("EQS query already exists (loaded). Generator/test nodes require the EQS editor graph (not headless)."));
+                TEXT("EQS query already exists (loaded, left unchanged and not saved)."));
             return mcp_common::MakeOkReply(ResultObj);
         }
     }
@@ -140,7 +139,7 @@ TSharedPtr<FJsonObject> HandleCreateEQSQuery(const TSharedPtr<FJsonObject>& Para
     ResultObj->SetBoolField(TEXT("saved"), bSaved);
     ResultObj->SetBoolField(TEXT("success"), bSaved);
     ResultObj->SetStringField(TEXT("message"), bSaved
-        ? TEXT("Empty EQS query asset created and saved. Generator/test nodes require the EQS editor graph (not headless).")
+        ? TEXT("Empty EQS query asset created and saved; give it a generator with add_eqs_generator and tests with add_eqs_test.")
         : FString::Printf(TEXT("EQS query created but save failed: %s"), *SaveError));
 
     // The verdict measured above is the verdict EMITTED. A hardcoded success:true
@@ -936,7 +935,7 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_eqs_test_scoring - Sets scoring/filter parameters on a test within a query option and PERSISTS them on the asset (TestPurpose, FilterType, ScoringEquation, ScoringFactor, FloatValue bounds are all real UEnvQueryTest UPROPERTYs). The response reports the values read back from the test object.
+// MCP:set_eqs_test_scoring - Set the scoring and filter settings of the test at test_index in the option at option_index of a UEnvQuery asset loaded by asset path, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1), and an unknown enum name falls back to its default too: the reply reads the stored values back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param option_index - Option index (default 0)
 //   @param test_index - Test index within the option (default 0)
@@ -979,6 +978,13 @@ TSharedPtr<FJsonObject> HandleSetEQSTestScoring(const TSharedPtr<FJsonObject>& P
 
     UEnvQueryTest* Test = Option->Tests[TestIndex];
 
+    // Modify() before the writes, so undo restores the previous scoring. A test saved without RF_Transactional would
+    // be skipped by Modify(); add_eqs_test and the EQS editor create tests with it.
+    Test->SetFlags(RF_Transactional);
+    Test->Modify();
+    Option->Modify();
+    Query->Modify();
+
     Test->TestPurpose = ParseEnumByName<EEnvTestPurpose::Type>(
         *FString::Printf(TEXT("EEnvTestPurpose::%s"), PurposeStr.IsEmpty() ? TEXT("Score") : *PurposeStr),
         EEnvTestPurpose::Score);
@@ -997,9 +1003,6 @@ TSharedPtr<FJsonObject> HandleSetEQSTestScoring(const TSharedPtr<FJsonObject>& P
     if (Params->TryGetNumberField(TEXT("scoring_factor"), ScoringFactor))
         Test->ScoringFactor.DefaultValue = static_cast<float>(ScoringFactor);
 
-    Test->Modify();
-    Option->Modify();
-    Query->Modify();
     Query->MarkPackageDirty();
 
     // Read BACK the real persisted values (not the input echo) for honest verification.
@@ -1379,9 +1382,11 @@ TSharedPtr<FJsonObject> HandleRemoveEQSGenerator(const TSharedPtr<FJsonObject>& 
     const bool bRemoved = Option && Option->Generator != nullptr;
     if (bRemoved)
     {
-        Option->Generator = nullptr;
+        // Modify() before the write, so undo puts the generator back (RF_Transactional as in remove_eqs_test).
+        Option->SetFlags(RF_Transactional);
         Option->Modify();
         Query->Modify();
+        Option->Generator = nullptr;
         Query->MarkPackageDirty();
     }
 
@@ -1390,7 +1395,7 @@ TSharedPtr<FJsonObject> HandleRemoveEQSGenerator(const TSharedPtr<FJsonObject>& 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_eqs_test - Remove the test at test_index from one option of a UEnvQuery asset; later tests shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range option or test index is an error, not a no-op. Returns removed and test_count.
+// MCP:remove_eqs_test - Remove the test at test_index from the option at option_index (default 0) of a UEnvQuery asset loaded by asset path; the tests after it shift down one index, and test_count is what the option keeps. One undo step puts the test back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Not idempotent: repeating the call removes the test that moved into that index, so read the indices with get_eqs_query_info first. Inverse: add_eqs_test; retune a test instead: set_eqs_test_scoring; a whole option: remove_eqs_option; the generator: remove_eqs_generator.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param option_index - 0-based index of the query option that holds the test (default 0).
 //   @param test_index - Index of the test to remove within the option (required)
@@ -1415,9 +1420,12 @@ TSharedPtr<FJsonObject> HandleRemoveEQSTest(const TSharedPtr<FJsonObject>& Param
     if (!Option || !Option->Tests.IsValidIndex(TestIndex))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Test index %d out of range (option has %d tests)"), TestIndex, Option ? Option->Tests.Num() : 0));
 
-    Option->Tests.RemoveAt(TestIndex);
+    // Modify() before the removal, so undo puts the test back. An option saved without RF_Transactional would be
+    // skipped by Modify(); the EQS editor sets it too.
+    Option->SetFlags(RF_Transactional);
     Option->Modify();
     Query->Modify();
+    Option->Tests.RemoveAt(TestIndex);
     Query->MarkPackageDirty();
 
     TSharedPtr<FJsonObject> Result = NavEqs_OptionReply(QueryPath, OptionIndex);
@@ -1427,7 +1435,7 @@ TSharedPtr<FJsonObject> HandleRemoveEQSTest(const TSharedPtr<FJsonObject>& Param
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:add_eqs_option - Append a new empty option (no generator, no tests) after the existing options of the UEnvQuery asset at query_path and return its option_index, always the last one. Each call adds another option (not idempotent). The asset is only marked dirty, not saved (save_asset), and no undo step is recorded; a query that does not load is an error. An option without a generator is skipped, with an error log, when the query runs: give it one with add_eqs_generator (which can also append the option itself when option_index equals the option count), then add tests with add_eqs_test. Inspect with get_eqs_query_info; inverse: remove_eqs_option; a new query: create_eqs_query.
+// MCP:add_eqs_option - Append a new empty option (no generator, no tests) after the existing options of the UEnvQuery asset at query_path and return its option_index, always the last one. Each call adds another option (not idempotent). The asset is only marked dirty, not saved (save_asset), and the append is one undo step; a query that does not load is an error. An option without a generator is skipped, with an error log, when the query runs: give it one with add_eqs_generator (which can also append the option itself when option_index equals the option count), then add tests with add_eqs_test. Inspect with get_eqs_query_info; inverse: remove_eqs_option; a new query: create_eqs_query.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @returns { query_path, option_index, option_count }
 TSharedPtr<FJsonObject> HandleAddEQSOption(const TSharedPtr<FJsonObject>& Params)
@@ -1441,17 +1449,19 @@ TSharedPtr<FJsonObject> HandleAddEQSOption(const TSharedPtr<FJsonObject>& Params
         return Failure;
     }
 
-    UEnvQueryOption* NewOpt = NewObject<UEnvQueryOption>(Query);
-    Query->GetOptionsMutable().Add(NewOpt);
+    // Modify() before the append records the options as they were, so undo removes the new one; NavEqs_EnsureOption
+    // creates it RF_Transactional, as the EQS editor does, so later edits of it are undoable too.
     Query->Modify();
+    const int32 NewIndex = Query->GetOptions().Num();
+    NavEqs_EnsureOption(Query, NewIndex);
     Query->MarkPackageDirty();
 
-    TSharedPtr<FJsonObject> Result = NavEqs_OptionReply(QueryPath, Query->GetOptions().Num() - 1);
+    TSharedPtr<FJsonObject> Result = NavEqs_OptionReply(QueryPath, NewIndex);
     Result->SetNumberField(TEXT("option_count"), Query->GetOptions().Num());
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:remove_eqs_option - Remove the option at option_index, with its generator and tests, from a UEnvQuery asset; later options shift down one index. Marks the asset dirty without saving (use save_asset); an out-of-range index is an error, not a no-op. Returns removed and option_count.
+// MCP:remove_eqs_option - Remove the option at option_index from a UEnvQuery asset loaded by asset path, together with its generator and all its tests; the options after it shift down one index, and option_count is what remains. One undo step puts it back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option_index out of range, is an error and nothing changes. Not idempotent: repeating the call removes the option that moved into that index, so read the indices with get_eqs_query_info first. Inverse: add_eqs_option; keep the option but drop its generator: remove_eqs_generator; a single test: remove_eqs_test.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param option_index - Index of the option to remove (required)
 //   @returns { query_path, option_index, removed, option_count }
@@ -1469,8 +1479,9 @@ TSharedPtr<FJsonObject> HandleRemoveEQSOption(const TSharedPtr<FJsonObject>& Par
         return Failure;
     }
 
-    Query->GetOptionsMutable().RemoveAt(OptionIndex);
+    // Modify() before the removal, so undo puts the option back.
     Query->Modify();
+    Query->GetOptionsMutable().RemoveAt(OptionIndex);
     Query->MarkPackageDirty();
 
     TSharedPtr<FJsonObject> Result = NavEqs_OptionReply(QueryPath, OptionIndex);

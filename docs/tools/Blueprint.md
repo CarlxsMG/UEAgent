@@ -322,18 +322,18 @@ Create ONE node in a Blueprint's event/function graph (node_type selects the kin
 |---|---|---|---|
 | `blueprint_name` | string | yes | Blueprint name (resolved under /Game/Blueprints) or full asset path. Pass the FULL path when the short name is ambiguous: a bare name that matches two assets resolves to one of them silently. |
 | `node_type` | string | yes | One of event, custom_event, call_function, print_string, variable_get, variable_set, branch, sequence, self, cast, spawn_actor (alias spawn_actor_from_class), create_widget, make_struct, break_struct, get_array_item, select, make_array, make_set, make_map, switch_int, switch_string, switch_name, switch_enum, enum_literal, format_text, foreach, foreach_with_break, do_once, gate, flipflop, for_loop, while_loop, is_valid, add_delegate, macro_instance |
-| `event_name` | string | yes | Event name; required for event and custom_event node types |
-| `function_name` | string | yes | Function to call; required for call_function node type |
-| `target_class` | string | yes | Class owning the function or cast/spawn target class. For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins. |
-| `variable_name` | string | yes | Variable to get/set; required for variable_get and variable_set |
-| `struct_type` | string | yes | Struct type; required for make_struct and break_struct nodes |
-| `enum_path` | string | yes | Enum path or name; required for switch_enum and enum_literal nodes |
-| `dispatcher` | string | yes | Event-dispatcher (multicast delegate) name; required for add_delegate node type. Must already exist in the COMPILED class (add_event_dispatcher + compile_blueprint), and it binds on self only -- for a dispatcher on another class use add_object_bound_event. |
-| `macro_graph_name` | string | yes | Macro graph name; required for node_type=macro_instance. Resolved against this Blueprint's own MacroGraphs first, then the engine StandardMacros. |
+| `event_name` | string | no | Event name; required for event and custom_event node types |
+| `function_name` | string | no | Function to call; required for call_function node type |
+| `target_class` | string | no | Class owning the function or cast/spawn target class; required for cast and create_widget. For variable_get/variable_set it names the class that owns the variable, producing a non-self member-access node (with a 'target' pin) instead of a self-context node. For create_widget it names the widget class to construct (e.g. WBP_Foo_C, a full asset path, or the widget Blueprint short name); the node exposes that widget's Expose-On-Spawn pins. |
+| `variable_name` | string | no | Variable to get/set; required for variable_get and variable_set |
 | `scope` | string | no | Optional scope hint for variable_get/variable_set: 'auto' (default; a function-local variable declared in the target graph wins, else a self/member variable), 'local' (function-local variable ONLY), or 'member' (member variable only -- self, or on target_class when supplied). Ignored by other node types. |
+| `struct_type` | string | no | Struct type; required for make_struct and break_struct nodes |
+| `enum_path` | string | no | Enum path or name; required for switch_enum and enum_literal nodes |
 | `num_inputs` | number | no | Optional input-pin count for make_array/make_set/make_map (added after spawn) |
 | `cases` | string | no | Optional string array of case pins for switch_int/switch_string/switch_name |
 | `arguments` | string | no | Optional string array of argument names for format_text |
+| `dispatcher` | string | no | Event-dispatcher (multicast delegate) name; required for add_delegate node type. Must already exist in the COMPILED class (add_event_dispatcher + compile_blueprint), and it binds on self only -- for a dispatcher on another class use add_object_bound_event. |
+| `macro_graph_name` | string | no | Macro graph name; required for node_type=macro_instance. Resolved against this Blueprint's own MacroGraphs first, then the engine StandardMacros. |
 | `macro_source` | string | no | Set to "standard_macros" to skip this Blueprint's own MacroGraphs and resolve macro_graph_name only in the engine StandardMacros library. Only read for node_type=macro_instance. |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted |
 | `position_x` | number | no | Node X position on the graph canvas (ignored when node_position is set) |
@@ -647,9 +647,9 @@ Create an EMPTY, Tunnel-terminated macro graph owned by this Blueprint's MacroGr
 
 ## `create_editor_utility_blueprint`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create, compile and save an Editor Utility Blueprint at package_path/name, parented to parent_class. Returns asset_path, parent_class, created, already_existed and saved; an existing Editor Utility Blueprint there is returned unchanged and parent_class is not applied to it. Refused during PIE unless force.
+Create an Editor Utility Blueprint at package_path/name with the editor factory, parented to parent_class, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has; the requested parent_class is not applied to it. A parent_class that does not resolve or cannot back a Blueprint, another kind of asset at that path, or an invalid path is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. A tool with a UI panel: create_editor_utility_widget_blueprint; right-click actions: create_asset_action_utility.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -657,20 +657,20 @@ Create, compile and save an Editor Utility Blueprint at package_path/name, paren
 | `name` | string | yes | Asset name without path or extension, e.g. "EUB_BatchRename". |
 | `parent_class` | string | no | Parent class by name without the U or A prefix, e.g. "EditorUtilityActor", or by path such as "/Script/Blutility.EditorUtilityObject" (default EditorUtilityObject); it must be Blueprintable. |
 
-**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error }`
+**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }`
 
 ## `create_editor_utility_widget_blueprint`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtilityWidget) with a CanvasPanel root at package_path/name. Returns asset_path, root_widget, root_widget_class, created, already_existed and saved; an existing one is returned unchanged. Open it as a tab with run_editor_utility_widget. Refused during PIE unless force.
+Create an Editor Utility Widget Blueprint at package_path/name with the editor factory, parented to UEditorUtilityWidget, give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: an Editor Utility Widget Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class and root it really has. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Open it as a tab with run_editor_utility_widget; find them with list_editor_utility_widgets; a plain Widget Blueprint is create_widget_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored. |
 | `name` | string | yes | Asset name without path or extension, e.g. "EUW_LevelTools". |
 
-**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error }`
+**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error? }`
 
 ## `delete_bp_variable`
 
@@ -1278,7 +1278,7 @@ Guarded, rollback-capable Blueprint reparent -- PREFER THIS OVER the raw reparen
 
 *Destructive.*
 
-Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on its class default object, as the right-click menu would but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, or a utility with no actions is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
+Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on a new transient instance of its class, as the right-click menu does but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, a utility with no actions or an abstract utility class is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

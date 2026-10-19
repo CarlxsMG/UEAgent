@@ -833,7 +833,10 @@ namespace UEAgentMaterialExtraImpl
         CountFunctionIO(Function, OutInputs, OutOutputs);
     }
 
-    // node_count, nodes (with their inputs) and the flattened connections of an expression graph.
+    // node_count, nodes (with their inputs) and the flattened connections of an expression graph. Empty
+    // slots in Expressions are skipped, so node_count counts the nodes listed. An input's name is
+    // GetInputName(i): FExpressionInput::InputName is set only by the few nodes that rename an input,
+    // and is None on the rest, whose inputs are named after their FExpressionInput property.
     void AddGraphFields(const TSharedPtr<FJsonObject>& Result, TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions)
     {
         TArray<TSharedPtr<FJsonValue>> Nodes;
@@ -855,9 +858,10 @@ namespace UEAgentMaterialExtraImpl
             {
                 FExpressionInput* In = Expr->GetInput(i);
                 if (!In) { continue; }
+                const FString ReportedInputName = Expr->GetInputName(i).ToString();
                 TSharedPtr<FJsonObject> IObj = MakeShared<FJsonObject>();
                 IObj->SetNumberField(TEXT("index"), i);
-                IObj->SetStringField(TEXT("input_name"), In->InputName.ToString());
+                IObj->SetStringField(TEXT("input_name"), ReportedInputName);
                 if (In->Expression)
                 {
                     // The source output is identified by an OutputIndex into
@@ -871,7 +875,7 @@ namespace UEAgentMaterialExtraImpl
                     CObj->SetStringField(TEXT("from"), In->Expression->GetName());
                     CObj->SetNumberField(TEXT("from_output_index"), In->OutputIndex);
                     CObj->SetStringField(TEXT("to"), Expr->GetName());
-                    CObj->SetStringField(TEXT("to_input"), In->InputName.ToString());
+                    CObj->SetStringField(TEXT("to_input"), ReportedInputName);
                     Connections.Add(MakeShared<FJsonValueObject>(CObj));
                 }
                 InputsJson.Add(MakeShared<FJsonValueObject>(IObj));
@@ -881,18 +885,29 @@ namespace UEAgentMaterialExtraImpl
             Nodes.Add(MakeShared<FJsonValueObject>(NObj));
         }
 
-        Result->SetNumberField(TEXT("node_count"), Expressions.Num());
+        Result->SetNumberField(TEXT("node_count"), Nodes.Num());
         Result->SetArrayField(TEXT("nodes"), Nodes);
         Result->SetNumberField(TEXT("connection_count"), Connections.Num());
         Result->SetArrayField(TEXT("connections"), Connections);
     }
 
-    // Saves the package Asset lives in; false when it has none or the save fails.
+    // Saves the package Asset lives in; false, with OutError saying why, when it has none or the save fails.
+    bool SaveOwningPackage(UObject* Asset, FString& OutError)
+    {
+        UPackage* Package = Asset->GetPackage();
+        if (!Package)
+        {
+            OutError = FString::Printf(TEXT("%s has no package to save"), *Asset->GetPathName());
+            return false;
+        }
+        return mcp_common::SaveAssetPackage(Package, Asset, OutError);
+    }
+
+    // SaveOwningPackage for a caller that does not report why the save failed.
     bool SaveOwningPackage(UObject* Asset)
     {
         FString SaveError;
-        UPackage* Package = Asset->GetPackage();
-        return Package && mcp_common::SaveAssetPackage(Package, Asset, SaveError);
+        return SaveOwningPackage(Asset, SaveError);
     }
 
     // The FExpressionInput property of Expr whose name equals InputName (FString comparison), or null.
@@ -916,11 +931,11 @@ namespace UEAgentMaterialExtraImpl
     }
 }
 
-// MCP:create_material_function - Create a UMaterialFunction asset at package_path/name through the editor factory, exposed to the function library, and save it. Idempotent: an existing function is returned untouched with already_exists=true; another asset class at that path is an error. Returns function_path, num_inputs, num_outputs and saved.
+// MCP:create_material_function - Create an empty UMaterialFunction asset named name in package_path through the editor factory, exposed to the material function library, with the optional description stored as its tooltip, then save it. Idempotent: an existing function at that path is returned untouched with already_exists=true, created=false and saved=false, and nothing is saved (description is ignored then and comes back as the function's own); another asset class there, or an invalid package path, is an error. A failed save (PIE running, read-only file) still answers success, with created=true and saved=false and the function kept in memory. Then add pins with add_material_function_input and add_material_function_output and nodes with create_material_function_expression; read it back with get_material_function_graph; a variant with overrides: create_material_function_instance; use it in a material: add_material_function_call; inverse: delete_material_function.
 //   @param package_path - /Game package directory, e.g. '/Game/MyGame'
 //   @param name - Asset name for the new material function
 //   @param description - Text stored as the function Description, the tooltip shown wherever the function is used; default empty. Ignored when the function already exists.
-//   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists: bool? }
+//   @returns { function_path: string, name: string, package_path: string, description: string, num_inputs: number, num_outputs: number, created: bool, saved: bool, already_exists?: bool }
 
 TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -944,10 +959,12 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunction(const TSharedPtr<FJsonObjec
             R->SetStringField(TEXT("function_path"), Existing->GetPathName());
             R->SetStringField(TEXT("name"), Existing->GetName());
             R->SetStringField(TEXT("package_path"), PackagePath);
+            R->SetStringField(TEXT("description"), Existing->Description);
             R->SetNumberField(TEXT("num_inputs"), NumInputs);
             R->SetNumberField(TEXT("num_outputs"), NumOutputs);
             R->SetBoolField(TEXT("already_exists"), true);
-            R->SetBoolField(TEXT("created"), true);
+            R->SetBoolField(TEXT("created"), false);
+            R->SetBoolField(TEXT("saved"), false);
             return R;
         }
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Asset exists but is not a UMaterialFunction: %s"), *FullPath));
@@ -1194,10 +1211,10 @@ TSharedPtr<FJsonObject> HandleSetMaterialFunctionOutputProps(const TSharedPtr<FJ
     return Result;
 }
 
-// MCP:create_post_process_material - Create a UMaterial configured as a post-process material (MD_PostProcess).
+// MCP:create_post_process_material - Create a UMaterial named name in package_path through the editor factory, configured as a post-process material (domain PostProcess, blended after tonemapping), then recompile and save it. Idempotent create or convert: an existing UMaterial at that path has those two settings overwritten, is recompiled and saved, and answers created=false, already_exists=true and a note with its old domain; one that already has them is left as it is (changed=false, saved=false, a note), nothing recompiled or saved. Another asset class there, or an invalid path, is an error. A failed save makes success false with saved=false and save_error, the material kept in memory. Add nodes with create_material_expression and wire them with connect_to_material_output; another domain: set_material_domain.
 //   @param package_path - /Game package directory, e.g. '/Game/MyGame'
 //   @param name - Asset name for the new material
-//   @returns { material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, saved: bool }
+//   @returns { material_path: string, name: string, package_path: string, domain: string, blendable_location: number, is_post_process: bool, created: bool, already_exists: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreatePostProcessMaterial(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1232,17 +1249,28 @@ TSharedPtr<FJsonObject> HandleCreatePostProcessMaterial(const TSharedPtr<FJsonOb
             return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to create material: %s"), *FullPath));
     }
 
-    // Configure as a post-process material.
-    Material->PreEditChange(nullptr);
-    Material->Modify();
-    Material->MaterialDomain = MD_PostProcess;
-    Material->BlendableLocation = BL_SceneColorAfterTonemapping;
-    Material->PostEditChange();
-    UMaterialEditingLibrary::RecompileMaterial(Material);
-    Material->MarkPackageDirty();
+    // An existing material that already has the settings below is left as it is: nothing is modified, recompiled or
+    // saved. One with other settings is converted to a post-process material, as a new one is configured.
+    const EMaterialDomain PreviousDomain = (EMaterialDomain)Material->MaterialDomain.GetValue();
+    const bool bAlreadyConfigured = bAlreadyExists && Material->MaterialDomain == MD_PostProcess
+        && Material->BlendableLocation == BL_SceneColorAfterTonemapping;
 
-    // Save the package.
-    const bool bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Material);
+    bool bSaved = false;
+    FString SaveError;
+    if (!bAlreadyConfigured)
+    {
+        // Configure as a post-process material.
+        Material->PreEditChange(nullptr);
+        Material->Modify();
+        Material->MaterialDomain = MD_PostProcess;
+        Material->BlendableLocation = BL_SceneColorAfterTonemapping;
+        Material->PostEditChange();
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+        Material->MarkPackageDirty();
+
+        // Save the package.
+        bSaved = UEAgentMaterialExtraImpl::SaveOwningPackage(Material, SaveError);
+    }
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("material_path"), Material->GetPathName());
@@ -1251,10 +1279,22 @@ TSharedPtr<FJsonObject> HandleCreatePostProcessMaterial(const TSharedPtr<FJsonOb
     Result->SetStringField(TEXT("domain"), MaterialDomainToString((EMaterialDomain)Material->MaterialDomain.GetValue()));
     Result->SetNumberField(TEXT("blendable_location"), (int32)Material->BlendableLocation.GetValue());
     Result->SetBoolField(TEXT("is_post_process"), Material->MaterialDomain == MD_PostProcess);
-    Result->SetBoolField(TEXT("created"), true);
+    Result->SetBoolField(TEXT("created"), !bAlreadyExists);
     Result->SetBoolField(TEXT("already_exists"), bAlreadyExists);
-    Result->SetBoolField(TEXT("saved"), bSaved);
-    return Result;
+    Result->SetBoolField(TEXT("changed"), !bAlreadyConfigured);
+    if (bAlreadyConfigured)
+    {
+        Result->SetBoolField(TEXT("saved"), false);
+        Result->SetStringField(TEXT("note"), TEXT("The material is already a post-process material blended after tonemapping; nothing was changed or saved."));
+        return mcp_common::MakeOkReply(Result);
+    }
+    if (bAlreadyExists)
+    {
+        Result->SetStringField(TEXT("note"), FString::Printf(
+            TEXT("The existing material was converted to a post-process material blended after tonemapping (its domain was %s)."),
+            MaterialDomainToString(PreviousDomain)));
+    }
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_post_process_material"), SaveError);
 }
 
 // MCP:set_material_domain - Set the material domain (EMaterialDomain) of a UMaterial asset, then recompile it and mark its package dirty, without saving and without an undo transaction. domain is matched without case and also accepts spellings such as post_process, decal or light function; an unknown domain is an error before the material loads, and a material instance or a path that does not load is an error (Material not found). Setting the domain it already has still recompiles. previous_domain and domain are read back, and domain_set confirms the change took. Persist with save_asset; a new post-process material is create_post_process_material; a recompile alone is compile_material.
@@ -1427,7 +1467,7 @@ TSharedPtr<FJsonObject> HandleDuplicateMaterialExpression(const TSharedPtr<FJson
     return Result;
 }
 
-// MCP:get_material_graph_info - Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's own name, which can be None on built-in nodes, so match inputs by index. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
+// MCP:get_material_graph_info - Read the expression graph of a UMaterial asset without changing it: every expression node with its object name (the node_id other material tools take) and class, its inputs by index, and the node-to-node connections flattened into connections[], each with the source output index. Only wiring between expressions is listed -- what feeds the material's main outputs (BaseColor, Normal...) is not -- and node positions and property values are not read. input_name and to_input are each input's name as the node reports it (GetInputName, e.g. A, B, Alpha), and node_count counts the nodes listed. A material instance or a path that does not load is an error (Material not found). Material functions: get_material_function_graph; node descriptions: get_material_expressions; shader stats: get_material_stats; wiring: connect_material_expressions, connect_to_material_output.
 //   @param material_path - UMaterial asset path, e.g. "/Game/Materials/M_Rock" or "/Game/Materials/M_Rock.M_Rock"; a material instance is not accepted
 //   @returns { material_path: string, node_count: number, nodes: [{ name: string, class: string, inputs: [{ index: number, input_name: string, source?: string, source_output_index?: number }], input_count: number }], connection_count: number, connections: [{ from: string, from_output_index: number, to: string, to_input: string }] }
 
@@ -1589,8 +1629,8 @@ TSharedPtr<FJsonObject> HandleConnectMaterialFunctionPins(const TSharedPtr<FJson
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("connect_material_function_pins"));
 }
 
-// MCP:create_material_function_instance - Create a UMaterialFunctionInstance (asset, with parent set) and save it.
-//   @param package_path - Target /Game package path (auto-prefixed with /Game/ if missing)
+// MCP:create_material_function_instance - Create a UMaterialFunctionInstance asset named instance_name in package_path through the editor factory, parented to the material function or function instance at parent_function_path, then save it. package_path is any long package path, such as /Game/Materials or a plugin's /MyPlugin/Funcs; a relative folder is read under /Game, a missing folder is made, and an unmounted or malformed path is an error. Idempotent: an instance already at that path is returned unchanged with already_existed=true, created=false and saved=false, its own parent in parent_function_path (the requested one is ignored) and nothing saved; another asset class there is an error. A parent that does not load is an error and nothing, not even the folder, is created; a failed save (PIE running, read-only file) makes success false, with the new instance kept in memory and saved=false. Re-parent later: set_material_function_instance_parent; a new base function: create_material_function.
+//   @param package_path - Target folder as a long package path, e.g. /Game/Materials or /MyPlugin/Funcs; a relative folder is read under /Game
 //   @param instance_name - Name for the new UMaterialFunctionInstance asset
 //   @param parent_function_path - Asset path of the parent UMaterialFunctionInterface
 //   @returns { asset_path: string, instance_name: string, parent_function_path: string, created: bool, already_existed: bool, saved: bool }
@@ -1601,29 +1641,43 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunctionInstance(const TSharedPtr<FJ
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("instance_name"), InstanceName)) { return Missing; }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parent_function_path"), ParentPath)) { return Missing; }
 
-    if (!PackagePath.StartsWith(TEXT("/Game/")))
+    // package_path is a folder: any long package path is taken as it is (/Game, /Game/Funcs, a plugin's
+    // /MyPlugin/Funcs), without trailing slashes; a relative folder is read under /Game.
+    PackagePath = mcp_common::NormalizeFolder(PackagePath, TEXT("/Game"));
+    if (!PackagePath.StartsWith(TEXT("/")))
     {
         PackagePath = TEXT("/Game/") + PackagePath;
     }
     const FString FullPath = PackagePath + TEXT("/") + InstanceName;
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
+    FText InvalidReason;
+    if (!FPackageName::IsValidLongPackageName(FullPath, /*bIncludeReadOnlyRoots=*/ false, &InvalidReason))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Invalid asset path '%s': %s. Nothing was created."), *FullPath, *InvalidReason.ToString()));
+    }
 
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
-        // Idempotent: return the existing instance, like create_material_function does.
+        // Idempotent: return the existing instance unchanged and unsaved, like create_material_function does.
         UMaterialFunctionInstance* Existing = LoadObject<UMaterialFunctionInstance>(nullptr, *FullPath);
+        if (!Existing)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("Asset exists but is not a UMaterialFunctionInstance: %s"), *FullPath));
+        }
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
         Result->SetStringField(TEXT("asset_path"), FullPath);
         Result->SetStringField(TEXT("instance_name"), InstanceName);
+        Result->SetStringField(TEXT("parent_function_path"), Existing->Parent ? Existing->Parent->GetPathName() : FString());
         Result->SetBoolField(TEXT("created"), false);
         Result->SetBoolField(TEXT("already_existed"), true);
+        Result->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(Result);
     }
-    if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
-    {
-        UEditorAssetLibrary::MakeDirectory(PackagePath);
-    }
 
+    // The parent is checked before anything is made, so a bad parent leaves no new folder behind.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(ParentPath)) { return Invalid; }
     UMaterialFunctionInterface* Parent = LoadObject<UMaterialFunctionInterface>(nullptr, *ParentPath);
     if (!Parent)
     {
@@ -1631,7 +1685,12 @@ TSharedPtr<FJsonObject> HandleCreateMaterialFunctionInstance(const TSharedPtr<FJ
             FString::Printf(TEXT("Parent function not found: %s"), *ParentPath));
     }
 
-UMaterialFunctionInstanceFactory* Factory = NewObject<UMaterialFunctionInstanceFactory>();
+    if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
+    {
+        UEditorAssetLibrary::MakeDirectory(PackagePath);
+    }
+
+    UMaterialFunctionInstanceFactory* Factory = NewObject<UMaterialFunctionInstanceFactory>();
     if (!Factory)
     {
         return mcp_common::MakeErrorReply(TEXT("Failed to spawn UMaterialFunctionInstanceFactory"));
@@ -1904,10 +1963,10 @@ TSharedPtr<FJsonObject> HandleDeleteMaterialFunctionOutput(const TSharedPtr<FJso
 
 // create_subsurface_profile
 // ---------------------------------------------------------------------------- //
-// MCP:create_subsurface_profile - Create a USubsurfaceProfile data asset (NewObject + save).  Idempotent: if the asset already exists it is loaded and returned.
+// MCP:create_subsurface_profile - Create a USubsurfaceProfile asset named name in package_path (default /Game/Gameplay; trailing slashes trimmed) with the engine's default settings, then save it; mean_free_path_distance reads one of those settings back. Idempotent: an asset at that path that loads as a subsurface profile is returned as it is, with already_existed=true, created=false and saved=false, and nothing is saved; one of another class is an error, and so is an invalid package path. A failed save (PIE running, read-only file) makes success false with saved=false and save_error, but the new profile stays registered in memory, so a repeat call answers already_existed=true for an asset that is not on disk: persist it with save_asset. Edit its Settings struct with set_property_value or set_properties on the asset path, then save_asset.
 //   @param name - Asset name (e.g. SSP_Example)
 //   @param package_path - Target /Game package path (optional, default "/Game/Gameplay")
-//   @returns { name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool }
+//   @returns { name: string, asset_path: string, asset_class: string, mean_free_path_distance: number, is_subsurface_profile: bool, already_existed: bool, created: bool, saved: bool, save_error?: string }
 
 TSharedPtr<FJsonObject> HandleCreateSubsurfaceProfile(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1920,6 +1979,8 @@ TSharedPtr<FJsonObject> HandleCreateSubsurfaceProfile(const TSharedPtr<FJsonObje
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
     bool bAlreadyExisted = false;
+    bool bSaved = false;
+    FString SaveError;
     USubsurfaceProfile* Profile = nullptr;
 
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
@@ -1952,11 +2013,8 @@ TSharedPtr<FJsonObject> HandleCreateSubsurfaceProfile(const TSharedPtr<FJsonObje
         FAssetRegistryModule::AssetCreated(Profile);
         Profile->MarkPackageDirty();
 
-        FString SaveError;
-        if (!mcp_common::SaveAssetPackage(Package, Profile, SaveError))
-        {
-            return mcp_common::MakeErrorReply(SaveError);
-        }
+        // A failed save keeps the new profile in memory; the reply below says so with saved=false and save_error.
+        bSaved = mcp_common::SaveAssetPackage(Package, Profile, SaveError);
     }
 
     const bool bIsSubsurfaceProfile = Profile->IsA(USubsurfaceProfile::StaticClass());
@@ -1970,8 +2028,14 @@ TSharedPtr<FJsonObject> HandleCreateSubsurfaceProfile(const TSharedPtr<FJsonObje
     Result->SetNumberField(TEXT("mean_free_path_distance"), Profile->Settings.MeanFreePathDistance);
     Result->SetBoolField(TEXT("is_subsurface_profile"), bIsSubsurfaceProfile);
     Result->SetBoolField(TEXT("already_existed"), bAlreadyExisted);
-    Result->SetBoolField(TEXT("created"), true);
-    return mcp_common::MakeOkReply(Result);
+    Result->SetBoolField(TEXT("created"), !bAlreadyExisted);
+    if (bAlreadyExisted)
+    {
+        // The existing profile is returned as it is: nothing was saved.
+        Result->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Result);
+    }
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_subsurface_profile"), SaveError);
 }
 
 // ========================================================================== //

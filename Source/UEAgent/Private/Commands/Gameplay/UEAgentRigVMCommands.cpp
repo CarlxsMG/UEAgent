@@ -228,7 +228,7 @@ namespace
 // ---------------------------------------------------------------------------
 // add_rigvm_node
 // ---------------------------------------------------------------------------
-// MCP:add_rigvm_node - Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
+// MCP:add_rigvm_node - Add a rig-unit node of node_type to the main RigVM graph of a Control Rig Blueprint loaded by asset path, at position (default 0, 0), then compile and save the rig. Types match case-insensitively (ForwardsSolve means BeginExecution, Setup means PrepareForExecution); any other is an error. node_name is only a request: a taken name gets a unique suffix (the reply has the real one), and every call adds one more node. An event node the graph already has (BeginExecution, PrepareForExecution) is not added twice: when node_name is its name the call succeeds with already_exists=true and saved=false, nothing compiled or saved, otherwise it is an error. A failed save makes success false with save_error, the node kept in memory. Refused during PIE unless force=true. Next: add_rigvm_link to wire it, set_rigvm_pin_default for inputs, get_rigvm_graph for pin paths; the inverse is remove_rigvm_node.
 //   @param control_rig_path - Asset path of the UControlRigBlueprint, e.g. "/Game/Rigs/CR_Mannequin".
 //   @param node_type - BeginExecution, PrepareForExecution, GetTransform, SetTransform, AimBone, or TwoBoneIKSimple
 //   @param node_name - Optional node name to ask for; defaults to the rig-unit struct name, and a name already in the graph gets a unique suffix.
@@ -272,22 +272,24 @@ TSharedPtr<FJsonObject> HandleAddRigVMNode(const TSharedPtr<FJsonObject>& Params
 
     if (!NewNode)
     {
-        // Idempotent: check if a node with the same name already exists.
+        // Idempotent: the event node the graph already has, when node_name is its name. A node of another
+        // type under that name is not the requested node, so it stays an error.
         URigVMGraph* Model = CRBP->GetDefaultModel();
         if (Model && !NodeName.IsEmpty())
         {
             for (URigVMNode* ExistingNode : Model->GetNodes())
             {
-                if (ExistingNode && ExistingNode->GetName() == NodeName)
+                const URigVMUnitNode* ExistingUnit = Cast<URigVMUnitNode>(ExistingNode);
+                if (ExistingUnit && ExistingUnit->GetName() == NodeName && ExistingUnit->GetScriptStruct() == UnitStruct)
                 {
-                    // Node already exists — return success (idempotent)
+                    // Nothing was added, so nothing is compiled or saved.
                     TSharedPtr<FJsonObject> Resp = RigVM_StartReply(CRBP);
-                    Resp->SetStringField(TEXT("node_name"), ExistingNode->GetName());
-                    Resp->SetStringField(TEXT("node_title"), ExistingNode->GetNodeTitle());
+                    Resp->SetStringField(TEXT("node_name"), ExistingUnit->GetName());
+                    Resp->SetStringField(TEXT("node_title"), ExistingUnit->GetNodeTitle());
                     Resp->SetStringField(TEXT("node_type"), UnitStruct->GetName());
-                    Resp->SetNumberField(TEXT("pin_count"), ExistingNode->GetPins().Num());
+                    Resp->SetNumberField(TEXT("pin_count"), ExistingUnit->GetPins().Num());
                     Resp->SetNumberField(TEXT("node_count"), Model->GetNodes().Num());
-                    Resp->SetBoolField(TEXT("saved"), true);
+                    Resp->SetBoolField(TEXT("saved"), false);
                     Resp->SetBoolField(TEXT("already_exists"), true);
                     return mcp_common::MakeOkReply(Resp);
                 }

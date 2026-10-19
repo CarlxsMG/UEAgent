@@ -216,6 +216,36 @@ namespace
         return ParentKey;
     }
 
+    /**
+     * Null when ParentKey is the empty key (the root) or names an element of the rig's hierarchy, else the error reply.
+     * The hierarchy controller puts an element whose parent it cannot find at the root without a word, so a parent that
+     * is not there is refused before anything is added. Hint tells the caller what to check.
+     */
+    TSharedPtr<FJsonObject> ControlRig_RefuseMissingParent(UControlRigBlueprint* CRBP, const FRigElementKey& ParentKey,
+        const TCHAR* NewElementLabel, const TCHAR* Hint)
+    {
+        if (!ParentKey.IsValid())
+        {
+            return nullptr;
+        }
+        const URigHierarchy* Hierarchy = CRBP->GetHierarchy();
+        if (Hierarchy != nullptr && Hierarchy->GetIndex(ParentKey) != INDEX_NONE)
+        {
+            return nullptr;
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The rig has no %s named '%s' to parent the new %s under; nothing was added. %s"),
+            *RigElementTypeToString(ParentKey.Type), *ParentKey.Name.ToString(), NewElementLabel, Hint));
+    }
+
+    /** The parent the hierarchy gives Key, read back: its name, or empty for an element at the root. */
+    FString ControlRig_ReadParentName(UControlRigBlueprint* CRBP, const FRigElementKey& Key)
+    {
+        const URigHierarchy* Hierarchy = CRBP->GetHierarchy();
+        const FRigElementKey Parent = Hierarchy != nullptr ? Hierarchy->GetFirstParent(Key) : FRigElementKey();
+        return Parent.IsValid() ? Parent.Name.ToString() : FString();
+    }
+
     /** The rig blueprint at RigPath. Null on success, else the error reply. */
     TSharedPtr<FJsonObject> ControlRig_LoadBlueprint(const FString& RigPath, UControlRigBlueprint*& OutBlueprint)
     {
@@ -358,10 +388,10 @@ TSharedPtr<FJsonObject> HandleCreateControlRigBlueprint(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 // add_rig_bone
 // ---------------------------------------------------------------------------
-// MCP:add_rig_bone - Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at the root, then compile and save the blueprint. The engine keeps names unique, so element_key is the name the bone really got. Refused while PIE runs unless force is set.
+// MCP:add_rig_bone - Add a bone to the hierarchy of a Control Rig Blueprint, under parent_name or at the root, then compile and save the blueprint; there is no undo step. The engine keeps names unique, so element_key is the name the bone really got, and parent is the parent read back from the hierarchy. A parent_name that is not a bone of the rig is an error and nothing is added; so is a rig that cannot be loaded, and a failed save makes success false with save_error. Refused while PIE runs unless force is set. Nulls and controls: add_rig_null, add_rig_control; inspect: get_rig_hierarchy.
 //   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @param bone_name - Name of the new bone
-//   @param parent_name - Existing BONE to parent the new bone under; omitted or empty puts it at the root
+//   @param parent_name - Existing BONE to parent the new bone under; omitted or empty puts it at the root, and a name that is not a bone of the rig is an error
 //   @param location - Optional [x, y, z] world location for the new bone.
 //   @param rotation - Optional [pitch, yaw, roll] world rotation for the new bone.
 //   @param scale - Optional [x, y, z] scale for the new bone.
@@ -387,6 +417,11 @@ TSharedPtr<FJsonObject> HandleAddRigBone(const TSharedPtr<FJsonObject>& Params)
     {
         ParentKey = FRigElementKey(FName(*ParentName), ERigElementType::Bone);
     }
+    if (TSharedPtr<FJsonObject> NoParent = ControlRig_RefuseMissingParent(CRBP, ParentKey, TEXT("bone"),
+        TEXT("A bone is parented under a bone only; check the names with get_rig_hierarchy, or omit parent_name for the root.")))
+    {
+        return NoParent;
+    }
 
     const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
     const FRotator Rotation = mcp_common::ReadJsonRotator(Params, TEXT("rotation"));
@@ -411,7 +446,7 @@ TSharedPtr<FJsonObject> HandleAddRigBone(const TSharedPtr<FJsonObject>& Params)
     TSharedPtr<FJsonObject> Resp = ControlRig_StartReply(CRBP);
     Resp->SetStringField(TEXT("element_key"), NewKey.Name.ToString());
     Resp->SetStringField(TEXT("element_type"), RigElementTypeToString(NewKey.Type));
-    Resp->SetStringField(TEXT("parent"), ParentKey.IsValid() ? ParentKey.Name.ToString() : TEXT(""));
+    Resp->SetStringField(TEXT("parent"), ControlRig_ReadParentName(CRBP, NewKey));
     FillHierarchyCounts(CRBP->GetHierarchy(), Resp, nullptr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_rig_bone"), SaveErr);
 }
@@ -419,10 +454,10 @@ TSharedPtr<FJsonObject> HandleAddRigBone(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_rig_null
 // ---------------------------------------------------------------------------
-// MCP:add_rig_null - Add a null (a space: a transform-only element) to the hierarchy of a Control Rig Blueprint at location in rig global space, with no rotation and unit scale, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the null really got. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request, so check with get_rig_hierarchy. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Each call adds another null. Controls and bones: add_rig_control, add_rig_bone; rename or take out: rename_rig_element, remove_rig_element.
+// MCP:add_rig_null - Add a null (a space: a transform-only element) to the hierarchy of a Control Rig Blueprint at location in rig global space, with no rotation and unit scale, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the null really got. parent_name puts it under that element, of parent_type; a parent the hierarchy does not have is an error and nothing is added, and parent is the parent read back. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Each call adds another null. Controls and bones: add_rig_control, add_rig_bone; rename or take out: rename_rig_element, remove_rig_element.
 //   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @param null_name - Name of the new null; a name already in use gets a numbered suffix
-//   @param parent_name - Optional existing element name to parent the new null under; omitted or empty puts it at the root.
+//   @param parent_name - Optional existing element name to parent the new null under; omitted or empty puts it at the root, and a name the hierarchy lacks is an error.
 //   @param parent_type - Element type of the parent ("Bone" default, "Null"/"Control"/etc); case is ignored, "Space" means Null, and an unknown type falls back to Bone.
 //   @param location - Optional [x, y, z] location in rig global space for the new null; defaults to the origin.
 //   @returns { asset_path: string, element_key: string, element_type: string, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
@@ -443,6 +478,11 @@ TSharedPtr<FJsonObject> HandleAddRigNull(const TSharedPtr<FJsonObject>& Params)
     // Parent: empty key (= root) unless a parent_name is provided. Default parent type is Bone;
     // callers can parent a null under a null/control by passing parent_type.
     const FRigElementKey ParentKey = ControlRig_ReadParentKey(Params, ERigElementType::Bone);
+    if (TSharedPtr<FJsonObject> NoParent = ControlRig_RefuseMissingParent(CRBP, ParentKey, TEXT("null"),
+        TEXT("Check parent_name and parent_type (Bone by default) with get_rig_hierarchy, or omit parent_name for the root.")))
+    {
+        return NoParent;
+    }
 
     const FVector Location = mcp_common::ReadJsonVector(Params, TEXT("location"));
     const FTransform Transform(FQuat::Identity, Location, FVector(1.f, 1.f, 1.f));
@@ -461,7 +501,7 @@ TSharedPtr<FJsonObject> HandleAddRigNull(const TSharedPtr<FJsonObject>& Params)
     TSharedPtr<FJsonObject> Resp = ControlRig_StartReply(CRBP);
     Resp->SetStringField(TEXT("element_key"), NewKey.Name.ToString());
     Resp->SetStringField(TEXT("element_type"), RigElementTypeToString(NewKey.Type));
-    Resp->SetStringField(TEXT("parent"), ParentKey.IsValid() ? ParentKey.Name.ToString() : TEXT(""));
+    Resp->SetStringField(TEXT("parent"), ControlRig_ReadParentName(CRBP, NewKey));
     FillHierarchyCounts(CRBP->GetHierarchy(), Resp, nullptr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_rig_null"), SaveErr);
 }
@@ -469,11 +509,11 @@ TSharedPtr<FJsonObject> HandleAddRigNull(const TSharedPtr<FJsonObject>& Params)
 // ---------------------------------------------------------------------------
 // add_rig_control
 // ---------------------------------------------------------------------------
-// MCP:add_rig_control - Add an animation control to the hierarchy of a Control Rig Blueprint, with a zero or identity value and no limits, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the control really got. An unrecognised control_type makes a Float control with control_type_recognized false instead of failing. parent_name puts it under that element, of parent_type; a parent that does not exist leaves it at the root while parent still echoes the request. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Set it up with set_rig_control_value, set_rig_control_limits and set_rig_control_settings; bones and nulls: add_rig_bone, add_rig_null; inspect: get_rig_hierarchy; take it out: remove_rig_element.
+// MCP:add_rig_control - Add an animation control to the hierarchy of a Control Rig Blueprint, with a zero or identity value and no limits, then compile and save the blueprint; there is no undo step and it is refused while PIE runs unless force is set. The engine keeps names unique, so element_key is the name the control really got. An unrecognised control_type makes a Float control with control_type_recognized false instead of failing. parent_name puts it under that element, of parent_type; a parent the hierarchy does not have is an error and nothing is added, and parent is the parent read back. A rig that cannot be loaded is an error; a failed save makes success false with save_error. Set it up with set_rig_control_value, set_rig_control_limits and set_rig_control_settings; bones and nulls: add_rig_bone, add_rig_null; inspect: get_rig_hierarchy; take it out: remove_rig_element.
 //   @param control_rig_path - Control Rig Blueprint asset path, e.g. "/Game/Rigs/CR_Hero"
 //   @param control_name - Name of the new control, also used as its display name; a name already in use gets a numbered suffix
 //   @param control_type - One of: "bool", "float", "scalefloat", "integer", "int", "vector2d", "position", "scale", "rotator", "transform", "eulertransform" (default "float").
-//   @param parent_name - Optional existing element name to parent the new control under; omitted or empty puts it at the root.
+//   @param parent_name - Optional existing element name to parent the new control under; omitted or empty puts it at the root, and a name the hierarchy lacks is an error.
 //   @param parent_type - Element type of the parent (default "Null"); case is ignored, "Space" means Null, and an unknown type falls back to Null.
 //   @returns { asset_path: string, element_key: string, element_type: string, control_type: string, control_type_recognized: bool, parent: string, bone_count: int, null_count: int, control_count: int, curve_count: int, other_count: int, total: int, saved: bool, save_error: string }
 
@@ -497,6 +537,11 @@ TSharedPtr<FJsonObject> HandleAddRigControl(const TSharedPtr<FJsonObject>& Param
 
     // Parent: empty (root) unless parent_name provided; parent type can be Null/Control/Bone.
     const FRigElementKey ParentKey = ControlRig_ReadParentKey(Params, ERigElementType::Null);
+    if (TSharedPtr<FJsonObject> NoParent = ControlRig_RefuseMissingParent(CRBP, ParentKey, TEXT("control"),
+        TEXT("Check parent_name and parent_type (Null by default) with get_rig_hierarchy, or omit parent_name for the root.")))
+    {
+        return NoParent;
+    }
 
     FRigControlSettings Settings;
     Settings.AnimationType = ERigControlAnimationType::AnimationControl;
@@ -523,7 +568,7 @@ TSharedPtr<FJsonObject> HandleAddRigControl(const TSharedPtr<FJsonObject>& Param
     Resp->SetStringField(TEXT("element_type"), RigElementTypeToString(NewKey.Type));
     Resp->SetStringField(TEXT("control_type"), RigControlTypeToString(ControlType));
     Resp->SetBoolField(TEXT("control_type_recognized"), bRecognized);
-    Resp->SetStringField(TEXT("parent"), ParentKey.IsValid() ? ParentKey.Name.ToString() : TEXT(""));
+    Resp->SetStringField(TEXT("parent"), ControlRig_ReadParentName(CRBP, NewKey));
     FillHierarchyCounts(CRBP->GetHierarchy(), Resp, nullptr);
     return mcp_common::MakeSavedReply(Resp, bSaved, TEXT("add_rig_control"), SaveErr);
 }

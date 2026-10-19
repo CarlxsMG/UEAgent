@@ -92,6 +92,34 @@ namespace
         return nullptr;
     }
 
+    // Whether Target is among the inputs of Start, directly or through other nodes: reached from Start through
+    // ChildNodes, so Target feeds Start. Each node is visited once, so a loop already in the graph does not
+    // hang the walk.
+    bool SoundCue_FeedsInto(const USoundNode* Target, const USoundNode* Start)
+    {
+        TArray<const USoundNode*> Pending;
+        TSet<const USoundNode*> Visited;
+        Pending.Add(Start);
+        while (Pending.Num() > 0)
+        {
+            const USoundNode* Node = Pending.Pop();
+            if (Node == nullptr || Visited.Contains(Node))
+            {
+                continue;
+            }
+            Visited.Add(Node);
+            for (const TObjectPtr<USoundNode>& Child : Node->ChildNodes)
+            {
+                if (Child.Get() == Target)
+                {
+                    return true;
+                }
+                Pending.Add(Child.Get());
+            }
+        }
+        return false;
+    }
+
     // Map a node_type token -> concrete USoundNode subclass. Returns nullptr if unknown.
     UClass* ResolveSoundNodeClass(const FString& NodeType)
     {
@@ -277,7 +305,7 @@ TSharedPtr<FJsonObject> HandleAddSoundCueNode(const TSharedPtr<FJsonObject>& Par
 // ---------------------------------------------------------------------------
 // connect_sound_cue_nodes
 // ---------------------------------------------------------------------------
-// MCP:connect_sound_cue_nodes - Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (both ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes) or a full parent is an error. Nothing checks for cycles or earlier links: repeating the call without input_index links the child again in another slot. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; the cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
+// MCP:connect_sound_cue_nodes - Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes), a full parent, or a cycle (a node into itself or into a node feeding it) is an error, with nothing changed. Duplicate links are allowed: a repeat without input_index adds the child again. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
 //   @param cue_path - Full asset path of the cue
 //   @param parent_node_id - node_id of the upstream node with inputs (its index in the cue AllNodes)
 //   @param child_node_id - node_id of the node to feed into the parent
@@ -321,6 +349,21 @@ TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>
             TEXT("Parent node %s accepts no children"), *ParentNode->GetClass()->GetName()));
     }
 
+    // A node fed into itself, or into a node that already feeds it (the parent among the child's inputs, directly
+    // or through other nodes), closes a loop that USoundCue::CacheAggregateValues and every other recursive walk
+    // of the cue (GetDuration, playback) never leaves, so either is refused before anything changes.
+    if (ParentNode == ChildNode)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("parent_node_id and child_node_id are both %d: a node cannot feed itself. Nothing was changed."), ParentId));
+    }
+    if (SoundCue_FeedsInto(ParentNode, ChildNode))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Node %d already feeds node %d through its inputs, so linking %d into %d would make a cycle. ")
+            TEXT("Nothing was changed."), ParentId, ChildId, ChildId, ParentId));
+    }
+
     // Resolve target input slot. Default to first free slot (append) when not given.
     int32 InputIndex = -1;
     double InputIdxD = 0.0;
@@ -334,14 +377,11 @@ TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>
         }
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("ConnectSoundCueNodes", "Connect Sound Cue Nodes"));
-    Cue->Modify();
-    ParentNode->Modify();
-
+    // Without input_index: the first empty slot, else a new one appended; a full parent is refused here,
+    // before anything changes.
+    int32 FreeSlot = INDEX_NONE;
     if (InputIndex < 0)
     {
-        // Append into the next free slot (reuse a null entry if one exists).
-        int32 FreeSlot = INDEX_NONE;
         for (int32 i = 0; i < ParentNode->ChildNodes.Num(); ++i)
         {
             if (ParentNode->ChildNodes[i] == nullptr)
@@ -350,13 +390,22 @@ TSharedPtr<FJsonObject> HandleConnectSoundCueNodes(const TSharedPtr<FJsonObject>
                 break;
             }
         }
+        if (FreeSlot == INDEX_NONE && ParentNode->ChildNodes.Num() >= MaxChildNodes)
+        {
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("Parent node %s already has the maximum %d children"), *ParentNode->GetClass()->GetName(), MaxChildNodes));
+        }
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("ConnectSoundCueNodes", "Connect Sound Cue Nodes"));
+    Cue->Modify();
+    ParentNode->Modify();
+
+    if (InputIndex < 0)
+    {
+        // Append into the next free slot (reuse a null entry if one exists).
         if (FreeSlot == INDEX_NONE)
         {
-            if (ParentNode->ChildNodes.Num() >= MaxChildNodes)
-            {
-                return mcp_common::MakeErrorReply(FString::Printf(
-                    TEXT("Parent node %s already has the maximum %d children"), *ParentNode->GetClass()->GetName(), MaxChildNodes));
-            }
             FreeSlot = ParentNode->ChildNodes.Add(ChildNode);
         }
         else

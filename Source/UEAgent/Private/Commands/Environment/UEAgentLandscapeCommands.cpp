@@ -1040,7 +1040,7 @@ TSharedPtr<FJsonObject> HandleGetFoliageTypes(const TSharedPtr<FJsonObject>& Par
 
 // MCP:scatter_foliage_in_box - Scatter N seeded-random foliage instances of a type inside a world-space box (same seed = same layout). DANGER: measured CRASHING the editor process, the identical access violation as add_foliage_instances (UnrealEditor-FoliageEdit.dll) because both end in the same FFoliageInfo::AddInstance path -- lowering count does not help and the failure arrives disguised as "Connection reset". Use add_instanced_static_mesh_component + add_ism_instance to scatter instead, or PCG for rule-driven placement. Save your work before calling this at all.
 //   @param foliage_type_path - Full path of the UFoliageType asset
-//   @param count [integer!] - Number of instances to scatter, default 8
+//   @param count [integer] - Optional number of instances to scatter, default 8 when omitted; a negative count is taken as 0
 //   @param seed - Seed for the random stream, default 1337
 //   @param center - [x, y, z] box center in world space, default [0,0,0]
 //   @param extent - [x, y, z] box half-extents, default [500,500,0]
@@ -3340,7 +3340,7 @@ TSharedPtr<FJsonObject> HandleSetLandscapeGrassTypeProperties(const TSharedPtr<F
 
 // MCP:get_landscape_grass_type_properties - Read one grass variety of a LandscapeGrassType asset: mesh, density, placement jitter, start/end cull distance, min LOD, scaling mode and scale ranges, rotation/alignment and shadow flags. The read-back oracle for set_landscape_grass_type_properties. Two units that mislead: grass_density is instances per TEN square metres (25 means 2.5/m2), and start_cull_distance only fades if the mesh's material uses a PerInstanceFadeAmount node -- otherwise clusters pop at end_cull_distance and the start value does nothing.
 //   @param grass_path - Asset path of the ULandscapeGrassType
-//   @param variety_index [integer!] - Index of the FGrassVariety to read, default 0
+//   @param variety_index [integer] - Optional index of the FGrassVariety to read, default 0 when omitted; an index outside the grass type's varieties is an error
 //   @returns { asset_path, grass_class, variety_index, variety_count, grass_mesh, grass_density, placement_jitter, start_cull_distance, end_cull_distance, min_lod, scaling, scale_x:{min,max}, scale_y, scale_z, random_rotation, align_to_surface, use_grid, cast_dynamic_shadow, receives_decals, keep_instance_buffer_cpu_copy }
 TSharedPtr<FJsonObject> HandleGetLandscapeGrassTypeProperties(const TSharedPtr<FJsonObject>& Params)
 {

@@ -54,8 +54,9 @@
 #include "AnimGraphNode_TransitionResult.h" // UAnimGraphNode_TransitionResult (sink, CanUserDeleteNode=false)
 #include "K2Node_VariableGet.h"           // UK2Node_VariableGet (via mcp_common::SpawnVariableGetNode)
 #include "K2Node_CallFunction.h"         // UK2Node_CallFunction (KismetMathLibrary comparison + KismetSystemLibrary literal)
-#include "Kismet/KismetMathLibrary.h"     // UKismetMathLibrary (EqualEqual_FloatFloat etc.)
-#include "Kismet/KismetSystemLibrary.h"    // UKismetSystemLibrary::MakeLiteralFloat / MakeLiteralDouble (KismetMathLibrary has no literals)
+#include "EdGraphSchema_K2.h"             // UEdGraphSchema_K2: the pin type of a rule variable
+#include "Kismet/KismetMathLibrary.h"     // UKismetMathLibrary (EqualEqual_DoubleDouble etc.)
+#include "Kismet/KismetSystemLibrary.h"    // UKismetSystemLibrary::MakeLiteralDouble (KismetMathLibrary has no literals)
 
 /**
  * Animation Blueprint authoring commands.
@@ -409,6 +410,33 @@ namespace
         OutError = mcp_common::MakeErrorReply(FString::Printf(
             TEXT("Variable '%s' not found on anim blueprint (not in generated class, not in NewVariables)"), *VariableName));
         return FString();
+    }
+
+    /**
+     * The K2 pin type of the rule variable AnimBp_RuleVariableKind resolved into Property: converted from Property
+     * when there is one, else the type declared in AnimBP's NewVariables (a variable not compiled yet). False when
+     * neither gives a type.
+     */
+    bool AnimBp_RuleVariablePinType(const UAnimBlueprint* AnimBP, const FString& VariableName, const FProperty* Property,
+        FEdGraphPinType& OutPinType)
+    {
+        if (Property)
+        {
+            return GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, OutPinType);
+        }
+        const int32 Index = FBlueprintEditorUtils::FindNewVariableIndex(AnimBP, FName(*VariableName));
+        if (Index == INDEX_NONE)
+        {
+            return false;
+        }
+        OutPinType = AnimBP->NewVariables[Index].VarType;
+        return true;
+    }
+
+    /** The type of a rule variable for an error message: Property's C++ type, else the Blueprint type PinType names. */
+    FString AnimBp_RuleVariableTypeName(const FProperty* Property, const FEdGraphPinType& PinType)
+    {
+        return Property ? Property->GetCPPType() : UEdGraphSchema_K2::TypeToText(PinType).ToString();
     }
 
     /**
@@ -1466,7 +1494,7 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleAutomatic(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_from_bool
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_from_bool - Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or a non-bool one, is an error before anything changes; a variable known only from the blueprint's variable list (variable_kind new_blueprint) is not type-checked. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
+// MCP:set_anim_transition_rule_from_bool - Make a bool variable the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter of variable_name is wired to the sink's bCanEnterTransition, so the transition passes while the variable is true (there is no invert option). A missing blueprint, machine, transition or variable, or one that is not a single bool, is an error before anything changes; a variable not compiled yet (variable_kind new_blueprint) is checked against its declared type. Repeat calls rebuild the same rule (idempotent). Marks the blueprint structurally modified and saves without compiling (compile_anim_blueprint). Float test: set_anim_transition_rule_from_comparison; time-based: set_anim_transition_rule_automatic; empty rule: clear_anim_transition_rule; new transition: add_anim_transition. Refused while PIE runs unless force=true; a failed save is an error, the change kept in memory.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param machine_name - Name of the state machine that owns the transition, matched without case
 //   @param source_state - Name of the source state or conduit (transition origin)
@@ -1503,24 +1531,28 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
     if (!ResultNode)
         return mcp_common::MakeErrorReply(
             TEXT("Rule graph has no UAnimGraphNode_TransitionResult sink"));
+    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+    if (!SinkInputPin)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("UAnimGraphNode_TransitionResult has no 'bCanEnterTransition' input pin"));
+    }
 
-    // --- Validate the variable exists on the AnimBP (or its parent) AND is a bool. ---
+    // --- Validate the variable exists on the AnimBP (or its parent) AND is a single bool. ---
     FProperty* Property = nullptr;
     TSharedPtr<FJsonObject> Error;
     const FString VariableKind = AnimBp_RuleVariableKind(AnimBP, VariableName, Property, Error);
     if (VariableKind.IsEmpty())
         return Error;
 
-    if (Property)
+    // A compiled variable is typed by its property (a bitfield bool and a plain bool both map to PC_Boolean); one
+    // only declared on the blueprint is typed by its NewVariables entry, so it is checked before the graph changes too.
+    FEdGraphPinType VariableType;
+    if (!AnimBp_RuleVariablePinType(AnimBP, VariableName, Property, VariableType)
+        || VariableType.PinCategory != UEdGraphSchema_K2::PC_Boolean || VariableType.IsContainer())
     {
-        // Reject non-bool up front. CastField<FBoolProperty> catches both bitfield bools and
-        // plain bool UPROPERTYs — GetCPPType would also work but the cast is the canonical
-        // check used throughout the engine.
-        if (!CastField<FBoolProperty>(Property))
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Variable '%s' is not a bool (type=%s)"), *VariableName, *Property->GetCPPType()));
-        }
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Variable '%s' is not a bool (type=%s); nothing was changed"),
+            *VariableName, *AnimBp_RuleVariableTypeName(Property, VariableType)));
     }
 
     // --- Clear existing contributor nodes (preserve the sink). Idempotent step. ---
@@ -1537,16 +1569,10 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
 
     // --- Wire variable-get.value -> sink.bCanEnterTransition. ---
     UEdGraphPin* ValuePin = VariableGetNode->GetValuePin();
-    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
     if (!ValuePin)
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("UK2Node_VariableGet for '%s' has no value pin (variable may not be bool-compatible)"), *VariableName));
-    }
-    if (!SinkInputPin)
-    {
-        return mcp_common::MakeErrorReply(
-            TEXT("UAnimGraphNode_TransitionResult has no 'bCanEnterTransition' input pin"));
     }
 
     // MakeLinkTo is the low-level connector — both pins are bool-typed (the variable was
@@ -1589,21 +1615,21 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromBool(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------
 // set_anim_transition_rule_from_comparison
 // ---------------------------------------------------------------------------
-// MCP:set_anim_transition_rule_from_comparison - Make (variable_name operator comparison_value) the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter, a literal and a comparison node are wired into the sink's bCanEnterTransition. Only a double variable (a Blueprint float) works: a C++ float property, or one known only from the variable list (variable_kind new_blueprint), maps to *_FloatFloat math functions the engine no longer has and is an error, like an unknown operator; both are found after the old rule is removed, which stays removed in memory. A missing blueprint, machine, transition or variable, or a non-float one, is an error before anything changes. Repeat calls rebuild the same rule (idempotent); saves without compiling (compile_anim_blueprint). Bool rule: set_anim_transition_rule_from_bool; empty rule: clear_anim_transition_rule. Refused while PIE runs unless force=true; a failed save is an error.
+// MCP:set_anim_transition_rule_from_comparison - Make (variable_name operator comparison_value) the rule of an existing transition (source_state to target_state) of an Animation Blueprint state machine: every rule-graph node but the result sink is removed, then a getter, a literal and a comparison node are wired into the sink's bCanEnterTransition. The variable must be a single float of either precision, compiled or only declared (variable_kind new_blueprint), and the test runs in double precision. A missing blueprint, machine, transition or variable, a variable of another type or an unknown operator is an error before anything changes. Repeat calls rebuild the same rule (idempotent); saves without compiling (compile_anim_blueprint). Bool rule: set_anim_transition_rule_from_bool; empty rule: clear_anim_transition_rule. Refused while PIE runs unless force=true; a failed save is an error.
 //   @param anim_blueprint_path - Asset path of the UAnimBlueprint
 //   @param machine_name - Name of the state machine that owns the transition, matched without case
 //   @param source_state - Name of the source state or conduit (transition origin)
 //   @param target_state - Name of the target state or conduit (transition destination)
-//   @param variable_name - Name of an existing double variable (a Blueprint float) on the AnimBP or its parent class; the left-hand side of the comparison
+//   @param variable_name - Name of an existing float variable (a Blueprint float, or a C++ float or double property) on the AnimBP or its parent class; the left-hand side of the comparison
 //   @param operator - One of "==", "!=", ">", "<", ">=", "<=" (compared against comparison_value)
-//   @param comparison_value [number] - Right-hand side of the comparison (default 0), written into the literal node at float precision
+//   @param comparison_value [number] - Right-hand side of the comparison (default 0), written into the double literal node with six decimal places
 //   @returns { anim_blueprint_path, machine_name, source_state, target_state, variable_name, operator, comparison_value, variable_kind, rule_set, sink_present, contributor_count, contributor_node_classes, saved, save_error? }
 //
 // Behavior: clears existing contributor nodes (preserving the sink), creates a
 // UK2Node_VariableGet for the named float, a UK2Node_CallFunction wrapping
-// UKismetMathLibrary::MakeLiteralFloat for the comparison value, and another
-// UK2Node_CallFunction for the chosen comparison operator (EqualEqual_FloatFloat,
-// Greater_FloatFloat, etc.). The graph is wired:
+// UKismetSystemLibrary::MakeLiteralDouble for the comparison value, and another
+// UK2Node_CallFunction for the chosen comparison operator (EqualEqual_DoubleDouble,
+// Greater_DoubleDouble, etc.). The graph is wired:
 //   VariableGet.value        --> Comparison.<op>.A
 //   MakeLiteral*.ReturnValue --> Comparison.<op>.B     <-- the OUTPUT, not 'Value'
 //   Comparison.ReturnValue   --> sink.bCanEnterTransition
@@ -1618,27 +1644,26 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
     double ComparisonValue = 0.0;
     Params->TryGetNumberField(TEXT("comparison_value"), ComparisonValue);
 
-    // Operator string -> KismetMathLibrary function name. Float scope for old PC_Float
-    // pins; Double scope is what LWC actually emits when a Blueprint user
-    // declares `variable_type=real/float/double` because ResolvePinType maps all three
-    // to PC_Real + PC_Double (GraphUtils.cpp). Resolved at runtime against the
-    // variable's actual FProperty type.
-    static const TMap<FString, FName> OpToFuncFloat = {
-        {TEXT("=="), FName(TEXT("EqualEqual_FloatFloat"))},
-        {TEXT("!="), FName(TEXT("NotEqual_FloatFloat"))},
-        {TEXT(">"),  FName(TEXT("Greater_FloatFloat"))},
-        {TEXT("<"),  FName(TEXT("Less_FloatFloat"))},
-        {TEXT(">="), FName(TEXT("GreaterEqual_FloatFloat"))},
-        {TEXT("<="), FName(TEXT("LessEqual_FloatFloat"))},
+    // Operator -> UKismetMathLibrary comparison. The *_DoubleDouble functions are the only float comparisons UE 5.8
+    // declares (the *_FloatFloat names survive only as CoreRedirects, which FindFunctionByName does not follow). The
+    // K2 schema treats every real pin as compatible and the compiler inserts the float-to-double cast, so a single
+    // precision variable wires to their double A pin like a double one does.
+    static const TMap<FString, FName> OpToFunc = {
+        {TEXT("=="), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, EqualEqual_DoubleDouble)},
+        {TEXT("!="), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, NotEqual_DoubleDouble)},
+        {TEXT(">"),  GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Greater_DoubleDouble)},
+        {TEXT("<"),  GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Less_DoubleDouble)},
+        {TEXT(">="), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, GreaterEqual_DoubleDouble)},
+        {TEXT("<="), GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, LessEqual_DoubleDouble)},
     };
-    static const TMap<FString, FName> OpToFuncDouble = {
-        {TEXT("=="), FName(TEXT("EqualEqual_DoubleDouble"))},
-        {TEXT("!="), FName(TEXT("NotEqual_DoubleDouble"))},
-        {TEXT(">"),  FName(TEXT("Greater_DoubleDouble"))},
-        {TEXT("<"),  FName(TEXT("Less_DoubleDouble"))},
-        {TEXT(">="), FName(TEXT("GreaterEqual_DoubleDouble"))},
-        {TEXT("<="), FName(TEXT("LessEqual_DoubleDouble"))},
-    };
+    const FName* FuncNamePtr = OpToFunc.Find(OperatorStr);
+    if (!FuncNamePtr)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Invalid operator '%s' (expected one of: == != > < >= <=); nothing was changed"), *OperatorStr));
+    }
+    const FName ComparisonFuncName = *FuncNamePtr;
+    const FName LiteralFuncName = GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, MakeLiteralDouble);
 
     UAnimBlueprint* AnimBP = nullptr;
     UAnimationStateMachineGraph* SMGraph = nullptr;
@@ -1653,30 +1678,44 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
     if (!ResultNode)
         return mcp_common::MakeErrorReply(
             TEXT("Rule graph has no UAnimGraphNode_TransitionResult sink"));
+    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+    if (!SinkInputPin)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("UAnimGraphNode_TransitionResult has no 'bCanEnterTransition' input pin"));
+    }
 
-    // Validate variable exists + is float.
+    // Validate variable exists + is a single float of either precision (PC_Real covers FFloatProperty and
+    // FDoubleProperty); one only declared on the blueprint is typed by its NewVariables entry.
     FProperty* Property = nullptr;
     TSharedPtr<FJsonObject> Error;
     const FString VariableKind = AnimBp_RuleVariableKind(AnimBP, VariableName, Property, Error);
     if (VariableKind.IsEmpty())
         return Error;
 
-    if (Property)
+    FEdGraphPinType VariableType;
+    if (!AnimBp_RuleVariablePinType(AnimBP, VariableName, Property, VariableType)
+        || VariableType.PinCategory != UEdGraphSchema_K2::PC_Real || VariableType.IsContainer())
     {
-        // Accept BOTH FFloatProperty (legacy PC_Float) and FDoubleProperty (LWC
-        // PC_Real + PC_Double). The dispatch below picks the matching operator + literal
-        // set. Any other type is rejected with an honest type-name error so the caller
-        // knows exactly what went wrong.
-        const bool bIsFloat = CastField<FFloatProperty>(Property) != nullptr;
-        const bool bIsDouble = CastField<FDoubleProperty>(Property) != nullptr;
-        if (!bIsFloat && !bIsDouble)
-        {
-            return mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Variable '%s' is not a float/double (type=%s)"), *VariableName, *Property->GetCPPType()));
-        }
+        return mcp_common::MakeErrorReply(FString::Printf(TEXT("Variable '%s' is not a float/double (type=%s); nothing was changed"),
+            *VariableName, *AnimBp_RuleVariableTypeName(Property, VariableType)));
     }
 
-    // Clear existing contributor nodes (preserve the sink).
+    // UKismetSystemLibrary owns the literal-makers (KismetMathLibrary has no MakeLiteral* functions).
+    UFunction* LiteralFunc = UKismetSystemLibrary::StaticClass()->FindFunctionByName(LiteralFuncName);
+    if (!LiteralFunc)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UKismetSystemLibrary::%s not found in engine source; nothing was changed"), *LiteralFuncName.ToString()));
+    }
+    UFunction* CompFunc = UKismetMathLibrary::StaticClass()->FindFunctionByName(ComparisonFuncName);
+    if (!CompFunc)
+    {
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("UKismetMathLibrary::%s not found in engine source; nothing was changed"), *ComparisonFuncName.ToString()));
+    }
+
+    // Everything the rule needs is validated: only from here on does the rule graph change.
     AnimBp_RemoveRuleContributors(AnimBP, RuleGraph);
 
     // Create the variable-get node.
@@ -1688,39 +1727,9 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
             FString::Printf(TEXT("Failed to create UK2Node_VariableGet for variable '%s' (post-clear rule graph dirty)"), *VariableName));
     }
 
-    // Decide float vs double by inspecting the actual FProperty kind. Done AFTER the
-    // existence + type checks so we have a stable answer. For NewVariables (declared on
-    // the AnimBP pre-compile), the FProperty is null; default to Double because that
-    // matches the LWC default for new Blueprint real-typed members.
-    const bool bIsFloatProp = (Property != nullptr) && (CastField<FFloatProperty>(Property) != nullptr);
-    const bool bIsDoubleProp = (Property != nullptr) && (CastField<FDoubleProperty>(Property) != nullptr);
-    const FName LiteralFuncName = (Property == nullptr || bIsDoubleProp) ? FName(TEXT("MakeLiteralDouble")) : FName(TEXT("MakeLiteralFloat"));
-    const TMap<FString, FName>& OpMap = bIsDoubleProp ? OpToFuncDouble : OpToFuncFloat;
-
-    const FName* FuncNamePtr = OpMap.Find(OperatorStr);
-    if (!FuncNamePtr)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Invalid operator '%s' (expected one of: == != > < >= <=)"), *OperatorStr));
-    }
-    const FName ComparisonFuncName = *FuncNamePtr;
-
-    // Create MakeLiteral{Float,Double} node carrying the right-hand-side comparison value.
-    // UKismetSystemLibrary owns the literal-makers (KismetMathLibrary has no
-    // MakeLiteral* functions).
-    UK2Node_CallFunction* LiteralNode = NewObject<UK2Node_CallFunction>(RuleGraph);
-    UFunction* LiteralFunc = UKismetSystemLibrary::StaticClass()->FindFunctionByName(LiteralFuncName);
-    if (!LiteralFunc)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("UKismetSystemLibrary::%s not found in engine source"), *LiteralFuncName.ToString()));
-    }
-    LiteralNode->FunctionReference.SetFromField<UFunction>(LiteralFunc, false);
-    LiteralNode->NodePosX = -700.0f;
-    LiteralNode->NodePosY = 150.0f;
-    RuleGraph->AddNode(LiteralNode, true);
-    LiteralNode->PostPlacedNewNode();
-    LiteralNode->AllocateDefaultPins();
+    // The MakeLiteralDouble node carrying the right-hand-side comparison value, then the comparison node.
+    UK2Node_CallFunction* LiteralNode = mcp_common::CreateFunctionCallNode(RuleGraph, LiteralFunc, FVector2D(-700.0f, 150.0f));
+    UK2Node_CallFunction* ComparisonNode = mcp_common::CreateFunctionCallNode(RuleGraph, CompFunc, FVector2D(-400.0f, 25.0f));
 
     UEdGraphPin* LiteralValuePin = LiteralNode->FindPin(TEXT("Value"));
     if (!LiteralValuePin)
@@ -1728,39 +1737,23 @@ TSharedPtr<FJsonObject> HandleSetAnimTransitionRuleFromComparison(const TSharedP
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("UKismetSystemLibrary::%s has no 'Value' input pin"), *LiteralFuncName.ToString()));
     }
-    // UE float/double literal defaults use FString representation; SanitizeFloat handles locale.
-    LiteralValuePin->DefaultValue = FString::SanitizeFloat(static_cast<float>(ComparisonValue));
+    // A real pin's default is its text form; the value stays a double (SanitizeFloat keeps six decimal places).
+    LiteralValuePin->DefaultValue = FString::SanitizeFloat(ComparisonValue);
 
-    // Create the comparison operator node.
-    UK2Node_CallFunction* ComparisonNode = NewObject<UK2Node_CallFunction>(RuleGraph);
-    UFunction* CompFunc = UKismetMathLibrary::StaticClass()->FindFunctionByName(ComparisonFuncName);
-    if (!CompFunc)
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("UKismetMathLibrary::%s not found in engine source"), *ComparisonFuncName.ToString()));
-    }
-    ComparisonNode->FunctionReference.SetFromField<UFunction>(CompFunc, false);
-    ComparisonNode->NodePosX = -400.0f;
-    ComparisonNode->NodePosY = 25.0f;
-    RuleGraph->AddNode(ComparisonNode, true);
-    ComparisonNode->PostPlacedNewNode();
-    ComparisonNode->AllocateDefaultPins();
-
-    // Resolve all 5 wiring pins. Failure of any is an engine/API mismatch — surface it.
+    // Resolve the wiring pins. Failure of any is an engine/API mismatch — surface it.
     UEdGraphPin* VariableOutPin = VariableGetNode->GetValuePin();
     UEdGraphPin* CompAPin = ComparisonNode->FindPin(TEXT("A"));
     UEdGraphPin* CompBPin = ComparisonNode->FindPin(TEXT("B"));
     UEdGraphPin* CompReturnPin = ComparisonNode->FindPin(TEXT("ReturnValue"));
-    UEdGraphPin* SinkInputPin = ResultNode->FindPin(TEXT("bCanEnterTransition"));
     // The literal's OUTPUT. 'Value' is its INPUT and is used for the default
     // (above), NEVER for the link -- see the block below.
     UEdGraphPin* LiteralReturnPin = LiteralNode->FindPin(TEXT("ReturnValue"));
-    if (!VariableOutPin || !CompAPin || !CompBPin || !CompReturnPin || !SinkInputPin || !LiteralReturnPin)
+    if (!VariableOutPin || !CompAPin || !CompBPin || !CompReturnPin || !LiteralReturnPin)
     {
         return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Pin wiring failed (variable_out=%d A=%d B=%d ret=%d sink=%d lit_ret=%d) -- engine API mismatch"),
+            FString::Printf(TEXT("Pin wiring failed (variable_out=%d A=%d B=%d ret=%d lit_ret=%d) -- engine API mismatch"),
                 VariableOutPin != nullptr, CompAPin != nullptr, CompBPin != nullptr,
-                CompReturnPin != nullptr, SinkInputPin != nullptr, LiteralReturnPin != nullptr));
+                CompReturnPin != nullptr, LiteralReturnPin != nullptr));
     }
 
     // Wire all 3 edges via MakeLinkTo (low-level; bypasses UAnimationTransitionSchema's

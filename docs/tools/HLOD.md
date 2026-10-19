@@ -18,7 +18,7 @@ No parameters.
 
 *Additive, idempotent.*
 
-Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'.
+Creates and saves a new UHLODLayer (World Partition HLOD layer) asset.  Idempotent on re-run: an HLOD layer already at the path is returned unchanged with created=false, already_exists=true and saved=false, layer_type not applied and nothing saved; an asset of another class there is an error. Sets default streaming-grid cell_size=25600, loading_range=51200. Layer type accepts 'Instancing', 'MeshApproximate' (also 'Custom'/'CustomHLODActor'). Defaults to 'Instancing'. A failed save makes success false with saved=false. Change it later with set_hlod_layer_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -68,13 +68,13 @@ Lists all UHLODLayer assets under a content path via the AssetRegistry.
 
 *Destructive, idempotent.*
 
-Destroy a UHLODLayer asset at a /Game path (mirror of create_hlod_layer). Typed-delete: it loads the asset and REFUSES to delete it if it is not a UHLODLayer, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Delete a UHLODLayer asset at a /Game path, the mirror of create_hlod_layer. Typed delete: it loads the asset first and refuses one that is not a UHLODLayer with success false, its asset_class and a note, deleting nothing, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent: a path with no asset is a no-op, success true with deleted=false and already_existed=false. The delete removes the asset and its file and cannot be undone; when the engine refuses it (Play-in-Editor running, an asset the Asset Registry does not list, a file it cannot delete) success is false with deleted=false. List layers with get_hlod_layers; inspect one with get_hlod_layer_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_path` | string | yes | Full /Game/.../LayerName asset path. |
 
-**Returns:** `{ asset_path, deleted, already_existed, layer_type?, note? }`
+**Returns:** `{ asset_path, deleted, already_existed?, layer_type?, asset_class?, note? }`
 
 ## `set_hlod_layer_actors`
 

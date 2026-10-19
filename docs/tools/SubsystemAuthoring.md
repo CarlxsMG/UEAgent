@@ -20,7 +20,7 @@ Externally activate a Blueprint-authored USubsystem via FSubsystemCollectionBase
 
 *Additive, idempotent.*
 
-Create a Blueprint subclass of a USubsystem class at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, which compiles it; the package is marked dirty but not saved (save it with save_asset), there is no undo step, and it is refused while PIE runs unless force is set. A repeat call is idempotent: a Blueprint already at that path is returned as it is with already_exists true, without checking its parent, and parent_class then echoes the request rather than its real parent; another asset type there is an error. parent_class must resolve to a USubsystem class or nothing is created. lifetime is the family of the generated class: Editor, Engine, GameInstance, World, LocalPlayer or Unknown. Parent candidates: list_subsystem_classes; inspect: get_subsystem_class_info; inverse: remove_subsystem_class_bp; live instance check: is_subsystem_class_active.
+Create a Blueprint subclass of a USubsystem class at package_path/asset_name with FKismetEditorUtilities::CreateBlueprint, which compiles it, then save it; there is no undo step, and it is refused while PIE runs unless force is set. A failed save makes success false with save_error, the new Blueprint staying in memory. A repeat call is idempotent: a Blueprint already there whose parent is parent_class or derives from it is returned as it is, with already_exists true, saved false and its real parent_class, and nothing is saved; one with another parent, or another asset type there, is an error. parent_class must resolve to a USubsystem class or nothing is created. lifetime is the family of the generated class: Editor, Engine, GameInstance, World, LocalPlayer or Unknown. Parent candidates: list_subsystem_classes; inspect: get_subsystem_class_info; inverse: remove_subsystem_class_bp; live instance check: is_subsystem_class_active.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -28,7 +28,7 @@ Create a Blueprint subclass of a USubsystem class at package_path/asset_name wit
 | `parent_class` | string | yes | Parent USubsystem class: short name with or without the U prefix (e.g. "GameInstanceSubsystem"), a /Script path, or a Blueprint asset path |
 | `package_path` | string | no | Optional content folder; defaults to /Game/MCP |
 
-**Returns:** `{ asset_name: string, asset_path: string, package_path: string, parent_class: string, lifetime: string, already_exists: bool }`
+**Returns:** `{ asset_name: string, asset_path: string, package_path: string, parent_class: string, lifetime: string, already_exists: bool, saved: bool, save_error?: string, note?: string }`
 
 ## `deactivate_external_subsystem`
 

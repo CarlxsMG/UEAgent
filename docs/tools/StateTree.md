@@ -149,17 +149,17 @@ Append a new condition node, of the struct named by condition_struct and with th
 
 ## `add_tree_parameter`
 
-*Additive.*
+*Additive, idempotent.*
 
-Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. The engine keeps names unique: when a parameter of that name already exists it is left as it is and the new one gets a numbered suffix (e.g. Speed_0), while parameter_name still echoes the requested name and added only confirms that a parameter with that name exists, so check with list_tree_parameters first. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
+Add a typed parameter to the root parameter bag of a StateTree asset (the parameters that bindings and per-component overrides read), then save the asset without compiling it; there is no undo step. Idempotent: when the tree already has a parameter of that name (case-insensitive) and type, nothing is changed or saved and the reply says added false and already_existed true; the same name with another type is an error and nothing changes. parameter_name is the name in the tree. A missing tree or editor data is an error; a failed save (for example while PIE runs) makes success false with the change only in memory. Set its value with set_tree_parameter; inverse: remove_tree_parameter; bind it with add_state_tree_binding; per-actor values: set_component_parameter_override.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path of the StateTree, e.g. "/Game/AI/ST_Guard". |
-| `parameter_name` | string | yes | Name of the parameter to add, e.g. "Speed"; a name already in the bag yields a second parameter with a numbered suffix. |
+| `parameter_name` | string | yes | Name of the parameter to add, e.g. "Speed"; a name already in the bag, compared case-insensitively, is never added a second time. |
 | `parameter_type` | string | no | Scalar type: bool, int (default), int64, float, double, name, string, text, byte; case is ignored, int32 and fstring are accepted as aliases, and an unrecognised type silently becomes a string parameter |
 
-**Returns:** `{ tree_path, parameter_name, parameter_type, parameter_count, added, saved }`
+**Returns:** `{ tree_path, parameter_name, parameter_type, parameter_count, added, already_existed, saved, note? }`
 
 ## `compile_state_tree`
 
@@ -439,12 +439,12 @@ List all UStateTree assets under a content path (default /Game).
 
 *Read-only.*
 
-Walk the state hierarchy of a UStateTree, returning a flat list with parent/child/sibling info plus a recursive child_count.
+List every state of a StateTree asset, found by asset path, as one flat breadth-first list, read as loaded in memory (unsaved edits included) without changing anything: the top-level states (SubTrees) at depth 0 first, then each level of children. Each entry gives the name, type (State, Group, Linked, LinkedAsset or Subtree), task completion (All or Any), parent name (empty at depth 0), depth, child_count (direct children only, not recursive), and task, enter-condition and transition counts. root_state, matched by name (case-insensitive, first match in tree order), lists only that state, at depth 0, and its descendants. An unknown tree or root_state, or a tree without editor data, is an error. Whole structure with transitions: get_state_tree_info; one state's details: list_transitions, list_tasks, list_conditions; finding trees: list_state_trees.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `tree_path` | string | yes | Asset path to the UStateTree. |
-| `root_state` | string | yes | Optional. If set, walk from this state as root (top-level SubTrees are skipped). |
+| `root_state` | string | no | Optional. If set, walk from this state as root (top-level SubTrees are skipped). |
 
 **Returns:** `{ tree_path, count, states: [{ name, type, completion, has_children, child_count, depth, parent }] }`
 
@@ -658,8 +658,8 @@ Override a single UStateTree root parameter on a UStateTreeComponent living on a
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Actor label/name that owns the UStateTreeComponent (resolved against the editor world) |
-| `parameter_name` | string | yes | Root parameter name to override (must exist on the bound tree) |
-| `value` | string | yes | Optional string-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc |
+| `parameter_name` | string | no | Root parameter name to override (must exist on the bound tree); required unless clear_overrides is true |
+| `value` | string | no | String-encoded value; type-driven by the parameter's FPropertyBagPropertyDesc. Required unless clear_overrides is true |
 | `state_tree_path` | string | no | Optional path to a UStateTree to bind the component to if no tree is already bound |
 | `clear_overrides` | boolean | no | If true, drop all per-instance overrides on the component (asset defaults take over); value is ignored |
 
@@ -820,7 +820,7 @@ Set a single field of a task instance by reflection (FJsonObjectConverter::JsonV
 
 *Destructive, idempotent.*
 
-Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
+Change the trigger, priority, enabled flag and delay of an existing transition of a state of a StateTree asset, then save the asset without compiling it; there is no undo step. The transition is addressed by state_name and transition_index (0-based, as list_transitions or get_state_tree_info report it). Only the fields you pass are written, overwriting their old values; the reply reads every field back. An unknown trigger or priority name, a missing or out-of-range transition_index, or a missing tree or state is an error and nothing is changed or saved; a failed save (for example while PIE runs) makes success false. Target state, transition type, event tag or payload: update_transition; a new transition: add_state_transition; inverse: remove_transition; conditions: add_transition_condition.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -853,7 +853,7 @@ Set the value of an existing root parameter of a StateTree asset and save it. Wo
 
 *Destructive.*
 
-Update any subset of a transition's metadata fields on a state. Only fields explicitly passed are written; everything else is preserved. Unknown enum strings are rejected (no silent no-ops on bad input). Superset of set_transition_properties: adds transition_type (None|Succeeded|Failed|GotoState|Parent|NextState|...), target_state (rebind by name), event_tag (FGameplayTag, when trigger=OnEvent), and payload_struct (event-payload struct, when trigger=OnEvent). Use this when set_transition_properties doesn't expose the field you need.
+Update any subset of a transition's metadata fields on a state. Only fields explicitly passed are written; everything else is preserved. Every input is checked before any is written: an unknown enum name, target_state, event_tag or payload_struct is an error naming each bad input, and nothing is changed or saved, so errors in a reply is always empty. Superset of set_transition_properties: adds transition_type (None|Succeeded|Failed|GotoState|Parent|NextState|...), target_state (rebind by name), event_tag (FGameplayTag, when trigger=OnEvent), and payload_struct (event-payload struct, when trigger=OnEvent). Use this when set_transition_properties doesn't expose the field you need.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

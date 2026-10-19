@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Data/DataAuthoringUtils.h"       // OtherClassAtPathReply
 
 // DataRegistry plugin (DataRegistry module — Build.cs dep; plugin must be enabled)
 #include "DataRegistry.h"                    // UDataRegistry
@@ -257,12 +258,12 @@ namespace
 // protected authoring fields via reflection, registers + saves the package.
 // Idempotent: re-loads and returns an existing asset.
 // ---------------------------------------------------------------------------
-// MCP:create_data_registry - Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the named UScriptStruct (e.g. "MirrorTableRow"); DataTable sources attached later must use a matching RowStruct. Idempotent: re-loads and returns an existing asset.
+// MCP:create_data_registry - Create and save a UDataRegistry asset.  The registry's ItemStruct is set to the named UScriptStruct (e.g. "MirrorTableRow"); DataTable sources attached later must use a matching RowStruct. Idempotent: a registry already at the path is returned unchanged with already_exists=true and saved=false (registry_type and item_struct not applied), and nothing is saved; another asset class there is an error. A failed save makes success false with saved=false and save_error. Attach sources with add_data_registry_source, then register it with initialize_data_registry.
 //   @param registry_name - Name of the new UDataRegistry asset.
 //   @param package_path - Destination /Game folder (default /Game/DataRegistries).
 //   @param item_struct - Name of the UScriptStruct used for items (e.g. "MirrorTableRow").
 //   @param registry_type - RegistryType FName (defaults to registry_name).
-//   @returns { registry_path: string, registry_type: string, item_struct: string, success: bool, already_exists: bool, type_verified: bool, struct_verified: bool, saved: bool, save_error: string }
+//   @returns { registry_path: string, registry_type: string, item_struct: string, success: bool, already_exists: bool, type_verified: bool, struct_verified: bool, saved: bool, save_error: string, message?: string }
 
 TSharedPtr<FJsonObject> HandleCreateDataRegistry(
     const TSharedPtr<FJsonObject>& Params)
@@ -291,11 +292,17 @@ TSharedPtr<FJsonObject> HandleCreateDataRegistry(
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *RegistryName);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: load and return existing.
+    // Idempotent: a registry already there is returned unchanged and nothing is saved. A subclass of UDataRegistry
+    // is not the asset asked for; an asset of an unrelated class does not resolve here, and NewAssetInPackage
+    // below refuses it.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         if (UDataRegistry* Existing = mcp_common::ResolveAsset<UDataRegistry>(FullPath))
         {
+            if (Existing->GetClass() != UDataRegistry::StaticClass())
+            {
+                return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UDataRegistry::StaticClass());
+            }
             TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
             ResultObj->SetStringField(TEXT("registry_path"), Existing->GetPathName());
             ResultObj->SetStringField(TEXT("registry_type"), Existing->GetRegistryType().ToString());
@@ -303,7 +310,8 @@ TSharedPtr<FJsonObject> HandleCreateDataRegistry(
                 Existing->GetItemStruct() ? Existing->GetItemStruct()->GetName() : TEXT("None"));
             ResultObj->SetBoolField(TEXT("success"), true);
             ResultObj->SetBoolField(TEXT("already_exists"), true);
-            ResultObj->SetBoolField(TEXT("saved"), true);
+            ResultObj->SetBoolField(TEXT("saved"), false);
+            ResultObj->SetStringField(TEXT("message"), TEXT("DataRegistry already exists; returned the existing asset unchanged, nothing saved"));
             return mcp_common::MakeOkReply(ResultObj);
         }
     }
@@ -443,7 +451,7 @@ TSharedPtr<FJsonObject> HandleAddDataRegistrySource(
 // Loads + registers + initializes a registry through the subsystem so its
 // sources become live and (for precached sources) cached for synchronous gets.
 // ---------------------------------------------------------------------------
-// MCP:initialize_data_registry - Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). registered and initialized describe the registry the subsystem holds for this asset's registry_type afterwards -- with two assets of one type that can be the other one -- and loaded only says the path is on the load list. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
+// MCP:initialize_data_registry - Register and initialize a UDataRegistry asset with the UDataRegistrySubsystem for this editor session, so get_data_registry_item can read its precached items: the asset is loaded, its path goes on the subsystem's load list (LoadRegistryPath), the registry map is refreshed and registries not yet initialized are initialized. Nothing is saved or written to the asset, and a repeat call adds nothing (idempotent). loaded, registered and initialized are read back from this asset, and it is a failure, success false with the reason, unless it ends up registered and initialized: another asset holding its registry_type, or no source that initializes, prevents that. A registry that does not load, or a missing subsystem (DataRegistry plugin off), is an error. Create one with create_data_registry and attach sources with add_data_registry_source; after edits use refresh_data_registry_map; state: get_data_registry_info, list_data_registry_types.
 //   @param registry_path - Path of the UDataRegistry asset, e.g. "/Game/Data/DR_Items" or "/Game/Data/DR_Items.DR_Items".
 //   @returns { registry_path: string, registry_type: string, success: bool, loaded: bool, registered: bool, initialized: bool }
 //   @hints additive idempotent
@@ -461,25 +469,51 @@ TSharedPtr<FJsonObject> HandleInitializeDataRegistry(
     UDataRegistry* Registry = nullptr;
     if (TSharedPtr<FJsonObject> LoadError = DataRegistry_Resolve(RegistryPath, Registry)) { return LoadError; }
 
+    // LoadRegistryPath puts the path on the subsystem's load list and, once the subsystem is ready, loads the asset,
+    // refreshes the registry map and initializes the registries not yet initialized. Its return value tests
+    // AddUnique() != INDEX_NONE, which never fails, so it says nothing and is not read.
     const FSoftObjectPath AssetPath(Registry->GetPathName());
-    const bool bLoaded = Subsystem->LoadRegistryPath(AssetPath);
-
-    // Refresh the registry map and re-resolve in case registration created a new
-    // registered instance.
+    Subsystem->LoadRegistryPath(AssetPath);
     Subsystem->RefreshRegistryMap();
 
+    // Every flag is read back from THIS asset. The registry map is keyed by registry type, so the registry it holds
+    // for this asset's type can be another asset of the same type: registered asks whether this object is in it.
+    // GetAllRegistries also flushes a registry load the subsystem deferred.
+    TArray<UDataRegistry*> RegisteredRegistries;
+    Subsystem->GetAllRegistries(RegisteredRegistries, /*bSortByType*/ false);
     const FName RegType = Registry->GetRegistryType();
-    UDataRegistry* Registered = Subsystem->GetRegistryForType(RegType);
-    const bool bInitialized = Registered ? Registered->IsInitialized() : Registry->IsInitialized();
+    const bool bLoaded = AssetPath.ResolveObject() == Registry;
+    const bool bRegistered = RegisteredRegistries.Contains(Registry);
+    const bool bInitialized = Registry->IsInitialized();
+    const bool bReady = bRegistered && bInitialized;
+
+    FString Failure;
+    if (!bRegistered)
+    {
+        const UDataRegistry* TypeHolder = Subsystem->GetRegistryForType(RegType);
+        Failure = TypeHolder
+            ? FString::Printf(TEXT("initialize_data_registry: the subsystem holds %s for registry_type '%s', not this asset, so this one is not registered; two registries cannot share one registry_type"),
+                *TypeHolder->GetPathName(), *RegType.ToString())
+            : FString::Printf(TEXT("initialize_data_registry: the DataRegistry subsystem did not register this asset%s"),
+                Subsystem->IsReadyForInitialization() ? TEXT("") : TEXT(" (the subsystem is not ready for initialization yet)"));
+    }
+    else if (!bInitialized)
+    {
+        // UDataRegistry::Initialize initializes the registry only when at least one of its sources initializes.
+        const int32 SourceCount = CountDataSourcesReflective(Registry);
+        Failure = SourceCount == 0
+            ? FString(TEXT("initialize_data_registry: the registry is registered but not initialized: it has no source, and a registry initializes only when one of its sources does (attach one with add_data_registry_source)"))
+            : FString::Printf(TEXT("initialize_data_registry: the registry is registered but not initialized: none of its %d source(s) initialized"), SourceCount);
+    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("registry_path"), Registry->GetPathName());
     ResultObj->SetStringField(TEXT("registry_type"), RegType.ToString());
-    ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetBoolField(TEXT("success"), bReady);
     ResultObj->SetBoolField(TEXT("loaded"), bLoaded);
-    ResultObj->SetBoolField(TEXT("registered"), Registered != nullptr);
+    ResultObj->SetBoolField(TEXT("registered"), bRegistered);
     ResultObj->SetBoolField(TEXT("initialized"), bInitialized);
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bReady, Failure);
 }
 
 // ---------------------------------------------------------------------------

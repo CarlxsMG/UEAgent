@@ -138,6 +138,12 @@ TSharedPtr<FJsonObject> HandleSpawnDecalActor(
 
 	if (UDecalComponent* Comp = Decal->GetDecal())
 	{
+		// A reused actor's component is a separate object from the actor recorded above, so it is recorded too before
+		// its size and material are written; a new actor's spawn already covers it.
+		if (bReused)
+		{
+			Comp->Modify();
+		}
 		Comp->DecalSize = DecalSize;
 		FString MaterialPath;
 		if (Params->TryGetStringField(TEXT("material_path"), MaterialPath) && !MaterialPath.IsEmpty())
@@ -175,7 +181,7 @@ TSharedPtr<FJsonObject> HandleSpawnDecalActor(
 // ---------------------------------------------------------------------------
 // set_decal_material {actor_label, material_path}
 // ---------------------------------------------------------------------------
-// MCP:set_decal_material - Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. No undo step, dirty flag or save: the component is written without Modify. Assigning the material it already has rewrites the same value. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
+// MCP:set_decal_material - Assign a material to the UDecalComponent of an ADecalActor in the editor world, found by actor label (not object name), in place of its current one. material_path is loaded as a UMaterialInterface (it renders only with the Deferred Decal material domain) and echoed back as given, not read back. The change is one undo step and dirties the level; nothing is saved. Assigning the material it already has changes nothing and adds no undo step. An unknown label, an actor without a decal component, or a path that does not load as a material is an error. Read back with get_decal_info; spawn_decal_actor can set one at creation; tint: set_decal_color; projection box: set_decal_size.
 //   @param actor_label - Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match).
 //   @param material_path - Asset path of the UMaterialInterface, e.g. "/Game/Decals/M_Decal_Crack" (the object path form also works); echoed back as given.
 //   @returns { actor_label: string, material_path: string }
@@ -193,7 +199,14 @@ TSharedPtr<FJsonObject> HandleSetDecalMaterial(
 		return mcp_common::MakeErrorReply(
 			FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
 	}
-	Decal->GetDecal()->SetDecalMaterial(Mat);
+	// The component is recorded before the write, so the call is one undo step and dirties the actor's package; the
+	// material it already has is not written again, so that call dirties nothing.
+	UDecalComponent* Comp = Decal->GetDecal();
+	if (Comp->GetDecalMaterial() != Mat)
+	{
+		Comp->Modify();
+		Comp->SetDecalMaterial(Mat);
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetStringField(TEXT("material_path"), MaterialPath);
@@ -204,7 +217,7 @@ TSharedPtr<FJsonObject> HandleSetDecalMaterial(
 // set_decal_size {actor_label, decal_size?=[x,y,z], size_x?, size_y?, size_z?}
 //   Either a single decal_size array OR three named numbers are accepted.
 // ---------------------------------------------------------------------------
-// MCP:set_decal_size - Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated, and there is no undo step, dirty flag or save. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
+// MCP:set_decal_size - Set the DecalSize half-extents (cm, in the decal's local space, before actor scale) of an ADecalActor's UDecalComponent in the editor world, found by actor label, and refresh its render state. A valid decal_size [x, y, z] wins over size_x, size_y and size_z; without it each given axis changes and the rest keep their value, and a call with none changes nothing. X is the projection depth, Y and Z the footprint. Values are not validated; a change is one undo step that dirties the level, and nothing is saved. An unknown label or an actor without a decal component is an error. Read back with get_decal_info; set it at spawn with spawn_decal_actor; draw order: set_decal_sort_order.
 //   @param actor_label - Actor label of the ADecalActor in the editor world (case-insensitive; the object name does not match).
 //   @param decal_size - Optional array of exactly 3 numbers [x, y, z], the half-extents in cm; when valid it overrides size_x, size_y and size_z, and any other length is ignored.
 //   @param size_x - Optional X half-extent in cm (the projection depth); used only without a valid decal_size.
@@ -226,8 +239,15 @@ TSharedPtr<FJsonObject> HandleSetDecalSize(
 		if (Params->TryGetNumberField(TEXT("size_y"), Y)) { Size.Y = static_cast<float>(Y); }
 		if (Params->TryGetNumberField(TEXT("size_z"), Z)) { Size.Z = static_cast<float>(Z); }
 	}
-	Decal->GetDecal()->DecalSize = Size;
-	Decal->GetDecal()->MarkRenderStateDirty();
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
+	// size it already has is not written again, so that call dirties nothing.
+	UDecalComponent* Comp = Decal->GetDecal();
+	if (Comp->DecalSize != Size)
+	{
+		Comp->Modify();
+		Comp->DecalSize = Size;
+		Comp->MarkRenderStateDirty();
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetNumberField(TEXT("size_x"), Size.X);
@@ -239,7 +259,7 @@ TSharedPtr<FJsonObject> HandleSetDecalSize(
 // ---------------------------------------------------------------------------
 // set_decal_color {actor_label, color?=[r,g,b,a]}
 // ---------------------------------------------------------------------------
-// MCP:set_decal_color - Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). No undo, dirty flag or save; returns the resulting r, g, b, a.
+// MCP:set_decal_color - Set DecalColor on an editor-world ADecalActor found by label; it only shows if the decal material uses a Decal Color node. A color that is not a 4-number array is ignored (current color kept). A change is one undo step that dirties the level; nothing is saved. Returns the resulting r, g, b, a. An unknown label is an error; read it back with get_decal_info.
 //   @param actor_label - Label of the ADecalActor in the editor world.
 //   @param color [array] - Array of exactly 4 numbers [r, g, b, a], a linear color such as [1, 0.5, 0, 1]; missing or another length keeps the current DecalColor.
 //   @returns { actor_label: string, r: float, g: float, b: float, a: float }
@@ -250,9 +270,16 @@ TSharedPtr<FJsonObject> HandleSetDecalColor(
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
 	ADecalActor* Decal = nullptr;
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-	FLinearColor Color = Decal->GetDecal()->DecalColor;
+	UDecalComponent* Comp = Decal->GetDecal();
+	FLinearColor Color = Comp->DecalColor;
 	ReadLinearColor(Params, TEXT("color"), Color);
-	Decal->GetDecal()->SetDecalColor(Color);
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
+	// color it already has is not written again, so that call dirties nothing.
+	if (Comp->DecalColor != Color)
+	{
+		Comp->Modify();
+		Comp->SetDecalColor(Color);
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetNumberField(TEXT("r"), Color.R);
@@ -265,20 +292,32 @@ TSharedPtr<FJsonObject> HandleSetDecalColor(
 // ---------------------------------------------------------------------------
 // set_decal_sort_order {actor_label, sort_order}
 // ---------------------------------------------------------------------------
-// MCP:set_decal_sort_order - Set the SortOrder int on a UDecalComponent (lower draws first within the same decal bucket).
+// MCP:set_decal_sort_order - Set the SortOrder of the UDecalComponent of an ADecalActor in the editor world, found by actor label: where decals overlap, a higher sort order draws later, on top of a lower one. sort_order is required; a missing one is an error and nothing is written. A change is one undo step that dirties the level; the order the decal already has changes nothing, and nothing is saved. An unknown label or an actor without a decal component is an error. Read it back with get_decal_info; set the material with set_decal_material and the projection box with set_decal_size.
 //   @param actor_label - Label of the ADecalActor in the editor world.
-//   @param sort_order - New sort order value.
+//   @param sort_order - New sort order value, a whole number (a fraction is rounded); required.
 //   @returns { actor_label: string, sort_order: int }
 TSharedPtr<FJsonObject> HandleSetDecalSortOrder(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString ActorLabel;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_label"), ActorLabel)) { return Missing; }
+	// The order is the whole point of the call: without it nothing is written, rather than an order of 0. A negated read
+	// into the int32, not ReadRequiredNumber, so the catalog also publishes the int32 range the precondition enforces.
 	int32 SortOrder = 0;
-	Params->TryGetNumberField(TEXT("sort_order"), SortOrder);
+	if (!Params->TryGetNumberField(TEXT("sort_order"), SortOrder))
+	{
+		return mcp_common::MissingParameterReply(TEXT("sort_order"));
+	}
 	ADecalActor* Decal = nullptr;
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-	Decal->GetDecal()->SetSortOrder(SortOrder);
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
+	// order it already has is not written again, so that call dirties nothing.
+	UDecalComponent* Comp = Decal->GetDecal();
+	if (Comp->SortOrder != SortOrder)
+	{
+		Comp->Modify();
+		Comp->SetSortOrder(SortOrder);
+	}
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetNumberField(TEXT("sort_order"), SortOrder);
@@ -346,16 +385,48 @@ TSharedPtr<FJsonObject> HandleSetDecalFade(
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
 	UDecalComponent* Comp = Decal->GetDecal();
 
+	// The component is recorded once, before its first write that changes a value, so a change is one undo step and
+	// dirties the actor's package; fields given their current value are not written and dirty nothing.
+	bool bRecorded = false;
+	auto WriteField = [Comp, &bRecorded](float& Member, double Value)
+	{
+		const float NewValue = static_cast<float>(Value);
+		if (Member != NewValue)
+		{
+			if (!bRecorded)
+			{
+				Comp->Modify();
+				bRecorded = true;
+			}
+			Member = NewValue;
+		}
+	};
+
 	int32 Applied = 0;
 	double Number = 0.0;
-	if (Params->TryGetNumberField(TEXT("fade_start_delay"), Number))    { Comp->FadeStartDelay = static_cast<float>(Number); ++Applied; }
-	if (Params->TryGetNumberField(TEXT("fade_duration"), Number))       { Comp->FadeDuration = static_cast<float>(Number); ++Applied; }
-	if (Params->TryGetNumberField(TEXT("fade_in_start_delay"), Number)) { Comp->FadeInStartDelay = static_cast<float>(Number); ++Applied; }
-	if (Params->TryGetNumberField(TEXT("fade_in_duration"), Number))    { Comp->FadeInDuration = static_cast<float>(Number); ++Applied; }
+	if (Params->TryGetNumberField(TEXT("fade_start_delay"), Number))    { WriteField(Comp->FadeStartDelay, Number); ++Applied; }
+	if (Params->TryGetNumberField(TEXT("fade_duration"), Number))       { WriteField(Comp->FadeDuration, Number); ++Applied; }
+	if (Params->TryGetNumberField(TEXT("fade_in_start_delay"), Number)) { WriteField(Comp->FadeInStartDelay, Number); ++Applied; }
+	if (Params->TryGetNumberField(TEXT("fade_in_duration"), Number))    { WriteField(Comp->FadeInDuration, Number); ++Applied; }
 	bool bDestroy = false;
-	if (Params->TryGetBoolField(TEXT("destroy_owner_after_fade"), bDestroy)) { Comp->bDestroyOwnerAfterFade = bDestroy ? 1 : 0; ++Applied; }
+	if (Params->TryGetBoolField(TEXT("destroy_owner_after_fade"), bDestroy))
+	{
+		if ((Comp->bDestroyOwnerAfterFade != 0) != bDestroy)
+		{
+			if (!bRecorded)
+			{
+				Comp->Modify();
+				bRecorded = true;
+			}
+			Comp->bDestroyOwnerAfterFade = bDestroy ? 1 : 0;
+		}
+		++Applied;
+	}
 
-	Comp->MarkRenderStateDirty();
+	if (bRecorded)
+	{
+		Comp->MarkRenderStateDirty();
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
@@ -384,7 +455,14 @@ TSharedPtr<FJsonObject> HandleSetDecalFadeScreenSize(
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("fade_screen_size"), Value)) { return Missing; }
 	ADecalActor* Decal = nullptr;
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
-	Decal->GetDecal()->SetFadeScreenSize(static_cast<float>(Value));
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
+	// size it already has is not written again, so that call dirties nothing.
+	UDecalComponent* Comp = Decal->GetDecal();
+	if (Comp->FadeScreenSize != static_cast<float>(Value))
+	{
+		Comp->Modify();
+		Comp->SetFadeScreenSize(static_cast<float>(Value));
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
@@ -416,7 +494,13 @@ TSharedPtr<FJsonObject> HandleSetDecalFadeIn(
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
 
 	UDecalComponent* Comp = Decal->GetDecal();
-	Comp->SetFadeIn(static_cast<float>(StartDelay), static_cast<float>(Duration));
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package; the
+	// pair it already has is not written again, so that call dirties nothing.
+	if (Comp->FadeInStartDelay != static_cast<float>(StartDelay) || Comp->FadeInDuration != static_cast<float>(Duration))
+	{
+		Comp->Modify();
+		Comp->SetFadeIn(static_cast<float>(StartDelay), static_cast<float>(Duration));
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
@@ -425,7 +509,7 @@ TSharedPtr<FJsonObject> HandleSetDecalFadeIn(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_decal_destroy_owner_after_fade - Toggle the bDestroyOwnerAfterFade bit on a UDecalComponent. The existing set_decal_fade cmd always passes DestroyOwnerAfterFade=true to SetFadeOut; this cmd lets callers flip it independently and read it back. Implementation: writes the FadeOut triad through SetFadeOut(start, duration, destroy) using the current FadeStartDelay/FadeDuration so the other two fields are preserved.
+// MCP:set_decal_destroy_owner_after_fade - Set the bDestroyOwnerAfterFade bit of the UDecalComponent of an ADecalActor in the editor world, found by actor label: whether the actor is destroyed once its fade-out ends at runtime. The bit is written directly, as the details panel does, so FadeStartDelay and FadeDuration come back unchanged and no lifespan timer starts in the editor. A change is one undo step that dirties the level; nothing is saved. An unknown label is an error. set_decal_fade sets this bit together with the fade timing; read it back with get_decal_info.
 //   @param actor_label - Label of the ADecalActor in the editor world.
 //   @param destroy_owner_after_fade - New value for the bDestroyOwnerAfterFade bit (true = auto-destroy the actor once fully faded).
 //   @returns { actor_label: string, destroy_owner_after_fade: bool, fade_start_delay: float, fade_duration: float }
@@ -446,9 +530,16 @@ TSharedPtr<FJsonObject> HandleSetDecalDestroyOwnerAfterFade(
 	if (TSharedPtr<FJsonObject> Error = Decal_FindExisting(ActorLabel, Decal)) { return Error; }
 
 	UDecalComponent* Comp = Decal->GetDecal();
-	// Round-trip through SetFadeOut so the engine UPROPERTY bits stay consistent
-	// (DecalComponent has no standalone bDestroyOwnerAfterFade setter).
-	Comp->SetFadeOut(Comp->FadeStartDelay, Comp->FadeDuration, bDestroy);
+	// Written directly, as set_decal_fade and the details panel do. SetFadeOut would rescale FadeStartDelay and
+	// FadeDuration by r.Decal.FadeDurationScale and start the component's lifespan timer, which in an editor world
+	// with a realtime viewport destroys the decal component (and, with this bit set, its actor) when it runs out.
+	// The component is recorded before the write, so a change is one undo step and dirties the actor's package.
+	if ((Comp->bDestroyOwnerAfterFade != 0) != bDestroy)
+	{
+		Comp->Modify();
+		Comp->bDestroyOwnerAfterFade = bDestroy ? 1 : 0;
+		Comp->MarkRenderStateDirty();
+	}
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);

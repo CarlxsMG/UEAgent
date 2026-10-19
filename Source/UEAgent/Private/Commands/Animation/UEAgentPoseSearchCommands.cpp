@@ -152,12 +152,12 @@ namespace
 // ---------------------------------------------------------------------------
 // create_pose_search_schema
 // ---------------------------------------------------------------------------
-// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and nothing saved, although its saved field reads true; skeleton_path and sample_rate are not applied to it. The skeleton is loaded first, so a skeleton that does not load is an error even then; an invalid path, or an asset of another class there, is an error too; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_pose_search_schema_properties, and inspect it with inspect_pose_search_schema.
+// MCP:create_pose_search_schema - Create a UPoseSearchSchema data asset at package_path/name (package_path defaults to /Game/MCP) bound to the USkeleton at skeleton_path, with sample_rate clamped to 1..240 and the default Trajectory and Pose channels, then save it. Idempotent: a schema already at that path is returned unchanged with already_existed true and saved false, nothing saved, its skeleton_path and skeleton_paths read from it; the requested skeleton and sample_rate are not applied, and that skeleton is not even loaded. An invalid path, an asset of another class there, or for a new schema a skeleton that does not load, is an error; a failed save of a new schema makes success false. Next create a database with create_pose_search_database; add channels with add_pose_search_channel_to_schema, change settings with set_pose_search_schema_properties, and inspect it with inspect_pose_search_schema.
 //   @param name - Asset name (e.g. 'PoseSearchSchema_Example').
 //   @param package_path - Target content package path (default /Game/MCP); trailing slashes are stripped.
-//   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); it must load even when the schema already exists.
+//   @param skeleton_path - Asset path of the USkeleton (default /Engine/EngineMeshes/SkeletalCube_Skeleton); loaded only for a schema this call creates.
 //   @param sample_rate - Schema SampleRate (int, ClampMin=1, ClampMax=240; default 30); out-of-range values are clamped, and it is applied only to a schema this call creates.
-//   @returns { name, package_path, asset_path, schema_path, skeleton_path, sample_rate, schema_cardinality, channel_count, created, already_existed, saved, message }
+//   @returns { name, package_path, asset_path, schema_path, skeleton_path, skeleton_paths, sample_rate, schema_cardinality, channel_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -183,9 +183,6 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObjec
     // out-of-range values that PostEditChange would log and clamp anyway.
     SampleRate = FMath::Clamp(SampleRate, 1, 240);
 
-    USkeleton* Skeleton = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SkeletonPath, TEXT("Skeleton"), Skeleton)) { return Error; }
-
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Error = mcp_common::InvalidPackageNameReply(FullPath)) { return Error; }
 
@@ -196,7 +193,23 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObjec
         Obj->SetStringField(TEXT("package_path"), PackagePath);
         Obj->SetStringField(TEXT("asset_path"), Schema->GetPathName());
         Obj->SetStringField(TEXT("schema_path"), FullPath);
-        Obj->SetStringField(TEXT("skeleton_path"), SkeletonPath);
+        // The schema's own skeletons, read back from it rather than echoed from the request: skeleton_path is
+        // the first one, skeleton_paths all of them.
+        TArray<FString> SkeletonPaths;
+        for (const FPoseSearchRoledSkeleton& RoledSkeleton : Schema->GetRoledSkeletons())
+        {
+            if (RoledSkeleton.Skeleton)
+            {
+                SkeletonPaths.Add(RoledSkeleton.Skeleton->GetPathName());
+            }
+        }
+        Obj->SetStringField(TEXT("skeleton_path"), SkeletonPaths.IsEmpty() ? FString() : SkeletonPaths[0]);
+        TArray<TSharedPtr<FJsonValue>> SkeletonPathsJson;
+        for (const FString& Path : SkeletonPaths)
+        {
+            SkeletonPathsJson.Add(MakeShared<FJsonValueString>(Path));
+        }
+        Obj->SetArrayField(TEXT("skeleton_paths"), SkeletonPathsJson);
         Obj->SetNumberField(TEXT("sample_rate"), Schema->SampleRate);
         Obj->SetNumberField(TEXT("schema_cardinality"), Schema->SchemaCardinality);
         Obj->SetNumberField(TEXT("channel_count"), Schema->GetChannels().Num());
@@ -204,16 +217,27 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObjec
         return Obj;
     };
 
-    // Idempotent: if it already exists, load + return a stable payload.
+    // Idempotent: an existing schema is returned as it is. Nothing is applied to it, so nothing is saved, and
+    // the requested skeleton is not needed.
     if (UPoseSearchSchema* Existing = AnimAssetUtils::FindExisting<UPoseSearchSchema>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
         Obj->SetStringField(TEXT("message"),
-            TEXT("UPoseSearchSchema already exists; loaded existing asset"));
+            TEXT("UPoseSearchSchema already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
+    // An asset of another class at that path is refused before the skeleton is loaded.
+    if (const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UPoseSearchSchema::StaticClass()); !Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Loading a path with "//" would create its package, and CreatePackage aborts the editor on such a name.
+    if (TSharedPtr<FJsonObject> Error = mcp_common::InvalidPackageNameReply(SkeletonPath)) { return Error; }
+    USkeleton* Skeleton = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SkeletonPath, TEXT("Skeleton"), Skeleton)) { return Error; }
 
     // NewObject direct — UPoseSearchSchemaFactory opens a modal skeleton picker
     // via ConfigureProperties() which is not headless-safe. AddDefaultChannels()
@@ -252,11 +276,11 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchSchema(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 // create_pose_search_database
 // ---------------------------------------------------------------------------
-// MCP:create_pose_search_database - Create and save a UPoseSearchDatabase data asset bound to a UPoseSearchSchema
+// MCP:create_pose_search_database - Create a UPoseSearchDatabase data asset at package_path/name (package_path defaults to /Game/MCP) whose Schema is the UPoseSearchSchema at schema_path, with no animation assets yet, then save it. Idempotent: a database already at that path is returned unchanged with already_existed true and saved false, nothing saved, its schema_path read from it; the requested schema is not applied, and not even loaded. An invalid path, an asset of another class there, or for a new database a schema that does not load, is an error; a failed save of a new database makes success false. Create the schema with create_pose_search_schema; change the schema of an existing database with set_pose_search_database_schema; add animations with add_animation_asset_to_pose_search_database, then run build_pose_search_database_index.
 //   @param name - Asset name (e.g. 'PoseSearchDatabase_Example').
 //   @param package_path - Target content package path (default /Game/MCP).
-//   @param schema_path - Asset path of an existing UPoseSearchSchema (required).
-//   @returns { name, package_path, asset_path, database_path, schema_path, schema_cardinality, animation_asset_count, created, already_existed, saved, message }
+//   @param schema_path - Asset path of an existing UPoseSearchSchema (required); loaded only for a database this call creates.
+//   @returns { name, package_path, asset_path, database_path, schema_path, schema_cardinality, animation_asset_count, created, already_existed, saved, save_error, message }
 TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
 {
     FString Name;
@@ -272,9 +296,6 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObj
     FString SchemaPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("schema_path"), SchemaPath)) { return Missing; }
 
-    UPoseSearchSchema* Schema = nullptr;
-    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SchemaPath, TEXT("UPoseSearchSchema"), Schema)) { return Error; }
-
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Error = mcp_common::InvalidPackageNameReply(FullPath)) { return Error; }
 
@@ -285,7 +306,8 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObj
         Obj->SetStringField(TEXT("package_path"), PackagePath);
         Obj->SetStringField(TEXT("asset_path"), Database->GetPathName());
         Obj->SetStringField(TEXT("database_path"), FullPath);
-        Obj->SetStringField(TEXT("schema_path"), SchemaPath);
+        // The database's own schema, read back from it rather than echoed from the request.
+        Obj->SetStringField(TEXT("schema_path"), Database->Schema ? Database->Schema->GetPathName() : FString());
         Obj->SetNumberField(TEXT("schema_cardinality"),
             Database->Schema ? Database->Schema->SchemaCardinality : 0);
         Obj->SetNumberField(TEXT("animation_asset_count"), Database->GetNumAnimationAssets());
@@ -293,15 +315,27 @@ TSharedPtr<FJsonObject> HandleCreatePoseSearchDatabase(const TSharedPtr<FJsonObj
         return Obj;
     };
 
+    // Idempotent: an existing database is returned as it is. Nothing is applied to it, so nothing is saved, and
+    // the requested schema is not needed.
     if (UPoseSearchDatabase* Existing = AnimAssetUtils::FindExisting<UPoseSearchDatabase>(FullPath))
     {
         TSharedPtr<FJsonObject> Obj = BuildPayload(Existing, /*bCreated=*/false);
         Obj->SetBoolField(TEXT("already_existed"), true);
-        Obj->SetBoolField(TEXT("saved"), true);
+        Obj->SetBoolField(TEXT("saved"), false);
         Obj->SetStringField(TEXT("message"),
-            TEXT("UPoseSearchDatabase already exists; loaded existing asset"));
+            TEXT("UPoseSearchDatabase already exists; loaded the existing asset unchanged, nothing saved"));
         return mcp_common::MakeOkReply(Obj);
     }
+    // An asset of another class at that path is refused before the schema is loaded.
+    if (const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UPoseSearchDatabase::StaticClass()); !Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Loading a path with "//" would create its package, and CreatePackage aborts the editor on such a name.
+    if (TSharedPtr<FJsonObject> Error = mcp_common::InvalidPackageNameReply(SchemaPath)) { return Error; }
+    UPoseSearchSchema* Schema = nullptr;
+    if (TSharedPtr<FJsonObject> Error = AnimAssetUtils::LoadOrError(SchemaPath, TEXT("UPoseSearchSchema"), Schema)) { return Error; }
 
     FString CreateError;
     UPoseSearchDatabase* Database = mcp_common::NewAssetInPackage<UPoseSearchDatabase>(FullPath, Name,

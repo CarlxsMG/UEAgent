@@ -36,6 +36,7 @@
 
 // Editor subsystem access
 #include "Editor.h"
+#include "UObject/Script.h"  // FEditorScriptExecutionGuard
 
 // Scripted Asset/Actor Action Utility parent classes (Blutility).
 #include "AssetActionUtility.h"
@@ -153,11 +154,11 @@ UClass* ResolveEditorUtilityParentClass(const FString& ParentClass, FString& Out
 // ---------------------------------------------------------------------------
 // create_editor_utility_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_editor_utility_blueprint - Create, compile and save an Editor Utility Blueprint at package_path/name, parented to parent_class. Returns asset_path, parent_class, created, already_existed and saved; an existing Editor Utility Blueprint there is returned unchanged and parent_class is not applied to it. Refused during PIE unless force.
+// MCP:create_editor_utility_blueprint - Create an Editor Utility Blueprint at package_path/name with the editor factory, parented to parent_class, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has; the requested parent_class is not applied to it. A parent_class that does not resolve or cannot back a Blueprint, another kind of asset at that path, or an invalid path is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. A tool with a UI panel: create_editor_utility_widget_blueprint; right-click actions: create_asset_action_utility.
 //   @param package_path - Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored.
 //   @param name - Asset name without path or extension, e.g. "EUB_BatchRename".
 //   @param parent_class - Parent class by name without the U or A prefix, e.g. "EditorUtilityActor", or by path such as "/Script/Blutility.EditorUtilityObject" (default EditorUtilityObject); it must be Blueprintable.
-//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error }
+//   @returns { name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }
 TSharedPtr<FJsonObject> HandleCreateEditorUtilityBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -188,19 +189,30 @@ TSharedPtr<FJsonObject> HandleCreateEditorUtilityBlueprint(const TSharedPtr<FJso
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *NormalizedPath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load and return a full payload.
+    // An asset of another kind at that path is an error before anything is created: the factory would
+    // otherwise meet it in CreateAsset, which asks to overwrite it.
+    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UEditorUtilityBlueprint::StaticClass());
+    if (!Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Idempotent: an existing Editor Utility Blueprint is returned as it is, with its own parent class and nothing
+    // compiled or saved.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
-        UObject* ExistingObj = UEditorAssetLibrary::LoadAsset(FullPath);
-        UEditorUtilityBlueprint* Existing = Cast<UEditorUtilityBlueprint>(ExistingObj);
-        if (Existing)
+        UEditorUtilityBlueprint* Existing = Cast<UEditorUtilityBlueprint>(UEditorAssetLibrary::LoadAsset(FullPath));
+        if (!Existing)
         {
-            TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
-            Resp->SetBoolField(TEXT("created"), false);
-            Resp->SetBoolField(TEXT("already_existed"), true);
-            Resp->SetBoolField(TEXT("saved"), true);
-            return mcp_common::MakeOkReply(Resp);
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("an asset already exists at %s but does not load as an Editor Utility Blueprint; nothing was created"),
+                *FullPath));
         }
+        TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
     }
 
     // Create via the real editor factory. IAssetTools::CreateAsset does NOT call
@@ -233,10 +245,10 @@ TSharedPtr<FJsonObject> HandleCreateEditorUtilityBlueprint(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 // create_editor_utility_widget_blueprint
 // ---------------------------------------------------------------------------
-// MCP:create_editor_utility_widget_blueprint - Create, compile and save an Editor Utility Widget Blueprint (parent UEditorUtilityWidget) with a CanvasPanel root at package_path/name. Returns asset_path, root_widget, root_widget_class, created, already_existed and saved; an existing one is returned unchanged. Open it as a tab with run_editor_utility_widget. Refused during PIE unless force.
+// MCP:create_editor_utility_widget_blueprint - Create an Editor Utility Widget Blueprint at package_path/name with the editor factory, parented to UEditorUtilityWidget, give it a CanvasPanel root named RootCanvas when the factory made no root, then compile and save it. Idempotent by path: an Editor Utility Widget Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class and root it really has. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with save_error and keeps the new asset in memory. Refused during PIE unless force=true. Open it as a tab with run_editor_utility_widget; find them with list_editor_utility_widgets; a plain Widget Blueprint is create_widget_blueprint.
 //   @param package_path - Content folder for the asset, e.g. "/Game/EditorUtilities"; a trailing slash is ignored.
 //   @param name - Asset name without path or extension, e.g. "EUW_LevelTools".
-//   @returns { name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error }
+//   @returns { name, package_path, asset_path, blueprint_class, parent_class, root_widget, root_widget_class, created, already_existed, root_created, saved, save_error? }
 TSharedPtr<FJsonObject> HandleCreateEditorUtilityWidgetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -250,23 +262,34 @@ TSharedPtr<FJsonObject> HandleCreateEditorUtilityWidgetBlueprint(const TSharedPt
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *NormalizedPath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load and return a full payload.
+    // An asset of another kind at that path is an error before anything is created: the factory would
+    // otherwise meet it in CreateAsset, which asks to overwrite it.
+    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UEditorUtilityWidgetBlueprint::StaticClass());
+    if (!Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+
+    // Idempotent: an existing Editor Utility Widget Blueprint is returned as it is, with its own parent class and
+    // nothing compiled or saved.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
-        UObject* ExistingObj = UEditorAssetLibrary::LoadAsset(FullPath);
-        UEditorUtilityWidgetBlueprint* Existing = Cast<UEditorUtilityWidgetBlueprint>(ExistingObj);
-        if (Existing)
+        UEditorUtilityWidgetBlueprint* Existing = Cast<UEditorUtilityWidgetBlueprint>(UEditorAssetLibrary::LoadAsset(FullPath));
+        if (!Existing)
         {
-            const UWidget* Root = Existing->WidgetTree ? Existing->WidgetTree->RootWidget : nullptr;
-            TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
-            Resp->SetStringField(TEXT("root_widget"), Root ? Root->GetName() : TEXT(""));
-            Resp->SetStringField(TEXT("root_widget_class"), Root ? Root->GetClass()->GetName() : TEXT(""));
-            Resp->SetBoolField(TEXT("created"), false);
-            Resp->SetBoolField(TEXT("already_existed"), true);
-            Resp->SetBoolField(TEXT("root_created"), false);
-            Resp->SetBoolField(TEXT("saved"), true);
-            return mcp_common::MakeOkReply(Resp);
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("an asset already exists at %s but does not load as an Editor Utility Widget Blueprint; nothing was created"),
+                *FullPath));
         }
+        const UWidget* Root = Existing->WidgetTree ? Existing->WidgetTree->RootWidget : nullptr;
+        TSharedPtr<FJsonObject> Resp = BlueprintReply_EditorUtility(Name, PackagePath, Existing, FString());
+        Resp->SetStringField(TEXT("root_widget"), Root ? Root->GetName() : TEXT(""));
+        Resp->SetStringField(TEXT("root_widget_class"), Root ? Root->GetClass()->GetName() : TEXT(""));
+        Resp->SetBoolField(TEXT("created"), false);
+        Resp->SetBoolField(TEXT("already_existed"), true);
+        Resp->SetBoolField(TEXT("root_created"), false);
+        Resp->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOkReply(Resp);
     }
 
     // Create via the real editor factory. We set ParentClass (UEditorUtilityWidget)
@@ -615,10 +638,10 @@ TSharedPtr<FJsonObject> HandleListScriptedActionUtilities(const TSharedPtr<FJson
 // A scripted action is a CallInEditor UFUNCTION (no return value) on the utility's
 // generated class. We do a REAL reflection check that the function exists, then
 // attempt a real headless invocation: if the function takes no parameters we can
-// ProcessEvent it on the utility's default object. Functions that depend on a
+// ProcessEvent it on a transient instance of the utility class. Functions that depend on a
 // content-browser / level selection (which the engine surfaces only through the
 // interactive right-click menu) are reported with an honest invoked=false note.
-// MCP:run_asset_action_utility - Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on its class default object, as the right-click menu would but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, or a utility with no actions is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
+// MCP:run_asset_action_utility - Invoke one CallInEditor action of a scripted Asset or Actor Action Utility Blueprint (by asset path) on a new transient instance of its class, as the right-click menu does but with no Content Browser or level selection. function_name picks the action, case-insensitive, else the first one found; the reply always lists every action in action_functions. Only a parameterless action runs: one that takes parameters, a name that matches no action, a utility with no actions or an abstract utility class is a success with invoked=false and a note saying why. What the action does is up to its Blueprint; this tool saves nothing itself. A missing asset, one that is not a Blueprint, or a Blueprint that is not an Asset/Actor Action Utility is an error. Find them with list_scripted_action_utilities; create one with create_asset_action_utility or create_actor_action_utility.
 //   @param utility_path - Asset path of the utility Blueprint, e.g. "/Game/EditorTools/EUA_RenameTextures" (the object path form also works).
 //   @param function_name - Name of the CallInEditor action to run, case-insensitive; when absent the first action found on the class runs.
 //   @returns { utility_path, kind, generated_class, action_functions, function_name, function_found, invoked, note }
@@ -722,18 +745,27 @@ TSharedPtr<FJsonObject> HandleRunAssetActionUtility(const TSharedPtr<FJsonObject
         return mcp_common::MakeOkReply(Resp);
     }
 
-    // Invoke the parameterless CallInEditor action for real on a utility instance.
-    // The action typically reads the editor selection (empty headless) and operates
-    // on it -- invoking it is real even when the selection is empty.
-    UObject* Instance = GenClass->GetDefaultObject();
-    if (!Instance)
+    // Invoke the parameterless CallInEditor action for real, as the editor's scripted-action menu does
+    // (FBlutilityMenuExtensions): on a new transient instance of the utility class, never on its class default
+    // object, rooted while it runs because an action may collect garbage, and under an FEditorScriptExecutionGuard.
+    // The action typically reads the editor selection (empty headless) and operates on it -- invoking it is real
+    // even when the selection is empty. An abstract class cannot be instantiated (NewObject would assert), so its
+    // action is not run.
+    if (GenClass->HasAnyClassFlags(CLASS_Abstract))
     {
         Resp->SetBoolField(TEXT("invoked"), false);
-        Resp->SetStringField(TEXT("note"), TEXT("Could not obtain a default object to invoke the scripted action"));
+        Resp->SetStringField(TEXT("note"),
+            TEXT("The utility class is abstract, so there is no instance to run the scripted action on"));
         return mcp_common::MakeOkReply(Resp);
     }
 
-    Instance->ProcessEvent(TargetFunc, nullptr);
+    UObject* Instance = NewObject<UObject>(GetTransientPackage(), GenClass);
+    Instance->AddToRoot();
+    {
+        FEditorScriptExecutionGuard ScriptGuard;
+        Instance->ProcessEvent(TargetFunc, nullptr);
+    }
+    Instance->RemoveFromRoot();
 
     Resp->SetBoolField(TEXT("invoked"), true);
     Resp->SetStringField(TEXT("note"),

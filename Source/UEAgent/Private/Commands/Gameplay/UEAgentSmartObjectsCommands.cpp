@@ -110,6 +110,42 @@ namespace
 		return FGameplayTagQuery::MakeQuery_MatchAnyTags(Tags);
 	}
 
+	/**
+	 * The user tag filter that the user_tags and match params ask for: OutTags (the registered names kept), OutMatch
+	 * (lower case) and OutQuery. An omitted or empty user_tags gives the empty query, which the SmartObjects subsystem
+	 * reads as no filter (it refuses no user); otherwise BuildTagQuery of the tags under match. Null on success, else
+	 * the error reply: a match other than any, all or none, or a user_tags whose names are all unregistered (a query
+	 * of no tag would refuse every user under any, not clear the filter).
+	 */
+	TSharedPtr<FJsonObject> SmartObjects_ReadUserTagFilter(const TSharedPtr<FJsonObject>& Params,
+		FGameplayTagContainer& OutTags, FString& OutMatch, FGameplayTagQuery& OutQuery)
+	{
+		FString RequestedMatch;
+		Params->TryGetStringField(TEXT("match"), RequestedMatch);
+		OutMatch = RequestedMatch.IsEmpty() ? FString(TEXT("any")) : RequestedMatch.ToLower();
+		if (OutMatch != TEXT("any") && OutMatch != TEXT("all") && OutMatch != TEXT("none"))
+		{
+			return mcp_common::MakeErrorReply(FString::Printf(
+				TEXT("Invalid match '%s' (expected one of: any, all, none); nothing was changed"), *RequestedMatch));
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
+		Params->TryGetArrayField(TEXT("user_tags"), TagsArr);
+		OutTags = ParseTagContainer(TagsArr);
+		if (OutTags.IsEmpty())
+		{
+			if (TagsArr && TagsArr->Num() > 0)
+			{
+				return mcp_common::MakeErrorReply(
+					TEXT("None of user_tags is a registered gameplay tag; nothing was changed (pass an empty user_tags to clear the filter)"));
+			}
+			OutQuery = FGameplayTagQuery();
+			return nullptr;
+		}
+		OutQuery = BuildTagQuery(OutTags, OutMatch);
+		return nullptr;
+	}
+
 	FString MergingPolicyToString(const ESmartObjectTagMergingPolicy P)
 	{
 		return P == ESmartObjectTagMergingPolicy::Override ? TEXT("Override") : TEXT("Combine");
@@ -768,12 +804,12 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_activity_tags"));
 }
 
-// MCP:set_smart_object_slot_user_tag_filter - Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Names that are not registered gameplay tags are skipped silently (the reply lists the tags kept), and an unrecognized match acts as any but is echoed as sent. An empty list still builds a query (filter_is_empty false) that, with any, admits no user, so this cannot clear the filter. A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Repeat calls write the same query (idempotent). Object-level filter: set_smart_object_definition_user_tag_filter; slot activity tags: set_smart_object_slot_activity_tags; read slots back: get_smart_object_slots_detail.
+// MCP:set_smart_object_slot_user_tag_filter - Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user, though under the Override policy the object-level filter then applies. A call that leaves the filter as it was saves nothing (changed false). A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Object-level filter: set_smart_object_definition_user_tag_filter; read slots back: get_smart_object_slots_detail.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error
-//   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list does not clear the filter
-//   @param match - Match mode: "any" (default), "all", or "none"; any other value acts as any
-//   @returns { definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }
+//   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter
+//   @param match - Match mode: "any" (default), "all", or "none"; any other value is an error
+//   @returns { definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -781,22 +817,35 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	TSharedPtr<FJsonObject> Err;
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinitionSlot(Params, SlotIndex, Err);
 	if (!Def) { return Err; }
-	FString Match = TEXT("any");
-	Params->TryGetStringField(TEXT("match"), Match);
-	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
-	Params->TryGetArrayField(TEXT("user_tags"), TagsArr);
-	const FGameplayTagContainer Tags = ParseTagContainer(TagsArr);
+	FGameplayTagContainer Tags;
+	FString Match;
+	FGameplayTagQuery Query;
+	if (TSharedPtr<FJsonObject> Invalid = SmartObjects_ReadUserTagFilter(Params, Tags, Match, Query)) { return Invalid; }
 
-	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotUserTagFilter", "Set Smart Object Slot User Tag Filter (MCP)"));
-	Def->Modify();
-	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
-	Slot.UserTagFilter = BuildTagQuery(Tags, Match);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	const bool bChanged = !(Def->GetSlots()[SlotIndex].UserTagFilter == Query);
+	bool bSaved = false;
+	if (bChanged)
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotUserTagFilter", "Set Smart Object Slot User Tag Filter (MCP)"));
+		Def->Modify();
+		Def->GetMutableSlot(SlotIndex).UserTagFilter = Query;
+		bSaved = SmartObjects_SaveDefinition(Def);
+	}
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetArrayField(TEXT("user_tags"), mcp_common::GameplayTagsToJson(Tags));
 	Data->SetStringField(TEXT("match"), Match);
-	Data->SetBoolField(TEXT("filter_is_empty"), Slot.UserTagFilter.IsEmpty());
+	Data->SetBoolField(TEXT("filter_is_empty"), Def->GetSlots()[SlotIndex].UserTagFilter.IsEmpty());
+	Data->SetBoolField(TEXT("changed"), bChanged);
+	Data->SetBoolField(TEXT("cleared"), bChanged && Query.IsEmpty());
+	if (!bChanged)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), Query.IsEmpty()
+			? TEXT("The slot filter was already empty; nothing changed and nothing was saved.")
+			: TEXT("The slot already has that filter; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_user_tag_filter"));
 }
 
@@ -852,77 +901,108 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_transform"));
 }
 
-// MCP:set_smart_object_definition_activity_tags - Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error, but the policies are checked after the tags are written, so that error leaves the new tags in memory, unsaved. Repeat calls write the same state (idempotent); no undo step is recorded, and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
+// MCP:set_smart_object_definition_activity_tags - Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, in one undo step, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error checked before anything is written, so the definition stays as it was. A call that leaves tags and policies as they were changes and saves nothing (changed false), and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param activity_tags - Gameplay tag names for the definition's object-level activity tags; the list replaces the current tags whole
 //   @param merging_policy - Optional activity-tag merging policy: "Combine" (default) or "Override"; Combine merges slot and object tags, Override lets non-empty slot tags take their place; omitted keeps the current policy
 //   @param filtering_policy - Optional user-tag filtering policy: "NoFilter", "Combine", or "Override"; how the object and slot user filters apply to a request; omitted keeps the current policy
-//   @returns { definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, saved: bool }
+//   @returns { definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, changed: bool, saved: bool, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	TSharedPtr<FJsonObject> Err;
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinition(Params, Err);
 	if (!Def) { return Err; }
+
+	// Every input is read and checked before anything is written, so a bad policy leaves the definition as it was.
+	ESmartObjectTagMergingPolicy MergingPolicy = Def->GetActivityTagsMergingPolicy();
+	FString MergingStr;
+	if (Params->TryGetStringField(TEXT("merging_policy"), MergingStr) && !MergingStr.IsEmpty()
+		&& !ParseMergingPolicy(MergingStr, MergingPolicy))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Invalid merging_policy '%s' (expected Combine|Override); nothing was changed"), *MergingStr));
+	}
+	ESmartObjectTagFilteringPolicy FilteringPolicy = Def->GetUserTagsFilteringPolicy();
+	FString FilteringStr;
+	if (Params->TryGetStringField(TEXT("filtering_policy"), FilteringStr) && !FilteringStr.IsEmpty()
+		&& !ParseFilteringPolicy(FilteringStr, FilteringPolicy))
+	{
+		return mcp_common::MakeErrorReply(
+			FString::Printf(TEXT("Invalid filtering_policy '%s' (expected NoFilter|Combine|Override); nothing was changed"), *FilteringStr));
+	}
 	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
 	Params->TryGetArrayField(TEXT("activity_tags"), TagsArr);
-	Def->SetActivityTags(ParseTagContainer(TagsArr));
+	const FGameplayTagContainer Tags = ParseTagContainer(TagsArr);
 
-	FString MergingStr;
-	if (Params->TryGetStringField(TEXT("merging_policy"), MergingStr) && !MergingStr.IsEmpty())
+	const bool bChanged = !(Def->GetActivityTags() == Tags)
+		|| Def->GetActivityTagsMergingPolicy() != MergingPolicy
+		|| Def->GetUserTagsFilteringPolicy() != FilteringPolicy;
+	bool bSaved = false;
+	if (bChanged)
 	{
-		ESmartObjectTagMergingPolicy MP;
-		if (!ParseMergingPolicy(MergingStr, MP))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Invalid merging_policy '%s' (expected Combine|Override)"), *MergingStr));
-		}
-		Def->SetActivityTagsMergingPolicy(MP);
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectDefinitionActivityTags", "Set Smart Object Definition Activity Tags (MCP)"));
+		Def->Modify();
+		Def->SetActivityTags(Tags);
+		Def->SetActivityTagsMergingPolicy(MergingPolicy);
+		Def->SetUserTagsFilteringPolicy(FilteringPolicy);
+		bSaved = SmartObjects_SaveDefinition(Def);
 	}
-	FString FilteringStr;
-	if (Params->TryGetStringField(TEXT("filtering_policy"), FilteringStr) && !FilteringStr.IsEmpty())
-	{
-		ESmartObjectTagFilteringPolicy FP;
-		if (!ParseFilteringPolicy(FilteringStr, FP))
-		{
-			return mcp_common::MakeErrorReply(
-				FString::Printf(TEXT("Invalid filtering_policy '%s' (expected NoFilter|Combine|Override)"), *FilteringStr));
-		}
-		Def->SetUserTagsFilteringPolicy(FP);
-	}
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetArrayField(TEXT("activity_tags"), mcp_common::GameplayTagsToJson(Def->GetActivityTags()));
 	Data->SetStringField(TEXT("merging_policy"), MergingPolicyToString(Def->GetActivityTagsMergingPolicy()));
 	Data->SetStringField(TEXT("filtering_policy"), FilteringPolicyToString(Def->GetUserTagsFilteringPolicy()));
+	Data->SetBoolField(TEXT("changed"), bChanged);
+	if (!bChanged)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The definition already has those activity tags and policies; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_activity_tags"));
 }
 
-// MCP:set_smart_object_definition_user_tag_filter - Set the object-level user tag filter (a gameplay tag query) of a USmartObjectDefinition, built from a tag list and a match mode.
+// MCP:set_smart_object_definition_user_tag_filter - Replace the object-level user tag filter of a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the object) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user. A call that leaves the filter as it was saves nothing (changed false). A missing definition is an error; a failed save, as during PIE, makes success false. How it combines with slot filters: filtering_policy of set_smart_object_definition_activity_tags; per-slot filter: set_smart_object_slot_user_tag_filter; read back: get_smart_object_definition_summary.
 //   @param definition_path - Path to the USmartObjectDefinition asset
-//   @param user_tags - Gameplay tag names the filter query matches against
-//   @param match - Match mode: "any" (default), "all", or "none"
-//   @returns { definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }
+//   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter
+//   @param match - Match mode: "any" (default), "all", or "none"; any other value is an error
+//   @returns { definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionUserTagFilter(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	TSharedPtr<FJsonObject> Err;
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinition(Params, Err);
 	if (!Def) { return Err; }
-	FString Match = TEXT("any");
-	Params->TryGetStringField(TEXT("match"), Match);
-	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
-	Params->TryGetArrayField(TEXT("user_tags"), TagsArr);
-	const FGameplayTagContainer Tags = ParseTagContainer(TagsArr);
+	FGameplayTagContainer Tags;
+	FString Match;
+	FGameplayTagQuery Query;
+	if (TSharedPtr<FJsonObject> Invalid = SmartObjects_ReadUserTagFilter(Params, Tags, Match, Query)) { return Invalid; }
 
-	Def->SetUserTagFilter(BuildTagQuery(Tags, Match));
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	const bool bChanged = !(Def->GetUserTagFilter() == Query);
+	bool bSaved = false;
+	if (bChanged)
+	{
+		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectDefinitionUserTagFilter", "Set Smart Object Definition User Tag Filter (MCP)"));
+		Def->Modify();
+		Def->SetUserTagFilter(Query);
+		bSaved = SmartObjects_SaveDefinition(Def);
+	}
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetArrayField(TEXT("user_tags"), mcp_common::GameplayTagsToJson(Tags));
 	Data->SetStringField(TEXT("match"), Match);
 	Data->SetBoolField(TEXT("filter_is_empty"), Def->GetUserTagFilter().IsEmpty());
+	Data->SetBoolField(TEXT("changed"), bChanged);
+	Data->SetBoolField(TEXT("cleared"), bChanged && Query.IsEmpty());
+	if (!bChanged)
+	{
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), Query.IsEmpty()
+			? TEXT("The object-level filter was already empty; nothing changed and nothing was saved.")
+			: TEXT("The definition already has that filter; nothing changed and nothing was saved."));
+		return mcp_common::MakeOkReply(Data);
+	}
 	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_user_tag_filter"));
 }
 

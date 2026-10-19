@@ -3,7 +3,7 @@
 
 // Media framework (module: MediaAssets, runtime)
 #include "MediaPlayer.h"        // UMediaPlayer: PlayOnOpen, Loop, IsLooping/SetLooping
-#include "MediaTexture.h"       // UMediaTexture: SetMediaPlayer/GetMediaPlayer, AutoClear
+#include "MediaTexture.h"       // UMediaTexture: SetDefaultMediaPlayer/GetMediaPlayer, AutoClear
 #include "FileMediaSource.h"    // UFileMediaSource: SetFilePath/GetFilePath/FilePath
 
 // Engine / editor / packaging
@@ -12,6 +12,7 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UnrealType.h"   // FindFProperty / FObjectPropertyBase: the texture's saved MediaPlayer property
 #include "Misc/PackageName.h"
 
 #define LOCTEXT_NAMESPACE "UEAgentMedia"
@@ -77,12 +78,19 @@ namespace UEAgentMediaImpl
         }
         return Data;
     }
+
+    // UMediaTexture's protected MediaPlayer property: the player the texture asset saves and gets back on load.
+    // GetMediaPlayer reports the current player instead, a transient pointer.
+    const FObjectPropertyBase* StoredPlayerProperty()
+    {
+        return FindFProperty<FObjectPropertyBase>(UMediaTexture::StaticClass(), TEXT("MediaPlayer"));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // create_media_player
 // NewObject<UMediaPlayer> -> save. Optionally also creates a sibling
-// UMediaTexture ("<name>_T") and links it via UMediaTexture::SetMediaPlayer.
+// UMediaTexture ("<name>_T") and links it via UMediaTexture::SetDefaultMediaPlayer.
 // PlayOnOpen / Loop are configurable; Loop is set via the public SetLooping().
 // ---------------------------------------------------------------------------
 // MCP:create_media_player - Create a UMediaPlayer asset at package_path/name with PlayOnOpen and looping set, optionally with a linked UMediaTexture named "<name>_T" beside it, and save both. An existing player is returned unchanged (flags not applied). Returns asset_path, play_on_open, loop, media_texture_path, saved and texture_saved.
@@ -174,7 +182,9 @@ TSharedPtr<FJsonObject> HandleCreateMediaPlayer(const TSharedPtr<FJsonObject>& P
                         FScopedTransaction Transaction(LOCTEXT("CreateMediaTextureForPlayer", "Create Media Texture"));
                         Tex->Modify();
                         Tex->AutoClear = true;
-                        Tex->SetMediaPlayer(NewPlayer);
+                        // The saved MediaPlayer property, so the link survives a reload (SetMediaPlayer sets
+                        // only the transient current player).
+                        Tex->SetDefaultMediaPlayer(NewPlayer);
                         Tex->UpdateResource();
                     }
                     bTextureSaved = UEAgentMediaImpl::RegisterAndSave(TexPackage, Tex, TexSaveError);
@@ -307,10 +317,11 @@ TSharedPtr<FJsonObject> HandleCreateMediaTexture(const TSharedPtr<FJsonObject>& 
 
 // ---------------------------------------------------------------------------
 // link_media_texture_to_player
-// UMediaTexture::SetMediaPlayer(player), verified by reading GetMediaPlayer back.
-// Re-saves the texture package so the link persists.
+// UMediaTexture::SetDefaultMediaPlayer(player), verified by reading back both the
+// current player and the saved MediaPlayer property. Re-saves the texture package
+// so the link persists; a link that did not take is not saved.
 // ---------------------------------------------------------------------------
-// MCP:link_media_texture_to_player - Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). linked confirms the texture now reports that player, and bound_player_path names the player it reports. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
+// MCP:link_media_texture_to_player - Bind a UMediaTexture asset to a UMediaPlayer asset (both by asset path) so the texture shows that player's video, in place of any player it was bound to, in one undo step; then save the texture package (the player asset is not modified). The link is written to the texture's saved MediaPlayer property, so it survives a reload; linked confirms both that property and the player the texture now reports (bound_player_path), and a link that did not take is an error with linked false and nothing saved. Idempotent: linking the same pair again writes and saves the same state. A missing texture or player is an error; a failed save makes success false with saved=false and save_error. Create the assets with create_media_texture and create_media_player (which can also make a linked texture); read back with get_media_info.
 //   @param media_texture_path - Asset path of the UMediaTexture, e.g. "/Game/Media/T_Intro" (the object path form also works).
 //   @param media_player_path - Asset path of the UMediaPlayer to bind, e.g. "/Game/Media/MP_Intro" (the object path form also works).
 //   @returns { media_texture_path, media_player_path, linked, saved, bound_player_path?, save_error? }
@@ -336,25 +347,26 @@ TSharedPtr<FJsonObject> HandleLinkMediaTextureToPlayer(const TSharedPtr<FJsonObj
             FString::Printf(TEXT("Media player not found: %s"), *PlayerPath));
     }
 
+    const FObjectPropertyBase* MediaPlayerProperty = UEAgentMediaImpl::StoredPlayerProperty();
+    if (MediaPlayerProperty == nullptr)
+    {
+        return mcp_common::MakeErrorReply(
+            TEXT("link_media_texture_to_player: UMediaTexture has no MediaPlayer property to store the link in; nothing was changed"));
+    }
+
     {
         FScopedTransaction Transaction(LOCTEXT("LinkMediaTextureToPlayer", "Link Media Texture To Player"));
         Tex->Modify();
-        Tex->SetMediaPlayer(Player);
+        // SetDefaultMediaPlayer writes the saved MediaPlayer property and the current player; SetMediaPlayer
+        // would set only the current player, a transient pointer the next load resets from MediaPlayer.
+        Tex->SetDefaultMediaPlayer(Player);
         Tex->UpdateResource();
     }
 
-    // Verify by readback.
+    // Read back both: the player the texture renders now and the one its saved property holds.
     UMediaPlayer* Bound = Tex->GetMediaPlayer();
-    const bool bLinked = (Bound == Player);
-
-    // Persist the texture asset so the link survives.
-    Tex->MarkPackageDirty();
-    FString SaveError;
-    bool bSaved = false;
-    if (UPackage* Package = Tex->GetOutermost())
-    {
-        bSaved = mcp_common::SaveAssetPackage(Package, Tex, SaveError);
-    }
+    const UObject* Stored = MediaPlayerProperty->GetObjectPropertyValue_InContainer(Tex);
+    const bool bLinked = (Bound == Player) && (Stored == Player);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("media_texture_path"), Tex->GetPathName());
@@ -363,6 +375,22 @@ TSharedPtr<FJsonObject> HandleLinkMediaTextureToPlayer(const TSharedPtr<FJsonObj
     if (Bound)
     {
         Data->SetStringField(TEXT("bound_player_path"), Bound->GetPathName());
+    }
+    if (!bLinked)
+    {
+        // A link that did not take is not saved.
+        Data->SetBoolField(TEXT("saved"), false);
+        return mcp_common::MakeOutcomeReply(Data, false,
+            mcp_common::MeasuredOutcomeError(TEXT("link_media_texture_to_player"), TEXT("linked")));
+    }
+
+    // Persist the texture asset so the link survives.
+    Tex->MarkPackageDirty();
+    FString SaveError;
+    bool bSaved = false;
+    if (UPackage* Package = Tex->GetPackage())
+    {
+        bSaved = mcp_common::SaveAssetPackage(Package, Tex, SaveError);
     }
     if (!bSaved && !SaveError.IsEmpty())
     {

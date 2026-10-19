@@ -8,26 +8,26 @@
 
 *Destructive, idempotent.*
 
-Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world.
+Configure shadow settings for a light actor using preset shadow qualities. Enabled/Disabled switch cast shadows; High, Medium and Low also set ShadowBias, ShadowSlopeBias and ShadowSharpen (0.1/0.1/1.0, 0.2/0.2/0.5, 0.5/0.5/0.0). Everything is read back from the light; it does not touch whether the light affects the world. The change is one undo step that marks the level dirty, and nothing is saved; a light that already has the preset changes nothing and answers shadows_changed false. Changing cast shadows or the bias of a Static-mobility light, which the engine's setters ignore, is an error and nothing is written. Single fields: set_light_properties; cascades: set_directional_light_cascade_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `light_name` | string | yes | Name of the light actor to configure |
 | `shadow_settings` | string | yes | Shadow configuration: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low' (case-insensitive); any other name is an error |
 
-**Returns:** `{ light_name, shadow_settings, shadows_configured, shadow_message, old_cast_shadows, new_cast_shadows, old_affect_world, new_affect_world, shadows_enabled, affect_world, bias_applied, shadow_bias, shadow_slope_bias, shadow_filter_sharpen, light_enabled, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_cascade_distribution_exponent, light_cascade_transition_fraction, light_attenuation_radius, light_source_radius, light_source_length, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }`
+**Returns:** `{ light_name, shadow_settings, shadows_configured, shadows_changed, shadow_message, old_cast_shadows, new_cast_shadows, old_affect_world, new_affect_world, shadows_enabled, affect_world, bias_applied, shadow_bias, shadow_slope_bias, shadow_filter_sharpen, light_enabled, light_intensity, light_mobility, light_type, light_atmosphere_sun_light, light_cascade_distribution_exponent, light_cascade_transition_fraction, light_attenuation_radius, light_source_radius, light_source_length, light_inner_cone_angle, light_outer_cone_angle, x, y, z, r, g, b, a }`
 
 ## `configure_post_processing`
 
 *Destructive, idempotent.*
 
-Apply a post-processing quality preset with console commands that set nine renderer variables (r.PostProcessAAQuality, r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.GlobalIlluminationQuality, r.ColorGradingQuality, r.LensFlareQuality, r.SSRQuality). Enabled and High set all to 2; Medium sets anti-aliasing, bloom, depth of field, ambient occlusion and color grading to 1 and the rest to 0; Disabled and Low set all to 0, yet Low reports post_processing_enabled true. The change is engine-wide for this session: no volume is edited, no config written, nothing saved or undoable. An unknown preset changes nothing and still succeeds, with post_processing_configured false. The *_enabled flags echo the preset, not a read-back, so a variable this engine lacks (r.SSRQuality is r.SSR.Quality in UE5) still reads as set. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
+Apply a post-processing quality preset by setting six renderer console variables with console priority (r.BloomQuality, r.MotionBlurQuality, r.DepthOfFieldQuality, r.AmbientOcclusionLevels, r.LensFlareQuality, r.SSR.Quality); anti-aliasing, global illumination and color grading have no such variable in UE 5.8 and are left alone. Enabled and High set all to 2; Medium sets bloom, depth of field and ambient occlusion to 1 and the rest to 0; Disabled and Low set all to 0. Each variable is read back: post_processing_variables lists it, the *_enabled flags say whether it reads above 0, and one that did not take its level makes success false. The change is engine-wide for this session: no volume is edited, nothing saved or undoable. An unknown preset, or a variable this engine lacks, is an error and nothing changes. Per-volume settings: set_post_process_setting, set_post_process_volume_settings; one variable: set_cvar, get_cvar.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `post_process_settings` | string | yes | Post-processing setting: 'Enabled', 'Disabled', 'High', 'Medium', or 'Low'; case is ignored |
 
-**Returns:** `{ post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, anti_aliasing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, global_illumination_enabled, color_grading_enabled, lens_flare_enabled, screen_space_reflections_enabled, world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }`
+**Returns:** `{ post_process_settings, post_processing_configured, post_processing_message, post_processing_enabled, bloom_enabled, motion_blur_enabled, depth_of_field_enabled, ambient_occlusion_enabled, lens_flare_enabled, screen_space_reflections_enabled, post_processing_variables: [{ variable, previous, requested, value, applied }], world_name, post_process_volume_count, post_process_volume_details: [{ volume_name, volume_class, volume_enabled, volume_unbound, volume_priority, volume_blend_weight, volume_blend_radius, volume_position: { x, y, z } }], post_processing_recommendations, performance_impact, performance_rating }`
 
 ## `get_directional_light_cascade_settings`
 
@@ -183,7 +183,7 @@ Read the properties of a VolumetricCloud actor's UVolumetricCloudComponent, unde
 
 *Destructive, idempotent.*
 
-Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Partial update (idempotent): only fields present are written; the engine setters auto-dedup, and the inset-shadows bit (no setter) is guarded by hand. Errors honestly if the actor is not a directional light. Verify by read-back (every field is echoed) or via get_directional_light_cascade_settings.
+Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic shadow distance (movable/stationary), cascade count, distribution exponent, transition fraction, distance-fadeout fraction, and per-object inset shadows for movable objects. Partial update (idempotent): only fields present are written; the engine setters auto-dedup, and the inset-shadows bit (no setter) is guarded by hand. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. Errors honestly if the actor is not a directional light. Verify by read-back (every field is echoed) or via get_directional_light_cascade_settings.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -196,7 +196,7 @@ Configure Cascaded Shadow Map (CSM) settings on a directional light: dynamic sha
 | `shadow_distance_fadeout_fraction` | number | no | Size of the fade-out region at the far extent of the dynamic shadow, as a fraction of the shadow distance |
 | `use_inset_shadows_for_movable_objects` | boolean | no | Stationary lights: use per-object inset shadows for movable components even though CSM is enabled |
 
-**Returns:** `{ light_name, light_subtype, settings_applied: {...}, applied_count, dynamic_shadow_distance_movable, dynamic_shadow_distance_stationary, num_dynamic_shadow_cascades, cascade_distribution_exponent, cascade_transition_fraction, shadow_distance_fadeout_fraction, use_inset_shadows_for_movable_objects }`
+**Returns:** `{ light_name, light_subtype, settings_applied: {...}, applied_count, changed, dynamic_shadow_distance_movable, dynamic_shadow_distance_stationary, num_dynamic_shadow_cascades, cascade_distribution_exponent, cascade_transition_fraction, shadow_distance_fadeout_fraction, use_inset_shadows_for_movable_objects }`
 
 ## `set_exponential_height_fog_properties`
 
@@ -232,33 +232,33 @@ Set the properties of an ExponentialHeightFog actor's UExponentialHeightFogCompo
 
 *Destructive, idempotent.*
 
-Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The engine refuses runtime changes on a Static-mobility light, which keeps its color with color_set false and success still true. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or unparsable color is an error. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
+Set the LightColor of one light actor with ULightComponent::SetLightColor: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The light stores an 8-bit sRGB color, so each channel is clamped to 0-1 and quantized, and color_set compares the stored color with the quantized request; old_color and new_color are the linear readings before and after. The change is one undo step that marks the level dirty, and nothing is saved; a request that quantizes to the stored color changes nothing (color_changed false). The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or unparsable color is an error too. Brightness: set_light_intensity; color temperature: set_light_properties; read back: get_light_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `light_name` | string | yes | Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched |
 | `color` | string | yes | Color in 'R,G,B,A' or 'R,G,B' format (values 0-1) or hex '#RRGGBB' format; alpha defaults to 1, and in the comma form a part that is not a number reads as 0 |
 
-**Returns:** `{ light_name, requested_color, color_set, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }`
+**Returns:** `{ light_name, requested_color, color_set, color_changed, color_message, old_color: { r, g, b, a }, new_color: { r, g, b, a }, light_enabled, light_cast_shadows, light_affect_world, light_intensity, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z } }`
 
 ## `set_light_intensity`
 
 *Destructive, idempotent.*
 
-Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The engine refuses runtime changes on a Static-mobility light, so it keeps its intensity and intensity_set is false while success stays true; old_intensity and new_intensity show what happened. The write is direct: no undo step, the level is not marked dirty and nothing is saved. An unknown light or a missing intensity is an error. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
+Set the Intensity of one light actor with ULightComponent::SetIntensity and read it back: the actor is the first one in the engine's first world context (normally the editor level) whose object name matches light_name and that owns a ULightComponent (a sky light does not). The change is one undo step that marks the level dirty; nothing is saved. A request equal to the current intensity changes nothing, records no undo step and answers intensity_changed false. The engine's setter ignores a Static-mobility light, so changing one is an error and nothing is written; an unknown light or a missing intensity is an error too. Color: set_light_color; temperature, radius and the other fields: set_light_properties; shadows: configure_light_shadows; full read-back: get_light_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `light_name` | string | yes | Object name of the light actor (e.g. "PointLight_2"), compared case-insensitively; the Outliner label is not matched |
 | `intensity` | number | yes | New intensity as a float in the light's own units (lux for a directional light, its intensity units for a local light); not clamped |
 
-**Returns:** `{ light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }`
+**Returns:** `{ light_name, old_intensity, new_intensity, requested_intensity, intensity_set, intensity_changed, intensity_message, light_enabled, light_cast_shadows, light_affect_world, light_mobility, light_type, light_atmosphere_sun_light?, light_attenuation_radius?, light_inner_cone_angle?, light_outer_cone_angle?, light_position: { x, y, z }, light_color: { r, g, b, a } }`
 
 ## `set_light_properties`
 
 *Destructive, idempotent.*
 
-Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. Verify by read-back via get_light_properties (light_* keys).
+Set component-level light properties: attenuation radius, source radius/length, cone angles, color temperature, indirect/volumetric intensity, translucent lighting, plus RectLight source size + barn doors + source texture, IES profile (texture/brightness scale/use-brightness), light-function (material/scale/fade distance/disabled brightness), shadow bias, cast/volumetric shadow, contact-shadow length (+ world-space flag), and inverse-squared falloff. Round-trips with get_light_properties. Partial update (idempotent): only fields present are written; a field that doesn't apply to the light's type returns an honest note instead of an error. The edit is one undo step that marks the level dirty, nothing is saved, and a call that changes nothing leaves neither and says changed false. On a Static-mobility light a field whose engine setter skips static lights (IES, light function, shadow bias, cast flags, falloff, RectLight source and barn doors) is an error and nothing is written. Verify by read-back via get_light_properties (light_* keys).
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -294,7 +294,7 @@ Set component-level light properties: attenuation radius, source radius/length, 
 | `barn_door_length` | number | no | float, RectLight barn-door length (Rect only). |
 | `source_texture` | string | no | asset path to a UTexture for the RectLight surface; omit/empty leaves it unchanged (Rect only). |
 
-**Returns:** `{ light_name, light_subtype, settings_applied: {...}, notes: [string], applied_count }`
+**Returns:** `{ light_name, light_subtype, settings_applied: {...}, notes: [string], applied_count, changed }`
 
 ## `set_lumen_gi_quality`
 

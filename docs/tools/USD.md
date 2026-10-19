@@ -572,18 +572,18 @@ Save a USD stage's root layer to disk.  Wraps UE::FSdfLayer::Save(force) on the 
 
 *Destructive, idempotent.*
 
-Author a value on a USD attribute (creating it if missing)
+Author one value on an attribute of a prim on a registered USD stage, at the current edit target: a time sample at time, or the default value when time is omitted; a missing attribute is created with type_name. The JSON value is converted to the attribute's declared scalar type before anything is written: bool takes a boolean; uchar, int, uint, int64 and uint64 a whole number in range; half, float, double and timecode a number; string, token and asset a string. Another type (float3, arrays), a value that does not fit, a missing attribute without type_name, an unregistered stage or a missing prim is an error and writes nothing. If USD still refuses the value, success is false and an attribute this call created is taken out again. In memory only: save_usd_stage writes it. Read it back with get_usd_attribute_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `stage_name` | string | yes | Stage cache key |
-| `prim_path` | string | yes | Target prim path |
-| `attr_name` | string | yes | Attribute name to set |
-| `type_name` | string | no | USD type name; REQUIRED when the attribute does not exist yet (used to CreateAttribute). When the attribute already exists this is ignored. |
-| `value` | any | no | {type: "float"\|"int"\|"string"\|"token"\|"asset"\|..., value: &lt;scalar>}; explicit type preferred; implicit by JSON runtime type otherwise. |
-| `time` | number | no | Optional time code (default: unset = static default) |
+| `stage_name` | string | yes | Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled"). |
+| `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
+| `attr_name` | string | yes | Attribute name to set, e.g. "size" |
+| `type_name` | string | no | USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides. |
+| `value` | any | no | The value: a JSON scalar, e.g. 2.5, "inherited" or true, or an object {"value": &lt;scalar>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. |
+| `time` | number | no | Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored |
 
-**Returns:** `{ prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time: number? }`
+**Returns:** `{ prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }`
 
 ## `set_usd_edit_target`
 
@@ -644,16 +644,16 @@ Set or clear the instanceable metadata (USD native instancing) of an existing pr
 
 *Destructive, idempotent.*
 
-Author one metadata field (e.g. "comment", "documentation", "kind") on an existing prim of a registered USD stage, at the current edit target. USD returns set=false when the value type does not match the field type; the reply echoes the converted value. Not saved to disk.
+Author one metadata field (e.g. "comment", "documentation", "kind" or "hidden") on an existing prim of a registered USD stage, at the current edit target. The value is converted to the field's own type, read from the value the field resolves to (authored or fallback), so a bare string fits a token field; a value that does not fit that type is an error and writes nothing. A field that resolves to no scalar value (an unregistered key, an unauthored field without a fallback, an array or dictionary field) takes the type the value names, such as {"type": "token"}. When USD still refuses the write, success is false with set=false and the USD errors. The reply echoes the converted value. In memory only: save_usd_stage writes it; read it back with get_usd_prim_metadata.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim, e.g. "/World/Cube". |
-| `key` | string | yes | Registered USD prim metadata field, e.g. "comment", "documentation", "kind" or "hidden"; a key USD does not register as prim metadata fails with set=false. |
+| `key` | string | yes | Registered USD prim metadata field, e.g. "comment", "documentation", "kind" or "hidden"; a key USD does not register as prim metadata fails with success false and set=false. |
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
-| `value` | any | no | {type?: "bool\|int\|int64\|float\|double\|string\|token\|asset", value: &lt;scalar>} OR a bare scalar; without type the JSON type decides (bool, number stored as double, string). Token fields such as "kind" need type "token". |
+| `value` | any | no | {type?: "bool\|int\|int64\|float\|double\|string\|token\|asset", value: &lt;scalar>} OR a bare scalar. It is converted to the field's type when that can be read, and type is then not used; otherwise type, or without it the JSON type, decides (bool, number stored as double, string). |
 
-**Returns:** `{ set: bool, key: string, value: object }`
+**Returns:** `{ set: bool, key: string, value: object, declared_type?: string, errors?: [string] }`
 
 ## `set_usd_prim_specifier`
 

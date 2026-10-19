@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "AssetRegistry/AssetData.h"                        // FAssetData (mcp_common::FindAssetDataByPath)
 #include "Curves/RichCurve.h"                               // FRichCurve / FKeyHandle
 #include "Engine/World.h"
 #include "WorldPartition/DataLayer/DataLayerAsset.h"        // UDataLayerAsset
@@ -11,12 +12,48 @@
 // Reply pieces and lookups shared by the asset authoring, data layer and World Partition command families.
 namespace DataAuthoringUtils
 {
-    /** created=false, already_exists=true, saved=true: a create command that found its asset already there. */
-    inline void AddAlreadyExistsFlags(const TSharedPtr<FJsonObject>& Reply)
+    /**
+     * created=false, already_exists=true, saved=false and the message "<AssetNoun> already exists; ...": a create
+     * command that found its asset already there and returns it unchanged. Nothing was written, so nothing is saved.
+     */
+    inline void AddAlreadyExistsFlags(const TSharedPtr<FJsonObject>& Reply, const TCHAR* AssetNoun)
     {
         Reply->SetBoolField(TEXT("created"), false);
         Reply->SetBoolField(TEXT("already_exists"), true);
-        Reply->SetBoolField(TEXT("saved"), true);
+        Reply->SetBoolField(TEXT("saved"), false);
+        Reply->SetStringField(TEXT("message"), FString::Printf(
+            TEXT("%s already exists; returned the existing asset unchanged, nothing saved"), AssetNoun));
+    }
+
+    /**
+     * The error of a create command whose target path already holds an asset that is not exactly of class Wanted
+     * (another class, or a subclass with its own behavior, such as a composite table): it is not the asset asked
+     * for, so it is neither returned as already existing nor replaced. Found is that asset when it loaded as a
+     * Wanted; otherwise its class is read from the asset registry.
+     */
+    inline TSharedPtr<FJsonObject> OtherClassAtPathReply(const FString& Path, const UObject* Found, const UClass* Wanted)
+    {
+        FString FoundClass;
+        if (Found != nullptr)
+        {
+            FoundClass = Found->GetClass()->GetName();
+        }
+        else
+        {
+            const FAssetData OnDisk = mcp_common::FindAssetDataByPath(Path);
+            if (!OnDisk.IsValid() || OnDisk.AssetClassPath == Wanted->GetClassPathName())
+            {
+                // The registry knows no other class there: the asset is there but does not load.
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("An asset already exists at '%s' but does not load as a %s; nothing was created or saved."),
+                    *Path, *Wanted->GetName()));
+            }
+            FoundClass = OnDisk.AssetClassPath.GetAssetName().ToString();
+        }
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("'%s' already exists as a %s, so a %s cannot be created there; nothing was created or saved. ")
+            TEXT("Choose another name, or delete or rename the existing asset first."),
+            *Path, *FoundClass, *Wanted->GetName()));
     }
 
     /** created, already_exists=false, success and saved = bSaved, message "<AssetNoun> created and saved to disk" or "... but save failed: <SaveError>". */

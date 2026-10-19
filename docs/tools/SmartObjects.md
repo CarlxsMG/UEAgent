@@ -270,7 +270,7 @@ Set (change) the USmartObjectDefinition on the USmartObjectComponent of an actor
 
 *Destructive, idempotent.*
 
-Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error, but the policies are checked after the tags are written, so that error leaves the new tags in memory, unsaved. Repeat calls write the same state (idempotent); no undo step is recorded, and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
+Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, in one undo step, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error checked before anything is written, so the definition stays as it was. A call that leaves tags and policies as they were changes and saves nothing (changed false), and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -279,21 +279,21 @@ Replace the object-level activity tags of a USmartObjectDefinition asset with ac
 | `merging_policy` | string | no | Optional activity-tag merging policy: "Combine" (default) or "Override"; Combine merges slot and object tags, Override lets non-empty slot tags take their place; omitted keeps the current policy |
 | `filtering_policy` | string | no | Optional user-tag filtering policy: "NoFilter", "Combine", or "Override"; how the object and slot user filters apply to a request; omitted keeps the current policy |
 
-**Returns:** `{ definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, saved: bool }`
+**Returns:** `{ definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, changed: bool, saved: bool, note?: string }`
 
 ## `set_smart_object_definition_user_tag_filter`
 
 *Destructive, idempotent.*
 
-Set the object-level user tag filter (a gameplay tag query) of a USmartObjectDefinition, built from a tag list and a match mode.
+Replace the object-level user tag filter of a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the object) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user. A call that leaves the filter as it was saves nothing (changed false). A missing definition is an error; a failed save, as during PIE, makes success false. How it combines with slot filters: filtering_policy of set_smart_object_definition_activity_tags; per-slot filter: set_smart_object_slot_user_tag_filter; read back: get_smart_object_definition_summary.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
-| `user_tags` | array | no | Gameplay tag names the filter query matches against |
-| `match` | string | no | Match mode: "any" (default), "all", or "none" |
+| `user_tags` | array | no | Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter |
+| `match` | string | no | Match mode: "any" (default), "all", or "none"; any other value is an error |
 
-**Returns:** `{ definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }`
+**Returns:** `{ definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }`
 
 ## `set_smart_object_slot_activity_tags`
 
@@ -356,16 +356,16 @@ Set the local offset and/or rotation (degrees) of the slot at slot_index in a US
 
 *Destructive, idempotent.*
 
-Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Names that are not registered gameplay tags are skipped silently (the reply lists the tags kept), and an unrecognized match acts as any but is echoed as sent. An empty list still builds a query (filter_is_empty false) that, with any, admits no user, so this cannot clear the filter. A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Repeat calls write the same query (idempotent). Object-level filter: set_smart_object_definition_user_tag_filter; slot activity tags: set_smart_object_slot_activity_tags; read slots back: get_smart_object_slots_detail.
+Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user, though under the Override policy the object-level filter then applies. A call that leaves the filter as it was saves nothing (changed false). A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Object-level filter: set_smart_object_definition_user_tag_filter; read slots back: get_smart_object_slots_detail.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `definition_path` | string | yes | Path to the USmartObjectDefinition asset |
 | `slot_index` | number | no | Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error |
-| `user_tags` | array | no | Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list does not clear the filter |
-| `match` | string | no | Match mode: "any" (default), "all", or "none"; any other value acts as any |
+| `user_tags` | array | no | Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter |
+| `match` | string | no | Match mode: "any" (default), "all", or "none"; any other value is an error |
 
-**Returns:** `{ definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, saved: bool }`
+**Returns:** `{ definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }`
 
 ## `use_smart_object`
 

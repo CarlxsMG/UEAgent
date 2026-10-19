@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Common/McpEnumLabels.h"   // create_project_overview: NetModeLabel
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "GameFramework/Actor.h"
@@ -296,18 +297,24 @@ TSharedPtr<FJsonObject> HandleCreateAssetDocumentation(const TSharedPtr<FJsonObj
     return mcp_common::MakeOkReply(Reply);
 }
 
-// MCP:create_project_overview - Summarize the project in one read that writes nothing, neither a file nor an asset: project name, engine version and platform; /Game asset counts per class from the Asset Registry; the Blueprint total split into normal Blueprints and macro libraries; the name, actor count, level count and actors per class of the editor world; and the totals of materials (any UMaterialInterface), Texture2D and sound assets. Every Blueprint under /Game is loaded to classify it, so the first call on a large project can take a while. world_info.net_mode is the fixed label "Standalone", not read from the world. Without an editor world it is an error. Project metadata alone: get_project_info; one asset: create_asset_documentation; every Blueprint in detail: generate_blueprint_docs; the actors themselves: get_actors_in_level.
-//   @returns { project_info: { project_name, engine_version, platform, generation_date, is_editor }, asset_types: [{ asset_type, count }], blueprint_info: { total_blueprints, normal_blueprints, macro_blueprints }, world_info: { world_name, net_mode, actor_count, level_count }, actor_types: [{ actor_type, count }], material_info: { total_materials }, texture_info: { total_textures }, audio_info: { total_audio_assets }, statistics: { total_assets, total_blueprints, total_materials, total_textures, total_audio_assets, total_actors } }
+// MCP:create_project_overview - Summarize the project in one read that writes nothing, neither a file nor an asset: project name, engine version and platform; /Game asset counts per class from the Asset Registry; the Blueprint total split into normal Blueprints and macro libraries, read from the registry's BlueprintType tag without loading any Blueprint; the name, world_type, net mode, actor count, level count and actors per class of one world, the PIE world while a play session runs and the editor world otherwise; and the totals of materials (any UMaterialInterface), Texture2D and sound assets. Without an editor world it is an error. Project metadata alone: get_project_info; one asset: create_asset_documentation; every Blueprint in detail: generate_blueprint_docs; the actors themselves: get_actors_in_level.
+//   @returns { project_info: { project_name, engine_version, platform, generation_date, is_editor }, asset_types: [{ asset_type, count }], blueprint_info: { total_blueprints, normal_blueprints, macro_blueprints }, world_info: { world_name, world_type, net_mode, actor_count, level_count }, actor_types: [{ actor_type, count }], material_info: { total_materials }, texture_info: { total_textures }, audio_info: { total_audio_assets }, statistics: { total_assets, total_blueprints, total_materials, total_textures, total_audio_assets, total_actors } }
 //   @hints read-only
 
 TSharedPtr<FJsonObject> HandleCreateProjectOverview(const TSharedPtr<FJsonObject>& Params)
 {
     namespace Impl = UEAgentDocumentationCommandsImpl;
 
-    UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+    // The world described: the PIE world while a play session runs, else the editor world.
+    UWorld* EditorWorld = mcp_common::GetEditorWorld();
     if (EditorWorld == nullptr)
     {
         return Impl::NoWorldError();
+    }
+    UWorld* World = EditorWorld;
+    if (GEditor->PlayWorld != nullptr)
+    {
+        World = GEditor->PlayWorld;
     }
 
     TSharedPtr<FJsonObject> Reply = MakeShared<FJsonObject>();
@@ -331,22 +338,24 @@ TSharedPtr<FJsonObject> HandleCreateProjectOverview(const TSharedPtr<FJsonObject
     }
     Reply->SetArrayField(TEXT("asset_types"), Impl::CountsToJson(PerAssetClass, TEXT("asset_type")));
 
-    // Blueprints of every kind, split into normal Blueprints and macro libraries (each one gets loaded).
+    // Blueprints of every kind, split into normal Blueprints and macro libraries by the registry's BlueprintType
+    // tag (UBlueprint::BlueprintType is AssetRegistrySearchable, exported as the enum name, "BPTYPE_Normal"),
+    // so no Blueprint is loaded. FString comparison ignores case, as the engine's own readers of this tag do.
     const TArray<FAssetData> Blueprints = Impl::GameAssetsOf(Registry, UBlueprint::StaticClass(), /*bWithSubclasses*/ true);
     int32 NormalCount = 0;
     int32 MacroLibraryCount = 0;
     for (const FAssetData& Entry : Blueprints)
     {
-        const UBlueprint* Blueprint = Cast<UBlueprint>(Entry.GetAsset());
-        if (Blueprint == nullptr)
+        FString BlueprintTypeTag;
+        if (!Entry.GetTagValue(FBlueprintTags::BlueprintType, BlueprintTypeTag))
         {
             continue;
         }
-        if (Blueprint->BlueprintType == BPTYPE_Normal)
+        if (BlueprintTypeTag == TEXT("BPTYPE_Normal"))
         {
             ++NormalCount;
         }
-        else if (Blueprint->BlueprintType == BPTYPE_MacroLibrary)
+        else if (BlueprintTypeTag == TEXT("BPTYPE_MacroLibrary"))
         {
             ++MacroLibraryCount;
         }
@@ -358,15 +367,16 @@ TSharedPtr<FJsonObject> HandleCreateProjectOverview(const TSharedPtr<FJsonObject
     Reply->SetObjectField(TEXT("blueprint_info"), BlueprintSummary);
 
     TSharedPtr<FJsonObject> WorldSummary = MakeShared<FJsonObject>();
-    WorldSummary->SetStringField(TEXT("world_name"), EditorWorld->GetName());
-    WorldSummary->SetStringField(TEXT("net_mode"), TEXT("Standalone"));   // a fixed label, not read from the world
-    WorldSummary->SetNumberField(TEXT("actor_count"), EditorWorld->GetActorCount());
-    WorldSummary->SetNumberField(TEXT("level_count"), EditorWorld->GetNumLevels());
+    WorldSummary->SetStringField(TEXT("world_name"), World->GetName());
+    WorldSummary->SetStringField(TEXT("world_type"), LexToString(World->WorldType.GetValue()));
+    WorldSummary->SetStringField(TEXT("net_mode"), mcp_common::NetModeLabel(World->GetNetMode()));
+    WorldSummary->SetNumberField(TEXT("actor_count"), World->GetActorCount());
+    WorldSummary->SetNumberField(TEXT("level_count"), World->GetNumLevels());
     Reply->SetObjectField(TEXT("world_info"), WorldSummary);
 
-    // Actors of the editor world, counted per class name.
+    // Actors of that world, counted per class name.
     TMap<FString, int32> PerActorClass;
-    for (TActorIterator<AActor> ActorIt(EditorWorld); ActorIt; ++ActorIt)
+    for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
     {
         ++PerActorClass.FindOrAdd(ActorIt->GetClass()->GetName());
     }
@@ -386,7 +396,7 @@ TSharedPtr<FJsonObject> HandleCreateProjectOverview(const TSharedPtr<FJsonObject
     Totals->SetNumberField(TEXT("total_materials"), MaterialTotal);
     Totals->SetNumberField(TEXT("total_textures"), TextureTotal);
     Totals->SetNumberField(TEXT("total_audio_assets"), AudioTotal);
-    Totals->SetNumberField(TEXT("total_actors"), EditorWorld->GetActorCount());
+    Totals->SetNumberField(TEXT("total_actors"), World->GetActorCount());
     Reply->SetObjectField(TEXT("statistics"), Totals);
 
     return mcp_common::MakeOkReply(Reply);

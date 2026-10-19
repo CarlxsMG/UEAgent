@@ -101,17 +101,33 @@ namespace
         return C;
     }
 
+    // What ResolveWritableStaticMesh did on disk in this call: whether it created the /Game copy at dest_path,
+    // and whether that copy's package was saved (SaveError says why not).
+    struct FWritableMeshCopy
+    {
+        bool bCreated = false;
+        bool bSaved = false;
+        FString SaveError;
+    };
+
     // Resolve a writable UStaticMesh from `static_mesh_path`, duplicating a read-only
     // /Engine source into the supplied `dest_path` (must be /Game) first, so the collision
     // commands never mutate a read-only engine asset. On failure, returns nullptr and
     // fills OutError with the response to return; on success returns the writable mesh and
-    // sets bOutDuplicated.
+    // sets bOutDuplicated (the mesh is the /Game copy, new or reused). OutCopy, when given,
+    // says whether this call created and saved that copy: a caller that saves nothing itself
+    // reports that save as its own.
     UStaticMesh* ResolveWritableStaticMesh(const TSharedPtr<FJsonObject>& Params,
                                            bool& bOutDuplicated,
-                                           TSharedPtr<FJsonObject>& OutError)
+                                           TSharedPtr<FJsonObject>& OutError,
+                                           FWritableMeshCopy* OutCopy = nullptr)
     {
         bOutDuplicated = false;
         OutError.Reset();
+        if (OutCopy)
+        {
+            *OutCopy = FWritableMeshCopy();
+        }
 
         FString MeshPath;
         if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("static_mesh_path"), MeshPath))
@@ -135,8 +151,11 @@ namespace
         }
 
         // Engine content under /Engine is read-only: require a /Game dest_path to copy into.
+        // Read into a bool, not negated in the if: dest_path is needed only on this path (a /Game
+        // mesh returned above), and a negated read would make the catalog require it on every call.
         FString DestPath;
-        if (!Params->TryGetStringField(TEXT("dest_path"), DestPath) || DestPath.IsEmpty())
+        const bool bHasDestPath = Params->TryGetStringField(TEXT("dest_path"), DestPath);
+        if (!bHasDestPath || DestPath.IsEmpty())
         {
             OutError = mcp_common::MakeErrorReply(
                 FString::Printf(TEXT("Static mesh is not writable (must be under /Game): %s. "
@@ -180,7 +199,13 @@ namespace
             DestMesh->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
             FAssetRegistryModule::AssetCreated(DestMesh);
             FString DupSaveError;
-            mcp_common::SaveAssetPackage(DestPackage, DestMesh, DupSaveError);
+            const bool bDupSaved = mcp_common::SaveAssetPackage(DestPackage, DestMesh, DupSaveError);
+            if (OutCopy)
+            {
+                OutCopy->bCreated = true;
+                OutCopy->bSaved = bDupSaved;
+                OutCopy->SaveError = DupSaveError;
+            }
         }
         bOutDuplicated = true;
         return DestMesh;
@@ -388,11 +413,11 @@ namespace
     }
 }
 
-// MCP:create_physics_asset - Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true, nothing generated or written (saved still reads true), while another asset class there is an error. skeletal_mesh_path must load even when the asset exists. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
+// MCP:create_physics_asset - Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true and saved=false, nothing generated or saved and skeletal_mesh_path not read, while another asset class there is an error before any mesh loads. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
 //   @param name - Asset name (e.g. 'PA_Cube').
 //   @param package_path - Content folder for the new asset (default /Game/Physics; an empty string also uses it)
-//   @param skeletal_mesh_path - Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load
-//   @returns { asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string }
+//   @param skeletal_mesh_path - Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); read only for a new asset, which fails when it does not load
+//   @returns { asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString PackagePath;
@@ -403,6 +428,36 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
     }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("name"), Name)) { return Missing; }
 
+    const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
+
+    // What is already at the path is settled before the skeletal mesh loads: another asset class there is an
+    // error, and an existing physics asset is returned as it is, with nothing generated or saved.
+    const FString Conflict = mcp_common::AssetNameConflict(FullPath, Name, UPhysicsAsset::StaticClass());
+    if (!Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
+    if (UEditorAssetLibrary::DoesAssetExist(FullPath))
+    {
+        UPhysicsAsset* Existing = Cast<UPhysicsAsset>(
+            StaticLoadObject(UPhysicsAsset::StaticClass(), nullptr, *FullPath));
+        if (!Existing)
+        {
+            return mcp_common::MakeErrorReply(
+                FString::Printf(TEXT("An asset exists at %s but does not load as a UPhysicsAsset"), *FullPath));
+        }
+        TSharedPtr<FJsonObject> ExObj = MakeShared<FJsonObject>();
+        FillPhysicsAssetPayload(Existing, ExObj);
+        ExObj->SetStringField(TEXT("package_path"), PackagePath);
+        ExObj->SetBoolField(TEXT("already_existed"), true);
+        ExObj->SetBoolField(TEXT("created"), false);
+        ExObj->SetBoolField(TEXT("saved"), false);
+        ExObj->SetStringField(TEXT("note"),
+            TEXT("A physics asset already exists at this path; it was returned unchanged, skeletal_mesh_path was not read and nothing was saved"));
+        return mcp_common::MakeOkReply(ExObj);
+    }
+
     FString SkelMeshPath = TEXT("/Engine/EngineMeshes/SkeletalCube");
     Params->TryGetStringField(TEXT("skeletal_mesh_path"), SkelMeshPath);
 
@@ -412,25 +467,6 @@ TSharedPtr<FJsonObject> HandleCreatePhysicsAsset(const TSharedPtr<FJsonObject>& 
     {
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Skeletal mesh not found: %s"), *SkelMeshPath));
-    }
-
-    const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
-
-    // Idempotent: if it already exists, load it and return a stable payload.
-    if (UEditorAssetLibrary::DoesAssetExist(FullPath))
-    {
-        if (UPhysicsAsset* Existing = Cast<UPhysicsAsset>(
-                StaticLoadObject(UPhysicsAsset::StaticClass(), nullptr, *FullPath)))
-        {
-            TSharedPtr<FJsonObject> ExObj = MakeShared<FJsonObject>();
-            FillPhysicsAssetPayload(Existing, ExObj);
-            ExObj->SetStringField(TEXT("package_path"), PackagePath);
-            ExObj->SetBoolField(TEXT("already_existed"), true);
-            ExObj->SetBoolField(TEXT("created"), false);
-            ExObj->SetBoolField(TEXT("saved"), true);
-            return mcp_common::MakeOkReply(ExObj);
-        }
     }
 
     FString CreateError;
@@ -776,15 +812,16 @@ TSharedPtr<FJsonObject> HandleAddSimpleCollisionToStaticMesh(const TSharedPtr<FJ
 
 // Static-mesh collision CRUD: clear (RemoveSimpleCollision), convex decomposition, K-DOP.
 
-// MCP:remove_static_mesh_collision - Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true.
+// MCP:remove_static_mesh_collision - Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves; a failed save makes success false with save_error.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first (an existing copy there is reused); duplicated is true when this call created that copy.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true, where saved reports only the save of a copy this call created and is false, with nothing saved, when there is none.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
-//   @returns { static_mesh_path, removed_count, element_count, collision_removed, already_empty, duplicated_to_game, saved, save_error? }
+//   @returns { static_mesh_path, removed_count, element_count, collision_removed, already_empty, duplicated_to_game, duplicated, saved, save_error?, note? }
 TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonObject>& Params)
 {
     bool bDuplicated = false;
     TSharedPtr<FJsonObject> Error;
-    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error);
+    FWritableMeshCopy Copy;
+    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error, &Copy);
     if (!StaticMesh)
     {
         return Error;
@@ -792,7 +829,8 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonOb
 
     // No BodySetup, or an empty one, means there is no simple collision to clear -> honest
     // no-op (do NOT create a BodySetup just to empty it; nothing to dirty or save). Report
-    // already_empty so re-runs are stable.
+    // already_empty so re-runs are stable. The only thing such a call can have saved is the
+    // /Game copy of an /Engine mesh it created on the way, so that save is what `saved` reports.
     UBodySetup* BodySetup = StaticMesh->GetBodySetup();
     const int32 BeforeCount = BodySetup ? BodySetup->AggGeom.GetElementCount() : 0;
     if (BeforeCount == 0)
@@ -804,7 +842,15 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonOb
         EmptyObj->SetBoolField(TEXT("collision_removed"), false);
         EmptyObj->SetBoolField(TEXT("already_empty"), true);
         EmptyObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
-        EmptyObj->SetBoolField(TEXT("saved"), true);
+        EmptyObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
+        if (Copy.bCreated)
+        {
+            EmptyObj->SetStringField(TEXT("note"),
+                TEXT("The mesh had no simple collision to clear; this call only created the /Game copy at dest_path"));
+            return mcp_common::MakeSavedReply(EmptyObj, Copy.bSaved, TEXT("remove_static_mesh_collision"), Copy.SaveError);
+        }
+        EmptyObj->SetBoolField(TEXT("saved"), false);
+        EmptyObj->SetStringField(TEXT("note"), TEXT("The mesh had no simple collision to clear; nothing was changed or saved"));
         return mcp_common::MakeOkReply(EmptyObj);
     }
 
@@ -831,6 +877,7 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonOb
     ResultObj->SetBoolField(TEXT("collision_removed"), AfterCount < BeforeCount);
     ResultObj->SetBoolField(TEXT("already_empty"), false);
     ResultObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+    ResultObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
 
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_static_mesh_collision"), SaveError);
 }
@@ -916,11 +963,12 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshConvexCollision(const TSharedPtr<FJso
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_static_mesh_convex_collision"), SaveError);
 }
 
-// MCP:set_static_mesh_kdop_collision - Add a K-DOP (discrete-oriented-polytope) simple collision hull to a UStaticMesh via UStaticMeshEditorSubsystem::AddSimpleCollisionsWithNotification (the "Add K-DOP Simplified Collision" editor action).  shape is one of NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26.  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns a negative index on failure — surfaced as a CLEAN error.
+// MCP:set_static_mesh_kdop_collision - Add one K-DOP simple collision hull to a UStaticMesh asset, found by path, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game, such as /Engine content, is first copied to dest_path under /Game, reusing a copy already there. An invalid shape, unknown mesh or running PIE session is an error; a failed save makes success false with saved=false and save_error. Replace all collision with a convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
 //   @param shape - K-DOP hull shape: NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26 (default NDOP18).
 //   @returns { static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, saved, save_error? }
+//   @hints additive not-idempotent
 TSharedPtr<FJsonObject> HandleSetStaticMeshKDopCollision(const TSharedPtr<FJsonObject>& Params)
 {
     bool bDuplicated = false;
@@ -1147,7 +1195,7 @@ TSharedPtr<FJsonObject> HandleRemovePhysicsAssetConstraint(const TSharedPtr<FJso
         AbsentObj->SetBoolField(TEXT("removed"), false);
         AbsentObj->SetBoolField(TEXT("already_absent"), true);
         AbsentObj->SetNumberField(TEXT("constraint_count"), PhysAsset->ConstraintSetup.Num());
-        AbsentObj->SetBoolField(TEXT("saved"), true);
+        AbsentObj->SetBoolField(TEXT("saved"), false);
         return mcp_common::MakeOkReply(AbsentObj);
     }
 

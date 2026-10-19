@@ -258,7 +258,7 @@ namespace UEAgentMaterialCollectionImpl
     }
 }
 
-// MCP:create_material_parameter_collection - Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned with created=false and already_exists=true, while another asset type at that path is an error. Returns collection_path, scalar_count, vector_count and saved.
+// MCP:create_material_parameter_collection - Create a UMaterialParameterCollection asset at package_path/name and save it to disk. Idempotent: an existing collection there is returned unchanged with created=false, already_exists=true and saved=false, and nothing is saved, while another asset type at that path is an error naming it. A failed save makes success false with saved=false. Returns collection_path, scalar_count, vector_count and saved. Add parameters with add_collection_scalar_param and add_collection_vector_param; read them with get_collection_info.
 //   @param name - Asset name without a path, e.g. "MPC_Global"
 //   @param package_path - Content folder for the asset, e.g. "/Game/MaterialCollections" (the default)
 //   @returns { name: string, package_path: string, collection_path: string, asset_path: string, collection_class: string, scalar_count: int, vector_count: int, created: bool, already_exists: bool, success: bool, saved: bool, message: string }
@@ -276,18 +276,18 @@ TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollection(const TSharedPtr
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
-    // Idempotent: if it already exists, load and return a STABLE payload.
+    // Idempotent: a collection already there is returned unchanged and nothing is saved; an asset of any other
+    // class there is not the one asked for.
     if (UEditorAssetLibrary::DoesAssetExist(FullPath))
     {
         UMaterialParameterCollection* Existing = LoadCollectionAt(FullPath);
-        if (Existing)
+        if (Existing && Existing->GetClass() == UMaterialParameterCollection::StaticClass())
         {
             TSharedPtr<FJsonObject> ExistObj = UEAgentMaterialCollectionImpl::CreatedCollectionReply(Name, PackagePath, Existing);
-            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj);
+            DataAuthoringUtils::AddAlreadyExistsFlags(ExistObj, TEXT("MaterialParameterCollection"));
             return mcp_common::MakeOkReply(ExistObj);
         }
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Asset exists at %s but is not a MaterialParameterCollection"), *FullPath));
+        return DataAuthoringUtils::OtherClassAtPathReply(FullPath, Existing, UMaterialParameterCollection::StaticClass());
     }
 
     FString CreateError;
@@ -992,7 +992,7 @@ TSharedPtr<FJsonObject> HandleCreateMaterialParameterCollectionInstance(const TS
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_mpci_scalar_parameter_value - Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value and readback_ok report what the instance holds afterwards. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
+// MCP:set_mpci_scalar_parameter_value - Override one scalar parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection asset on one world, creating the instance when needed, and push the value to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Runtime only: the asset is untouched, nothing is saved, no undo, and the override is lost when the instance is rebuilt. A missing value, a collection that does not load, an unmatched world, or a parameter_name that is not a scalar of the collection is an error; readback_value is what the instance holds afterwards, and one that differs from value makes success false with readback_ok=false. Saved default: set_collection_param_default; vectors: set_mpci_vector_parameter_value; drop every override: clear_mpci_parameter_overrides; read values: get_mpci_info.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the scalar parameter to override
 //   @param value - New float value for the parameter
@@ -1038,9 +1038,11 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     // up. Without this the uniform buffer stays at the prior value.
     Instance->UpdateRenderState(/*bRecreateUniformBuffer=*/false);
 
-    // Read back so the caller has confirmation the override landed.
+    // Read back: the getter answers the override, or the collection default when there is none, so only a value
+    // equal to the one written proves the override landed (the setter writes nothing once the instance has lost
+    // its world).
     float OutValue = 0.0f;
-    const bool bReadback = Instance->GetScalarParameterValue(FName(*ParamName), OutValue);
+    const bool bReadback = Instance->GetScalarParameterValue(FName(*ParamName), OutValue) && OutValue == Value;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), Collection->GetPathName());
@@ -1049,10 +1051,12 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     Result->SetNumberField(TEXT("readback_value"), OutValue);
     Result->SetBoolField(TEXT("readback_ok"), bReadback);
     mcp_common::AddWorldEvidence(Result, World);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bReadback, bReadback ? FString() : FString::Printf(
+        TEXT("set_mpci_scalar_parameter_value: the instance reads back %s for '%s', not the %s written, so the override did not land"),
+        *FString::SanitizeFloat(OutValue), *ParamName, *FString::SanitizeFloat(Value)));
 }
 
-// MCP:set_mpci_vector_parameter_value - Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; scalars: set_mpci_scalar_parameter_value.
+// MCP:set_mpci_vector_parameter_value - Override one vector parameter on the Material Parameter Collection Instance (MPCI: the transient per-world values) of a collection on a world, creating the instance when needed, and push it to the renderer. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was reached. Pass rgba or r/g/b/a: r/g/b/a override the matching rgba entries, and channels given by neither are 0 (alpha 1), not the current value. Runtime only: the asset is untouched (set_collection_param_default edits it), nothing saved, no undo. Errors when parameter_name is not a vector parameter of the collection; readback_rgba is what the instance holds afterwards, and one that differs from value_rgba makes success false with readback_ok=false. Scalars: set_mpci_scalar_parameter_value.
 //   @param collection_path - Full /Game path of the parent MPC
 //   @param parameter_name - Name of the vector parameter to override
 //   @param rgba - Optional [r, g, b, a] color value
@@ -1115,8 +1119,10 @@ TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJson
     Instance->SetVectorParameterValue(FName(*ParamName), Value);
     Instance->UpdateRenderState(/*bRecreateUniformBuffer=*/false);
 
+    // Read back: the getter answers the override, or the collection default when there is none, so only a color
+    // equal to the one written proves the override landed.
     FLinearColor OutColor(0.0f, 0.0f, 0.0f, 1.0f);
-    const bool bReadback = Instance->GetVectorParameterValue(FName(*ParamName), OutColor);
+    const bool bReadback = Instance->GetVectorParameterValue(FName(*ParamName), OutColor) && OutColor == Value;
 
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("collection_path"), Collection->GetPathName());
@@ -1125,7 +1131,9 @@ TSharedPtr<FJsonObject> HandleSetMpciVectorParameterValue(const TSharedPtr<FJson
     Result->SetArrayField(TEXT("readback_rgba"), mcp_common::ColorToJsonArray(OutColor));
     Result->SetBoolField(TEXT("readback_ok"), bReadback);
     mcp_common::AddWorldEvidence(Result, World);
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeOutcomeReply(Result, bReadback, bReadback ? FString() : FString::Printf(
+        TEXT("set_mpci_vector_parameter_value: the instance reads back %s for '%s', not the %s written, so the override did not land"),
+        *OutColor.ToString(), *ParamName, *Value.ToString()));
 }
 
 // MCP:get_mpci_info - Read the transient Material Parameter Collection Instance of one collection on a world: instance_exists, is_valid, parent_collection_path and, per parameter, current_value or current_rgba with readback_ok. The world is the editor world by default, or the Play-in-Editor world world_label selects; world_package and world_type say which one was read. Changes no value, but the engine lookup creates the instance, at the collection defaults, when the world has none, so instance_exists is true in practice; scalar_override_count and vector_override_count are only the parameter counts.

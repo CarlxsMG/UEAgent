@@ -22,17 +22,17 @@ Adds a USoundControlBus to a USoundControlBusMix asset as a new stage whose targ
 
 *Additive.*
 
-Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
+Add a graph input of data_type (default Float) to an existing MetaSound Source through the MetaSound builder, inside an undo transaction, then save the asset. Optionally bakes a typed default into the new input; give at most one of default_value, int_value, bool_value or string_value (bool_value wins, then int_value, string_value, default_value). An unregistered data_type or a source that does not load is an error, and so is a default of the wrong JSON type or one data_type takes no literal of, with nothing written. A name already used by an input is left untouched: with the same data_type the call succeeds with added=false and already_exists=true, saves nothing and does not apply a supplied default (note says so; use metasound_set_input_default); with another data_type it is an error. success is false, with save_error, when the save fails (during PIE, for one). Inverse: remove_metasound_graph_input.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | Asset path of the MetaSound Source, as a package path like "/Game/MetaSounds/MS_Example" or an object path like "/Game/MetaSounds/MS_Example.MS_Example" |
 | `input_name` | string | yes | Name of the graph input node to add. |
 | `data_type` | string | no | Frontend data type: "Float", "Int32", "Bool", "String", "Audio", "Trigger" (optional, default "Float") |
-| `default_value` | number | no | Float default baked into the literal (optional) |
-| `int_value` | number | no | Int32 default baked into the literal (optional, mutually exclusive with other defaults) |
-| `bool_value` | boolean | no | Bool default baked into the literal (optional, mutually exclusive with other defaults) |
-| `string_value` | string | no | String default baked into the literal (optional, mutually exclusive with other defaults) |
+| `default_value` | number | no | Float default baked into the literal, a JSON number (optional) |
+| `int_value` | number | no | Int32 default baked into the literal, a whole JSON number (optional, mutually exclusive with other defaults) |
+| `bool_value` | boolean | no | Bool default baked into the literal, JSON true or false (optional, mutually exclusive with other defaults) |
+| `string_value` | string | no | String default baked into the literal, a JSON string (optional, mutually exclusive with other defaults) |
 
 **Returns:** `{ asset_path: string, input_name: string, data_type: string, added: bool, already_exists?: bool, has_default: bool, note?: string, saved: bool, save_error: string? }`
 
@@ -155,7 +155,7 @@ Connects a graph input node's output to a graph output node's input.  Resolves t
 
 *Destructive.*
 
-Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (both ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes) or a full parent is an error. Nothing checks for cycles or earlier links: repeating the call without input_index links the child again in another slot. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; the cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
+Link the node child_node_id into an input slot of the node parent_node_id in a USoundCue asset (ids from add_sound_cue_node or get_sound_cue_graph), in one undo step, then save the cue. With input_index that slot is overwritten even when it holds another child (missing slots up to it are added empty); without it the first empty slot is used, or a new one is appended. A cue that does not load, an id out of range, a parent that takes no children (a WavePlayer), an input_index outside [0, max_child_nodes), a full parent, or a cycle (a node into itself or into a node feeding it) is an error, with nothing changed. Duplicate links are allowed: a repeat without input_index adds the child again. A failed save, as during PIE, makes success false with save_error. Inverse: disconnect_sound_cue_nodes; cue output: set_sound_cue_first_node; read back: get_sound_cue_graph.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -886,34 +886,34 @@ Connect a concrete node's output pin to a named graph output, completing a signa
 
 *Destructive, idempotent.*
 
-Sets the default literal value of a MetaSound Source graph input.  Obtains a builder for the existing asset (FindOrBeginBuilding) and calls SetGraphInputDefault with an FMetasoundFrontendLiteral built from the supplied value, then reads the value back to verify and saves the asset. Provide exactly one of ``value`` (float, default), ``int_value``, ``bool_value`` or ``string_value``.
+Set the default value of one graph input of a MetaSound Source asset through the MetaSound editor builder, in one undo step, then save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, or an input that is missing or does not take that type is an error, with nothing written. value_set means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error. Inputs: get_metasound_info; a node pin: metasound_set_node_input_default; a preset by parameter_type: set_metasound_preset_parameter.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | Asset path of the MetaSound Source. |
 | `input_name` | string | yes | Name of the graph input whose default to set. |
-| `value` | number | no | Float default value (optional, used if no other *_value is provided) |
-| `int_value` | number | no | Int32 default value (optional, mutually exclusive with value/bool_value/string_value) |
-| `bool_value` | boolean | no | Bool default value (optional, mutually exclusive with value/int_value/string_value) |
-| `string_value` | string | no | String default value (optional, mutually exclusive with value/int_value/bool_value) |
+| `value` | number | no | Float default value, a JSON number (optional, used if no other *_value is provided); another JSON type is an error |
+| `int_value` | number | no | Int32 default value, a whole JSON number (optional, mutually exclusive with value/bool_value/string_value) |
+| `bool_value` | boolean | no | Bool default value, JSON true or false (optional, mutually exclusive with value/int_value/string_value) |
+| `string_value` | string | no | String default value, a JSON string (optional, mutually exclusive with value/int_value/bool_value) |
 
-**Returns:** `{ asset_path: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }`
+**Returns:** `{ asset_path: string, input_name: string, value_type: string, value_set: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
 
 ## `metasound_set_node_input_default`
 
 *Destructive, idempotent.*
 
-Set the default literal of a named input pin on a concrete node (by node_id from metasound_add_node_by_classname).  Reads the value back to verify and saves. Provide exactly one of ``value`` (float, default), ``int_value``, ``bool_value`` or ``string_value``.
+Set the default literal of a named input pin on a concrete node of a MetaSound Source (node by node_id from metasound_add_node_by_classname) through the MetaSound editor builder, then read it back and save the asset. Give one typed field: bool_value (true or false), int_value (a whole number), string_value (a string) or value (a number, read as a float); with several, the first in that order wins. A missing or mistyped value, an unknown source, node_id or pin, or a literal the pin refuses is an error. A failed save makes success false. For a graph input use metasound_set_input_default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `metasound_path` | string | yes | Asset path of the MetaSound Source. |
 | `node_id` | string | yes | GUID of the node (from metasound_add_node_by_classname). |
 | `input_name` | string | yes | Name of the node input pin (discover via the node's enumerated inputs). |
-| `value` | number | no | Float default (optional, used if no other *_value is provided). |
-| `int_value` | number | no | Int32 default (optional, mutually exclusive). |
-| `bool_value` | boolean | no | Bool default (optional, mutually exclusive). |
-| `string_value` | string | no | String default (optional, mutually exclusive). |
+| `value` | number | no | Float default, a JSON number (optional, used if no other *_value is provided). |
+| `int_value` | number | no | Int32 default, a whole JSON number (optional, mutually exclusive). |
+| `bool_value` | boolean | no | Bool default, JSON true or false (optional, mutually exclusive). |
+| `string_value` | string | no | String default, a JSON string (optional, mutually exclusive). |
 
 **Returns:** `{ asset_path: string, node_id: string, input_name: string, value_type: string, value_set: bool, verified: bool, value_read_back: string, saved: bool }`
 
@@ -1137,16 +1137,16 @@ Write one field of a MetaSound Source node's Configuration struct by reflection,
 
 *Destructive, idempotent.*
 
-Set the default value of one graph input on a MetaSound Source asset, normally a preset, found by content path. The value becomes a float, bool, int or string literal as parameter_type says, is written through the MetaSound editor builder in one undo step, built back into the asset, and the asset is saved. A path that does not load as a MetaSound Source (a patch is not accepted), no builder, or an input name the builder rejects is an error; a failed save makes success false with saved=false and save_error, the change kept in memory. value_read_back is the default read back as text, verified says that read worked. Read the inputs with get_metasound_preset_parameters; make a preset with create_metasound_preset; metasound_set_input_default does the same with one typed value field per type.
+Set the default value of one graph input on a MetaSound Source asset, normally a preset, found by content path. value must be the JSON type parameter_type names (a whole number for int); it is written into the asset through the MetaSound editor builder in one undo step and saved. A missing or mistyped value, an unknown parameter_type, a path that is not a MetaSound Source (patches are refused), or an input that is missing or does not take that type is an error, with nothing written. success means the default reads back as the value; an input already holding it gives changed=false and saved=false, nothing written. A failed save makes success false with save_error, the change kept in memory. Inputs: get_metasound_preset_parameters; new preset: create_metasound_preset; one typed field per type: metasound_set_input_default.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `preset_path` | string | yes | Content path of the MetaSound preset asset, e.g. "/Game/Audio/MSP_Engine". |
 | `parameter_name` | string | yes | Name of the graph input to set, as get_metasound_preset_parameters lists it. |
 | `parameter_type` | string | no | Literal type for the value: "float" (default), "bool", "int", "string". |
-| `value` | any | no | Value to set, read as parameter_type says; a missing value, or one that does not read as that type, writes 0, false or an empty string. |
+| `value` | any | no | Value to set, of the JSON type parameter_type names: a number for float, a whole number for int, true or false for bool, a string for string; a missing value or another type is an error |
 
-**Returns:** `{ preset_path: string, parameter_name: string, success: bool, verified: bool, value_read_back: string, saved: bool }`
+**Returns:** `{ preset_path: string, parameter_name: string, success: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
 
 ## `set_modulation_generator_settings`
 

@@ -119,7 +119,7 @@ Appends one simple collision primitive (Box, Sphere or Capsule) sized to the bou
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Path to the source UStaticMesh. |
-| `dest_path` | string | yes | Path under /Game to copy a mesh that is not under /Game into before editing (required then; an existing mesh there is reused and edited) |
+| `dest_path` | string | no | Path under /Game to copy a mesh that is not under /Game into before editing (required then; an existing mesh there is reused and edited) |
 | `shape` | string | no | Box, Sphere or Capsule, case-insensitive, sized from the mesh bounds (default Box; any other value also adds a Box) |
 
 **Returns:** `{ static_mesh_path, shape, box_count, sphere_count, capsule_count, element_count, collision_added, duplicated_to_game, saved, save_error }`
@@ -210,15 +210,15 @@ Create and save a UPhysicalMaterial asset, optionally setting surface/object pro
 
 *Additive, idempotent.*
 
-Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true, nothing generated or written (saved still reads true), while another asset class there is an error. skeletal_mesh_path must load even when the asset exists. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
+Create a UPhysicsAsset at package_path/name by generating bodies and constraints from a skeletal mesh with the engine's default settings (FPhysicsAssetUtils::CreateFromSkeletalMesh), set that mesh as its preview mesh and save it, with no undo transaction; the mesh itself is not pointed at the new asset (assign_skeletal_mesh_physics_asset does that). Idempotent: a physics asset already at that path is returned unchanged with already_existed=true and saved=false, nothing generated or saved and skeletal_mesh_path not read, while another asset class there is an error before any mesh loads. A generation failure is not an error: the asset is still saved, with bodies_generated=false and generation_message. A failed save, refused while PIE runs, makes success false with save_error. Inspect it with get_physics_asset_info; tune bodies with set_physics_body_properties and joints with add_physics_asset_constraint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Asset name (e.g. 'PA_Cube'). |
 | `package_path` | string | no | Content folder for the new asset (default /Game/Physics; an empty string also uses it) |
-| `skeletal_mesh_path` | string | no | Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); the call fails when it does not load |
+| `skeletal_mesh_path` | string | no | Skeletal mesh to generate the bodies from (default /Engine/EngineMeshes/SkeletalCube); read only for a new asset, which fails when it does not load |
 
-**Returns:** `{ asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string }`
+**Returns:** `{ asset_path: string, asset_name: string, package_path: string, body_count: number, constraint_count: number, skeletal_mesh_path: string, bodies: [{ index: number, bone_name: string, primitive_count?: number }], skeleton_bones: [string], constraints: [object], already_existed: bool, created: bool, saved: bool, bodies_generated?: bool, generation_message?: string, save_error?: string, note?: string }`
 
 ## `fracture_geometry_collection`
 
@@ -382,9 +382,9 @@ Sphere / box / capsule overlap query against the world: "what is inside this vol
 |---|---|---|---|
 | `shape` | string | yes | "sphere" \| "box" \| "capsule" |
 | `location` | array | yes | World-space [x, y, z] shape center |
-| `radius` | number | yes | Sphere/capsule radius (required for those shapes) |
-| `half_height` | number | yes | Capsule half-height (required for capsule) |
+| `radius` | number | no | Sphere/capsule radius (required for those shapes) |
 | `half_extent` | array | no | Box HALF-extent [x, y, z], not the full size (required for box) |
+| `half_height` | number | no | Capsule half-height (required for capsule) |
 | `trace_channel` | string | no | Collision channel, canonical ("ECC_Visibility") or friendly ("Visibility"). Defaults to "Visibility". |
 | `ignore_actors` | array | no | Actor names/labels to exclude from the overlap. |
 | `world` | string | no | Which world to query: absent/"editor" (default) \| "server" (the PIE world with authority) \| "client" \| "pie:N" \| "pie" (ambiguous) \| "game" (alias of "pie"). Pass a live world to hit World-Partition/OFPA actor collision (only cooked in the PIE physics scene). |
@@ -484,14 +484,14 @@ Remove a ragdoll constraint (joint) from a UPhysicsAsset — the inverse of add_
 
 *Destructive, idempotent.*
 
-Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true.
+Clear ALL simple/convex collision primitives from a UStaticMesh's BodySetup (the 'clear' half of the collision CRUD).  Calls UBodySetup::RemoveSimpleCollision (InvalidatePhysicsData + AggGeom.EmptyElements), rebuilds the physics meshes and saves; a failed save makes success false with save_error.  Reuses the same duplicate-first logic as add_simple_collision_to_static_mesh so a read-only /Engine source is copied into dest_path first (an existing copy there is reused); duplicated is true when this call created that copy.  Idempotent: clearing an already-empty BodySetup (or a mesh with no BodySetup) is a no-op reported via already_empty:true, where saved reports only the save of a copy this call created and is false, with nothing saved, when there is none.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Path to the source UStaticMesh. |
-| `dest_path` | string | yes | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
+| `dest_path` | string | no | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
 
-**Returns:** `{ static_mesh_path, removed_count, element_count, collision_removed, already_empty, duplicated_to_game, saved, save_error? }`
+**Returns:** `{ static_mesh_path, removed_count, element_count, collision_removed, already_empty, duplicated_to_game, duplicated, saved, save_error?, note? }`
 
 ## `set_actor_physical_material`
 
@@ -733,7 +733,7 @@ Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Path to the source UStaticMesh. |
-| `dest_path` | string | yes | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
+| `dest_path` | string | no | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
 | `hull_count` | number | no | Maximum number of convex pieces to create (default 4, must be positive). |
 | `max_hull_verts` | number | no | Maximum vertices per generated hull (default 16). |
 | `hull_precision` | number | no | Voxel resolution used during decomposition (default 100000, must be positive). |
@@ -742,14 +742,14 @@ Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the
 
 ## `set_static_mesh_kdop_collision`
 
-*Destructive, idempotent.*
+*Additive.*
 
-Add a K-DOP (discrete-oriented-polytope) simple collision hull to a UStaticMesh via UStaticMeshEditorSubsystem::AddSimpleCollisionsWithNotification (the "Add K-DOP Simplified Collision" editor action).  shape is one of NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26.  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns a negative index on failure — surfaced as a CLEAN error.
+Add one K-DOP simple collision hull to a UStaticMesh asset, found by path, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game, such as /Engine content, is first copied to dest_path under /Game, reusing a copy already there. An invalid shape, unknown mesh or running PIE session is an error; a failed save makes success false with saved=false and save_error. Replace all collision with a convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Path to the source UStaticMesh. |
-| `dest_path` | string | yes | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
+| `dest_path` | string | no | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
 | `shape` | string | no | K-DOP hull shape: NDOP10_X \| NDOP10_Y \| NDOP10_Z \| NDOP18 \| NDOP26 (default NDOP18). |
 
 **Returns:** `{ static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, saved, save_error? }`

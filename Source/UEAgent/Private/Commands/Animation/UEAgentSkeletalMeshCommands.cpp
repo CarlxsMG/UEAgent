@@ -1603,7 +1603,7 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMaterialSlot(
 // next save.
 // ========================================================================== //
 
-// MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated, so build the LOD with bake_skeletal_mesh_lod (regenerate_even_if_imported=true) and keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_screen_size; take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
+// MCP:add_skeletal_mesh_lod - Append one LOD to a skeletal mesh asset found by content path, its LOD info a copy of LOD 0's (build and reduction settings, material map, flags) with ScreenSize.Default set to screen_size, or 0.5 when omitted. Each call appends another LOD (not idempotent), in one undo step; the mesh is marked dirty but not saved, and its render data is not regenerated: bake_skeletal_mesh_lod with regenerate_even_if_imported=true and new_lod_count omitted builds the new LOD (its defaults skip it, as it copies LOD 0's imported flag; note says which applies), then keep it with save_asset. A mesh that does not load is an error. To append reduced LODs in one call, use bake_skeletal_mesh_lod with a higher new_lod_count instead. Tune this LOD with set_skeletal_mesh_lod_reduction_settings or set_skeletal_mesh_lod_screen_size; take one out with remove_skeletal_mesh_lod; inspect it with get_skeletal_mesh_lod_info.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param screen_size - Optional ScreenSize.Default of the new LOD, the screen size at which it switches in (default 0.5); not clamped
 //   @returns { skeletal_mesh_path: string, lod_index: int, lod_count: int, screen_size: float, added: bool, note: string }
@@ -1641,9 +1641,14 @@ TSharedPtr<FJsonObject> HandleAddSkeletalMeshLod(const TSharedPtr<FJsonObject>& 
     ResultObj->SetNumberField(TEXT("lod_count"), NewLODCount);
     ResultObj->SetNumberField(TEXT("screen_size"), NewLOD.ScreenSize.Default);
     ResultObj->SetBoolField(TEXT("added"), true);
-    ResultObj->SetStringField(TEXT("note"),
-        TEXT("Render data NOT regenerated; call bake_skeletal_mesh_lod to "
-             "rebuild geometry via the editor's reduction pipeline."));
+    // FLODUtilities::RegenerateLOD, keeping the LOD count, reduces a LOD above 0 only when it is flagged
+    // bHasBeenSimplified or regenerate_even_if_imported is set; the new LOD copied that flag from LOD 0.
+    ResultObj->SetStringField(TEXT("note"), NewLOD.bHasBeenSimplified
+        ? TEXT("Render data NOT regenerated. This LOD is flagged generated (copied from LOD 0), so "
+               "bake_skeletal_mesh_lod with new_lod_count omitted builds it.")
+        : TEXT("Render data NOT regenerated. This LOD copied LOD 0's imported flag, so bake_skeletal_mesh_lod "
+               "with its defaults skips it: call it with regenerate_even_if_imported=true and new_lod_count "
+               "omitted to build it (that also re-reduces the other LODs above 0)."));
     return mcp_common::MakeOkReply(ResultObj);
 }
 
@@ -1763,7 +1768,7 @@ Mesh->Modify();
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:bake_skeletal_mesh_lod - Regenerate the LODs of a skeletal mesh asset (found by content path) with the engine's mesh reduction, driven by each LOD's reduction settings, then rebuild its render data; nothing is saved, so follow with save_asset. A new_lod_count below the current count drops the LODs above it; above it, appends reduced LODs up to that count; 0, omitted or equal re-reduces the LODs that were generated, plus imported LODs above 0 with regenerate_even_if_imported and LOD 0 with generate_base_lod. A mesh that does not load is an error; a run the engine refuses, as it does during PIE, is a success with baked=false and bake_warning. Author the settings first with set_skeletal_mesh_lod_reduction_settings; one empty LOD entry: add_skeletal_mesh_lod; one LOD out by index: remove_skeletal_mesh_lod; triangle counts: get_asset_lod_settings.
+// MCP:bake_skeletal_mesh_lod - Regenerate the LODs of a skeletal mesh asset (found by content path) with the engine's mesh reduction, driven by each LOD's reduction settings, then rebuild its render data; nothing is saved, so follow with save_asset. A new_lod_count below the current count drops the LODs above it; above it, appends reduced LODs up to that count; 0, omitted or equal re-reduces the LODs that were generated, plus imported LODs above 0 with regenerate_even_if_imported and LOD 0 with generate_base_lod. A mesh that does not load is an error; during PIE, where the engine regenerates nothing, the call is refused before the mesh is touched, and any other run the engine refuses fails with baked=false and bake_warning. Author the settings first with set_skeletal_mesh_lod_reduction_settings; one empty LOD entry: add_skeletal_mesh_lod; one LOD out by index: remove_skeletal_mesh_lod; triangle counts: get_asset_lod_settings.
 //   @param skeletal_mesh_path - Content path to the skeletal mesh asset, e.g. "/Game/Characters/SKM_Hero"
 //   @param new_lod_count - Target LOD count; fewer than now drops the extra LODs, more appends reduced ones, and <= 0 (the default when omitted) keeps the current count and re-runs reduction
 //   @param regenerate_even_if_imported - bool, also re-reduce imported LODs above 0 when the count is kept (default false)
@@ -1796,6 +1801,15 @@ TSharedPtr<FJsonObject> HandleBakeSkeletalMeshLod(const TSharedPtr<FJsonObject>&
         return mcp_common::MakeErrorReply(TEXT("new_lod_count must be >= 1"));
     }
 
+    // USkeletalMeshEditorSubsystem::RegenerateLOD returns false without doing anything while a play
+    // session runs (EditorScriptingHelpers::CheckIfInEditorAndPIE tests GEditor->PlayWorld and
+    // GIsPlayInEditorWorld), so that case is refused here, before the mesh is touched.
+    if (mcp_common::IsPieActive() || (GEditor != nullptr && GEditor->PlayWorld != nullptr) || GIsPlayInEditorWorld)
+    {
+        return mcp_common::MakeErrorReply(TEXT("REFUSED: a Play-in-Editor session is running, and the engine does not ")
+            TEXT("regenerate LODs during it, so nothing was changed. Stop PIE (stop_play_in_editor) and retry."));
+    }
+
     Mesh->Modify();
     // USkeletalMeshEditorSubsystem::RegenerateLOD (static UE_API):
     //   static bool RegenerateLOD(USkeletalMesh* SkeletalMesh, int32 NewLODCount = 0,
@@ -1821,7 +1835,9 @@ TSharedPtr<FJsonObject> HandleBakeSkeletalMeshLod(const TSharedPtr<FJsonObject>&
             TEXT("RegenerateLOD returned false; the reduction pipeline may "
                  "have failed. Inspect the editor log for SkeletalMesh reduction errors."));
     }
-    return mcp_common::MakeOkReply(ResultObj);
+    return mcp_common::MakeOutcomeReply(ResultObj, bOk, bOk ? FString() : FString(
+        TEXT("bake_skeletal_mesh_lod: the engine did not regenerate the LODs (RegenerateLOD returned false); ")
+        TEXT("see bake_warning and the editor log.")));
 }
 
 // ========================================================================== //
