@@ -121,25 +121,25 @@ Import a source file synchronously through the Interchange manager: unattended, 
 
 *Additive, idempotent.*
 
-Load a factory class and register it with the Interchange manager. Idempotent: a class already registered is a no-op.
+Register a factory class -- the Interchange step that creates one kind of asset, such as a texture or a static mesh, from translated data -- with the Interchange manager for this editor session. Nothing is written to disk and the registration ends when the editor closes; the engine registers its own factories on startup, so this is for a class whose plugin did not. The manager keeps one factory per asset class and the first one registered stays: when another factory already makes that asset class the call is refused and names it. Registering the factory that is already active changes nothing and reports already_registered=true, so a repeat call is harmless (idempotent). A class that does not load, is abstract or is not a UInterchangeFactoryBase subclass is refused. The reader of a source file format registers with register_interchange_translator.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `factory_class_path` | string | yes | Class path of the factory UClass to instantiate and register (e.g. "/Script/InterchangeEngine.InterchangeTextureFactory"), loaded via LoadClass. |
+| `factory_class_path` | string | yes | Class path of the factory class, e.g. "/Script/InterchangeImport.InterchangeTextureFactory"; loaded with LoadClass. |
 
-**Returns:** `{ factory_class_path: string, class: string, registered: bool, note: string }`
+**Returns:** `{ factory_class_path, class, asset_class, registered, already_registered }`
 
 ## `register_interchange_translator`
 
 *Additive, idempotent.*
 
-Load a translator class (e.g. /Script/InterchangeEngine.InterchangeTextureTranslator) and register it with the Interchange manager. Idempotent: a class already registered is a no-op.
+Register a translator class -- the Interchange reader of one or more source file formats -- with the Interchange manager for this editor session, so imports and get_interchange_supported_formats pick up its formats. Nothing is written to disk and the registration ends when the editor closes; the engine registers its own translators on startup, so this is for a class whose plugin did not. The class must load and be a concrete UInterchangeTranslatorBase subclass: anything else is refused before it is registered, since the manager would assert on the next format query. A class already registered changes nothing and reports already_registered=true, so a repeat call is harmless (idempotent). A factory, which turns translated data into assets, registers with register_interchange_factory; whether a given file can be read: can_translate_interchange_source_data.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `translator_class_path` | string | yes | Class path of the translator UClass to instantiate and register (e.g. "/Script/InterchangeEngine.InterchangeTextureTranslator"), loaded via LoadClass. |
+| `translator_class_path` | string | yes | Class path of the translator class, e.g. "/Script/InterchangeImport.InterchangeImageWrapperTranslator"; loaded with LoadClass. |
 
-**Returns:** `{ translator_class_path: string, class: string, registered: bool, note: string }`
+**Returns:** `{ translator_class_path, class, registered, already_registered?, supported_formats: [string] }`
 
 ## `reimport_interchange_asset`
 
@@ -205,27 +205,27 @@ Write the package of an Interchange pipeline asset (a UInterchangePipelineBase l
 
 *Destructive, idempotent.*
 
-Set properties of an Interchange pipeline asset by reflection: properties is {name: value}, where a value can be a scalar, an object (a struct) or an array (a TArray).
+Write settings of an Interchange pipeline asset -- what a pipeline does at import, such as whether it imports materials or how it names the assets -- by reflection, from a {name: value} object in which a value is a scalar, an object for a struct or an array for a TArray. Each value overwrites the one in memory, records no undo step and is not saved: save_interchange_pipeline writes the asset to disk. Names are applied one by one; one that does not exist, is not editable in the editor or does not convert is skipped and listed with the reason in skipped, and the others are still written. An empty properties object is refused. Writing the same values again leaves the asset as it was (idempotent). The names, types and current values come from get_interchange_pipeline_properties; to choose which pipelines an imported asset uses, set_interchange_pipelines.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `pipeline_path` | string | yes | Object path of the pipeline asset to modify (loaded via LoadObject, must be a UInterchangePipelineBase). |
-| `properties` | object | yes | JSON object of { propertyName: value } pairs applied by reflection to the pipeline's EditAnywhere UPROPERTYs. Values may be scalars, nested objects (structs), or arrays; non-editable or unknown fields are skipped and reported. |
+| `pipeline_path` | string | yes | Object path of the pipeline asset, e.g. "/Game/Pipelines/MyMeshPipeline.MyMeshPipeline"; it must load as a UInterchangePipelineBase. |
+| `properties` | object | yes | {property_name: value}, with names as get_interchange_pipeline_properties lists them; a struct takes an object of its fields and a TArray an array. |
 
-**Returns:** `{ pipeline_path: string, applied_count: number, skipped_count: number, skipped: [string], note: string }`
+**Returns:** `{ pipeline_path, applied_count, skipped_count, skipped?: [string], note }`
 
 ## `set_interchange_pipeline_stack_default`
 
 *Destructive, idempotent.*
 
-Set the default Interchange pipeline stack for content or scene import (DefaultPipelineStack of the project's ContentImportSettings or SceneImportSettings), saved to the project's default config.
+Choose the named pipeline stack Interchange uses by default for content imports (assets) or scene imports (levels) -- the DefaultPipelineStack that Project Settings > Interchange shows -- and write it to the project's DefaultEngine.ini, so it outlives the editor session. The stack must already exist in that import path's pipeline stacks: an unknown name is refused with the list of the ones there, and so is a read-only DefaultEngine.ini, both before anything changes. The previous default is overwritten and returned in previous_stack_name; choosing the stack that is already the default changes nothing (changed=false), so a repeat call is harmless (idempotent). No undo step is recorded. The content stacks and both current defaults are listed by get_interchange_project_settings; to choose the pipelines of one imported asset instead, use set_interchange_pipelines.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `content_or_scene` | string | yes | Which import path's default stack to set: "content" (ContentImportSettings) or "scene" (SceneImportSettings). Case-insensitive. |
-| `stack_name` | string | yes | Name of the pipeline stack to make the default (an FName key into the project's PipelineStacks map). |
+| `content_or_scene` | string | yes | Which default to set: "content" for asset imports (ContentImportSettings) or "scene" for level imports (SceneImportSettings). Case-insensitive. |
+| `stack_name` | string | yes | Name of an existing pipeline stack of that import path, e.g. "Assets"; matched without case. |
 
-**Returns:** `{ content_or_scene: string, stack_name: string, applied: bool }`
+**Returns:** `{ content_or_scene, stack_name, previous_stack_name, changed, config_file, applied }`
 
 ## `set_interchange_pipelines`
 
