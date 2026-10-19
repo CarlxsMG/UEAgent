@@ -89,30 +89,44 @@ namespace AssetCommandHelpers
             *ExpectedClassName, *Asset.GetClass()->GetName());
     }
 
-    TSharedPtr<FJsonObject> WrongTypeRefusal(const FString& AssetPath, const UObject& Asset, const FString& ExpectedClassName)
+    TSharedPtr<FJsonObject> WrongTypeRefusal(const TCHAR* Command, const FString& AssetPath, const UObject& Asset,
+        const FString& ExpectedClassName)
     {
         TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
         const FString Note = RefuseWrongType(Data, AssetPath, Asset, ExpectedClassName);
         Data->SetStringField(TEXT("note"), Note);
-        return Data;
+        return mcp_common::MakeOutcomeReply(Data, false, FString::Printf(TEXT("%s: %s at %s"), Command, *Note, *AssetPath));
     }
 
-    FString DeleteTypedAsset(const FString& AssetPath, const UClass* ExpectedClass, const TSharedPtr<FJsonObject>& Data)
+    TSharedPtr<FJsonObject> DeleteOutcomeReply(const TCHAR* Command, const TSharedPtr<FJsonObject>& Data, bool bDeleted,
+        const FString& AssetPath)
     {
+        return mcp_common::MakeOutcomeReply(Data, bDeleted, bDeleted ? FString() : FString::Printf(
+            TEXT("%s: the asset at %s was not deleted (the editor's delete returned false: a Play-in-Editor session ")
+            TEXT("running, an asset the Asset Registry does not list, or a file that cannot be deleted; the Output Log ")
+            TEXT("names which)"), Command, *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> DeleteTypedAsset(const TCHAR* Command, const FString& AssetPath, const UClass* ExpectedClass)
+    {
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
         UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
         if (!Asset)
         {
+            // Nothing there to delete: the idempotent no-op.
             Data->SetStringField(TEXT("asset_path"), AssetPath);
             Data->SetStringField(TEXT("asset_class"), TEXT(""));
             Data->SetBoolField(TEXT("deleted"), false);
             Data->SetBoolField(TEXT("already_existed"), false);
-            return TEXT("asset_path did not resolve to a loadable UObject");
+            Data->SetStringField(TEXT("note"), TEXT("asset_path did not resolve to a loadable UObject; nothing to remove"));
+            return mcp_common::MakeOkReply(Data);
         }
         if (!Asset->IsA(ExpectedClass))
         {
-            return RefuseWrongType(Data, AssetPath, *Asset, ExpectedClass->GetName());
+            return WrongTypeRefusal(Command, AssetPath, *Asset, ExpectedClass->GetName());
         }
 
+        // Read before the delete: ForceDeleteObjects can collect garbage, which frees the asset.
         const FString AssetClassName = Asset->GetClass()->GetName();
         const FString PackageName = Asset->GetOutermost()->GetName();
         const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
@@ -122,7 +136,7 @@ namespace AssetCommandHelpers
         Data->SetStringField(TEXT("package_name"), PackageName);
         Data->SetBoolField(TEXT("deleted"), bDeleted);
         Data->SetBoolField(TEXT("already_existed"), true);
-        return FString();
+        return DeleteOutcomeReply(Command, Data, bDeleted, AssetPath);
     }
 
     UObject* FindDottedPathInWorld(const FString& Path, UWorld* World)

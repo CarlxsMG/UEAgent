@@ -573,11 +573,13 @@ TSharedPtr<FJsonObject> HandleStopAnimation(const TSharedPtr<FJsonObject>& Param
 }
 
 // Typed remove commands: each deletes an asset only after verifying it is of the expected class, which is
-// what sets them apart from the generic delete_asset. A path that does not load, or an asset of another
-// class, answers deleted:false with a `note` instead of an error, so they are idempotent.
+// what sets them apart from the generic delete_asset. A path that does not load answers deleted:false with
+// a `note` and success, so they are idempotent; an asset of another class is refused, and a delete the
+// engine does not carry out fails the call (AssetCommandHelpers::DeleteTypedAsset). The class is a parameter
+// rather than a template argument so the catalog generator follows each command into this body.
 
-template <typename T>
-static TSharedPtr<FJsonObject> HandleRemoveTypedAnimAsset(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName)
+static TSharedPtr<FJsonObject> HandleRemoveTypedAnimAsset(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
+    const UClass* ExpectedClass)
 {
     FString AssetPath;
     if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath) || AssetPath.IsEmpty())
@@ -586,69 +588,63 @@ static TSharedPtr<FJsonObject> HandleRemoveTypedAnimAsset(const TSharedPtr<FJson
             FString::Printf(TEXT("[%s] Missing 'asset_path' parameter"), CmdName));
     }
 
-    TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-    const FString Refusal = AssetCommandHelpers::DeleteTypedAsset(AssetPath, T::StaticClass(), Resp);
-    if (!Refusal.IsEmpty())
-    {
-        Resp->SetStringField(TEXT("note"), Refusal);
-    }
-    return mcp_common::MakeOkReply(Resp);
+    return AssetCommandHelpers::DeleteTypedAsset(CmdName, AssetPath, ExpectedClass);
 }
 
-// MCP:remove_anim_blueprint - Delete a UAnimBlueprint asset after verifying the asset is a UAnimBlueprint.
+// MCP:remove_anim_blueprint - Permanently delete one Animation Blueprint (UAnimBlueprint) asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_blueprint; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UAnimBlueprint (e.g. /Game/Anim/ABP_Foo).
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UAnimBlueprint>(Params, TEXT("remove_anim_blueprint"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_blueprint"), UAnimBlueprint::StaticClass());
 }
 
-// MCP:remove_anim_sequence - Delete a UAnimSequence asset after verifying the asset is a UAnimSequence.
+// MCP:remove_anim_sequence - Permanently delete one UAnimSequence asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_sequence; montages use remove_anim_montage and composites remove_anim_composite; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UAnimSequence.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveAnimSequence(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UAnimSequence>(Params, TEXT("remove_anim_sequence"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_sequence"), UAnimSequence::StaticClass());
 }
 
-// MCP:remove_anim_montage - Delete a UAnimMontage asset after verifying the asset is a UAnimMontage.
+// MCP:remove_anim_montage - Permanently delete one UAnimMontage asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a sequence or composite included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_montage; sequences use remove_anim_sequence and composites remove_anim_composite; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UAnimMontage.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveAnimMontage(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UAnimMontage>(Params, TEXT("remove_anim_montage"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_montage"), UAnimMontage::StaticClass());
 }
 
-// MCP:remove_anim_composite - Delete a UAnimComposite asset after verifying the asset is a UAnimComposite.
+// MCP:remove_anim_composite - Permanently delete one UAnimComposite asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. An asset of another class -- a montage or sequence included -- is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_anim_composite; montages use remove_anim_montage and sequences remove_anim_sequence; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UAnimComposite.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveAnimComposite(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UAnimComposite>(Params, TEXT("remove_anim_composite"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_anim_composite"), UAnimComposite::StaticClass());
 }
 
-// MCP:remove_blend_space - Delete a UBlendSpace asset after verifying the asset is a UBlendSpace.
+// MCP:remove_blend_space - Permanently delete one UBlendSpace asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. Any blend space class passes the check, 1D blend spaces and aim offsets included; an asset of another class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space or scaffold_blend_space_2d; to accept only a 1D blend space use remove_blendspace_1d; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UBlendSpace.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveBlendSpace(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UBlendSpace>(Params, TEXT("remove_blend_space"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_blend_space"), UBlendSpace::StaticClass());
 }
 
-// MCP:remove_blendspace_1d - Delete a UBlendSpace1D asset after verifying the asset is a UBlendSpace1D.
+// MCP:remove_blendspace_1d - Permanently delete one UBlendSpace1D asset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error. A 1D aim offset passes the check too; a 2D blend space or any other class is refused with success false and deleted=false. A delete the engine does not carry out -- PIE running, an asset the Asset Registry does not list, a file that cannot be deleted -- is also success false with deleted=false. Check get_asset_referencers first. Create one with create_blend_space; 2D blend spaces use remove_blend_space; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UBlendSpace1D.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveBlendSpace1D(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UBlendSpace1D>(Params, TEXT("remove_blendspace_1d"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_blendspace_1d"), UBlendSpace1D::StaticClass());
 }
 
-// MCP:remove_pose_asset - Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error, and so does an asset of another class; during PIE the delete fails with deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
+// MCP:remove_pose_asset - Permanently delete one UPoseAsset after checking that the path loads as one: a force delete with no confirmation and no undo that nulls references to it. Idempotent: a path that no longer loads gives deleted=false with a note, not an error; an asset of another class is refused with success false and deleted=false, and during PIE the delete fails with success false and deleted=false. Check get_asset_referencers first. To drop one pose or curve inside the asset use remove_pose_from_pose_asset or remove_pose_curve; delete_asset removes an asset of any type.
 //   @param asset_path - Long path of the UPoseAsset.
 //   @returns { asset_path, asset_class, package_name, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemovePoseAsset(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedAnimAsset<UPoseAsset>(Params, TEXT("remove_pose_asset"));
+    return HandleRemoveTypedAnimAsset(Params, TEXT("remove_pose_asset"), UPoseAsset::StaticClass());
 }
 
 // get_active_montages helpers -----------------------------------------------

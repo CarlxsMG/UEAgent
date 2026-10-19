@@ -6066,19 +6066,27 @@ TSharedPtr<FJsonObject> HandleAddSelectNode(const TSharedPtr<FJsonObject>& Param
     return Result;
 }
 
-// Shared body for add_make_struct_node / add_break_struct_node: create the node with StructType set
-// (crash-safe FGraphNodeCreator -> Finalize allocates the per-member pins), then ReconstructNode.
-template <typename TNode>
-static TSharedPtr<FJsonObject> AddStructNodeImpl(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName)
+// The two params add_make_struct_node / add_break_struct_node cannot do without. A plain function the handlers
+// call with Params, so the catalog generator sees both reads (it does not follow a call with template arguments).
+static TSharedPtr<FJsonObject> ReadStructNodeParams(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
+    FString& OutBlueprintName, FString& OutStructTypeName)
 {
-    FString BlueprintName, StructTypeName;
-    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), BlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
-    if (!Params->TryGetStringField(TEXT("struct_type"), StructTypeName) || StructTypeName.IsEmpty())
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("blueprint_name"), OutBlueprintName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
+    if (!Params->TryGetStringField(TEXT("struct_type"), OutStructTypeName) || OutStructTypeName.IsEmpty())
     {
         // The command name is part of the message so each of the two tools reports itself.
         const FString Complaint = FString::Printf(TEXT("%s requires 'struct_type'"), CmdName);
         return mcp_common::MakeErrorReply(Complaint);
     }
+    return nullptr;
+}
+
+// Shared body for add_make_struct_node / add_break_struct_node: create the node with StructType set
+// (crash-safe FGraphNodeCreator -> Finalize allocates the per-member pins), then ReconstructNode.
+template <typename TNode>
+static TSharedPtr<FJsonObject> AddStructNodeImpl(const TSharedPtr<FJsonObject>& Params, const FString& BlueprintName,
+    const FString& StructTypeName)
+{
     UBlueprint* Blueprint = nullptr;
     UEdGraph* Graph = nullptr;
     if (TSharedPtr<FJsonObject> Error = UEAgentGraphCommandsImpl::ResolveBlueprintGraph(Params, BlueprintName, Blueprint, Graph)) { return Error; }
@@ -6121,7 +6129,9 @@ static TSharedPtr<FJsonObject> AddStructNodeImpl(const TSharedPtr<FJsonObject>& 
 //   @returns { node_id, pins:[...one input pin per struct member + the struct output...], blueprint_name, graph_name, struct_type }
 TSharedPtr<FJsonObject> HandleAddMakeStructNode(const TSharedPtr<FJsonObject>& Params)
 {
-    return AddStructNodeImpl<UK2Node_MakeStruct>(Params, TEXT("add_make_struct_node"));
+    FString BlueprintName, StructTypeName;
+    if (TSharedPtr<FJsonObject> Missing = ReadStructNodeParams(Params, TEXT("add_make_struct_node"), BlueprintName, StructTypeName)) { return Missing; }
+    return AddStructNodeImpl<UK2Node_MakeStruct>(Params, BlueprintName, StructTypeName);
 }
 
 // MCP:add_break_struct_node - Create a Break Struct node with ONE OUTPUT PIN PER MEMBER of the struct (Blueprint-defined structs included) and return them all, so each field can be read out with connect_pins without a follow-up read. Same node as add_graph_node node_type="break_struct", but reconstructed after creation so the per-member pins are refreshed from the struct. Inverse: add_make_struct_node. Does NOT compile.
@@ -6134,7 +6144,9 @@ TSharedPtr<FJsonObject> HandleAddMakeStructNode(const TSharedPtr<FJsonObject>& P
 //   @returns { node_id, pins:[...the struct input + one output pin per struct member...], blueprint_name, graph_name, struct_type }
 TSharedPtr<FJsonObject> HandleAddBreakStructNode(const TSharedPtr<FJsonObject>& Params)
 {
-    return AddStructNodeImpl<UK2Node_BreakStruct>(Params, TEXT("add_break_struct_node"));
+    FString BlueprintName, StructTypeName;
+    if (TSharedPtr<FJsonObject> Missing = ReadStructNodeParams(Params, TEXT("add_break_struct_node"), BlueprintName, StructTypeName)) { return Missing; }
+    return AddStructNodeImpl<UK2Node_BreakStruct>(Params, BlueprintName, StructTypeName);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

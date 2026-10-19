@@ -403,13 +403,13 @@ Drop specific actors from the editor selection, or clear it entirely with desele
 
 *Destructive, idempotent.*
 
-Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
+Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. A plugin the .uproject already has disabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `plugin_name` | string | yes | Plugin name exactly as in its .uplugin file, not a path. |
 
-**Returns:** `{ plugin_name: string, enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart }`
+**Returns:** `{ plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }`
 
 ## `duplicate_actor`
 
@@ -427,13 +427,13 @@ Copy one editor-world actor in place through the editor's duplicate path, keepin
 
 *Destructive, idempotent.*
 
-Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. Use get_plugin_status to read the current state and disable_plugin for the inverse.
+Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. A plugin the .uproject already has enabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. Use get_plugin_status to read the current state and disable_plugin for the inverse.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `plugin_name` | string | yes | Plugin name exactly as in its .uplugin file (e.g. 'PythonScriptPlugin'), not a path. |
 
-**Returns:** `{ plugin_name: string, enabled: bool (hardcoded true when the .uproject write succeeded), project_saved: bool, note: string about the required restart }`
+**Returns:** `{ plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded true when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }`
 
 ## `end_transaction`
 
@@ -808,7 +808,7 @@ No parameters.
 
 *Read-only.*
 
-Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
+Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_&lt;index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag.
 
 No parameters.
 
@@ -1525,11 +1525,11 @@ Enable or disable realtime rendering on the active editor viewport
 
 *Destructive, idempotent.*
 
-Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
+Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case. An unknown name is an error before anything changes, and so is a mode the editor only enters with a choice of what to show (a buffer, a visualization, texture streaming data, a zebra direction): the error says which. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Show flags: set_show_flag; projection: set_view_type; game view: set_game_view.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `view_mode` | string | yes | One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode, read back as Wireframe; CSGWireframe (the BSP wireframe) and ReflectionOverride (read back as Reflections) are accepted too. |
+| `view_mode` | string | yes | Engine view mode name, matched without case, e.g. Lit, Unlit, Wireframe, CSGWireframe, DetailLighting, LightingOnly, LightComplexity, ShaderComplexity, LightmapDensity, Reflections, PlayerCollision, MeshLODColoration, QuadOverdraw, Clay; each is the engine display name without spaces. BrushWireframe is accepted for Wireframe, ReflectionOverride for Reflections, RandomColor for Random; PathTracing only where ray tracing is allowed. |
 
 **Returns:** `{ applied: bool, requested: string, view_mode_index: int, view_mode: string }`
 

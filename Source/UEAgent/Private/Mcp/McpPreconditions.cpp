@@ -412,6 +412,46 @@ namespace McpPreconditionsPrivate
 		return Refuse(Message, TEXT("integer_range"));
 	}
 
+	/** A name or path argument (`nameLike` in the catalog) of NAME_SIZE characters or more: the FName the tool
+	 *  builds from it is a checkf in UnrealNames.cpp, which aborts the editor. */
+	static TOptional<FRefusal> RefuseNameTooLong(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+	{
+		const FString Message = FMcpToolCatalog::CheckNameLengths(CommandType, Params);
+		if (Message.IsEmpty())
+		{
+			return {};
+		}
+		return Refuse(Message, TEXT("name_length"));
+	}
+
+	/** A batch item whose command_type has NAME_SIZE characters or more: the dispatch makes an FName of each
+	 *  item's command type (its PIE-safety and parameter tables are keyed by FName) before that item's own
+	 *  preconditions run, so the batch is refused before any item runs. */
+	static TOptional<FRefusal> RefuseBatchCommandTypeTooLong(const TSharedPtr<FJsonObject>& Params)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Commands = nullptr;
+		if (!Params.IsValid() || !Params->TryGetArrayField(TEXT("commands"), Commands) || !Commands)
+		{
+			return {};
+		}
+		for (int32 Index = 0; Index < Commands->Num(); ++Index)
+		{
+			const TSharedPtr<FJsonObject>* Item = nullptr;
+			FString SubCommand;
+			if ((*Commands)[Index].IsValid() && (*Commands)[Index]->TryGetObject(Item) && Item
+				&& (*Item)->TryGetStringField(TEXT("command_type"), SubCommand) && SubCommand.Len() >= NAME_SIZE)
+			{
+				return Refuse(FString::Printf(
+					TEXT("batch: commands[%d].command_type is %d characters long. An FName holds at most %d characters, and the engine ")
+					TEXT("aborts the editor when it builds one from a longer string (UnrealNames.cpp, NAME_SIZE); every command type ")
+					TEXT("becomes one before its item runs, and no tool has a name that long. Refused before any item ran: nothing was ")
+					TEXT("changed. WHAT WORKS: the name of a tool, as tools/list gives it."),
+					Index, SubCommand.Len(), NAME_SIZE - 1), TEXT("name_length"));
+			}
+		}
+		return {};
+	}
+
 	/** Creating a SetMaterialAttributes node crashes the editor. */
 	static TOptional<FRefusal> RefuseSetMaterialAttributes(const TSharedPtr<FJsonObject>& Params)
 	{
@@ -733,6 +773,8 @@ TOptional<McpPreconditions::FRefusal> McpPreconditions::Check(const FString& Com
 	// (a) by arguments
 	if (TOptional<FRefusal> Refusal = RefuseDoubleSlashPath(Params)) { return Refusal; }
 	if (TOptional<FRefusal> Refusal = RefuseIntegerOutOfRange(CommandType, Params)) { return Refusal; }
+	if (TOptional<FRefusal> Refusal = RefuseNameTooLong(CommandType, Params)) { return Refusal; }
+	if (CommandType == TEXT("batch")) { return RefuseBatchCommandTypeTooLong(Params); }
 	if (CommandType == TEXT("create_material_expression")) { return RefuseSetMaterialAttributes(Params); }
 	if (CommandType == TEXT("scatter_foliage_in_box") || CommandType == TEXT("add_foliage_instances")) { return RefuseFoliage(Params); }
 	if (CommandType == TEXT("load_level")) { return RefuseLoadLevel(Params); }

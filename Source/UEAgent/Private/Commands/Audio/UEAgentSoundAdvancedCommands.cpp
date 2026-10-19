@@ -124,12 +124,12 @@ namespace
 // Uses CreateSourcePresetBuilder or CreatePatchPresetBuilder to create a
 // transient preset builder, then BuildToAsset to persist it as a new asset.
 // ---------------------------------------------------------------------------
-// MCP:create_metasound_preset - Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSoundBuilderSubsystem::CreateSourcePresetBuilder (or CreatePatchPresetBuilder) to create a transient preset builder referencing the source, then BuildToAsset to persist it as a new /Game asset.
+// MCP:create_metasound_preset - Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSoundBuilderSubsystem::CreateSourcePresetBuilder (or CreatePatchPresetBuilder) to create a transient preset builder referencing the source, then BuildToAsset to persist it as a new /Game asset. A preset of that type already at the path is returned unchanged with already_exists=true, saved=false and preset_type read from its class, nothing saved; an asset of another class there (a MetaSound of the other type included) is an error and nothing is created.
 //   @param preset_name - Name of the new MetaSound preset asset.
 //   @param package_path - Destination /Game folder (default /Game/MetaSounds).
 //   @param source_asset_path - Content path of the existing MetaSound source/patch to use as the preset's template.
 //   @param preset_type - "source" (default) or "patch".
-//   @returns { preset_path: string, preset_type: string, success: bool, saved: bool, already_exists: bool }
+//   @returns { preset_path: string, preset_type: string, success: bool, saved: bool, already_exists: bool, message: string? }
 
 TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
     const TSharedPtr<FJsonObject>& Params)
@@ -147,11 +147,21 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
     FString PresetType = TEXT("source");
     Params->TryGetStringField(TEXT("preset_type"), PresetType);
 
+    // A patch preset is a UMetaSoundPatch, any other preset_type a UMetaSoundSource.
+    const bool bPatch = PresetType.Equals(TEXT("patch"), ESearchCase::IgnoreCase);
+    UClass* const PresetClass = bPatch ? UMetaSoundPatch::StaticClass() : UMetaSoundSource::StaticClass();
+
     // Idempotent: if the preset asset already exists, return it. BuildToAsset
     // below CANNOT create over an existing asset (it fails), so a re-run would
     // otherwise report "BuildToAsset failed" even though the preset is present.
+    // An asset of another class there (a MetaSound of the other type included)
+    // is not the preset asked for: refused before anything is built.
     const FString PresetFullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *PresetName);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PresetFullPath)) { return Invalid; }
+    if (const FString Conflict = mcp_common::AssetNameConflict(PresetFullPath, PresetName, PresetClass); !Conflict.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(Conflict);
+    }
     if (UEditorAssetLibrary::DoesAssetExist(PresetFullPath))
     {
         UObject* Existing = UEditorAssetLibrary::LoadAsset(PresetFullPath);
@@ -159,10 +169,13 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
         {
             TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
             ResultObj->SetStringField(TEXT("preset_path"), Existing->GetPathName());
-            ResultObj->SetStringField(TEXT("preset_type"), PresetType);
+            // The type read from the asset's class, not echoed from the request.
+            ResultObj->SetStringField(TEXT("preset_type"), Existing->IsA<UMetaSoundPatch>() ? TEXT("patch") : TEXT("source"));
             ResultObj->SetBoolField(TEXT("success"), true);
             ResultObj->SetBoolField(TEXT("already_exists"), true);
-            ResultObj->SetBoolField(TEXT("saved"), true);
+            // Returned unchanged: nothing was built or written, so nothing is saved.
+            ResultObj->SetBoolField(TEXT("saved"), false);
+            ResultObj->SetStringField(TEXT("message"), TEXT("the preset already exists; returned it unchanged, nothing saved"));
             return mcp_common::MakeOkReply(ResultObj);
         }
     }
@@ -187,7 +200,7 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
     EMetaSoundBuilderResult CreateResult = EMetaSoundBuilderResult::Failed;
     const FName BuilderFName(*FString::Printf(TEXT("MCP_Preset_%s"), *PresetName));
 
-    if (PresetType == TEXT("patch"))
+    if (bPatch)
     {
         UMetaSoundPatch* Patch = mcp_common::ResolveAsset<UMetaSoundPatch>(SourceAssetPath);
         if (!Patch)
@@ -251,7 +264,7 @@ TSharedPtr<FJsonObject> HandleCreateMetasoundPreset(
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("preset_path"), PresetPath);
-    ResultObj->SetStringField(TEXT("preset_type"), PresetType);
+    ResultObj->SetStringField(TEXT("preset_type"), PresetObj->IsA<UMetaSoundPatch>() ? TEXT("patch") : TEXT("source"));
     ResultObj->SetBoolField(TEXT("success"), true);
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("create_metasound_preset"), SaveError);
 }
@@ -295,8 +308,13 @@ TSharedPtr<FJsonObject> HandleSetMetasoundPresetParameter(
 
     // value is required and must be of the JSON type parameter_type names; reading it any other way would
     // write 0, false or an empty string in its place.
+    // A guard on the field itself, so the catalog publishes value as required (of any JSON type).
+    if (!Params->HasField(TEXT("value")))
+    {
+        return mcp_common::MissingParameterReply(TEXT("value"));
+    }
     const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
-    if (!Value.IsValid() || Value->IsNull())
+    if (Value->IsNull())
     {
         return mcp_common::MissingParameterReply(TEXT("value"));
     }

@@ -39,9 +39,10 @@
  * Gotchas (see the implementation for the why):
  *   - All pxr/USD types used here live in the `UE::` namespace, so call
  *     sites need the `UE::` prefix.
- *   - USD type names are tokens ("float", "float3", "token", ...) — normalize to
- *     lowercase before dispatch (the dispatch whitelist covers the common
- *     types; unsupported types fall back to the type-name string).
+ *   - USD type names are tokens ("float", "float3", "color3f[]", ...) — normalize to
+ *     lowercase before dispatch. Scalars, vectors and their roles, quaternions,
+ *     matrices and arrays of them convert both ways (UEAgentUsdRegistry.h); any
+ *     other type is read as its type name only.
  *   - `Attr.Set(VtValue)` with the wrong type is a SILENT FAIL in pxr::: it does
  *     not convert a double into a float attribute. set_usd_attribute_value builds
  *     the value in the attribute's declared type with
@@ -129,16 +130,17 @@ namespace
 		return Time;
 	}
 
-	// {"type", "value"} of Value; a type with no JSON scalar form gets a null "value" and a "note" naming it,
-	// so the type name stays visible.
+	// {"type", "value"} of Value (UEAgent::UsdCommon::VtValueToJson); a type with no JSON form (opaque, a path
+	// expression) gets a null "value" and a "note" naming it, so the type name stays visible.
 	TSharedPtr<FJsonObject> UsdAttribute_VtValueToJson(const UE::FVtValue& Value)
 	{
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 		if (!UEAgent::UsdCommon::VtValueToJson(Value, *Out))
 		{
 			Out->SetField(TEXT("value"), MakeShared<FJsonValueNull>());
-			Out->SetStringField(TEXT("note"),
-				FString::Printf(TEXT("type '%s' not in dispatch whitelist (no string repr)"), *Value.GetTypeName()));
+			Out->SetStringField(TEXT("note"), FString::Printf(
+				TEXT("type '%s' has no JSON form here: only scalars, vectors, quaternions, matrices and arrays of them are converted"),
+				*Value.GetTypeName()));
 		}
 		return Out;
 	}
@@ -294,12 +296,12 @@ TSharedPtr<FJsonObject> HandleRemoveUsdAttribute(const TSharedPtr<FJsonObject>& 
 // ---------------------------------------------------------------------------
 // get_usd_attribute_value
 // ---------------------------------------------------------------------------
-// MCP:get_usd_attribute_value - Read the composed value of one attribute on a prim of a USD stage opened with open_usd_stage or create_usd_stage, at the time code given in time or, when it is omitted, at the default time, which gives the static default value rather than a time sample. The value may come from any layer or be a schema fallback (has_value true, has_authored_value false). value is an object {type, value}, converted only for bool, integer, floating-point, string, token and asset values; other types such as float3 or arrays, and an attribute with no value, give a null value with a note. A missing attribute is a success with present=false; an unregistered stage, an invalid prim path or a missing prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
+// MCP:get_usd_attribute_value - Read the composed value of one attribute on a prim of a registered USD stage, at the time code in time, else at the default time (the static default, not a sample), possibly a schema fallback (has_value true, has_authored_value false). value is {type, value}: a scalar as a boolean, number or string; a vector, color or point as an array of numbers; a quaternion as [x, y, z, w], real part last; a matrix as an array of rows; an array attribute as a JSON array of those plus length and truncated, cut to its first 600 numbers or strings (200 float3, fewer long strings). Another type, or no value, gives null with a note. A missing attribute is present=false; a missing stage or prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name to read, e.g. "size"
 //   @param time [number] - Optional USD time code to read at, e.g. 24; when omitted the default time is read (the static default value, not a sample)
-//   @returns { prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, note?: string } | null, note?: string }
+//   @returns { prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, length?: number, truncated?: bool, note?: string } | null, note?: string }
 
 TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>& Params)
 {
@@ -376,12 +378,12 @@ TSharedPtr<FJsonObject> HandleGetUsdAttributeValue(const TSharedPtr<FJsonObject>
 // ---------------------------------------------------------------------------
 // set_usd_attribute_value
 // ---------------------------------------------------------------------------
-// MCP:set_usd_attribute_value - Author one value on an attribute of a prim on a registered USD stage, at the current edit target: a time sample at time, or the default value when time is omitted; a missing attribute is created with type_name. The JSON value is converted to the attribute's declared scalar type before anything is written: bool takes a boolean; uchar, int, uint, int64 and uint64 a whole number in range; half, float, double and timecode a number; string, token and asset a string. Another type (float3, arrays), a value that does not fit, a missing attribute without type_name, an unregistered stage or a missing prim is an error and writes nothing. If USD still refuses the value, success is false and an attribute this call created is taken out again. In memory only: save_usd_stage writes it. Read it back with get_usd_attribute_value.
+// MCP:set_usd_attribute_value - Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value is converted to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w], real part last; a matrix an array of rows; an array type a JSON array of those. A value of another shape or range, an opaque type, or a new attribute without type_name fails and writes nothing. If USD refuses it, success is false and an attribute it created is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.
 //   @param stage_name [string!] - Name the stage was registered under by open_usd_stage (default the file basename) or create_usd_stage (default "Untitled").
 //   @param prim_path [string!] - Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube".
 //   @param attr_name [string!] - Attribute name to set, e.g. "size"
 //   @param type_name [string] - USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides.
-//   @param value [object!] - The value: a JSON scalar, e.g. 2.5, "inherited" or true, or an object {"value": <scalar>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute.
+//   @param value [object!] - The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": <value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute.
 //   @param time [number] - Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored
 //   @returns { prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }
 
@@ -400,12 +402,12 @@ TSharedPtr<FJsonObject> HandleSetUsdAttributeValue(const TSharedPtr<FJsonObject>
 	FString TypeName;
 	Params->TryGetStringField(TEXT("type_name"), TypeName);
 
-	// A raw scalar under "value" is promoted to a {value: ...} object; only its "value" is read.
+	// A raw scalar or array under "value" is promoted to a {value: ...} object; only its "value" is read.
 	TSharedPtr<FJsonObject> ValueObj = UEAgent::UsdCommon::TypedValueObject(Params->TryGetField(TEXT("value")));
 	if (!ValueObj.IsValid())
 	{
 		return mcp_common::MakeErrorReply(
-			TEXT("value is required (a scalar, or an object {value})"));
+			TEXT("value is required (a scalar, an array, or an object {value})"));
 	}
 
 	const TOptional<double> TimeOpt = UsdAttribute_ReadTime(Params);

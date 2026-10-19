@@ -207,7 +207,7 @@ Remove the test at test_index from the option at option_index (default 0) of a U
 
 *Destructive.*
 
-Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true).
+Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true). An unknown run_mode is an error and the query does not run.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -236,7 +236,7 @@ Set properties of the generator of one option of a UEnvQuery asset by reflection
 
 *Destructive, idempotent.*
 
-Set the scoring and filter settings of the test at test_index in the option at option_index of a UEnvQuery asset loaded by asset path, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1), and an unknown enum name falls back to its default too: the reply reads the stored values back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
+Set the scoring and filter settings of test test_index in option option_index of a UEnvQuery asset, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1); the reply reads the stored values back. Values equal to the stored ones are a no-op: changed=false, a note, nothing written. A changed asset is marked dirty, not saved: persist it with save_asset. An enum name the param does not list (the error names the accepted ones), a query that does not load or an index out of range is an error, and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -250,7 +250,7 @@ Set the scoring and filter settings of the test at test_index in the option at o
 | `float_value_min` | number | no | Optional min for FloatValueMin (default 0) |
 | `float_value_max` | number | no | Optional max for FloatValueMax (default 1) |
 
-**Returns:** `{ query_path, option_index, test_index, test_name, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max }`
+**Returns:** `{ query_path, option_index, test_index, test_name, changed, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max, note? }`
 
 ## `set_recast_navmesh_settings`
 

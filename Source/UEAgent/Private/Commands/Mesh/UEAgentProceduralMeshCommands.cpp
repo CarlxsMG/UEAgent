@@ -399,6 +399,12 @@ TSharedPtr<FJsonObject> HandleUpdateProceduralMeshSection(
 	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_ReadSectionIndex(Params, SectionIndex)) { return BadIndex; }
 	if (TSharedPtr<FJsonObject> BadIndex = ProceduralMesh_CheckSectionIndex(SectionIndex)) { return BadIndex; }
 
+	// A typed read first, so the catalog publishes vertices as the required array it is.
+	const TArray<TSharedPtr<FJsonValue>>* VerticesJson = nullptr;
+	if (!Params->TryGetArrayField(TEXT("vertices"), VerticesJson))
+	{
+		return mcp_common::MissingParameterReply(TEXT("vertices"));
+	}
 	TArray<FVector> Vertices;
 	if (!ReadVectorArray(Params, TEXT("vertices"), Vertices))
 	{

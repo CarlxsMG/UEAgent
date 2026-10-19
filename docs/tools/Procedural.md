@@ -261,7 +261,7 @@ Spawns an APCGVolume in the editor world with a REAL cube brush (from ``extent``
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | World location [X, Y, Z] for the volume. |
+| `location` | array | yes | World location [X, Y, Z] for the volume. |
 | `extent` | array | no | Cube HALF-size [x, y, z] in unreal units, each > 0 (same convention as spawn_box_volume / spawn_navmesh_bounds_volume). STRONGLY RECOMMENDED: omitting it leaves the volume with extent (0,0,0) and the PCG component generates 0 instances with no error and no warning. |
 | `rotation` | array | no | Optional [pitch, yaw, roll] rotation for the volume (default 0,0,0). |
 | `pcg_graph_path` | string | no | Optional content path of a UPCGGraph to assign to the spawned volume's PCG component. |

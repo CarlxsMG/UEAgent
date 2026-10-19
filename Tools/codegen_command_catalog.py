@@ -93,6 +93,16 @@ REQUIRED_RE = re.compile(
     r'(?:String|Number|Integer|Bool|Array|Object|StringArray)Field'
     r'\s*\(\s*TEXT\("([^"]+)"\)'
 )
+# The untyped forms of that guard, for a param of any JSON type:
+#   if (!Params->HasField(TEXT("value"))) return MissingParameterReply(TEXT("value"));
+#   if (!Params->TryGetField(TEXT("value"))) return ...;
+# They count only where the guard runs on every path of the handler (see _guard_runs_always): a raw
+# read says nothing about a type, so the generator cannot tell a required value from an optional one
+# the way it does for a typed read and its fallback, and leaves the param optional unless the guard
+# is unconditional.
+RAW_REQUIRED_RE = re.compile(
+    r'!\s*Params\s*->\s*(?:HasField|(?:Try)?GetField)\s*\(\s*TEXT\("([^"]+)"\)'
+)
 # ...BUT two or more negated reads chained with `&&` INSIDE THE SAME guard are
 # ALTERNATIVE spellings of the same parameter, not two requirements:
 #   if (!Params->TryGetStringField(TEXT("data_table"), T) &&
@@ -188,7 +198,7 @@ def _mark_aliases(params: list[dict], chains: dict[str, str]) -> None:
                 p["aliasOf"] = canonical["name"]
 
 
-def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
+def assemble_params(extracted: list, ann_params: dict, domain: str = "") -> list[dict]:
     """The params a command publishes, built from the C++ alone.
 
     Every `@param` the annotation documents, in documented order, then the params
@@ -198,7 +208,8 @@ def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
     otherwise from the `[type!]` hint (default string/optional). Descriptions come
     from the annotation. Following the documented order keeps the schema stable
     when a handler moves its reads into a helper. A param every read of which
-    lands in an integer variable also carries `intRange` (see _int_range)."""
+    lands in an integer variable also carries `intRange` (see _int_range), and a
+    string the engine makes a name of carries `nameLike` (see _is_name_like)."""
     code: dict[str, tuple[str, bool]] = {}
     chains: dict[str, str] = {}
     ranges: dict[str, list[int]] = {}
@@ -210,14 +221,24 @@ def assemble_params(extracted: list, ann_params: dict) -> list[dict]:
                 chains[pname] = chain_key
             if len(item) > 4 and item[4]:
                 ranges[pname] = list(item[4])
-    params: list[dict] = []
+    rows: list[tuple[str, str, bool, str]] = []
     for pname in [*ann_params, *(n for n in code if n not in ann_params)]:
         a = ann_params.get(pname)
         jt, req = code[pname] if pname in code else ((a["type"] or "string"), a["required"])
+        rows.append((pname, jt, req, a["desc"] if a else ""))
+    name_like = {pname for pname, jt, _req, desc in rows if _is_name_like(pname, jt, desc, domain)}
+    # The other spellings of a param (its alias chain) carry what it carries.
+    marked_chains = {chains[pname] for pname in name_like if pname in chains}
+    name_like |= {pname for pname, jt, _req, _desc in rows
+                  if chains.get(pname) in marked_chains and jt in _NAME_LIKE_TYPES}
+    params: list[dict] = []
+    for pname, jt, req, desc in rows:
         param = {"name": pname, "jsonType": jt, "required": req}
         if pname in ranges:
             param["intRange"] = ranges[pname]
-        param["description"] = a["desc"] if a else ""
+        if pname in name_like:
+            param["nameLike"] = True
+        param["description"] = desc
         params.append(param)
     # Within an alias chain, the REQUIRED name must be the one the `@param`
     # documents -- otherwise the schema demands an undocumented alias and leaves
@@ -468,8 +489,10 @@ def strip_cpp_comments(text: str) -> str:
 # A call that passes `Params` as its FIRST argument is a forwarder/helper whose
 # body reads the real params, e.g. `HandleCreateWaterBody(Params, River)` or
 # `ResolveSkeleton(Params, Out)`. (`Params->TryGetField(...)` does NOT match —
-# there Params is the object and the first arg is TEXT(...).)
-CALLEE_RE = re.compile(r'\b([A-Za-z_]\w*)\s*\(\s*Params\b')
+# there Params is the object and the first arg is TEXT(...).) A call with
+# template arguments, `HandleRemoveTyped<UFoo>(Params, ...)`, is followed too:
+# group 1 is the function name, and its definition is found by that name.
+CALLEE_RE = re.compile(r'\b([A-Za-z_]\w*)\s*(?:<[^<>;(){}]*>\s*)?\(\s*Params\b')
 # Control-flow keywords match CALLEE_RE (`if (Params->...)`) but are NOT calls;
 # following them would scan an unrelated control block elsewhere in the file.
 _CPP_KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "do",
@@ -628,6 +651,61 @@ def _int_range(types: list) -> tuple[int, int] | None:
     return max(_INT_RANGES[t][0] for t in types), min(_INT_RANGES[t][1] for t in types)
 
 
+# An FName holds at most NAME_SIZE - 1 (1023) characters, and building one from a longer string
+# is a checkf in UnrealNames.cpp that aborts the editor. The strings a tool resolves or creates as
+# an asset, actor, class, property, tag, bone or key become FNames on the way (FName(*X),
+# CreatePackage, LoadObject, FSoftObjectPath, FKey), so the catalog marks each param that carries
+# one (`nameLike`), and the dispatcher refuses such a string, or a string element of such an array,
+# of NAME_SIZE characters or more before the handler runs (McpPreconditions, check "name_length").
+#
+# The param's NAME says what it carries: its last word, once a trailing number or single letter is
+# dropped (object_path_1, table_a), is one of _NAME_WORDS; or its description calls it an FName, an
+# FKey or a key name. Left out on purpose, as strings the engine keeps without that limit: disk
+# paths (a word of _DISK_WORDS, an output or export path, or a description that shows a disk path),
+# the USD tools' prim paths, layer identifiers and tokens (the USD domain, but for the actor it
+# spawns), and free text, whose last word is never a name word (code, json, text, description,
+# tooltip, comment, value, query, pattern, filter...) and never counts by its description either.
+_NAME_LIKE_TYPES = frozenset({"string", "array", "any"})
+_NAME_WORDS = frozenset({
+    "name", "names", "label", "labels", "path", "paths", "class", "classes", "tag", "tags",
+    "id", "ids", "guid", "namespace", "socket", "bone", "slot", "section", "property",
+    "variable", "function", "event", "asset", "assets", "package", "folder", "map", "level",
+    "actor", "actors", "component", "components", "curve", "track", "state", "node", "pin",
+    "graph", "struct", "enum", "channel", "layer", "parameter", "blueprint", "bp", "material",
+    "materials", "mesh", "texture", "cubemap", "skeleton", "chain", "table", "tables", "widget",
+    "widgets", "dispatcher", "interface", "library", "macro", "column", "input", "attribute",
+    "world", "handle", "type", "mode", "profile", "primitive", "action", "composite", "group",
+    "trigger", "symbol",
+})
+_FREE_TEXT_WORDS = frozenset({
+    "filter", "pattern", "contains", "match", "prefix", "value", "values", "text", "json", "string",
+    "description", "comment", "message", "title", "tooltip", "script", "code", "query", "csv",
+    "content", "reason",
+})
+_DISK_WORDS = frozenset({"file", "filename", "files", "dir", "directory", "uproject", "url"})
+_DISK_PATH_SUFFIXES = ("output_path", "export_path", "rel_path")
+_DISK_PATH_DOC_RE = re.compile(
+    r'\b[A-Za-z]:[/\\]|^Absolute\b|(?<!not a )\b[Dd]isk (?:path|dir)|\bon disk \(|\bOS path|\b[Ff]ile ?system path')
+_NAME_DOC_RE = re.compile(r'\bFName\b|\bFKey\b|\b[Kk]ey name\b')
+_NOT_NAME_DOMAINS = frozenset({"USD"})
+
+
+def _is_name_like(name: str, json_type: str, description: str, domain: str) -> bool:
+    """Whether the param carries a name the engine makes an FName of (see the block above)."""
+    if json_type not in _NAME_LIKE_TYPES:
+        return False
+    words = name.split("_")
+    while len(words) > 1 and (words[-1].isdigit() or len(words[-1]) == 1):
+        words.pop()
+    if domain in _NOT_NAME_DOMAINS and "actor" not in words:
+        return False
+    if any(w in _DISK_WORDS for w in words) or name.endswith(_DISK_PATH_SUFFIXES) or _DISK_PATH_DOC_RE.search(description):
+        return False
+    if words[-1] in _NAME_WORDS:
+        return True
+    return words[-1] not in _FREE_TEXT_WORDS and bool(_NAME_DOC_RE.search(description))
+
+
 def _missing_value_fails(body: str, start: int, target: str) -> bool:
     """Whether, after `start`, the handler fails the call when `target` is still empty or null:
     an if-condition testing it (`X.IsEmpty()`, `!X`, `X == nullptr`) whose statement returns.
@@ -660,7 +738,124 @@ def _missing_value_fails(body: str, start: int, target: str) -> bool:
     return False
 
 
-def _collect_params(text, body, visited, depth, ordered, required, chains=None, sig="", num_types=None):
+_STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'')
+_LAMBDA_OPEN_RE = re.compile(r'\]\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*(?:mutable\s*)?(?:->\s*[\w:<>,\s*&]+?)?\s*\{')
+_RETURN_RE = re.compile(r'\breturn\b([^;]*);')
+# What an error return reads like: an error reply built in place, or a variable holding one
+# (`return Missing;`, `return Error;`, `return LoadError;`, `return Refused;`, `return NoWorld;`).
+_ERROR_RETURN_RE = re.compile(
+    r'MakeErrorReply|MissingParameterReply|EmptyParamError|AssetNotFoundError|RangeError|'
+    r'\b\w*(?:Missing|Error|Err|Refus|Invalid|NoWorld|Fail|Bad|Problem|Conflict|Complaint|Unsupported)\w*\b')
+
+
+def _blank_literals(body: str) -> str:
+    """`body` with the inside of every string and char literal blanked, same length: braces, parentheses and
+    `return` inside a message must not count as code."""
+    return _STRING_LITERAL_RE.sub(lambda m: m.group(0)[0] + " " * (len(m.group(0)) - 2) + m.group(0)[-1], body)
+
+
+def _lambda_spans(code: str) -> list[tuple[int, int]]:
+    """(start, end) of each lambda body in `code` (literals already blanked)."""
+    spans = []
+    for m in _LAMBDA_OPEN_RE.finditer(code):
+        open_at = m.end() - 1
+        spans.append((open_at, open_at + len(_body_from_brace(code, open_at))))
+    return spans
+
+
+def _is_error_return(code: str, original: str, ret: re.Match) -> bool:
+    """Whether the `return` matched by `ret` (_RETURN_RE over `code`) hands back an error: an error reply built in
+    place or held by an error-named variable (_ERROR_RETURN_RE), or the reply an `if (TSharedPtr<FJsonObject> X =
+    Check(...)) { return X; }` guard declares, the plugin's idiom for a check that answers null when it passes."""
+    expr = original[ret.start(1):ret.end(1)].strip()
+    if _ERROR_RETURN_RE.search(expr):
+        return True
+    return bool(re.fullmatch(r'\w+', expr)) and bool(re.search(
+        r'\bif\s*\(\s*(?:const\s+)?TSharedPtr\s*<\s*FJsonObject\s*>\s*' + re.escape(expr) + r'\s*=', code[:ret.start()]))
+
+
+def _success_return_before(code: str, original: str, pos: int) -> bool:
+    """Whether a `return` before `pos` (outside a lambda) may hand back something other than an error: the
+    handler then has a path that ends before `pos`, and what is checked at `pos` is not needed on it."""
+    lambdas = _lambda_spans(code)
+    for m in _RETURN_RE.finditer(code, 0, pos):
+        if any(s <= m.start() < e for s, e in lambdas):
+            continue
+        if not _is_error_return(code, original, m):
+            return True
+    return False
+
+
+def _if_around(code: str, pos: int) -> tuple[int, int, int] | None:
+    """(if start, condition open, condition close) of the `if` whose condition holds `pos`, or None."""
+    for m in reversed(list(_IF_OPEN_RE.finditer(code, 0, pos))):
+        open_at = m.end() - 1
+        depth, k = 0, open_at
+        while k < len(code):
+            if code[k] == "(":
+                depth += 1
+            elif code[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if open_at < pos < k:
+            return m.start(), open_at, k
+    return None
+
+
+def _brace_depth(code: str, pos: int) -> int:
+    """Brace depth of `pos` in a function body (its own `{` is depth 1)."""
+    return code.count("{", 0, pos) - code.count("}", 0, pos)
+
+
+def _runs_always(body: str, pos: int) -> bool:
+    """Whether the expression at `pos` is evaluated on every path that reaches the end of the function: it sits
+    at the top level of the body (brace depth 1), not in an `else if`, not after `&&`, `||` or `?` in its own
+    statement or condition, and no `return` that is not an error comes before it."""
+    code = _blank_literals(body)
+    around = _if_around(code, pos)
+    if around is not None:
+        start, open_at, _close = around
+        if _brace_depth(code, start) != 1 or code[:start].rstrip().endswith("else"):
+            return False
+        before = code[open_at + 1:pos]
+    else:
+        if _brace_depth(code, pos) != 1:
+            return False
+        stmt_start = max(code.rfind(";", 0, pos), code.rfind("{", 0, pos), code.rfind("}", 0, pos)) + 1
+        before = code[stmt_start:pos]
+    if re.search(r'&&|\|\||\?', before):
+        return False
+    return not _success_return_before(code, body, pos)
+
+
+def _guard_runs_always(body: str, pos: int) -> bool:
+    """Whether the negated raw read or HasField at `pos` is a guard that fails the call on every path: the
+    condition of an `if` at the top level of the body (not an `else if`), joined to other tests by `||` only (an
+    `&&` makes it a choice between params, or a guard that only applies sometimes), whose statement returns an
+    error, with no `return` that is not an error before it."""
+    code = _blank_literals(body)
+    around = _if_around(code, pos)
+    if around is None:
+        return False
+    start, open_at, close = around
+    if _brace_depth(code, start) != 1 or code[:start].rstrip().endswith("else"):
+        return False
+    if "&&" in code[open_at:close + 1] or "?" in code[open_at:close + 1]:
+        return False
+    guarded = _guarded_statement(code, pos)
+    if not guarded:
+        return False
+    stmt_at = code.find(guarded, close)
+    returns = list(_RETURN_RE.finditer(code, stmt_at, stmt_at + len(guarded)))
+    if not returns or not all(_is_error_return(code, body, r) for r in returns):
+        return False
+    return not _success_return_before(code, body, start)
+
+
+def _collect_params(text, body, visited, depth, ordered, required, chains=None, sig="", num_types=None,
+                    conditional=False):
     """Scan `body` for param reads, then follow `Params`-passing calls (forwarders
     and helpers like ResolveSkeleton) up to `depth` levels deep.
 
@@ -675,7 +870,11 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
     sequential form of an alias chain (`if (!Try(a, V)) { if (!Try(b, V)) Try(c, V); }`):
     one param, several spellings. Like the `&&` chains, the head stays required and the
     rest become optional aliases -- publishing the head AND its first alias as required would
-    make a call spell the same thing twice."""
+    make a call spell the same thing twice.
+
+    An untyped guard (`!Params->HasField(...)`, `!Params->TryGetField(...)`, RAW_REQUIRED_RE) makes
+    its param required only when it runs on every path (_guard_runs_always), and never in a body
+    reached through a call that runs only on some paths (`conditional`, see _runs_always)."""
     for m in REQUIRED_RE.finditer(body):
         name = m.group(1)
         guarded = _guarded_statement(body, m.start())
@@ -700,6 +899,11 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
             continue
         if re.search(r'\breturn\b', guarded):
             required.add(name)
+    # The untyped guards (RAW_REQUIRED_RE) count only when they run on every path of the handler: in a body
+    # reached through a call that itself runs only sometimes (`conditional`), none of them does.
+    for m in RAW_REQUIRED_RE.finditer(body):
+        if not conditional and _guard_runs_always(body, m.start()):
+            required.add(m.group(1))
     if chains is not None:
         for chain_head, alias in _alias_reads(body):
             chains[chain_head] = chain_head  # the head also belongs to its own chain
@@ -745,13 +949,15 @@ def _collect_params(text, body, visited, depth, ordered, required, chains=None, 
             num_types.setdefault(m.group(1), []).append(_declared_type(sig + body, m.group(2)))
     if depth <= 0:
         return
-    for callee in CALLEE_RE.findall(body):
+    for call in CALLEE_RE.finditer(body):
+        callee = call.group(1)
         if callee in visited or callee in _CPP_KEYWORDS:
             continue
         visited.add(callee)
         csig, cbody = _find_function_def(text, callee)
         if cbody:
-            _collect_params(text, cbody, visited, depth - 1, ordered, required, chains, csig, num_types)
+            _collect_params(text, cbody, visited, depth - 1, ordered, required, chains, csig, num_types,
+                            conditional or not _runs_always(body, call.start()))
 
 
 def _scan_params(text: str, body: str, sig: str = "") -> list[tuple[str, str, bool, str | None, tuple[int, int] | None]]:
@@ -905,7 +1111,7 @@ def describe_drift(want: dict, have_text: str | None) -> list[str]:
             if field == "params" and isinstance(a, list) and isinstance(b, list) and shape(a) == shape(b):
                 groups["param descriptions differ"].append(name)
             elif field == "params":
-                groups["params differ (name, type, required or aliasOf)"].append(name)
+                groups["params differ (name, type, required, aliasOf, intRange or nameLike)"].append(name)
             else:
                 groups[f"{field} differs"].append(name)
     lines = [f"{label} ({len(names)}): {', '.join(map(str, names[:10]))}{' ...' if len(names) > 10 else ''}"
@@ -1005,7 +1211,7 @@ def build(args) -> int:
         entry: dict = {
             "name": cmd,
             "description": (ann["description"] if ann and ann.get("description") else ""),
-            "params": assemble_params(extracted, ann.get("params", {}) if ann else {}),
+            "params": assemble_params(extracted, ann.get("params", {}) if ann else {}, domain),
             "returns": (ann["returns"] if ann and ann.get("returns") else ""),
         }
         by_domain[domain].append(entry)

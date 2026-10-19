@@ -211,6 +211,72 @@ namespace
         return DestMesh;
     }
 
+    // What a UStaticMeshEditorSubsystem collision call can change, read before it runs (and before the mesh's
+    // Modify): the package's dirty flag, and the body setup with its GUID, which every collision edit renews
+    // (UBodySetup::InvalidatePhysicsData) and which a new body setup replaces.
+    struct FMeshCollisionProbe
+    {
+        bool bPackageWasDirty = false;
+        const UBodySetup* BodySetup = nullptr;
+        FGuid BodySetupGuid;
+
+        explicit FMeshCollisionProbe(const UStaticMesh* StaticMesh)
+            : bPackageWasDirty(StaticMesh->GetOutermost()->IsDirty())
+            , BodySetup(StaticMesh->GetBodySetup())
+            , BodySetupGuid(BodySetup ? BodySetup->BodySetupGuid : FGuid())
+        {
+        }
+
+        // Whether StaticMesh still has the same body setup, with the same GUID: then the subsystem changed no collision.
+        bool CollisionUnchanged(const UStaticMesh* StaticMesh) const
+        {
+            const UBodySetup* Now = StaticMesh->GetBodySetup();
+            return Now == BodySetup && (Now == nullptr || Now->BodySetupGuid == BodySetupGuid);
+        }
+    };
+
+    // The reply of a collision call whose UStaticMeshEditorSubsystem step failed after StaticMesh->Modify(). When
+    // the probe shows the collision untouched, nothing stored changed: the package's dirty flag is put back and the
+    // call's undo step, which would undo nothing, is dropped. Otherwise the subsystem changed the collision before it
+    // failed (the convex decomposition clears the old collision first), and the error says so: the change is left
+    // unsaved and one undo restores it. Either way the payload says whether this call created the /Game copy at
+    // dest_path and whether that copy was saved, as remove_static_mesh_collision reports it.
+    TSharedPtr<FJsonObject> MeshCollision_FailureReply(UStaticMesh* StaticMesh, const FMeshCollisionProbe& Probe,
+        bool bDuplicated, const FWritableMeshCopy& Copy, const FString& Failure)
+    {
+        const bool bUnchanged = Probe.CollisionUnchanged(StaticMesh);
+        FString Message = Failure;
+        if (bUnchanged)
+        {
+            StaticMesh->GetOutermost()->SetDirtyFlag(Probe.bPackageWasDirty);
+            mcp_common::DiscardUndoStepOfThisCall();
+            Message += TEXT("; the mesh's collision was not changed");
+        }
+        else
+        {
+            Message += TEXT("; the subsystem had already changed the mesh's collision, which is left in memory, unsaved: undo restores it");
+        }
+
+        TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+        Data->SetStringField(TEXT("static_mesh_path"), StaticMesh->GetPathName());
+        Data->SetBoolField(TEXT("collision_changed"), !bUnchanged);
+        Data->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+        Data->SetBoolField(TEXT("duplicated"), Copy.bCreated);
+        if (Copy.bCreated)
+        {
+            mcp_common::AddSaveOutcome(Data, Copy.bSaved, Copy.SaveError);
+            Message += Copy.bSaved
+                ? FString::Printf(TEXT("; this call created and saved the /Game copy %s"), *StaticMesh->GetPathName())
+                : FString::Printf(TEXT("; this call created the /Game copy %s but could not save it: %s"),
+                    *StaticMesh->GetPathName(), *Copy.SaveError);
+        }
+        else
+        {
+            Data->SetBoolField(TEXT("saved"), false);
+        }
+        return mcp_common::MakeOutcomeReply(Data, false, Message);
+    }
+
     // Map a K-DOP shape string to the subsystem enum. Returns false on an unknown value.
     bool ParseKDopShape(const FString& In, EScriptCollisionShapeType& Out)
     {
@@ -882,24 +948,17 @@ TSharedPtr<FJsonObject> HandleRemoveStaticMeshCollision(const TSharedPtr<FJsonOb
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("remove_static_mesh_collision"), SaveError);
 }
 
-// MCP:set_static_mesh_convex_collision - Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the "Auto Convex Collision" editor action) via UStaticMeshEditorSubsystem::SetConvexDecompositionCollisionsWithNotification.  The subsystem removes any existing collision first, so this is idempotent (re-running replaces, never duplicates).  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns false honestly on bad input (no valid mesh description / not on the game thread / under PIE) — surfaced as a CLEAN error, never a fake success.
+// MCP:set_static_mesh_convex_collision - Replace the simple collision of a UStaticMesh asset, found by path, with a V-HACD convex decomposition, as the Static Mesh Editor's Auto Convex Collision does, in one undo step, then save it; re-running replaces the hulls, never adds to them. hull_count and hull_precision must be positive, checked before anything is copied. A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there; duplicated says this call created it. When the subsystem fails (no mesh description, no LOD 0 geometry with collision enabled, a PIE session), success is false: collision_changed says whether it had already cleared the old collision, left unsaved and undoable, and saved whether a new copy was saved. A failed save makes success false with save_error. K-DOP hull: set_static_mesh_kdop_collision; clear: remove_static_mesh_collision.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
 //   @param hull_count - Maximum number of convex pieces to create (default 4, must be positive).
 //   @param max_hull_verts - Maximum vertices per generated hull (default 16).
 //   @param hull_precision - Voxel resolution used during decomposition (default 100000, must be positive).
-//   @returns { static_mesh_path, hull_count, max_hull_verts, hull_precision, convex_count, element_count, collision_set, duplicated_to_game, saved, save_error? }
+//   @returns { static_mesh_path, hull_count, max_hull_verts, hull_precision, convex_count, element_count, collision_set, duplicated_to_game, duplicated, saved, save_error?, collision_changed? }
 TSharedPtr<FJsonObject> HandleSetStaticMeshConvexCollision(const TSharedPtr<FJsonObject>& Params)
 {
-    bool bDuplicated = false;
-    TSharedPtr<FJsonObject> Error;
-    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error);
-    if (!StaticMesh)
-    {
-        return Error;
-    }
-
-    // V-HACD parameters (sane editor defaults; positive-guarded below).
+    // V-HACD parameters (sane editor defaults; positive-guarded below). They and the subsystem are checked before
+    // ResolveWritableStaticMesh, so a refused call copies nothing into /Game.
     int32 HullCount = 4;
     int32 MaxHullVerts = 16;
     int32 HullPrecision = 100000;
@@ -922,20 +981,33 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshConvexCollision(const TSharedPtr<FJso
         return mcp_common::MakeErrorReply(TEXT("UStaticMeshEditorSubsystem unavailable"));
     }
 
+    bool bDuplicated = false;
+    TSharedPtr<FJsonObject> Error;
+    FWritableMeshCopy Copy;
+    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error, &Copy);
+    if (!StaticMesh)
+    {
+        return Error;
+    }
+
+    const FMeshCollisionProbe Probe(StaticMesh);
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetStaticMeshConvexCollision", "Set Static Mesh Convex Collision"));
     StaticMesh->Modify();
 
     // Synchronous: the subsystem runs V-HACD (Async + ParallelFor) then WaitFor before
     // returning, and pre-sets GIsRunningUnattendedScript so no progress dialog blocks headless.
-    // Returns false honestly on bad input (invalid MeshDescription / under PIE / off game thread).
+    // Returns false on an invalid mesh description, under PIE or off the game thread, before it touches the
+    // mesh, and also when the LOD 0 sections with collision enabled hold fewer than 3 vertices or indices,
+    // which it finds only after it has cleared the old collision.
     const bool bSet = SMES->SetConvexDecompositionCollisionsWithNotification(
         StaticMesh, HullCount, MaxHullVerts, HullPrecision, /*bApplyChanges=*/true);
     if (!bSet)
     {
-        // Honest failure: do NOT report success:true. The subsystem refused the input.
-        return mcp_common::MakeErrorReply(
+        // Honest failure: do NOT report success:true.
+        return MeshCollision_FailureReply(StaticMesh, Probe, bDuplicated, Copy,
             FString::Printf(TEXT("Convex decomposition failed for %s (subsystem returned false: invalid mesh "
-                "description, running under PIE, or not on the game thread)"), *StaticMesh->GetPathName()));
+                "description, no LOD 0 geometry with collision enabled, running under PIE, or not on the game thread)"),
+                *StaticMesh->GetPathName()));
     }
 
     StaticMesh->MarkPackageDirty();
@@ -959,26 +1031,22 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshConvexCollision(const TSharedPtr<FJso
     ResultObj->SetNumberField(TEXT("element_count"), ElementCount);
     ResultObj->SetBoolField(TEXT("collision_set"), true);
     ResultObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+    ResultObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
 
+    // This save also writes the /Game copy, so it is the one the reply reports.
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_static_mesh_convex_collision"), SaveError);
 }
 
-// MCP:set_static_mesh_kdop_collision - Add one K-DOP simple collision hull to a UStaticMesh asset, found by path, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game, such as /Engine content, is first copied to dest_path under /Game, reusing a copy already there. An invalid shape, unknown mesh or running PIE session is an error; a failed save makes success false with saved=false and save_error. Replace all collision with a convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
+// MCP:set_static_mesh_kdop_collision - Add one K-DOP simple collision hull to a UStaticMesh asset, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there (duplicated: this call created it). An invalid shape, checked before any copy, or an unknown mesh is an error; a subsystem failure, as under PIE, makes success false with collision_changed and the new copy's saved. A failed save makes success false with save_error. Convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
 //   @param static_mesh_path - Path to the source UStaticMesh.
 //   @param dest_path - /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game).
 //   @param shape - K-DOP hull shape: NDOP10_X | NDOP10_Y | NDOP10_Z | NDOP18 | NDOP26 (default NDOP18).
-//   @returns { static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, saved, save_error? }
+//   @returns { static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, duplicated, saved, save_error?, collision_changed? }
 //   @hints additive not-idempotent
 TSharedPtr<FJsonObject> HandleSetStaticMeshKDopCollision(const TSharedPtr<FJsonObject>& Params)
 {
-    bool bDuplicated = false;
-    TSharedPtr<FJsonObject> Error;
-    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error);
-    if (!StaticMesh)
-    {
-        return Error;
-    }
-
+    // The shape and the subsystem are checked before ResolveWritableStaticMesh, so a refused call copies nothing
+    // into /Game.
     FString ShapeStr = TEXT("NDOP18");
     Params->TryGetStringField(TEXT("shape"), ShapeStr);
     EScriptCollisionShapeType Shape = EScriptCollisionShapeType::NDOP18;
@@ -994,14 +1062,26 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshKDopCollision(const TSharedPtr<FJsonO
         return mcp_common::MakeErrorReply(TEXT("UStaticMeshEditorSubsystem unavailable"));
     }
 
+    bool bDuplicated = false;
+    TSharedPtr<FJsonObject> Error;
+    FWritableMeshCopy Copy;
+    UStaticMesh* StaticMesh = ResolveWritableStaticMesh(Params, bDuplicated, Error, &Copy);
+    if (!StaticMesh)
+    {
+        return Error;
+    }
+
+    const FMeshCollisionProbe Probe(StaticMesh);
     FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetStaticMeshKDopCollision", "Set Static Mesh K-DOP Collision"));
     StaticMesh->Modify();
 
-    // Returns the index of the newly-created collision; a negative value means it failed.
+    // Returns the index of the newly-created collision; a negative value means it failed: under PIE, before it
+    // touches the mesh, or when the mesh has neither render data nor a LOD 0 mesh description to fit the hull to,
+    // after it has given a mesh without a body setup an empty one.
     const int32 AddedIndex = SMES->AddSimpleCollisionsWithNotification(StaticMesh, Shape, /*bApplyChanges=*/true);
     if (AddedIndex < 0)
     {
-        return mcp_common::MakeErrorReply(
+        return MeshCollision_FailureReply(StaticMesh, Probe, bDuplicated, Copy,
             FString::Printf(TEXT("K-DOP collision (%s) failed for %s (subsystem returned index %d)"),
                 *ShapeStr, *StaticMesh->GetPathName(), AddedIndex));
     }
@@ -1025,7 +1105,9 @@ TSharedPtr<FJsonObject> HandleSetStaticMeshKDopCollision(const TSharedPtr<FJsonO
     ResultObj->SetNumberField(TEXT("element_count"), ElementCount);
     ResultObj->SetBoolField(TEXT("collision_added"), true);
     ResultObj->SetBoolField(TEXT("duplicated_to_game"), bDuplicated);
+    ResultObj->SetBoolField(TEXT("duplicated"), Copy.bCreated);
 
+    // This save also writes the /Game copy, so it is the one the reply reports.
     return mcp_common::MakeSavedReply(ResultObj, bSaved, TEXT("set_static_mesh_kdop_collision"), SaveError);
 }
 

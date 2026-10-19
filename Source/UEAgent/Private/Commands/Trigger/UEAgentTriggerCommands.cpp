@@ -487,7 +487,9 @@ TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Para
     FString VolumeClassName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("volume_class"), VolumeClassName)) { return Missing; }
 
-    if (!Params->HasField(TEXT("extent")))
+    // A typed read, so the catalog publishes extent as the required array it is.
+    const TArray<TSharedPtr<FJsonValue>>* ExtentJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("extent"), ExtentJson))
     {
         return mcp_common::MakeErrorReply(TEXT("Missing required parameter: extent (cube half-size [x,y,z], each > 0)"));
     }
@@ -672,11 +674,13 @@ TSharedPtr<FJsonObject> HandleSpawnBoxVolume(const TSharedPtr<FJsonObject>& Para
 
 /**
  * Shared body of the typed remove commands. The actor is looked up by object name in the
- * editor world and destroyed only when it really is a T. "Not found" and "wrong type" are
- * answers, not failures: both come back as success envelopes with deleted=false and a note.
+ * editor world and destroyed only when it really is an ExpectedClass. "Not found" is an answer, not a
+ * failure: a success envelope with deleted=false and a note. An actor of another class is refused
+ * (success false, nothing destroyed), and so is a destroy the world does not carry out. The class is a
+ * parameter rather than a template argument so the catalog generator follows each command into this body.
  */
-template <typename T>
-static TSharedPtr<FJsonObject> HandleRemoveTypedTrigger(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName)
+static TSharedPtr<FJsonObject> HandleRemoveTypedTrigger(const TSharedPtr<FJsonObject>& Params, const TCHAR* CmdName,
+    const UClass* ExpectedClass)
 {
     FString Target;
     if (!Params->TryGetStringField(TEXT("actor_name"), Target) || Target.IsEmpty())
@@ -706,44 +710,45 @@ static TSharedPtr<FJsonObject> HandleRemoveTypedTrigger(const TSharedPtr<FJsonOb
     const FString MatchClass = Match->GetClass()->GetName();
     Outcome->SetStringField(TEXT("actor_class"), MatchClass);
 
-    T* const Typed = Cast<T>(Match);
-    if (Typed == nullptr)
+    if (!Match->IsA(ExpectedClass))
     {
+        const FString Refusal = FString::Printf(TEXT("actor is not a %s (got %s) - wrong type, refusing to delete"),
+            *ExpectedClass->GetName(), *MatchClass);
         Outcome->SetBoolField(TEXT("deleted"), false);
-        Outcome->SetStringField(TEXT("note"), FString::Printf(
-            TEXT("actor is not a %s (got %s) - wrong type, refusing to delete"),
-            *T::StaticClass()->GetName(), *MatchClass));
-        return mcp_common::MakeOkReply(Outcome);
+        Outcome->SetStringField(TEXT("note"), Refusal);
+        return mcp_common::MakeOutcomeReply(Outcome, false, FString::Printf(TEXT("%s: %s: %s"), CmdName, *Target, *Refusal));
     }
 
-    const bool bDestroyed = EditorWorld->DestroyActor(Typed);
+    const bool bDestroyed = EditorWorld->DestroyActor(Match);
     Outcome->SetBoolField(TEXT("already_existed"), true);
     Outcome->SetBoolField(TEXT("deleted"), bDestroyed);
-    return mcp_common::MakeOkReply(Outcome);
+    return mcp_common::MakeOutcomeReply(Outcome, bDestroyed, bDestroyed ? FString() : FString::Printf(
+        TEXT("%s: UWorld::DestroyActor refused to destroy '%s' (an actor the world protects, or one already being destroyed)"),
+        CmdName, *Target));
 }
 
-// MCP:remove_trigger_box - Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor or one of another class is not an error: the reply has deleted false and a note. Returns actor_name, actor_class, deleted and already_existed.
+// MCP:remove_trigger_box - Delete a TriggerBox actor from the editor world after checking its class; the level is not saved. A missing actor is not an error: the reply has deleted false and a note; an actor of another class is refused, and that refusal or a destroy the world refuses is success false with deleted false. Returns actor_name, actor_class, deleted and already_existed.
 //   @param actor_name - Object name of the TriggerBox actor (its editor label is not matched); the command fails without it.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveTriggerBox(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedTrigger<ATriggerBox>(Params, TEXT("remove_trigger_box"));
+    return HandleRemoveTypedTrigger(Params, TEXT("remove_trigger_box"), ATriggerBox::StaticClass());
 }
 
-// MCP:remove_trigger_sphere - Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor, or an actor of another class, is not an error: the reply has deleted=false and a note, so read deleted; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
+// MCP:remove_trigger_sphere - Delete one ATriggerSphere actor from the editor world, found by its object name (matched without case; the editor label is not), after checking its class, through UWorld::DestroyActor: no undo step is recorded and the level is not saved (save_level). A name that matches no actor is not an error: the reply has deleted=false and a note; already_existed=false means nothing was found, and a repeat call finds nothing more to do (idempotent). An actor of another class is refused with success false and deleted=false, nothing destroyed, and so is a destroy the world refuses. A missing actor_name or no editor world is an error. A TriggerBox: remove_trigger_box; a brush volume: remove_volume; any actor, undoably: delete_actor; create one: create_trigger; resize: set_trigger_sphere_radius.
 //   @param actor_name - Object name of the TriggerSphere actor, e.g. TriggerSphere_0, matched without case (its editor label is not matched); the command fails without it.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveTriggerSphere(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedTrigger<ATriggerSphere>(Params, TEXT("remove_trigger_sphere"));
+    return HandleRemoveTypedTrigger(Params, TEXT("remove_trigger_sphere"), ATriggerSphere::StaticClass());
 }
 
-// MCP:remove_volume - Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed. This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
+// MCP:remove_volume - Destroy a volume ACTOR in the world -- any AVolume subclass: BlockingVolume, PainCausingVolume, PostProcessVolume, TriggerVolume and the rest. Typed: it verifies the actor really is an AVolume before deleting, so pointing it at a non-volume actor is refused rather than obeyed (success false, deleted false, nothing destroyed). This is the counterpart of spawn_box_volume / create_volume; for a TriggerBox or TriggerSphere use remove_trigger_box / remove_trigger_sphere instead.
 //   @param actor_name - Name of the AVolume actor.
 //   @returns { actor_name, actor_class, deleted, already_existed, note? }
 TSharedPtr<FJsonObject> HandleRemoveVolume(const TSharedPtr<FJsonObject>& Params)
 {
-    return HandleRemoveTypedTrigger<AVolume>(Params, TEXT("remove_volume"));
+    return HandleRemoveTypedTrigger(Params, TEXT("remove_volume"), AVolume::StaticClass());
 }
 
 // MCP:get_trigger_events - Read the overlap-event configuration of an actor's primitive component: collision profile, whether overlap events are enabled at all, and which begin/end overlap handlers are actually bound. Read-only inverse of set_trigger_events -- it changes nothing, so it is the way to check a trigger is really armed before blaming the gameplay code.

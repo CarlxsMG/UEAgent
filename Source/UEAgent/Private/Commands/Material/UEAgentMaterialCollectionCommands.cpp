@@ -1004,11 +1004,9 @@ TSharedPtr<FJsonObject> HandleSetMpciScalarParameterValue(const TSharedPtr<FJson
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("collection_path"), CollectionPath)) { return Missing; }
     FString ParamName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("parameter_name"), ParamName)) { return Missing; }
-    if (!Params->HasField(TEXT("value")))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing required 'value' parameter"));
-    }
-    const float Value = static_cast<float>(Params->GetNumberField(TEXT("value")));
+    double ValueD = 0.0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("value"), ValueD)) { return Missing; }
+    const float Value = static_cast<float>(ValueD);
 
     UWorld* World = nullptr;
     FString LoadError;

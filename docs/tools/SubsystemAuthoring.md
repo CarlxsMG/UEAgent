@@ -107,7 +107,7 @@ Enumerate the USubsystem instances live in the EDITOR right now, with each one's
 
 *Destructive, idempotent.*
 
-Destroy the Blueprint-authored USubsystem subclass at a package path (mirror of create_subsystem_class_bp). Typed-delete on TWO checks: the asset must be a UBlueprint AND its generated class must derive from USubsystem, so it cannot wipe an unrelated Blueprint the way the generic delete_asset can. Idempotent on missing assets.
+Destroy the Blueprint-authored USubsystem subclass at a package path (mirror of create_subsystem_class_bp). Typed-delete on TWO checks: the asset must be a UBlueprint AND its generated class must derive from USubsystem, so it cannot wipe an unrelated Blueprint the way the generic delete_asset can: either check failing is success false with deleted false, and nothing is deleted. Idempotent on missing assets; a delete the engine refuses is success false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

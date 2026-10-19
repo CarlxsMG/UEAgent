@@ -1733,11 +1733,8 @@ TSharedPtr<FJsonObject> HandleSetSkeletalMeshMinLod(const TSharedPtr<FJsonObject
     FString MeshPath;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("skeletal_mesh_path"), MeshPath)) { return Missing; }
 
-    if (!Params->HasField(TEXT("min_lod")))
-    {
-        return mcp_common::MakeErrorReply(TEXT("Missing 'min_lod'"));
-    }
-    const int32 MinLOD = static_cast<int32>(Params->GetNumberField(TEXT("min_lod")));
+    int32 MinLOD = 0;
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("min_lod"), MinLOD)) { return Missing; }
 
     USkeletalMesh* Mesh = nullptr;
     if (TSharedPtr<FJsonObject> Error = SkMesh_Load(MeshPath, Mesh)) { return Error; }

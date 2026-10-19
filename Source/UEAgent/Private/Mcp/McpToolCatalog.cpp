@@ -358,6 +358,7 @@ TSharedPtr<const FMcpToolCatalog> FMcpToolCatalog::LoadFromFile(const FString& P
 					{
 						Param.bHasIntRange = true;
 					}
+					(*ParamObj)->TryGetBoolField(TEXT("nameLike"), Param.bNameLike);
 					if (Param.Name.IsEmpty() || Tool.FindParam(Param.Name))
 					{
 						continue;
@@ -558,6 +559,58 @@ FString FMcpToolCatalog::CheckIntegerRanges(const FString& CommandType, const TS
 				TEXT("cannot be read, and the tool would go on with its default instead. WHAT WORKS: a whole number from %.0f to %.0f."),
 				*CommandType, *Param.Name, *FString::SanitizeFloat(Number, 0), Param.IntRangeMin, Param.IntRangeMax,
 				Param.IntRangeMin, Param.IntRangeMax);
+		}
+	}
+	return FString();
+}
+
+FString FMcpToolCatalog::CheckNameLengths(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return FString();
+	}
+	const TSharedPtr<const FMcpToolCatalog> Catalog = GetCurrent();
+	const FTool* Tool = Catalog.IsValid() ? Catalog->FindTool(CommandType) : nullptr;
+	if (!Tool)
+	{
+		return FString();
+	}
+	for (const FParam& Param : Tool->Params)
+	{
+		const TSharedPtr<FJsonValue> Value = Param.bNameLike ? Params->TryGetField(Param.Name) : nullptr;
+		if (!Value.IsValid())
+		{
+			continue;
+		}
+		// The string itself, or each string element of an array: the handlers make names of both.
+		FString Where;
+		int32 Length = 0;
+		if (Value->Type == EJson::String)
+		{
+			Where = Param.Name;
+			Length = Value->AsString().Len();
+		}
+		else if (Value->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
+			for (int32 Index = 0; Index < Items.Num() && Length < NAME_SIZE; ++Index)
+			{
+				if (Items[Index].IsValid() && Items[Index]->Type == EJson::String)
+				{
+					Where = FString::Printf(TEXT("%s[%d]"), *Param.Name, Index);
+					Length = Items[Index]->AsString().Len();
+				}
+			}
+		}
+		// FName's checkf fires at NAME_SIZE characters (UnrealNames.cpp, FindOrStoreString), so the longest name is NAME_SIZE - 1.
+		if (Length >= NAME_SIZE)
+		{
+			return FString::Printf(
+				TEXT("%s: %s is %d characters long. An FName holds at most %d characters, and the engine aborts the editor when it builds ")
+				TEXT("one from a longer string (UnrealNames.cpp, NAME_SIZE), so no name or path that long exists or can be created. Refused ")
+				TEXT("before the tool ran: nothing was changed. WHAT WORKS: a name or path of at most %d characters."),
+				*CommandType, *Where, Length, NAME_SIZE - 1, NAME_SIZE - 1);
 		}
 	}
 	return FString();

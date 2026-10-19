@@ -3297,8 +3297,8 @@ namespace
 
     // Shared front of every GameplayEffectComponent tag setter: parse ge_blueprint_path, load the GE CDO,
     // and parse the (required) tags array into Out. Returns the GE CDO, or nullptr + OutErrorResponse on
-    // any failure. TagsParamName/required mirror the callers.
-    UGameplayEffect* LoadGEAndParseTags(const TSharedPtr<FJsonObject>& Params, const TCHAR* TagsParamName,
+    // any failure. The key is written out literally so the catalog publishes tags as the required array it is.
+    UGameplayEffect* LoadGEAndParseTags(const TSharedPtr<FJsonObject>& Params,
                                         FGASAuthoringTagRequest& Out, TSharedPtr<FJsonObject>& OutErrorResponse)
     {
         OutErrorResponse = mcp_common::ReadRequiredString(Params, TEXT("ge_blueprint_path"), Out.BlueprintPath, mcp_common::EAllowEmpty::Yes);
@@ -3307,10 +3307,10 @@ namespace
             return nullptr;
         }
         const TArray<TSharedPtr<FJsonValue>>* TagsArray = nullptr;
-        if (!Params->TryGetArrayField(TagsParamName, TagsArray) || !TagsArray)
+        if (!Params->TryGetArrayField(TEXT("tags"), TagsArray) || !TagsArray)
         {
             OutErrorResponse = mcp_common::MakeErrorReply(
-                FString::Printf(TEXT("Missing required parameter: %s (array of gameplay tag strings)"), TagsParamName));
+                TEXT("Missing required parameter: tags (array of gameplay tag strings)"));
             return nullptr;
         }
 
@@ -3375,7 +3375,7 @@ namespace
 //       Application/Ongoing/RemovalTagRequirements (FGameplayTagRequirements RequireTags/IgnoreTags)
 //   set_..._granted_abilities  -> UAbilitiesGameplayEffectComponent::AddGrantedAbilityConfig (AddUnique dedup)
 
-// MCP:set_gameplay_effect_component_target_tags - Configure a TargetTagsGameplayEffectComponent so the GE GRANTS the given tags to its target actor (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_component_target_tags - Set the gameplay tags a GameplayEffect grants its target actor while active: the Added tags of the TargetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with granted_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Owned asset tags: set_gameplay_effect_component_asset_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; require/ignore tags: set_gameplay_effect_component_target_tag_requirements; read back: get_gameplay_effect_components.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings to grant to the target (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], granted_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3383,7 +3383,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
 {
     FGASAuthoringTagRequest Request;
     TSharedPtr<FJsonObject> ErrResp;
-    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, TEXT("tags"), Request, ErrResp);
+    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, Request, ErrResp);
     if (!GECDO)
     {
         return ErrResp;
@@ -3410,7 +3410,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentTargetTags(const TShared
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_asset_tags - Configure an AssetTagsGameplayEffectComponent so the GE OWNS the given asset tags (does not transfer to actors; creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_component_asset_tags - Set the gameplay tags a GameplayEffect asset owns (they describe the GE and are not given to its target): the Added tags of the AssetTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with asset_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; blocked abilities: set_gameplay_effect_component_block_ability_tags; read back: get_gameplay_effect_components.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings the GE asset owns (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], asset_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3418,7 +3418,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
 {
     FGASAuthoringTagRequest Request;
     TSharedPtr<FJsonObject> ErrResp;
-    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, TEXT("tags"), Request, ErrResp);
+    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, Request, ErrResp);
     if (!GECDO)
     {
         return ErrResp;
@@ -3441,7 +3441,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentAssetTags(const TSharedP
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_gameplay_effect_component_block_ability_tags - Configure a BlockAbilityTagsGameplayEffectComponent so the GE BLOCKS abilities with the given tags on its target (creates the component if absent; idempotent via FindOrAddComponent). A running PIE session, a read-only root or a .uasset read-only on disk fails before any edit, and a failed save undoes the edit.
+// MCP:set_gameplay_effect_component_block_ability_tags - Set which abilities, by ability tag, a GameplayEffect blocks on its target while active: the Added tags of the BlockAbilityTagsGameplayEffectComponent on the class default object of a GE Blueprint loaded by asset path, adding the component when missing (already_existed says which), then save without recompiling. tags becomes the whole Added list and the Removed list is emptied (tags inherited from a parent GE remain); unregistered strings are skipped into unknown_tags and the call still succeeds, with block_ability_tags read back. A running PIE session, an enforced read-only root or a read-only .uasset is refused before any edit; no undo step, and a failed save rolls the edit back. Repeat calls write the same tags (idempotent). Tags granted to the target: set_gameplay_effect_component_target_tags; owned tags: set_gameplay_effect_component_asset_tags; read back: get_gameplay_effect_components.
 //   @param ge_blueprint_path - Full asset path of the GE Blueprint
 //   @param tags - List of gameplay tag strings of abilities to block (replaces the component's Added tags)
 //   @returns { ge_blueprint_path: string, component_class: string, resolved_tags: [string], unknown_tags: [string], block_ability_tags: [string], tag_count: int, already_existed: bool, set: bool }
@@ -3449,7 +3449,7 @@ TSharedPtr<FJsonObject> HandleSetGameplayEffectComponentBlockAbilityTags(const T
 {
     FGASAuthoringTagRequest Request;
     TSharedPtr<FJsonObject> ErrResp;
-    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, TEXT("tags"), Request, ErrResp);
+    UGameplayEffect* GECDO = LoadGEAndParseTags(Params, Request, ErrResp);
     if (!GECDO)
     {
         return ErrResp;

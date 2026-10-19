@@ -107,9 +107,9 @@ Append one effect preset to the end of a USoundSubmix's effect chain and save th
 
 ## `add_subtitle_cue`
 
-*Additive.*
+*Additive, idempotent.*
 
-Appends a subtitle cue (FSubtitleAssetData) to a USubtitleAssetUserData.  Builds the cue from the supplied text/timing/priority/type/comment, dedupes by FSubtitleAssetData::operator== (text, duration, start_offset, priority, subtitle_type), and either appends or returns the existing cue's index with already_existed: true.
+Append one cue (text, start_offset, duration, duration_type, subtitle_type, priority, comment) to the Subtitles list of a USubtitleAssetUserData asset loaded by content path, in one undo step, then save it. Idempotent: a cue equal to it in text, duration_type, duration, start_offset, priority and subtitle_type -- comment is not compared -- is a success with already_existed=true, saved=false and that cue's cue_index, nothing added or saved. Defaults: start_offset 0, duration 3 s, duration_type use_duration_property, subtitle_type subtitle, priority 1. An unknown duration_type or subtitle_type, or an asset that does not load, is an error; so is a failed save, after which the cue is already in memory. Edit a cue with set_subtitle_cue_text or set_subtitle_cue_timing and list them with list_subtitle_cues; the inverse is remove_subtitle_cue. Create the asset with create_subtitles_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -122,7 +122,7 @@ Appends a subtitle cue (FSubtitleAssetData) to a USubtitleAssetUserData.  Builds
 | `priority` | number | no | Subtitle priority; higher values play instead of lower (default 1). |
 | `comment` | string | no | Editor-only author comment (default ""). |
 
-**Returns:** `{ asset_path: string, cue_index: int, text: string, success: bool, already_existed: bool, cue_count: int, saved: bool }`
+**Returns:** `{ asset_path: string, cue_index: int, text: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }`
 
 ## `configure_audio_3d`
 
@@ -237,7 +237,7 @@ Create a UDialogueWave asset (idempotent). Populate ContextMappings afterwards v
 
 *Additive.*
 
-Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSoundBuilderSubsystem::CreateSourcePresetBuilder (or CreatePatchPresetBuilder) to create a transient preset builder referencing the source, then BuildToAsset to persist it as a new /Game asset.
+Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSoundBuilderSubsystem::CreateSourcePresetBuilder (or CreatePatchPresetBuilder) to create a transient preset builder referencing the source, then BuildToAsset to persist it as a new /Game asset. A preset of that type already at the path is returned unchanged with already_exists=true, saved=false and preset_type read from its class, nothing saved; an asset of another class there (a MetaSound of the other type included) is an error and nothing is created.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -246,13 +246,13 @@ Creates a MetaSound preset from an existing source or patch asset.  Uses UMetaSo
 | `package_path` | string | no | Destination /Game folder (default /Game/MetaSounds). |
 | `preset_type` | string | no | "source" (default) or "patch". |
 
-**Returns:** `{ preset_path: string, preset_type: string, success: bool, saved: bool, already_exists: bool }`
+**Returns:** `{ preset_path: string, preset_type: string, success: bool, saved: bool, already_exists: bool, message: string? }`
 
 ## `create_metasound_source`
 
-*Additive.*
+*Additive, idempotent.*
 
-Creates (or loads, idempotently) a UMetaSoundSource asset and saves it.  Uses UMetaSoundBuilderSubsystem::CreateSourceBuilder to build a source graph (pre-populated with the source interface: OnPlay input + audio output +, for one-shots, OnFinished output), then UMetaSoundEditorSubsystem::BuildToAsset to persist it as a real /Game asset (headless-safe; no modal picker).
+Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: metasound_add_node_by_classname, metasound_add_interface; inspect: get_metasound_info; inverse: delete_meta_sound.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -260,7 +260,7 @@ Creates (or loads, idempotently) a UMetaSoundSource asset and saves it.  Uses UM
 | `package_path` | string | no | Target /Game package path (optional, default "/Game/MetaSounds") |
 | `output_format` | string | no | Output audio format: "mono", "stereo", "quad", "5.1", or "7.1" (optional, default "mono") |
 
-**Returns:** `{ source_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, output_format: string, class_name: string, input_count: number, output_count: number, save_error: string? }`
+**Returns:** `{ source_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, output_format: string, class_name: string, input_count: number, output_count: number, save_error: string?, message: string? }`
 
 ## `create_modulation_generator`
 
@@ -435,27 +435,27 @@ Create a USoundfieldSubmix asset at submix_path and save it, with its default en
 
 *Additive, idempotent.*
 
-Creates a USubtitleAssetUserData asset (the UE 5.8 subtitle authoring asset).  Creates a new package under /Game and NewObject&lt;USubtitleAssetUserData> into it, then saves. Idempotent: if the asset already exists, returns it with already_existed: true.
+Create a USubtitleAssetUserData asset -- the engine's subtitle authoring asset, a list of timed cues -- at package_path/name (default folder /Game/MCP), register it and save it; no undo step. Idempotent: a subtitles asset already at that path is returned unchanged with already_existed=true, saved=false, a message and its cue_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error, and so is a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- which leaves it unsaved in memory. Fill it with add_subtitle_cue and read it with list_subtitle_cues; the inverse is remove_subtitles_asset.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Name of the new subtitles asset. |
 | `package_path` | string | no | Destination /Game folder (default /Game/MCP). |
 
-**Returns:** `{ asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool }`
+**Returns:** `{ asset_path: string, success: bool, already_existed: bool, cue_count: int, saved: bool, message: string? }`
 
 ## `delete_meta_sound`
 
 *Destructive, idempotent.*
 
-Delete a UMetaSoundSource asset from the project. Idempotent — deleting a non-existent asset is a no-op. Destructive — requires confirm=true.
+Delete a MetaSound asset from the project: a MetaSound Source or Patch, or any other class the MetaSound UObject registry serves as an asset. Idempotent -- deleting a non-existent asset is a no-op. Destructive -- requires confirm=true. An asset of any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `metasound_path` | string | yes | Asset path of the MetaSound Source. |
-| `confirm` | boolean | no | Must be true to actually delete. |
+| `metasound_path` | string | yes | Asset path of the MetaSound Source or Patch. |
+| `confirm` | boolean | yes | Must be true to actually delete. |
 
-**Returns:** `{ metasound_path, deleted, already_existed, note }`
+**Returns:** `{ metasound_path, asset_class?, deleted, already_existed?, note }`
 
 ## `disconnect_metasound_node_from_graph_output`
 
@@ -1041,7 +1041,7 @@ Remove a single FSubtitleAssetData cue by index. Inverse of add_subtitle_cue; us
 
 *Destructive, idempotent.*
 
-Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets.
+Destroy a USubtitleAssetUserData asset (mirror of create_subtitles_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a USubtitleAssetUserData, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -1143,8 +1143,8 @@ Set the default value of one graph input on a MetaSound Source asset, normally a
 |---|---|---|---|
 | `preset_path` | string | yes | Content path of the MetaSound preset asset, e.g. "/Game/Audio/MSP_Engine". |
 | `parameter_name` | string | yes | Name of the graph input to set, as get_metasound_preset_parameters lists it. |
+| `value` | any | yes | Value to set, of the JSON type parameter_type names: a number for float, a whole number for int, true or false for bool, a string for string; a missing value or another type is an error |
 | `parameter_type` | string | no | Literal type for the value: "float" (default), "bool", "int", "string". |
-| `value` | any | no | Value to set, of the JSON type parameter_type names: a number for float, a whole number for int, true or false for bool, a string for string; a missing value or another type is an error |
 
 **Returns:** `{ preset_path: string, parameter_name: string, success: bool, changed: bool, verified: bool, value_read_back: string, saved: bool, save_error?: string, note?: string }`
 

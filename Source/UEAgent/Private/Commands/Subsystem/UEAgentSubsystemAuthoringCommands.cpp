@@ -482,7 +482,7 @@ TSharedPtr<FJsonObject> HandleDeactivateExternalSubsystem(
 // ---------------------------------------------------------------------------
 // remove_subsystem_class_bp
 // ---------------------------------------------------------------------------
-// MCP:remove_subsystem_class_bp - Destroy the Blueprint-authored USubsystem subclass at a package path (mirror of create_subsystem_class_bp). Typed-delete on TWO checks: the asset must be a UBlueprint AND its generated class must derive from USubsystem, so it cannot wipe an unrelated Blueprint the way the generic delete_asset can. Idempotent on missing assets.
+// MCP:remove_subsystem_class_bp - Destroy the Blueprint-authored USubsystem subclass at a package path (mirror of create_subsystem_class_bp). Typed-delete on TWO checks: the asset must be a UBlueprint AND its generated class must derive from USubsystem, so it cannot wipe an unrelated Blueprint the way the generic delete_asset can: either check failing is success false with deleted false, and nothing is deleted. Idempotent on missing assets; a delete the engine refuses is success false.
 //   @param asset_path - Full /Game/.../Name asset path of the subsystem Blueprint.
 //   @returns { asset_path, deleted, already_existed, asset_class, generated_class_name?, note? }
 
@@ -506,34 +506,42 @@ TSharedPtr<FJsonObject> HandleRemoveSubsystemClassBp(
 	UBlueprint* BP = Cast<UBlueprint>(Asset);
 	if (!BP)
 	{
-		return mcp_common::MakeOkReply(AssetCommandHelpers::WrongTypeRefusal(AssetPath, *Asset, TEXT("UBlueprint")));
+		return AssetCommandHelpers::WrongTypeRefusal(TEXT("remove_subsystem_class_bp"), AssetPath, *Asset, TEXT("UBlueprint"));
 	}
 
-	// Verify generated class is a USubsystem derivative (typed-delete guard).
-	const FString GeneratedClassName = BP->GeneratedClass ? BP->GeneratedClass->GetName() : FString();
-	const bool bIsSubsystemClass = BP->GeneratedClass && BP->GeneratedClass->IsChildOf(USubsystem::StaticClass());
+	// The second typed-delete check: the generated class must derive from USubsystem. Read before the delete,
+	// which can collect garbage and free the Blueprint.
+	const UClass* GeneratedClass = BP->GeneratedClass;
+	const FString GeneratedClassName = GeneratedClass ? GeneratedClass->GetName() : FString();
+	const bool bIsSubsystemClass = GeneratedClass && GeneratedClass->IsChildOf(USubsystem::StaticClass());
+	const FString AssetClassName = BP->GetClass()->GetName();
+
+	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
+	Resp->SetStringField(TEXT("asset_path"), AssetPath);
+	Resp->SetStringField(TEXT("asset_class"), AssetClassName);
+	if (!GeneratedClassName.IsEmpty())
+	{
+		Resp->SetStringField(TEXT("generated_class_name"), GeneratedClassName);
+	}
+	Resp->SetBoolField(TEXT("is_subsystem_class"), bIsSubsystemClass);
+	if (!bIsSubsystemClass)
+	{
+		const FString Refusal = FString::Printf(
+			TEXT("generated class %s does not derive from USubsystem - wrong type, refusing to delete"),
+			GeneratedClass ? *GeneratedClassName : TEXT("(none)"));
+		Resp->SetBoolField(TEXT("deleted"), false);
+		Resp->SetStringField(TEXT("note"), Refusal);
+		return mcp_common::MakeOutcomeReply(Resp, false,
+			FString::Printf(TEXT("remove_subsystem_class_bp: %s at %s"), *Refusal, *AssetPath));
+	}
 
 	// DeleteAsset(path) is unreliable for a Blueprint created + saved this session (asset registry
 	// not synced); delete the loaded object directly (registry-independent).
 	const bool bDeleted = UEditorAssetLibrary::DeleteLoadedAsset(BP);
 
-	TSharedPtr<FJsonObject> Resp = MakeShared<FJsonObject>();
-	Resp->SetStringField(TEXT("asset_path"), AssetPath);
-	Resp->SetStringField(TEXT("asset_class"), BP->GetClass()->GetName());
-	if (!GeneratedClassName.IsEmpty())
-	{
-		Resp->SetStringField(TEXT("generated_class_name"), GeneratedClassName);
-	}
 	Resp->SetBoolField(TEXT("deleted"), bDeleted);
 	Resp->SetBoolField(TEXT("already_existed"), true);
-	Resp->SetBoolField(TEXT("is_subsystem_class"), bIsSubsystemClass);
-	if (!bIsSubsystemClass)
-	{
-		Resp->SetStringField(TEXT("note"),
-			TEXT("deleted asset was not a USubsystem derivative -- accepted because the "
-			     "caller named the asset_path explicitly; this guard is informational"));
-	}
-	return mcp_common::MakeOkReply(Resp);
+	return AssetCommandHelpers::DeleteOutcomeReply(TEXT("remove_subsystem_class_bp"), Resp, bDeleted, AssetPath);
 }
 
 // ---------------------------------------------------------------------------

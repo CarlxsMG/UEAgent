@@ -716,15 +716,35 @@ namespace
         return Reply;
     }
 
-    /** Read a UEnum value by name with a default fallback. */
+    /**
+     * Into Out, the value of the EQS test enum TEnum that the param ParamName names in Given: one of AcceptedNames,
+     * the enum's own names, matched without case; Default when Given is empty. False, with OutError listing
+     * AcceptedNames, for any other name.
+     */
     template <typename TEnum>
-    TEnum ParseEnumByName(const TCHAR* Name, TEnum Default)
+    bool NavEqs_ParseEnumParam(const TCHAR* ParamName, const FString& Given, TArrayView<const TCHAR* const> AcceptedNames,
+                               TEnum Default, TEnum& Out, FString& OutError)
     {
-        if (!Name || !*Name) { return Default; }
-        const UEnum* E = StaticEnum<TEnum>();
-        if (!E) { return Default; }
-        const int64 V = E->GetValueByNameString(Name);
-        return (V != INDEX_NONE) ? static_cast<TEnum>(V) : Default;
+        Out = Default;
+        if (Given.IsEmpty())
+        {
+            return true;
+        }
+        for (const TCHAR* Name : AcceptedNames)
+        {
+            if (Given.Equals(Name, ESearchCase::IgnoreCase))
+            {
+                const int64 Value = StaticEnum<TEnum>()->GetValueByNameString(Name);
+                if (Value != INDEX_NONE)
+                {
+                    Out = static_cast<TEnum>(Value);
+                    return true;
+                }
+            }
+        }
+        OutError = FString::Printf(TEXT("%s '%s' is not one of: %s. Nothing was changed."),
+            ParamName, *Given, *FString::Join(AcceptedNames, TEXT(", ")));
+        return false;
     }
 
     /**
@@ -935,7 +955,7 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:set_eqs_test_scoring - Set the scoring and filter settings of the test at test_index in the option at option_index of a UEnvQuery asset loaded by asset path, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1), and an unknown enum name falls back to its default too: the reply reads the stored values back. The asset is marked dirty, not saved: persist it with save_asset. A query that does not load, or an option or test index out of range, is an error and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
+// MCP:set_eqs_test_scoring - Set the scoring and filter settings of test test_index in option option_index of a UEnvQuery asset, in one undo step: TestPurpose, FilterType, ScoringEquation, the FloatValueMin and FloatValueMax bounds and, only when given, ScoringFactor. The first five are written on every call, so one left out goes back to its default (Score, Range, Linear, 0, 1); the reply reads the stored values back. Values equal to the stored ones are a no-op: changed=false, a note, nothing written. A changed asset is marked dirty, not saved: persist it with save_asset. An enum name the param does not list (the error names the accepted ones), a query that does not load or an index out of range is an error, and nothing changes. Add the test with add_eqs_test; read the indices with get_eqs_query_info; generator settings: set_eqs_generator_properties.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param option_index - Option index (default 0)
 //   @param test_index - Test index within the option (default 0)
@@ -945,7 +965,7 @@ TSharedPtr<FJsonObject> HandleAddEQSTest(const TSharedPtr<FJsonObject>& Params)
 //   @param scoring_factor - Optional weight multiplier applied after the equation (ScoringFactor.DefaultValue); only applied when provided
 //   @param float_value_min - Optional min for FloatValueMin (default 0)
 //   @param float_value_max - Optional max for FloatValueMax (default 1)
-//   @returns { query_path, option_index, test_index, test_name, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max }
+//   @returns { query_path, option_index, test_index, test_name, changed, test_purpose, filter_type, scoring_equation, scoring_factor, float_value_min, float_value_max, note? }
 TSharedPtr<FJsonObject> HandleSetEQSTestScoring(const TSharedPtr<FJsonObject>& Params)
 {
     FString QueryPath;
@@ -960,6 +980,22 @@ TSharedPtr<FJsonObject> HandleSetEQSTestScoring(const TSharedPtr<FJsonObject>& P
     Params->TryGetStringField(TEXT("test_purpose"), PurposeStr);
     Params->TryGetStringField(TEXT("filter_type"), FilterStr);
     Params->TryGetStringField(TEXT("scoring_equation"), EqStr);
+
+    // The three enum names are checked before anything loads or changes; one left out takes its default.
+    static const TCHAR* const PurposeNames[] = { TEXT("Filter"), TEXT("Score"), TEXT("FilterAndScore") };
+    static const TCHAR* const FilterNames[] = { TEXT("Minimum"), TEXT("Maximum"), TEXT("Range"), TEXT("Match") };
+    static const TCHAR* const EquationNames[] =
+        { TEXT("Linear"), TEXT("Square"), TEXT("InverseLinear"), TEXT("SquareRoot"), TEXT("Constant") };
+    EEnvTestPurpose::Type Purpose = EEnvTestPurpose::Score;
+    EEnvTestFilterType::Type FilterType = EEnvTestFilterType::Range;
+    EEnvTestScoreEquation::Type Equation = EEnvTestScoreEquation::Linear;
+    FString EnumError;
+    if (!NavEqs_ParseEnumParam(TEXT("test_purpose"), PurposeStr, MakeArrayView(PurposeNames), EEnvTestPurpose::Score, Purpose, EnumError)
+        || !NavEqs_ParseEnumParam(TEXT("filter_type"), FilterStr, MakeArrayView(FilterNames), EEnvTestFilterType::Range, FilterType, EnumError)
+        || !NavEqs_ParseEnumParam(TEXT("scoring_equation"), EqStr, MakeArrayView(EquationNames), EEnvTestScoreEquation::Linear, Equation, EnumError))
+    {
+        return mcp_common::MakeErrorReply(EnumError);
+    }
 
     double FloatMin = 0.0, FloatMax = 1.0;
     Params->TryGetNumberField(TEXT("float_value_min"), FloatMin);
@@ -978,37 +1014,52 @@ TSharedPtr<FJsonObject> HandleSetEQSTestScoring(const TSharedPtr<FJsonObject>& P
 
     UEnvQueryTest* Test = Option->Tests[TestIndex];
 
-    // Modify() before the writes, so undo restores the previous scoring. A test saved without RF_Transactional would
-    // be skipped by Modify(); add_eqs_test and the EQS editor create tests with it.
-    Test->SetFlags(RF_Transactional);
-    Test->Modify();
-    Option->Modify();
-    Query->Modify();
-
-    Test->TestPurpose = ParseEnumByName<EEnvTestPurpose::Type>(
-        *FString::Printf(TEXT("EEnvTestPurpose::%s"), PurposeStr.IsEmpty() ? TEXT("Score") : *PurposeStr),
-        EEnvTestPurpose::Score);
-    // FilterType + ScoringEquation are real UEnvQueryTest UPROPERTYs (TEnumAsByte) that
-    // serialize on the asset, so they are persisted.
-    Test->FilterType = ParseEnumByName<EEnvTestFilterType::Type>(
-        *FString::Printf(TEXT("EEnvTestFilterType::%s"), FilterStr.IsEmpty() ? TEXT("Range") : *FilterStr),
-        EEnvTestFilterType::Range);
-    Test->ScoringEquation = ParseEnumByName<EEnvTestScoreEquation::Type>(
-        *FString::Printf(TEXT("EEnvTestScoreEquation::%s"), EqStr.IsEmpty() ? TEXT("Linear") : *EqStr),
-        EEnvTestScoreEquation::Linear);
-    // FloatValue*/ScoringFactor are FAIDataProviderFloatValue structs (DefaultValue field).
-    Test->FloatValueMin.DefaultValue = static_cast<float>(FloatMin);
-    Test->FloatValueMax.DefaultValue = static_cast<float>(FloatMax);
     double ScoringFactor = 0.0;
-    if (Params->TryGetNumberField(TEXT("scoring_factor"), ScoringFactor))
-        Test->ScoringFactor.DefaultValue = static_cast<float>(ScoringFactor);
+    const bool bHasScoringFactor = Params->TryGetNumberField(TEXT("scoring_factor"), ScoringFactor);
 
-    Query->MarkPackageDirty();
+    // Values that all equal the stored ones change nothing: nothing is Modify()'d, written or dirtied, so the call
+    // leaves no undo step.
+    const bool bChanged = Test->TestPurpose.GetValue() != Purpose
+        || Test->FilterType.GetValue() != FilterType
+        || Test->ScoringEquation.GetValue() != Equation
+        || Test->FloatValueMin.DefaultValue != static_cast<float>(FloatMin)
+        || Test->FloatValueMax.DefaultValue != static_cast<float>(FloatMax)
+        || (bHasScoringFactor && Test->ScoringFactor.DefaultValue != static_cast<float>(ScoringFactor));
+    if (bChanged)
+    {
+        // Modify() before the writes, so undo restores the previous scoring. A test saved without RF_Transactional
+        // would be skipped by Modify(); add_eqs_test and the EQS editor create tests with it.
+        Test->SetFlags(RF_Transactional);
+        Test->Modify();
+        Option->Modify();
+        Query->Modify();
+
+        Test->TestPurpose = Purpose;
+        // FilterType + ScoringEquation are real UEnvQueryTest UPROPERTYs (TEnumAsByte) that
+        // serialize on the asset, so they are persisted.
+        Test->FilterType = FilterType;
+        Test->ScoringEquation = Equation;
+        // FloatValue*/ScoringFactor are FAIDataProviderFloatValue structs (DefaultValue field).
+        Test->FloatValueMin.DefaultValue = static_cast<float>(FloatMin);
+        Test->FloatValueMax.DefaultValue = static_cast<float>(FloatMax);
+        if (bHasScoringFactor)
+        {
+            Test->ScoringFactor.DefaultValue = static_cast<float>(ScoringFactor);
+        }
+
+        Query->MarkPackageDirty();
+    }
 
     // Read BACK the real persisted values (not the input echo) for honest verification.
     TSharedPtr<FJsonObject> Result = NavEqs_OptionReply(QueryPath, OptionIndex);
     Result->SetNumberField(TEXT("test_index"), TestIndex);
     Result->SetStringField(TEXT("test_name"), Test->GetName());
+    Result->SetBoolField(TEXT("changed"), bChanged);
+    if (!bChanged)
+    {
+        Result->SetStringField(TEXT("note"),
+            TEXT("The test already holds these settings; nothing was written, dirtied or recorded for undo."));
+    }
     Result->SetStringField(TEXT("test_purpose"),
         StaticEnum<EEnvTestPurpose::Type>()->GetNameStringByValue(static_cast<int64>(Test->TestPurpose)));
     Result->SetStringField(TEXT("filter_type"),
@@ -1041,7 +1092,7 @@ namespace
     }
 }
 
-// MCP:run_eqs_query - Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true).
+// MCP:run_eqs_query - Runs a UEnvQuery synchronously against the editor world (UEnvQueryManager::RunInstantQuery) and returns the scored items. Generators/tests needing navigation data (SimpleGrid/PathingGrid/Pathfinding/Project/Trace) require a built navmesh; without it the query returns a non-Success status honestly (still success:true, ran:true). An unknown run_mode is an error and the query does not run.
 //   @param query_path - /Game/... path to the UEnvQuery asset (required)
 //   @param querier_actor - Optional actor display label or name used as the query Querier (drives contexts like EnvQueryContext_Querier); default: the query asset (no location)
 //   @param run_mode - "SingleResult" | "RandomBest5Pct" | "RandomBest25Pct" | "AllMatching" (default "AllMatching")
@@ -1086,9 +1137,14 @@ TSharedPtr<FJsonObject> HandleRunEQSQuery(const TSharedPtr<FJsonObject>& Params)
 
     FString RunModeStr;
     Params->TryGetStringField(TEXT("run_mode"), RunModeStr);
-    const EEnvQueryRunMode::Type RunMode = ParseEnumByName<EEnvQueryRunMode::Type>(
-        *FString::Printf(TEXT("EEnvQueryRunMode::%s"), RunModeStr.IsEmpty() ? TEXT("AllMatching") : *RunModeStr),
-        EEnvQueryRunMode::AllMatching);
+    // An unknown run_mode is refused rather than run as AllMatching.
+    static const TCHAR* const RunModeNames[] = { TEXT("SingleResult"), TEXT("RandomBest5Pct"), TEXT("RandomBest25Pct"), TEXT("AllMatching") };
+    EEnvQueryRunMode::Type RunMode = EEnvQueryRunMode::AllMatching;
+    FString RunModeError;
+    if (!NavEqs_ParseEnumParam(TEXT("run_mode"), RunModeStr, MakeArrayView(RunModeNames), EEnvQueryRunMode::AllMatching, RunMode, RunModeError))
+    {
+        return mcp_common::MakeErrorReply(RunModeError);
+    }
 
     int32 MaxItems = 50;
     Params->TryGetNumberField(TEXT("max_items"), MaxItems);

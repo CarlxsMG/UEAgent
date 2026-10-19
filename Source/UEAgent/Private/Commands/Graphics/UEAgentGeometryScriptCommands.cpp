@@ -141,9 +141,10 @@ namespace
      * Returns the populated UDynamicMesh* (caller-owned, transient package lifetime)
      * or nullptr with OutError set on failure.
      *
-     * Reads via MaxAvailable, which resets RequestedLODIndex to 0 and reads the
-     * hi-res source model when there is one (GeometryScript_ResolveStaticMeshReadLOD
-     * names the LOD read). UV channel selection is left to the
+     * Reads the source model at LODIndex (EGeometryScriptLODType::SourceModel), or the
+     * render data of that LOD when its source model holds no geometry; LODIndex must be one
+     * GeometryScript_ResolveStaticMeshReadLOD accepted, since the engine would clamp any
+     * other to a LOD the asset has. UV channel selection is left to the
      * caller (no UV traversal here — query cmds accept their own UVChannel arg).
      *
      * Build options:
@@ -157,7 +158,7 @@ namespace
      *   bUseBuildScale = true        — respect Build Scale so volume/area are
      *                                  in the StaticMesh's authored units.
      */
-    UDynamicMesh* BuildDynamicMeshFromStatic(UStaticMesh* StaticMesh, int32 RequestedLODIndex, FString& OutError)
+    UDynamicMesh* BuildDynamicMeshFromStatic(UStaticMesh* StaticMesh, int32 LODIndex, FString& OutError)
     {
         if (!StaticMesh)
         {
@@ -172,8 +173,8 @@ namespace
         Options.bUseBuildScale = true;
 
         FGeometryScriptMeshReadLOD RequestedLOD;
-        RequestedLOD.LODType = EGeometryScriptLODType::MaxAvailable;
-        RequestedLOD.LODIndex = FMath::Max(0, RequestedLODIndex);
+        RequestedLOD.LODType = EGeometryScriptLODType::SourceModel;
+        RequestedLOD.LODIndex = LODIndex;
 
         EGeometryScriptOutcomePins Outcome = EGeometryScriptOutcomePins::Failure;
         UDynamicMesh* DynMesh = NewObject<UDynamicMesh>(GetTransientPackage());
@@ -478,41 +479,53 @@ namespace
         return nullptr;
     }
 
-    // The LOD a static-mesh read was asked for, and the one it reads.
+    // The LOD a static-mesh read was asked for, and how it is read.
     struct FGeometryScriptStaticMeshLOD
     {
         int32 Requested = 0;        // lod_index as sent (0 when absent)
-        int32 Read = 0;             // index of the LOD read; 0 for the hi-res source model
-        bool bHiResSource = false;  // the hi-res source model was read
+        int32 Read = 0;             // index of the LOD read, which is the one requested once it is accepted
+        bool bRenderData = false;   // that LOD's render data was read, its source model holding no geometry
     };
 
-    // The LOD CopyMeshFromStaticMesh reads for an EGeometryScriptLODType::MaxAvailable request, the type every
-    // static-mesh read here passes. It mirrors the engine's resolution in the editor (UE::Conversion's
-    // StaticMeshToDynamicMesh with bUseClosestLOD, which GeometryScript passes): MaxAvailable resets the requested
-    // index to 0, then reads the hi-res source model when the asset has a valid one, else source model 0, else
-    // (no source geometry there) render-data LOD 0. A mesh with no source model, or with neither source geometry nor
-    // a render LOD, would make the engine index LOD -1 and kill the editor: OutError then says why it is refused.
+    // The LOD CopyMeshFromStaticMesh reads for an EGeometryScriptLODType::SourceModel request at RequestedLODIndex,
+    // the type every static-mesh read here passes. It mirrors the engine's resolution in the editor (UE::Conversion's
+    // StaticMeshToDynamicMesh with bUseClosestLOD, which GeometryScript passes): the source model at that index when
+    // it holds geometry, else the render data of the same LOD (as for a LOD the engine reduces from another). The
+    // engine silently clamps an index the asset does not have to one it has, so such an index is refused here, and so
+    // is a mesh with no source model or a LOD with neither source geometry nor a render LOD, which would make the
+    // engine index LOD -1 and kill the editor: OutError then says why.
     FGeometryScriptStaticMeshLOD GeometryScript_ResolveStaticMeshReadLOD(const UStaticMesh* StaticMesh, int32 RequestedLODIndex,
         FString& OutError)
     {
         FGeometryScriptStaticMeshLOD LOD;
         LOD.Requested = RequestedLODIndex;
-        if (StaticMesh->IsHiResMeshDescriptionValid())
+        LOD.Read = RequestedLODIndex;
+        const int32 NumSourceModels = StaticMesh->GetNumSourceModels();
+        if (NumSourceModels == 0)
         {
-            LOD.bHiResSource = true;
-        }
-        else if (StaticMesh->GetNumSourceModels() == 0
-            || (!StaticMesh->GetSourceModel(0).IsSourceModelInitialized() && StaticMesh->GetNumLODs() == 0))
-        {
-            OutError = FString::Printf(
-                TEXT("Static mesh '%s' has no source geometry and no render LOD to read; nothing was read"),
+            OutError = FString::Printf(TEXT("Static mesh '%s' has no source model, so no source geometry to read; nothing was read"),
                 *StaticMesh->GetPathName());
+        }
+        else if (RequestedLODIndex < 0 || RequestedLODIndex >= NumSourceModels)
+        {
+            OutError = FString::Printf(TEXT("Static mesh '%s' has no LOD %d: lod_index must be between 0 and %d; nothing was read"),
+                *StaticMesh->GetPathName(), RequestedLODIndex, NumSourceModels - 1);
+        }
+        else if (!StaticMesh->GetSourceModel(RequestedLODIndex).IsSourceModelInitialized())
+        {
+            LOD.bRenderData = true;
+            if (RequestedLODIndex >= StaticMesh->GetNumLODs())
+            {
+                OutError = FString::Printf(
+                    TEXT("Static mesh '%s' LOD %d has no source geometry and no render LOD to read; nothing was read"),
+                    *StaticMesh->GetPathName(), RequestedLODIndex);
+            }
         }
         return LOD;
     }
 
-    // The "static_mesh_path" mesh and the LOD it is read at (the optional "lod_index" is only recorded as
-    // requested); null on success, else the error reply.
+    // The "static_mesh_path" mesh and the LOD the optional "lod_index" asks for (default 0), which must be one the
+    // mesh has; null on success, else the error reply.
     TSharedPtr<FJsonObject> GeometryScript_LoadStaticMeshParam(const TSharedPtr<FJsonObject>& Params, FString& OutMeshPath,
         FGeometryScriptStaticMeshLOD& OutLOD, UStaticMesh*& OutStaticMesh)
     {
@@ -543,7 +556,7 @@ namespace
             return Failure;
         }
         FString DynError;
-        OutMesh = BuildDynamicMeshFromStatic(StaticMesh, OutLOD.Requested, DynError);
+        OutMesh = BuildDynamicMeshFromStatic(StaticMesh, OutLOD.Read, DynError);
         if (!OutMesh)
         {
             return mcp_common::MakeErrorReply(DynError);
@@ -551,25 +564,15 @@ namespace
         return nullptr;
     }
 
-    // The optional "lod_index" param clamped to >= 0; 0 when absent.
-    int32 GeometryScript_ReadClampedLODIndex(const TSharedPtr<FJsonObject>& Params)
-    {
-        int32 LODIndex = 0;
-        double LODDouble = 0.0;
-        if (Params->TryGetNumberField(TEXT("lod_index"), LODDouble))
-        {
-            LODIndex = FMath::Max(0, static_cast<int32>(LODDouble));
-        }
-        return LODIndex;
-    }
-
-    // Data["lod_index"] = the LOD read, Data["requested_lod_index"] = the one asked for, and
-    // Data["read_hi_res_source"] = whether the hi-res source model was read instead of an LOD.
+    // Data["lod_index"] = the LOD read, Data["requested_lod_index"] = the one asked for,
+    // Data["read_render_data"] = whether that LOD's render data was read instead of its source model, and
+    // Data["read_hi_res_source"] = false: a SourceModel read never takes the hi-res source model.
     void GeometryScript_AddStaticMeshLOD(const TSharedPtr<FJsonObject>& Data, const FGeometryScriptStaticMeshLOD& LOD)
     {
         Data->SetNumberField(TEXT("lod_index"), LOD.Read);
         Data->SetNumberField(TEXT("requested_lod_index"), LOD.Requested);
-        Data->SetBoolField(TEXT("read_hi_res_source"), LOD.bHiResSource);
+        Data->SetBoolField(TEXT("read_hi_res_source"), false);
+        Data->SetBoolField(TEXT("read_render_data"), LOD.bRenderData);
     }
 
     // A reply payload naming the queried static mesh: static_mesh_path and the LOD fields of
@@ -1820,10 +1823,10 @@ TSharedPtr<FJsonObject> HandleApplyAdaptiveRemesh(const TSharedPtr<FJsonObject>&
 // + UGeometryScriptLibrary_MeshQueryFunctions. Headless-safe. No save.
 // ===========================================================================
 
-// MCP:get_mesh_bounding_box - Read the axis-aligned bounding box of a UStaticMesh asset in mesh-local space (cm, no actor transform), measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied: min, max, center, and extent as the half-size on each axis. Read-only: the asset is loaded, not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. The bounds stored on the asset, with any bounds extension and a sphere radius: get_static_mesh_info; a placed actor in world space: get_actor_bounds; part of a DynamicMeshActor: get_mesh_selection_bounds.
+// MCP:get_mesh_bounding_box - Read the axis-aligned bounding box of a UStaticMesh asset in mesh-local space (cm, no actor transform), measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied: min, max, center, and extent as the half-size on each axis. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. The bounds stored on the asset, with any bounds extension and a sphere radius: get_static_mesh_info; a placed actor in world space: get_actor_bounds; part of a DynamicMeshActor: get_mesh_selection_bounds.
 //   @param static_mesh_path - Content path to the UStaticMesh asset (e.g. "/Game/Meshes/SM_Cube")
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, min_x, min_y, min_z, max_x, max_y, max_z, extent_x, extent_y, extent_z, center_x, center_y, center_z }
 TSharedPtr<FJsonObject> HandleGetMeshBoundingBox(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1851,10 +1854,10 @@ TSharedPtr<FJsonObject> HandleGetMeshBoundingBox(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_volume_area - Read the surface area (cm^2) and signed volume (cm^3) of one LOD of a UStaticMesh asset, measured on a transient copy with the asset's build settings and build scale applied, in mesh-local space (no actor transform). The volume is an enclosed volume only when is_closed is true; on an open mesh it is not one, and reversed winding makes it negative. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Center of mass too: get_mesh_volume_area_center; bounds: get_mesh_bounding_box; watertightness alone: get_mesh_is_closed.
+// MCP:get_mesh_volume_area - Read the surface area (cm^2) and signed volume (cm^3) of one LOD of a UStaticMesh asset, measured on a transient copy with the asset's build settings and build scale applied, in mesh-local space (no actor transform). The volume is an enclosed volume only when is_closed is true; on an open mesh it is not one, and reversed winding makes it negative. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Center of mass too: get_mesh_volume_area_center; bounds: get_mesh_bounding_box; watertightness alone: get_mesh_is_closed.
 //   @param static_mesh_path - Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works).
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, surface_area, volume, is_closed }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, surface_area, volume, is_closed }
 TSharedPtr<FJsonObject> HandleGetMeshVolumeArea(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1876,10 +1879,10 @@ TSharedPtr<FJsonObject> HandleGetMeshVolumeArea(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_volume_area_center - Read the surface area (cm^2), signed volume (cm^3) and center of mass of a UStaticMesh asset, measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied, in mesh-local space with no actor transform. The center is the centroid of the enclosed solid at uniform density; it and the volume mean something only when is_closed is true, and reversed winding makes the volume negative. Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Area and volume alone: get_mesh_volume_area; bounds: get_mesh_bounding_box.
+// MCP:get_mesh_volume_area_center - Read the surface area (cm^2), signed volume (cm^3) and center of mass of a UStaticMesh asset, measured on a transient dynamic-mesh copy with the asset's build settings and build scale applied, in mesh-local space with no actor transform. The center is the centroid of the enclosed solid at uniform density; it and the volume mean something only when is_closed is true, and reversed winding makes the volume negative. Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Area and volume alone: get_mesh_volume_area; bounds: get_mesh_bounding_box.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, surface_area, volume, center_of_mass_x, center_of_mass_y, center_of_mass_z, is_closed }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, surface_area, volume, center_of_mass_x, center_of_mass_y, center_of_mass_z, is_closed }
 TSharedPtr<FJsonObject> HandleGetMeshVolumeAreaCenter(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1905,10 +1908,10 @@ TSharedPtr<FJsonObject> HandleGetMeshVolumeAreaCenter(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_is_closed - Test whether one LOD of a UStaticMesh asset is closed (watertight): is_closed is true when the mesh, copied to a transient dynamic mesh with build settings applied, has triangles and no boundary edge, that is no edge with a single adjacent triangle. An empty mesh reports false. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. To locate the holes use get_mesh_open_border_loops; area and volume (with is_closed): get_mesh_volume_area; a DynamicMeshActor in the level: get_num_open_border_edges or get_dynamic_mesh_info.
+// MCP:get_mesh_is_closed - Test whether one LOD of a UStaticMesh asset is closed (watertight): is_closed is true when the mesh, copied to a transient dynamic mesh with build settings applied, has triangles and no boundary edge, that is no edge with a single adjacent triangle. An empty mesh reports false. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. To locate the holes use get_mesh_open_border_loops; area and volume (with is_closed): get_mesh_volume_area; a DynamicMeshActor in the level: get_num_open_border_edges or get_dynamic_mesh_info.
 //   @param static_mesh_path - Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works).
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, is_closed }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, is_closed }
 TSharedPtr<FJsonObject> HandleGetMeshIsClosed(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1925,10 +1928,10 @@ TSharedPtr<FJsonObject> HandleGetMeshIsClosed(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_open_border_loops - Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
+// MCP:get_mesh_open_border_loops - Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, open_border_loops, ambiguous_topology }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, ambiguous_topology }
 TSharedPtr<FJsonObject> HandleGetMeshOpenBorderLoops(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1947,10 +1950,10 @@ TSharedPtr<FJsonObject> HandleGetMeshOpenBorderLoops(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_connected_components - Count the connected components (islands: sets of triangles joined through shared edges) of one LOD of a UStaticMesh asset, computed on a transient dynamic mesh copy with build settings applied. One solid piece gives 1 and an empty mesh 0; parts that only touch or overlap without sharing edges count separately. Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. For a DynamicMeshActor in the level use get_num_connected_islands, or get_mesh_components_detail for each island's triangle count, bounds and material IDs.
+// MCP:get_mesh_connected_components - Count the connected components (islands: sets of triangles joined through shared edges) of one LOD of a UStaticMesh asset, computed on a transient dynamic mesh copy with build settings applied. One solid piece gives 1 and an empty mesh 0; parts that only touch or overlap without sharing edges count separately. Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. For a DynamicMeshActor in the level use get_num_connected_islands, or get_mesh_components_detail for each island's triangle count, bounds and material IDs.
 //   @param static_mesh_path - Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works).
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, connected_components }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, connected_components }
 TSharedPtr<FJsonObject> HandleGetMeshConnectedComponents(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1967,10 +1970,10 @@ TSharedPtr<FJsonObject> HandleGetMeshConnectedComponents(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_vertex_count - Count the vertices of a UStaticMesh asset on a transient dynamic-mesh copy with build settings applied and degenerate triangles kept: vertex_count is the live vertices, vertex_id_count the size of the ID space, and has_vertex_id_gaps is true when they differ. The copy shares one vertex across UV and normal seams, so the count is usually below the render vertex counts of list_uv_channels (per LOD) and get_static_mesh_info (LOD 0). Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Triangles: get_mesh_triangle_count; a DynamicMeshActor in the level: get_dynamic_mesh_info.
+// MCP:get_mesh_vertex_count - Count the vertices of a UStaticMesh asset on a transient dynamic-mesh copy with build settings applied and degenerate triangles kept: vertex_count is the live vertices, vertex_id_count the size of the ID space, and has_vertex_id_gaps is true when they differ. From a source model, the copy shares one vertex across UV and normal seams, so the count is usually below the render vertex counts of list_uv_channels (per LOD) and get_static_mesh_info (LOD 0). Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry, is an error. Triangles: get_mesh_triangle_count; a DynamicMeshActor in the level: get_dynamic_mesh_info.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, vertex_count, vertex_id_count, has_vertex_id_gaps }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, vertex_count, vertex_id_count, has_vertex_id_gaps }
 TSharedPtr<FJsonObject> HandleGetMeshVertexCount(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -1991,10 +1994,10 @@ TSharedPtr<FJsonObject> HandleGetMeshVertexCount(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_triangle_count - Count the triangles of one LOD of a UStaticMesh asset, copied to a transient dynamic mesh with build settings applied and degenerate triangles kept. triangle_count is the number of live triangles, triangle_id_count the size of the triangle ID space, and has_triangle_id_gaps is true when they differ (free ID slots, which a fresh copy does not normally have). Read-only: the asset is loaded, not changed. lod_index does not choose the geometry: the engine reads the hi-res source model when the asset has one, else LOD 0, and lod_index and read_hi_res_source in the reply say which was read. A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Vertices: get_mesh_vertex_count; LOD count and materials: get_static_mesh_info; a DynamicMeshActor in the level: get_dynamic_mesh_info.
+// MCP:get_mesh_triangle_count - Count the triangles of one LOD of a UStaticMesh asset, copied to a transient dynamic mesh with build settings applied and degenerate triangles kept. triangle_count is the number of live triangles, triangle_id_count the size of the triangle ID space, and has_triangle_id_gaps is true when they differ (free ID slots, which a fresh copy does not normally have). Read-only: the asset is loaded, not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that does not load as a static mesh, or a mesh with no geometry to read, is an error. Vertices: get_mesh_vertex_count; LOD count and materials: get_static_mesh_info; a DynamicMeshActor in the level: get_dynamic_mesh_info.
 //   @param static_mesh_path - Asset path of the UStaticMesh, e.g. "/Game/Meshes/SM_Rock" (the object path form also works).
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, triangle_count, triangle_id_count, has_triangle_id_gaps }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, triangle_count, triangle_id_count, has_triangle_id_gaps }
 TSharedPtr<FJsonObject> HandleGetMeshTriangleCount(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2015,10 +2018,10 @@ TSharedPtr<FJsonObject> HandleGetMeshTriangleCount(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_uv_channel_count - Count the UV channels of a UStaticMesh asset as GeometryScript reads them: the UV layers of a transient dynamic-mesh copy of its geometry, 0 when the copy carries no attributes. Read-only: the asset is not changed. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A lower LOD can carry a different number. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Use it to pick a valid uv_channel for get_mesh_uv_area; every LOD's count and the lightmap channel index: list_uv_channels; overlaps and out-of-square UVs: get_uv_health_report; empty a channel: clear_uv_channel.
+// MCP:get_mesh_uv_channel_count - Count the UV channels of a UStaticMesh asset as GeometryScript reads them: the UV layers of a transient dynamic-mesh copy of its geometry, 0 when the copy carries no attributes. Read-only: the asset is not changed. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A lower LOD can carry a different number. A path that does not load as a static mesh, or a mesh with no geometry, is an error. Use it to pick a valid uv_channel for get_mesh_uv_area; every LOD's count and the lightmap channel index: list_uv_channels; overlaps and out-of-square UVs: get_uv_health_report; empty a channel: clear_uv_channel.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, uv_channel_count }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, uv_channel_count }
 TSharedPtr<FJsonObject> HandleGetMeshUVChannelCount(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2035,11 +2038,11 @@ TSharedPtr<FJsonObject> HandleGetMeshUVChannelCount(
     return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:get_mesh_uv_area - Sum the UV-space area of one UV channel of a UStaticMesh asset on a transient dynamic-mesh copy: each triangle with UVs set adds its unsigned area and one without UVs adds nothing, so UVs that fill the 0-1 square once sum to 1.0, and overlapping or stacked islands all count, which can push the sum past 1. uv_channel defaults to 0; a negative one is an error, but a channel the mesh lacks is a success with is_valid_uv_channel=false and uv_area 0. Read-only. lod_index does not pick the geometry: the engine reads the hi-res source model when there is one, else LOD 0, and lod_index and read_hi_res_source say which. A path that is not a static mesh, or one with no geometry, is an error. Channel count: get_mesh_uv_channel_count; overlaps: get_uv_health_report.
+// MCP:get_mesh_uv_area - Sum the UV-space area of one UV channel of a UStaticMesh asset on a transient dynamic-mesh copy: each triangle with UVs set adds its unsigned area and one without UVs adds nothing, so UVs that fill the 0-1 square once sum to 1.0, and overlapping or stacked islands all count, which can push the sum past 1. uv_channel defaults to 0; a negative one is an error, but a channel the mesh lacks is a success with is_valid_uv_channel=false and uv_area 0. Read-only. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Channel count: get_mesh_uv_channel_count; overlaps: get_uv_health_report.
 //   @param static_mesh_path - Content path to the UStaticMesh asset
 //   @param uv_channel - UV channel index (default 0)
-//   @param lod_index - LOD asked for (default 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, uv_channel, uv_area, is_valid_uv_channel }
+//   @param lod_index - LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read.
+//   @returns { static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, uv_channel, uv_area, is_valid_uv_channel }
 TSharedPtr<FJsonObject> HandleGetMeshUVArea(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2055,7 +2058,7 @@ TSharedPtr<FJsonObject> HandleGetMeshUVArea(
         return mcp_common::MakeErrorReply(TEXT("uv_channel must be >= 0"));
 
     FString DynError;
-    UDynamicMesh* DynMesh = BuildDynamicMeshFromStatic(StaticMesh, LOD.Requested, DynError);
+    UDynamicMesh* DynMesh = BuildDynamicMeshFromStatic(StaticMesh, LOD.Read, DynError);
     if (!DynMesh)
         return mcp_common::MakeErrorReply(DynError);
 
@@ -2505,7 +2508,8 @@ TSharedPtr<FJsonObject> HandleFindNearestPointOnMesh(
     UDynamicMesh* DynMesh = ResolveDynamicMeshForSpatial(Params, Error);
     if (!DynMesh)
         return mcp_common::MakeErrorReply(Error);
-    if (!Params->HasField(TEXT("query_point")))
+    const TArray<TSharedPtr<FJsonValue>>* QueryPointJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("query_point"), QueryPointJson))
         return mcp_common::MakeErrorReply(TEXT("query_point is required"));
 
     const FVector QueryPoint = mcp_common::ReadJsonVector(Params, TEXT("query_point"));
@@ -2542,9 +2546,11 @@ TSharedPtr<FJsonObject> HandleFindNearestPointOnMesh(
 TSharedPtr<FJsonObject> HandleFindNearestRayIntersectionWithMesh(
     const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params->HasField(TEXT("ray_origin")))
+    const TArray<TSharedPtr<FJsonValue>>* RayOriginJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("ray_origin"), RayOriginJson))
         return mcp_common::MakeErrorReply(TEXT("ray_origin is required"));
-    if (!Params->HasField(TEXT("ray_direction")))
+    const TArray<TSharedPtr<FJsonValue>>* RayDirectionJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("ray_direction"), RayDirectionJson))
         return mcp_common::MakeErrorReply(TEXT("ray_direction is required"));
 
     const FVector RayOrigin = mcp_common::ReadJsonVector(Params, TEXT("ray_origin"));
@@ -2603,7 +2609,8 @@ TSharedPtr<FJsonObject> HandleIsPointInsideMesh(
     UDynamicMesh* DynMesh = ResolveDynamicMeshForSpatial(Params, Error);
     if (!DynMesh)
         return mcp_common::MakeErrorReply(Error);
-    if (!Params->HasField(TEXT("query_point")))
+    const TArray<TSharedPtr<FJsonValue>>* QueryPointJson = nullptr;
+    if (!Params->TryGetArrayField(TEXT("query_point"), QueryPointJson))
         return mcp_common::MakeErrorReply(TEXT("query_point is required"));
 
     const FVector QueryPoint = mcp_common::ReadJsonVector(Params, TEXT("query_point"));
@@ -2758,14 +2765,14 @@ TSharedPtr<FJsonObject> HandleTranslateMeshUVs(
     return mcp_common::MakeOkReply(ResultObj);
 }
 
-// MCP:scale_mesh_uvs - Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors; zero factors are refused and 1, 1 changes nothing (scaled false) and adds no undo step. One undo step restores the UVs; reply actor_name is the component name, not the actor label.
+// MCP:scale_mesh_uvs - Scale all UVs of one channel on a DynamicMeshActor's live dynamic mesh in the editor world by separate U and V factors around the scale origin, as one undo step that restores the UVs; nothing is saved. The factors are checked as the floats the engine uses: a zero factor, or a scale shorter than 0.0001, which the engine would silently replace with 1, 1, is an error and nothing changes. A scale of 1, 1 changes nothing: scaled is false with a note, and no undo step is added. A channel the mesh lacks or an unknown actor is an error. Reply actor_name is the component name, not the actor label. Offset UVs: translate_mesh_uvs; rotate them: rotate_mesh_uvs; copy a channel: copy_mesh_uv_channel.
 //   @param actor_name [string!] - Label or object name (case-insensitive) of the target DynamicMeshActor in the editor world.
 //   @param uv_channel [number!] - 0-based UV channel index; a channel the mesh does not have fails the call.
 //   @param scale_u [number!] - Scale factor along U; must be non-zero (1 keeps U unchanged).
 //   @param scale_v [number!] - Scale factor along V; must be non-zero (1 keeps V unchanged).
 //   @param scale_origin_u [number] - U coordinate of the point the scaling is centred on (default 0).
 //   @param scale_origin_v [number] - V coordinate of the point the scaling is centred on (default 0).
-//   @returns { actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool }
+//   @returns { actor_name: string, uv_channel: int, scale_u: number, scale_v: number, scale_origin: { u, v }, scaled: bool, note: string? }
 TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     const TSharedPtr<FJsonObject>& Params)
 {
@@ -2784,10 +2791,20 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     double SU = 1.0, SV = 1.0;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("scale_u"), SU)) { return Missing; }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("scale_v"), SV)) { return Missing; }
-    if (SU == 0.0 || SV == 0.0)
+    // ScaleMeshUVs works on the scale as an FVector2f, so the factors are checked as the floats it uses: a factor
+    // that is zero there collapses that axis, and a scale shorter than 0.0001 is silently replaced with (1, 1), so
+    // it would change nothing while the reply said scaled.
+    const FVector2f EngineScale = FVector2f(FVector2D(SU, SV));
+    if (EngineScale.X == 0.0f || EngineScale.Y == 0.0f)
     {
         return mcp_common::MakeErrorReply(
             TEXT("scale_u and scale_v must be non-zero"));
+    }
+    if (EngineScale.Length() < 0.0001)
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("The scale (%g, %g) is shorter than 0.0001, which ScaleMeshUVs replaces with (1, 1): it would change nothing; nothing was changed"),
+            SU, SV));
     }
 
     double SOU = 0.0, SOV = 0.0;
@@ -2800,7 +2817,8 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
         return Failure;
     }
 
-    const bool Scaled = (SU != 1.0) || (SV != 1.0);
+    // The engine scales by the float factors, so a factor that rounds to 1 in float leaves that axis unchanged.
+    const bool Scaled = (EngineScale.X != 1.0f) || (EngineScale.Y != 1.0f);
     if (Scaled)
     {
         const FScopedTransaction Transaction(LOCTEXT("ScaleMeshUVs", "MCP: Scale Mesh UVs"));
@@ -2821,6 +2839,10 @@ TSharedPtr<FJsonObject> HandleScaleMeshUVs(
     OriginObj->SetNumberField(TEXT("v"), SOV);
     ResultObj->SetObjectField(TEXT("scale_origin"), OriginObj);
     ResultObj->SetBoolField(TEXT("scaled"), Scaled);
+    if (!Scaled)
+    {
+        ResultObj->SetStringField(TEXT("note"), TEXT("A scale of (1, 1) leaves the UVs as they are; nothing was changed"));
+    }
     return mcp_common::MakeOkReply(ResultObj);
 }
 
@@ -3502,6 +3524,23 @@ TSharedPtr<FJsonObject> HandleDeleteTriangleFromMesh(const TSharedPtr<FJsonObjec
     // GetTriangleCount, not GetNumTriangleIDs: that is MaxTriangleID, the ID space, which a delete never shrinks.
     const int32 PreviousCount = DynMesh->GetTriangleCount();
 
+    // The engine's FDynamicMesh3::RemoveTriangle ensures on an ID that is not a live triangle, so such an ID is
+    // answered here, without calling it: deleted false, nothing changed, no undo step.
+    bool bTriangleExists = false;
+    DynMesh->ProcessMesh([TriangleId, &bTriangleExists](const UE::Geometry::FDynamicMesh3& ReadMesh)
+    {
+        bTriangleExists = ReadMesh.IsTriangle(TriangleId);
+    });
+    if (!bTriangleExists)
+    {
+        TSharedPtr<FJsonObject> MissingObj = GeometryScript_NewMeshData(DynMesh);
+        MissingObj->SetNumberField(TEXT("triangle_id"), TriangleId);
+        MissingObj->SetBoolField(TEXT("deleted"), false);
+        MissingObj->SetNumberField(TEXT("triangle_count"), PreviousCount);
+        MissingObj->SetNumberField(TEXT("previous_triangle_count"), PreviousCount);
+        return mcp_common::MakeOkReply(MissingObj);
+    }
+
     const FScopedTransaction Transaction(LOCTEXT("DeleteTriangleFromMesh", "MCP: Delete Triangle From Mesh"));
     FGeometryScriptMeshEdit MeshEdit(DynMesh);
     bool bWasDeleted = false;
@@ -3552,11 +3591,31 @@ TSharedPtr<FJsonObject> HandleDeleteSelectedTrianglesFromMesh(const TSharedPtr<F
     // GetTriangleCount, not GetNumTriangleIDs: that is MaxTriangleID, the ID space, which a delete never shrinks.
     const int32 PreviousCount = DynMesh->GetTriangleCount();
 
+    // Only live triangles, each once, reach the engine: its FDynamicMesh3::RemoveTriangle ensures on an ID that is
+    // not one, and a repeated ID is one the first removal already freed. The others count as not deleted.
+    FGeometryScriptIndexList LiveIndices;
+    LiveIndices.Reset(EGeometryScriptIndexType::Triangle, Indices.List->Num());
+    DynMesh->ProcessMesh([&Indices, &LiveIndices](const UE::Geometry::FDynamicMesh3& ReadMesh)
+    {
+        TSet<int32> Seen;
+        for (const int32 Id : *Indices.List)
+        {
+            if (ReadMesh.IsTriangle(Id) && !Seen.Contains(Id))
+            {
+                Seen.Add(Id);
+                LiveIndices.List->Add(Id);
+            }
+        }
+    });
+
     const FScopedTransaction Transaction(LOCTEXT("DeleteSelectedTrianglesFromMesh", "MCP: Delete Selected Triangles From Mesh"));
     FGeometryScriptMeshEdit MeshEdit(DynMesh);
     int32 NumDeleted = 0;
-    UGeometryScriptLibrary_MeshBasicEditFunctions::DeleteTrianglesFromMesh(
-        DynMesh, Indices, NumDeleted, /*bDeferChangeNotifications*/ false);
+    if (LiveIndices.List->Num() > 0)
+    {
+        UGeometryScriptLibrary_MeshBasicEditFunctions::DeleteTrianglesFromMesh(
+            DynMesh, LiveIndices, NumDeleted, /*bDeferChangeNotifications*/ false);
+    }
     MeshEdit.Commit();
 
     const int32 NewCount = DynMesh->GetTriangleCount();
@@ -3611,11 +3670,11 @@ TSharedPtr<FJsonObject> HandleGetNumExtendedPolygroupLayers(const TSharedPtr<FJs
 // (MeshAssetFunctions.cpp) — that must not be issued off the game thread.
 // ===========================================================================
 
-// MCP:copy_static_mesh_to_dynamic_mesh - Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh (engine-default options: build settings applied, tangents on). Destructive replace of the actor's current mesh. Idempotent-ish: re-running re-extracts the same source geometry. It reads the hi-res source model when the asset has one, else LOD 0, whatever lod_index says, and lod_index and read_hi_res_source in the reply say which was read; a mesh with no geometry to read is an error. One undo step restores the previous mesh, and a failed copy leaves it as it was.
+// MCP:copy_static_mesh_to_dynamic_mesh - Copy the geometry of a UStaticMesh asset INTO the live dynamic mesh of a DynamicMeshActor via UGeometryScriptLibrary_StaticMeshFunctions::CopyMeshFromStaticMesh (engine-default options: build settings applied, tangents on). Destructive replace of the actor's current mesh. Idempotent-ish: re-running re-extracts the same source geometry. It reads LOD lod_index (default 0) from its source model, or from its render data when that LOD has no source geometry, as a reduced one (read_render_data); a LOD the mesh does not have, or a mesh with no geometry to read, is an error checked before the actor is touched. One undo step restores the previous mesh, a failed copy leaves it as it was, and nothing is saved. Write back to an asset: copy_dynamic_mesh_to_static_mesh; query an asset without a copy: get_mesh_triangle_count.
 //   @param source_static_mesh_path [string!] - Content path of the source UStaticMesh (e.g. "/Engine/BasicShapes/Cube").
 //   @param actor_name [string!] - Label or name of the target DynamicMeshActor whose GetDynamicMesh() receives the geometry.
-//   @param lod_index [int] - Optional source LOD index (default 0, a negative one read as 0), echoed as requested_lod_index; it does not select the geometry, which is the hi-res source model or else LOD 0.
-//   @returns { source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, outcome_success: bool, triangle_count, vertex_count, copied: bool }
+//   @param lod_index [int] - Optional source LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a negative one or one the mesh does not have is an error.
+//   @returns { source_static_mesh_path, actor_name, lod_index, requested_lod_index, read_hi_res_source, read_render_data, outcome_success: bool, triangle_count, vertex_count, copied: bool }
 TSharedPtr<FJsonObject> HandleCopyStaticMeshToDynamicMesh(const TSharedPtr<FJsonObject>& Params)
 {
     UWorld* World = nullptr;
@@ -3627,15 +3686,16 @@ TSharedPtr<FJsonObject> HandleCopyStaticMeshToDynamicMesh(const TSharedPtr<FJson
     FString ActorName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
 
-    const int32 LODIndex = GeometryScript_ReadClampedLODIndex(Params);
+    int32 LODIndex = 0;
+    Params->TryGetNumberField(TEXT("lod_index"), LODIndex);
 
     // Resolve the source static-mesh asset.
     UStaticMesh* SourceMesh = mcp_common::LoadAssetOrSoftPath<UStaticMesh>(SourcePath);
     if (!SourceMesh)
         return mcp_common::MakeErrorReply(
             FString::Printf(TEXT("Source static mesh not found: %s"), *SourcePath));
-    // The LOD the engine reads (MaxAvailable ignores LODIndex); a mesh it cannot read without killing the editor is
-    // refused before the actor is touched.
+    // The LOD the engine reads; a LOD the mesh does not have, or a mesh it cannot read without killing the editor,
+    // is refused before the actor is touched.
     FString LODError;
     const FGeometryScriptStaticMeshLOD SourceLOD = GeometryScript_ResolveStaticMeshReadLOD(SourceMesh, LODIndex, LODError);
     if (!LODError.IsEmpty())
@@ -3660,8 +3720,8 @@ TSharedPtr<FJsonObject> HandleCopyStaticMeshToDynamicMesh(const TSharedPtr<FJson
     FGeometryScriptCopyMeshFromAssetOptions AssetOptions;
 
     FGeometryScriptMeshReadLOD RequestedLOD;
-    RequestedLOD.LODType = EGeometryScriptLODType::MaxAvailable; // the hi-res source model, else LOD 0, whatever LODIndex is
-    RequestedLOD.LODIndex = LODIndex;
+    RequestedLOD.LODType = EGeometryScriptLODType::SourceModel; // that LOD's source model, else its render data
+    RequestedLOD.LODIndex = SourceLOD.Read;
 
     const FScopedTransaction Transaction(LOCTEXT("CopyStaticMeshToDynamicMesh", "MCP: Copy Static Mesh To Dynamic Mesh"));
     Target.Actor->Modify();
@@ -3854,10 +3914,8 @@ TSharedPtr<FJsonObject> HandleSetNumExtendedPolygroupLayers(const TSharedPtr<FJs
     FString ActorName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("actor_name"), ActorName)) { return Missing; }
 
-    if (!Params->HasField(TEXT("num_layers")))
-        return mcp_common::MakeErrorReply(TEXT("num_layers is required"));
     double NumLayersDouble = 0.0;
-    Params->TryGetNumberField(TEXT("num_layers"), NumLayersDouble);
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("num_layers"), NumLayersDouble)) { return Missing; }
     const int32 NumLayers = static_cast<int32>(NumLayersDouble);
     if (NumLayers < 0)
         return mcp_common::MakeErrorReply(TEXT("num_layers must be >= 0"));
@@ -4220,10 +4278,8 @@ TSharedPtr<FJsonObject> HandleGetMeshMaterialIDs(const TSharedPtr<FJsonObject>& 
 //   @returns { actor_name, material_id, scope, triangles_targeted: int, triangles_painted: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params->HasField(TEXT("material_id")))
-        return mcp_common::MakeErrorReply(TEXT("material_id is required"));
     double MaterialIDDouble = 0.0;
-    Params->TryGetNumberField(TEXT("material_id"), MaterialIDDouble);
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("material_id"), MaterialIDDouble)) { return Missing; }
     const int32 MaterialID = static_cast<int32>(MaterialIDDouble);
     if (MaterialID < 0)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("material_id must be >= 0 (got %d)"), MaterialID));
@@ -4348,17 +4404,12 @@ TSharedPtr<FJsonObject> HandleSetMeshMaterialID(const TSharedPtr<FJsonObject>& P
 //   @returns { actor_name, polygroup_id, material_id, polygroup_id_valid: bool, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetPolygroupMaterialID(const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params->HasField(TEXT("polygroup_id")))
-        return mcp_common::MakeErrorReply(TEXT("polygroup_id is required"));
-    if (!Params->HasField(TEXT("material_id")))
-        return mcp_common::MakeErrorReply(TEXT("material_id is required"));
-
     double PolygroupIDDouble = 0.0;
-    Params->TryGetNumberField(TEXT("polygroup_id"), PolygroupIDDouble);
-    const int32 PolygroupID = static_cast<int32>(PolygroupIDDouble);
-
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("polygroup_id"), PolygroupIDDouble)) { return Missing; }
     double MaterialIDDouble = 0.0;
-    Params->TryGetNumberField(TEXT("material_id"), MaterialIDDouble);
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("material_id"), MaterialIDDouble)) { return Missing; }
+
+    const int32 PolygroupID = static_cast<int32>(PolygroupIDDouble);
     const int32 MaterialID = static_cast<int32>(MaterialIDDouble);
     if (MaterialID < 0)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("material_id must be >= 0 (got %d)"), MaterialID));
@@ -4440,10 +4491,8 @@ TSharedPtr<FJsonObject> HandleSetPolygroupMaterialID(const TSharedPtr<FJsonObjec
 //   @returns { actor_name, material_id, region, triangles_selected: int, max_material_id_after: int, distinct_material_ids_after: int, applied: bool }
 TSharedPtr<FJsonObject> HandleSetMeshMaterialIDInRegion(const TSharedPtr<FJsonObject>& Params)
 {
-    if (!Params->HasField(TEXT("material_id")))
-        return mcp_common::MakeErrorReply(TEXT("material_id is required"));
     double MaterialIDDouble = 0.0;
-    Params->TryGetNumberField(TEXT("material_id"), MaterialIDDouble);
+    if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("material_id"), MaterialIDDouble)) { return Missing; }
     const int32 MaterialID = static_cast<int32>(MaterialIDDouble);
     if (MaterialID < 0)
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("material_id must be >= 0 (got %d)"), MaterialID));

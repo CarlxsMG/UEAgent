@@ -174,8 +174,8 @@ Move the vertices of an existing section of a UProceduralMeshComponent on an edi
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `actor_label` | string | yes | Editor label of the actor carrying the PMC |
+| `vertices` | array | yes | Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared |
 | `component_index` | number | no | Optional 0-based PMC index on the actor; defaults to 0 |
 | `section_index` | number | no | Optional target section index (>= 0); defaults to 0 |
-| `vertices` | string | no | Required [[x, y, z], ...] array in component space with the same vertex count as the existing section; an entry that is not a 3-element array is skipped before the count is compared |
 
 **Returns:** `{ actor_label: string, section_index: int, vertex_count: int }`

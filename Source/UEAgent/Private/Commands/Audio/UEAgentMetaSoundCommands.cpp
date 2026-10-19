@@ -6,6 +6,7 @@
 #include "MetasoundBuilderBase.h"                               // UMetaSoundBuilderBase / EMetaSoundBuilderResult / handles
 #include "MetasoundSource.h"                                    // UMetaSoundSource
 #include "MetasoundDocumentInterface.h"                         // IMetaSoundDocumentInterface
+#include "MetasoundUObjectRegistry.h"                           // IMetasoundUObjectRegistry::GetObjectAsAssetBase
 #include "MetasoundFrontendDocument.h"                          // FMetasoundFrontendDocument / class metadata + interface
 #include "MetasoundFrontendLiteral.h"                           // FMetasoundFrontendLiteral
 #include "MetasoundFrontendDataTypeRegistry.h"                  // IDataTypeRegistry::IsRegistered / IsLiteralTypeSupported
@@ -127,15 +128,31 @@ namespace
         return GetBuilderForSource(OutSource, MetaSoundPath, OutError, bNameSourceIfNoSubsystem);
     }
 
-    // Map a string ("mono"/"stereo"/"quad"/"5.1"/"7.1") to EMetaSoundOutputAudioFormat.
-    EMetaSoundOutputAudioFormat ParseOutputFormat(const FString& InFormat)
+    // Map a string ("mono"/"stereo"/"quad"/"5.1"/"7.1", or empty for the mono default) to
+    // EMetaSoundOutputAudioFormat; false for any other string.
+    bool ParseOutputFormat(const FString& InFormat, EMetaSoundOutputAudioFormat& OutFormat)
     {
-        const FString F = InFormat.ToLower();
-        if (F == TEXT("stereo")) { return EMetaSoundOutputAudioFormat::Stereo; }
-        if (F == TEXT("quad")) { return EMetaSoundOutputAudioFormat::Quad; }
-        if (F == TEXT("5.1") || F == TEXT("fivedotone")) { return EMetaSoundOutputAudioFormat::FiveDotOne; }
-        if (F == TEXT("7.1") || F == TEXT("sevendotone")) { return EMetaSoundOutputAudioFormat::SevenDotOne; }
-        return EMetaSoundOutputAudioFormat::Mono;
+        const FString F = InFormat.TrimStartAndEnd().ToLower();
+        if (F.IsEmpty() || F == TEXT("mono")) { OutFormat = EMetaSoundOutputAudioFormat::Mono; return true; }
+        if (F == TEXT("stereo")) { OutFormat = EMetaSoundOutputAudioFormat::Stereo; return true; }
+        if (F == TEXT("quad")) { OutFormat = EMetaSoundOutputAudioFormat::Quad; return true; }
+        if (F == TEXT("5.1") || F == TEXT("fivedotone")) { OutFormat = EMetaSoundOutputAudioFormat::FiveDotOne; return true; }
+        if (F == TEXT("7.1") || F == TEXT("sevendotone")) { OutFormat = EMetaSoundOutputAudioFormat::SevenDotOne; return true; }
+        return false;
+    }
+
+    // The output_format spelling of Format, read back from a source; "channel_agnostic" for the experimental format.
+    const TCHAR* OutputFormatName(EMetaSoundOutputAudioFormat Format)
+    {
+        switch (Format)
+        {
+        case EMetaSoundOutputAudioFormat::Mono:        return TEXT("mono");
+        case EMetaSoundOutputAudioFormat::Stereo:      return TEXT("stereo");
+        case EMetaSoundOutputAudioFormat::Quad:        return TEXT("quad");
+        case EMetaSoundOutputAudioFormat::FiveDotOne:  return TEXT("5.1");
+        case EMetaSoundOutputAudioFormat::SevenDotOne: return TEXT("7.1");
+        default:                                       return TEXT("channel_agnostic");
+        }
     }
 
     // The literal kinds a typed value field of the default setters stands for.
@@ -468,11 +485,11 @@ namespace
 // UMetaSoundSource asset under /Game (via IAssetTools::CreateAsset; headless-safe,
 // no modal). Idempotent: if the asset already exists, loads + returns its info.
 // ---------------------------------------------------------------------------
-// MCP:create_metasound_source - Creates (or loads, idempotently) a UMetaSoundSource asset and saves it.  Uses UMetaSoundBuilderSubsystem::CreateSourceBuilder to build a source graph (pre-populated with the source interface: OnPlay input + audio output +, for one-shots, OnFinished output), then UMetaSoundEditorSubsystem::BuildToAsset to persist it as a real /Game asset (headless-safe; no modal picker).
+// MCP:create_metasound_source - Create a UMetaSoundSource asset at package_path/name (default folder /Game/MetaSounds): a one-shot source graph pre-wired with the source interface (OnPlay input, OnFinished output, one audio output per channel), built by the MetaSound builder subsystem and written with BuildToAsset, then saved; no dialog, no undo step. Idempotent: a MetaSound Source already there is returned unchanged with already_exists=true, created=false and saved=false, nothing saved. output_format is mono, stereo, quad, 5.1 or 7.1; anything else is an error and nothing is created. The reply's output_format is read from the source, also for an existing one, whose own format is reported and left as it is. An invalid package name or a failed build is an error; a failed save gives success false with save_error. Next: metasound_add_node_by_classname, metasound_add_interface; inspect: get_metasound_info; inverse: delete_meta_sound.
 //   @param name - Name of the MetaSound Source asset to create.
 //   @param package_path - Target /Game package path (optional, default "/Game/MetaSounds")
 //   @param output_format - Output audio format: "mono", "stereo", "quad", "5.1", or "7.1" (optional, default "mono")
-//   @returns { source_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, output_format: string, class_name: string, input_count: number, output_count: number, save_error: string? }
+//   @returns { source_name: string, asset_path: string, created: bool, already_exists: bool, saved: bool, output_format: string, class_name: string, input_count: number, output_count: number, save_error: string?, message: string? }
 
 TSharedPtr<FJsonObject> HandleCreateMetaSoundSource(const TSharedPtr<FJsonObject>& Params)
 {
@@ -485,7 +502,13 @@ TSharedPtr<FJsonObject> HandleCreateMetaSoundSource(const TSharedPtr<FJsonObject
 
     FString OutputFormatStr = TEXT("mono");
     Params->TryGetStringField(TEXT("output_format"), OutputFormatStr);
-    const EMetaSoundOutputAudioFormat OutputFormat = ParseOutputFormat(OutputFormatStr);
+    EMetaSoundOutputAudioFormat OutputFormat = EMetaSoundOutputAudioFormat::Mono;
+    if (!ParseOutputFormat(OutputFormatStr, OutputFormat))
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("Unknown output_format '%s': use \"mono\" (default), \"stereo\", \"quad\", \"5.1\" or \"7.1\". Nothing was created."),
+            *OutputFormatStr));
+    }
 
     const FString PackageName = FString::Printf(TEXT("%s/%s"), *PackagePath, *Name);
     if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(PackageName)) { return Invalid; }
@@ -500,10 +523,12 @@ TSharedPtr<FJsonObject> HandleCreateMetaSoundSource(const TSharedPtr<FJsonObject
         Data->SetStringField(TEXT("asset_path"), ObjectPath);
         Data->SetBoolField(TEXT("created"), false);
         Data->SetBoolField(TEXT("already_exists"), true);
-        // Already on disk => persisted. Emit the same keys as the create path so
-        // the idempotent re-run shape matches (was missing 'saved'/'output_format').
-        Data->SetBoolField(TEXT("saved"), true);
-        Data->SetStringField(TEXT("output_format"), OutputFormatStr.ToLower());
+        // Returned unchanged: nothing is applied to it, so nothing is saved. The same keys as the create path keep
+        // the idempotent re-run shape.
+        Data->SetBoolField(TEXT("saved"), false);
+        Data->SetStringField(TEXT("message"), TEXT("MetaSound Source already exists; returned the existing asset unchanged, nothing saved"));
+        // The source's own format, not the requested one: nothing is applied to an existing source.
+        Data->SetStringField(TEXT("output_format"), OutputFormatName(Existing->OutputFormat));
         Data->SetStringField(TEXT("class_name"), Doc.RootGraph.Metadata.GetClassName().ToString());
         Data->SetNumberField(TEXT("input_count"), Doc.RootGraph.GetDefaultInterface().Inputs.Num());
         Data->SetNumberField(TEXT("output_count"), Doc.RootGraph.GetDefaultInterface().Outputs.Num());
@@ -583,7 +608,7 @@ TSharedPtr<FJsonObject> HandleCreateMetaSoundSource(const TSharedPtr<FJsonObject
     Data->SetStringField(TEXT("source_name"), NewSource->GetName());
     Data->SetStringField(TEXT("asset_path"), NewSource->GetPathName());
     Data->SetBoolField(TEXT("created"), true);
-    Data->SetStringField(TEXT("output_format"), OutputFormatStr.ToLower());
+    Data->SetStringField(TEXT("output_format"), OutputFormatName(NewSource->OutputFormat));
     Data->SetStringField(TEXT("class_name"), Doc.RootGraph.Metadata.GetClassName().ToString());
     Data->SetNumberField(TEXT("input_count"), Doc.RootGraph.GetDefaultInterface().Inputs.Num());
     Data->SetNumberField(TEXT("output_count"), Doc.RootGraph.GetDefaultInterface().Outputs.Num());
@@ -1713,17 +1738,17 @@ TSharedPtr<FJsonObject> HandleListMetaSounds(
 // ---------------------------------------------------------------------------
 // delete_meta_sound — UEditorAssetLibrary::DeleteAsset with confirm gate
 // ---------------------------------------------------------------------------
-// MCP:delete_meta_sound - Delete a UMetaSoundSource asset from the project. Idempotent — deleting a non-existent asset is a no-op. Destructive — requires confirm=true.
-//   @param metasound_path - Asset path of the MetaSound Source.
+// MCP:delete_meta_sound - Delete a MetaSound asset from the project: a MetaSound Source or Patch, or any other class the MetaSound UObject registry serves as an asset. Idempotent -- deleting a non-existent asset is a no-op. Destructive -- requires confirm=true. An asset of any other class is refused with success false, deleted false and its asset_class, and nothing is deleted. A delete the engine refuses (Play-in-Editor running, a read-only file) is success false with deleted false.
+//   @param metasound_path - Asset path of the MetaSound Source or Patch.
 //   @param confirm - Must be true to actually delete.
-//   @returns { metasound_path, deleted, already_existed, note }
+//   @returns { metasound_path, asset_class?, deleted, already_existed?, note }
 TSharedPtr<FJsonObject> HandleDeleteMetaSound(
 	const TSharedPtr<FJsonObject>& Params)
 {
 	FString MetaSoundPath;
 	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("metasound_path"), MetaSoundPath)) { return Missing; }
 	bool bConfirm = false;
-	Params->TryGetBoolField(TEXT("confirm"), bConfirm);
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredBool(Params, TEXT("confirm"), bConfirm)) { return Missing; }
 	if (!bConfirm)
 	{
 		return mcp_common::MakeErrorReply(
@@ -1741,13 +1766,39 @@ TSharedPtr<FJsonObject> HandleDeleteMetaSound(
 		return mcp_common::MakeOkReply(Data);
 	}
 
+	UObject* Asset = UEditorAssetLibrary::LoadAsset(MetaSoundPath);
+	if (!Asset)
+	{
+		return mcp_common::MakeErrorReply(FString::Printf(
+			TEXT("delete_meta_sound: the asset at %s does not load, so its class cannot be checked; nothing deleted"), *MetaSoundPath));
+	}
+	// Only a MetaSound asset is deleted: the registry casts exactly the classes it serves as assets (Source, Patch
+	// and their subclasses) to FMetasoundAssetBase, and anything else to null.
+	const FString AssetClassName = Asset->GetClass()->GetName();
+	if (Metasound::IMetasoundUObjectRegistry::Get().GetObjectAsAssetBase(Asset) == nullptr)
+	{
+		const FString Refusal = FString::Printf(
+			TEXT("asset is not a MetaSound Source or Patch (got %s) - wrong type, refusing to delete"), *AssetClassName);
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("metasound_path"), MetaSoundPath);
+		Data->SetStringField(TEXT("asset_class"),    AssetClassName);
+		Data->SetBoolField  (TEXT("deleted"),        false);
+		Data->SetStringField(TEXT("note"),           Refusal);
+		return mcp_common::MakeOutcomeReply(Data, false,
+			FString::Printf(TEXT("delete_meta_sound: %s at %s"), *Refusal, *MetaSoundPath));
+	}
+
 	const bool bDeleted = UEditorAssetLibrary::DeleteAsset(MetaSoundPath);
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("metasound_path"),   MetaSoundPath);
+	Data->SetStringField(TEXT("asset_class"),     AssetClassName);
 	Data->SetBoolField  (TEXT("deleted"),         bDeleted);
 	Data->SetBoolField  (TEXT("already_existed"), true);
 	Data->SetStringField(TEXT("note"),            bDeleted ? TEXT("") : TEXT("UEditorAssetLibrary::DeleteAsset returned false."));
-	return mcp_common::MakeOkReply(Data);
+	return mcp_common::MakeOutcomeReply(Data, bDeleted, bDeleted ? FString() : FString::Printf(
+		TEXT("delete_meta_sound: the asset at %s was not deleted (UEditorAssetLibrary::DeleteAsset returned false: a ")
+		TEXT("Play-in-Editor session running, an asset the Asset Registry does not list, or a file that cannot be deleted; ")
+		TEXT("the Output Log names which)"), *MetaSoundPath));
 }
 
 // ---------------------------------------------------------------------------

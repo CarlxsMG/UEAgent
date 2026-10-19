@@ -239,7 +239,7 @@ List the time codes at which a USD attribute on a prim of an open stage has auth
 
 *Read-only.*
 
-Read the composed value of one attribute on a prim of a USD stage opened with open_usd_stage or create_usd_stage, at the time code given in time or, when it is omitted, at the default time, which gives the static default value rather than a time sample. The value may come from any layer or be a schema fallback (has_value true, has_authored_value false). value is an object {type, value}, converted only for bool, integer, floating-point, string, token and asset values; other types such as float3 or arrays, and an attribute with no value, give a null value with a note. A missing attribute is a success with present=false; an unregistered stage, an invalid prim path or a missing prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
+Read the composed value of one attribute on a prim of a registered USD stage, at the time code in time, else at the default time (the static default, not a sample), possibly a schema fallback (has_value true, has_authored_value false). value is {type, value}: a scalar as a boolean, number or string; a vector, color or point as an array of numbers; a quaternion as [x, y, z, w], real part last; a matrix as an array of rows; an array attribute as a JSON array of those plus length and truncated, cut to its first 600 numbers or strings (200 float3, fewer long strings). Another type, or no value, gives null with a note. A missing attribute is present=false; a missing stage or prim is an error. Read-only. Every attribute: list_usd_prim_attributes; sampled times: get_usd_attribute_time_samples; author a value: set_usd_attribute_value.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -248,7 +248,7 @@ Read the composed value of one attribute on a prim of a USD stage opened with op
 | `attr_name` | string | yes | Attribute name to read, e.g. "size" |
 | `time` | number | no | Optional USD time code to read at, e.g. 24; when omitted the default time is read (the static default value, not a sample) |
 
-**Returns:** `{ prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, note?: string } | null, note?: string }`
+**Returns:** `{ prim_path: string, attr_name: string, present: bool, has_value?: bool, has_authored_value?: bool, type?: string, type_name?: string, time?: number, value?: { type: string, value: any, length?: number, truncated?: bool, note?: string } | null, note?: string }`
 
 ## `get_usd_generated_assets`
 
@@ -306,7 +306,7 @@ Read one prim of a registered USD stage: name, type_name, active, parent_path, d
 
 *Read-only.*
 
-Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return; unsupported value types become a placeholder string. Read-only.
+Read the metadata of a prim on a registered USD stage: one key (present plus value as {type, value}) or, with no key, all entries (authored and fallback) plus count. Above 100 entries only count and a note return. Values read as get_usd_attribute_value reads them: scalars as booleans, numbers or strings, vectors and arrays as JSON arrays (an array with length and truncated, cut to its first 600 numbers or strings, fewer long strings), matrices as arrays of rows; an Sdf enum such as specifier gives its number, and a dictionary or list op (apiSchemas, references) a placeholder string. Read-only. Author one field with set_usd_prim_metadata; prim summary: get_usd_prim_info.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -314,7 +314,7 @@ Read the metadata of a prim on a registered USD stage: one key (present plus val
 | `stage_name` | string | no | Name the stage was registered under by create_usd_stage or open_usd_stage; a stage already in the USD cache also matches by the end of its root layer identifier. |
 | `key` | string | no | Metadata field to read, e.g. "documentation"; empty or omitted (default) returns all entries. |
 
-**Returns:** `{ present: bool, key: string, value: object, metadata: object, count: number, note?: string }`
+**Returns:** `{ present: bool, key: string, value: { type: string, value: any, length?: number, truncated?: bool }, metadata: object, count: number, note?: string }`
 
 ## `get_usd_stage_actor_info`
 
@@ -572,7 +572,7 @@ Save a USD stage's root layer to disk.  Wraps UE::FSdfLayer::Save(force) on the 
 
 *Destructive, idempotent.*
 
-Author one value on an attribute of a prim on a registered USD stage, at the current edit target: a time sample at time, or the default value when time is omitted; a missing attribute is created with type_name. The JSON value is converted to the attribute's declared scalar type before anything is written: bool takes a boolean; uchar, int, uint, int64 and uint64 a whole number in range; half, float, double and timecode a number; string, token and asset a string. Another type (float3, arrays), a value that does not fit, a missing attribute without type_name, an unregistered stage or a missing prim is an error and writes nothing. If USD still refuses the value, success is false and an attribute this call created is taken out again. In memory only: save_usd_stage writes it. Read it back with get_usd_attribute_value.
+Author one attribute value on a prim of a registered USD stage, at the current edit target: a time sample at time, else the default; a missing attribute is created with type_name. The JSON value is converted to the declared type: bool takes a boolean; integer types a whole number in range; half, float, double and timecode a number; string, token and asset a string; vectors, colors, points and texCoords an array of numbers; a quaternion [x, y, z, w], real part last; a matrix an array of rows; an array type a JSON array of those. A value of another shape or range, an opaque type, or a new attribute without type_name fails and writes nothing. If USD refuses it, success is false and an attribute it created is removed. In memory: save_usd_stage writes it; get_usd_attribute_value reads it back.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -580,7 +580,7 @@ Author one value on an attribute of a prim on a registered USD stage, at the cur
 | `prim_path` | string | yes | Absolute SdfPath of an existing prim on that stage, e.g. "/World/Cube". |
 | `attr_name` | string | yes | Attribute name to set, e.g. "size" |
 | `type_name` | string | no | USD type name of the attribute to create when it does not exist yet, e.g. "float" or "token"; required in that case, and ignored (with a note when it differs) for an existing attribute, whose declared type decides. |
-| `value` | any | no | The value: a JSON scalar, e.g. 2.5, "inherited" or true, or an object {"value": &lt;scalar>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. |
+| `value` | any | no | The value: a JSON scalar, e.g. 2.5, "inherited" or true, a JSON array, e.g. [1, 0.5, 0] for a color3f or [[0, 0, 1]] for a float3[], or an object {"value": &lt;value>} whose "type" key, if any, is not used; it is converted to the declared type of the attribute. |
 | `time` | number | no | Optional USD time code to author a time sample at, e.g. 24; when omitted the default value is authored |
 
 **Returns:** `{ prim_path: string, attr_name: string, set: bool, type_name: string, type: string, created: bool, time?: number, note?: string }`

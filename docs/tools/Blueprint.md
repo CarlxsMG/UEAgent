@@ -97,12 +97,12 @@ Create a Break Struct node with ONE OUTPUT PIN PER MEMBER of the struct (Bluepri
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | no | Blueprint name or path. |
-| `struct_type` | string | no | UScriptStruct path (/Game/.../S_Foo.S_Foo), bare name, or engine alias (Vector/Rotator/Transform...). |
+| `blueprint_name` | string | yes | Blueprint name or path. |
+| `struct_type` | string | yes | UScriptStruct path (/Game/.../S_Foo.S_Foo), bare name, or engine alias (Vector/Rotator/Transform...). |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. |
-| `position_x` | string | no | Node X position (ignored when node_position is set). |
-| `position_y` | string | no | Node Y position (ignored when node_position is set). |
-| `node_position` | string | no | Node canvas position as [x, y]; takes precedence over position_x/position_y. |
+| `position_x` | number | no | Node X position (ignored when node_position is set). |
+| `position_y` | number | no | Node Y position (ignored when node_position is set). |
+| `node_position` | array | no | Node canvas position as [x, y]; takes precedence over position_x/position_y. |
 
 **Returns:** `{ node_id, pins:[...the struct input + one output pin per struct member...], blueprint_name, graph_name, struct_type }`
 
@@ -385,12 +385,12 @@ Create a Make Struct node with ONE INPUT PIN PER EDITABLE MEMBER of the struct (
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `blueprint_name` | string | no | Blueprint name or path. |
-| `struct_type` | string | no | UScriptStruct path (/Game/.../S_Foo.S_Foo), bare name, or engine alias (Vector/Rotator/Transform...). |
+| `blueprint_name` | string | yes | Blueprint name or path. |
+| `struct_type` | string | yes | UScriptStruct path (/Game/.../S_Foo.S_Foo), bare name, or engine alias (Vector/Rotator/Transform...). |
 | `graph_name` | string | no | Target graph name; defaults to the Blueprint's event graph when omitted. |
-| `position_x` | string | no | Node X position (ignored when node_position is set). |
-| `position_y` | string | no | Node Y position (ignored when node_position is set). |
-| `node_position` | string | no | Node canvas position as [x, y]; takes precedence over position_x/position_y. |
+| `position_x` | number | no | Node X position (ignored when node_position is set). |
+| `position_y` | number | no | Node Y position (ignored when node_position is set). |
+| `node_position` | array | no | Node canvas position as [x, y]; takes precedence over position_x/position_y. |
 
 **Returns:** `{ node_id, pins:[...one input pin per struct member + the struct output...], blueprint_name, graph_name, struct_type }`
 
@@ -593,35 +593,35 @@ Wire one node's OUTPUT pin to another node's INPUT pin inside one Blueprint grap
 
 ## `create_actor_action_utility`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create, compile and save a Blueprint parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+Create an Editor Utility Blueprint at package_path/name parented to UActorActionUtility, whose CallInEditor functions become right-click actions on level actors, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be ActorActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on Content Browser assets: create_asset_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored. |
 | `name` | string | yes | Asset name without path or extension, e.g. "EUA_AlignToFloor". |
 
-**Returns:** `success or error payload`
+**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }`
 
 ## `create_asset_action_utility`
 
-*Additive.*
+*Additive, idempotent.*
 
-Create, compile and save a Blueprint parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets. An existing Blueprint at the path is returned unchanged, whatever its parent; a failed save only sets saved false. Returns asset_path, created, already_existed and saved. Refused during PIE unless force.
+Create an Editor Utility Blueprint at package_path/name parented to UAssetActionUtility, whose CallInEditor functions become right-click actions on Content Browser assets, then compile and save it. Idempotent by path: an Editor Utility Blueprint already there is returned as it is (created=false, already_existed=true, saved=false), nothing compiled or saved, with the parent_class it really has, which need not be AssetActionUtility. Another kind of asset at that path, or an invalid path, is an error and nothing is created. A failed save makes success false with saved=false and save_error, the new asset kept in memory. Refused during PIE unless force=true. Actions on level actors: create_actor_action_utility; run one: run_asset_action_utility; list them: list_scripted_action_utilities.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `package_path` | string | yes | Content folder for the asset, e.g. "/Game/EditorTools"; a trailing slash is ignored. |
 | `name` | string | yes | Asset name without path or extension, e.g. "EUA_RenameTextures". |
 
-**Returns:** `success or error payload`
+**Returns:** `{ name, package_path, asset_path, blueprint_class, parent_class, created, already_existed, saved, save_error? }`
 
 ## `create_blueprint`
 
 *Additive.*
 
-Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). It refuses instead of overwriting when the asset already exists on disk, and it never confirms the parent: read it back with get_blueprint_parent.
+Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). A plain Blueprint already at the path is returned unchanged with already_exists=true and saved=false, nothing saved, parent_class and blueprint_type not applied; another asset class there (a Widget or Anim Blueprint included) is an error and nothing is created. It never confirms the parent of a new Blueprint: read it back with get_blueprint_parent.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -630,7 +630,7 @@ Create a new Blueprint asset, optionally as a child of ANY parent class -- nativ
 | `blueprint_type` | string | no | Optional Blueprint type override: "normal" (default), "function_library" (a UBlueprintFunctionLibrary of static functions; parent_class is ignored/forced), or "macro" (a Macro Library; keeps parent_class or defaults to Actor). Function-library is also auto-detected from parent_class="BlueprintFunctionLibrary". |
 | `path` | string | no | Optional target content folder ("/Game/MyGame/Systems"). Used only when 'name' is a bare name; ignored when 'name' is already a full path. |
 
-**Returns:** `{ name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool, save_error?: string } -- parent_class here is what was REQUESTED and resolved, not proof the asset carries it: confirm a child's real parent with get_blueprint_parent. saved:false is honest and always carries save_error (PIE was running, or the Blueprint was already resident in memory and left untouched) -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.`
+**Returns:** `{ name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.`
 
 ## `create_blueprint_macro`
 
@@ -1348,7 +1348,7 @@ Set the DEFAULT of a property on a Blueprint component TEMPLATE, including compo
 | `blueprint_name` | string | yes | Blueprint asset path or short name |
 | `component_name` | string | yes | Component variable name (own or inherited) |
 | `property_name` | string | yes | Property to set on the component template |
-| `property_value` | any | no | New value (any JSON type; same importer as set_component_property). An array value REWRITES THE WHOLE ARRAY, including the empty/None gaps -- set_blueprint_component_array_element edits one element and proves the siblings did not move. |
+| `property_value` | any | yes | New value (any JSON type; same importer as set_component_property). An array value REWRITES THE WHOLE ARRAY, including the empty/None gaps -- set_blueprint_component_array_element edits one element and proves the siblings did not move. |
 
 **Returns:** `{ blueprint_name, component_name, property_name, component_class, source, override_persisted } -- source tells you which template was hit (scs / inherited-ich / inherited-scs / inherited-native) and override_persisted only guards the ICH case; NEITHER field re-reads the value, so they are not proof the write landed.`
 

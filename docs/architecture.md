@@ -52,7 +52,12 @@ On the game thread, `UUEAgentBridge::DispatchSingleCommand` runs every call, and
    scans the Python that `execute_python` is about to run (`Mcp/McpPythonScan`). When a check exists to
    prevent a crash and cannot verify, it refuses; any other check lets the call through. A number
    outside the integer range its parameter is read into (`intRange` in the catalog) is refused too:
-   the engine cannot read it, and the tool would otherwise go on with its default.
+   the engine cannot read it, and the tool would otherwise go on with its default. So is a string of
+   1024 characters or more, or an array element that long, in a parameter that carries a name or a
+   content path (`nameLike` in the catalog: its name ends in a word such as name, path, class or
+   tag, or its description calls it an FName): an FName holds at most 1023 characters, and the
+   engine aborts the editor when it builds a longer one. Disk paths, USD paths and free text are not
+   marked; a `batch` item whose `command_type` is that long refuses the whole batch.
 5. **The tool.** Each command family registers its tools in a route table
    (`Mcp/McpCommandFamilies`), and the registry runs the one named, inside one undo transaction
    named after it ("UEAgent: spawn_actor"): Ctrl+Z reverts the whole call, and a `batch` as one

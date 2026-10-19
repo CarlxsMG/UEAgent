@@ -4,6 +4,43 @@ Notable changes to UEAgent, newest first. Versions follow [Semantic Versioning](
 
 ## Unreleased
 
+## 1.2.6 - 2026-10-19
+
+- A name of 1024 characters or more no longer kills the editor: Unreal's names hold at most 1023, and any
+  string argument that becomes one (actor, asset and property names, content paths, tags, keys: 3634 parameters)
+  is refused before the tool runs, as is a `batch` item's command name and a package path that only the joined
+  pieces make too long. Also refused before they could crash: a widget name already held by another object in a
+  Widget Blueprint's tree (`add_list_view`, `add_tile_view`, `add_tree_view`, `create_common_ui_stack`).
+- Maps are saved as maps: a map package (`create_world_partition_map`, `set_data_layer_initial_runtime_state`,
+  the StateTree component-override tools) goes through the editor's own map save, as a `.umap` with its
+  external actor packages, instead of a stray `.uasset`.
+- USD vectors, quaternions, matrices and arrays are read and written as JSON arrays; reading a large array stops
+  at 600 numbers (fewer long strings) and says `length` and `truncated`, so the reply stays inline.
+- `lod_index` chooses the geometry in the `get_mesh_*` static mesh queries and `copy_static_mesh_to_dynamic_mesh`
+  (a LOD the mesh lacks is refused); the UV mapping tools read LOD 0 instead of a hi-res source.
+- A call that changes nothing saves nothing and leaves no undo step, now also in the Sequencer setters, the
+  StateTree, Smart Object, Niagara emitter and system setters, the MVVM list views and view models, EQS scoring,
+  river widths and `scale_mesh_uvs`.
+- The asset removers (`remove_anim_*`, `remove_blend_space`, the render target, pose search, subtitles, trigger
+  and volume removers, `delete_state_tree`, `delete_material_function`, `delete_meta_sound` and more) refuse an
+  asset of another type and answer a failed delete as a failure; a missing asset is still a success.
+- 23 more replies said `saved: true` without a save; they say `saved: false`.
+- 79 parameters of 70 tools that the tools cannot do without are published as required, and 14 parameters have
+  their real JSON type (arrays, numbers); the catalog generator now also reads `HasField` guards and follows
+  template helper calls.
+- Niagara: light and decal renderers belong to their emitter, the property setters check every field before
+  writing any, `add_niagara_simulation_stage` applies `iteration_count`, and a number given as a string or a
+  bool is refused instead of read as 0.
+- Values that were wrong: `add_weighted_value_keyframe` and the audio channel keys landed at display frames
+  instead of seconds, and the weighted key went to the first float track whatever `property_name` said;
+  `set_river_width_depth_at_point` did not update the spline; `set_water_body_properties` did not update the water
+  mesh or landscape; a convex or k-DOP collision call with a bad value left a duplicated mesh behind.
+- Changed: `set_viewport_view_mode` accepts every view mode that needs no extra setup and refuses the others with
+  the reason, and `get_viewport_state` names them all; `create_metasound_source`, `run_eqs_query`,
+  `set_eqs_test_scoring`, `bind_widget_to_viewmodel` and `enable_plugin` refuse an unknown name instead of
+  falling back to a default; `delete_meta_sound` deletes only MetaSounds; another class under a widget or view
+  model name is refused; `configure_post_processing` documents that Low equals Disabled.
+
 ## 1.2.5 - 2026-10-19
 
 - More calls that killed the editor are refused before anything runs: an empty key in `set_string_table_entry`,

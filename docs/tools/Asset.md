@@ -771,11 +771,11 @@ Removes an asset from a collection and reads back its object count (idempotent; 
 
 *Destructive, idempotent.*
 
-Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with a `note` explaining which, never an exception, so it is idempotent and safe to re-run. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
+Delete a render target asset, but only after loading it and verifying it really is a UTextureRenderTarget2D -- the typed counterpart of create_render_target_2d, and what makes it safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent and safe to re-run; an asset of another type is refused with success false and deleted:false, and a delete the engine refuses (Play-in-Editor running, a read-only file) is success false too. Sisters by type: remove_render_target_2d_array, remove_render_target_cube, remove_texture_2d_array, remove_static_texture_from_render_target.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Full object/package path of the render target (e.g. /Game/MyGame/RT/RT_Foo.RT_Foo); a bare name is not resolved here |
+| `asset_path` | string | yes | Full object/package path of the render target (e.g. /Game/MyGame/RT/RT_Foo.RT_Foo); a bare name is not resolved here |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -783,11 +783,11 @@ Delete a render target asset, but only after loading it and verifying it really 
 
 *Destructive, idempotent.*
 
-Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
+Delete a 2D-ARRAY render target, but only after loading it and verifying it really is a UTextureRenderTarget2DArray -- the typed counterpart of create_render_target_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d for a plain 2D render target and remove_texture_2d_array for a static UTexture2DArray.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Full object/package path of the 2D-array render target; a bare name is not resolved here |
+| `asset_path` | string | yes | Full object/package path of the 2D-array render target; a bare name is not resolved here |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -795,11 +795,11 @@ Delete a 2D-ARRAY render target, but only after loading it and verifying it real
 
 *Destructive, idempotent.*
 
-Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
+Delete a CUBE render target, but only after loading it and verifying it really is a UTextureRenderTargetCube -- the typed counterpart of create_render_target_cube, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Use remove_render_target_2d / remove_render_target_2d_array for the flat variants.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Full object/package path of the cube render target; a bare name is not resolved here |
+| `asset_path` | string | yes | Full object/package path of the cube render target; a bare name is not resolved here |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -820,11 +820,11 @@ Remove one socket, found by name, from a UStaticMesh asset loaded from its packa
 
 *Destructive, idempotent.*
 
-Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent.
+Delete the static UTexture2D that create_static_texture_from_render_target baked out of a render target (it lives beside the render target as a sibling asset), verifying the target really is a UTexture2D first -- so it refuses to delete the RENDER TARGET itself, which is remove_render_target_2d's job. Safer than the generic delete_asset, which deletes whatever sits at that path; a missing path returns deleted:false with a `note` and success, so it is idempotent, while a wrong type, or a delete the engine refuses, is success false with deleted:false.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Full object/package path of the baked static texture; a bare name is not resolved here |
+| `asset_path` | string | yes | Full object/package path of the baked static texture; a bare name is not resolved here |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -832,11 +832,11 @@ Delete the static UTexture2D that create_static_texture_from_render_target baked
 
 *Destructive, idempotent.*
 
-Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. Wrong type or missing path returns deleted:false with an explanatory `note` rather than raising, so it is idempotent. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
+Delete a static TEXTURE array, but only after loading it and verifying it really is a UTexture2DArray -- the typed counterpart of create_texture_2d_array, and safer than the generic delete_asset, which deletes whatever sits at that path. A missing path returns deleted:false with a `note` and success, so it is idempotent; a wrong type, or a delete the engine refuses, is success false with deleted:false. Do not confuse it with remove_render_target_2d_array, which deletes the RENDER TARGET array, not this static texture.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `asset_path` | string | no | Full object/package path of the 2D-array texture; a bare name is not resolved here |
+| `asset_path` | string | yes | Full object/package path of the 2D-array texture; a bare name is not resolved here |
 
 **Returns:** `{ asset_path, asset_class, package_name, deleted, already_existed, note? }`
 
@@ -941,13 +941,13 @@ Set lightmap resolution and/or lightmap UV coordinate index on a static mesh (no
 
 *Destructive, idempotent.*
 
-Assign a material to an existing material slot of a static mesh.
+Assign a material to one existing material slot of a UStaticMesh asset, picked by zero-based material_index, then save the mesh. This edits the asset, so every component without its own override of that slot shows the new material. The slot array never grows: an index outside the existing slots is an error, as is a mesh or material path that does not load. No undo transaction and no same-material check, so a repeat call writes and saves the slot again (idempotent). A failed save -- refused while PIE runs, under a read-only root, or a read-only file -- is an error, with the material already set in memory. material_path is read back. Slots: get_static_mesh_info; per-actor override: set_actor_material; skeletal meshes: set_skeletal_mesh_material_slot; a Blueprint component template: apply_material_to_blueprint.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset. |
+| `material_index` | number | yes | Zero-based index of an existing material slot. |
 | `material_path` | string | yes | Content path to the UMaterialInterface to assign. |
-| `material_index` | number | no | Zero-based index of an existing material slot. |
 
 **Returns:** `{ static_mesh_path, material_index, material_path, saved }`
 

@@ -214,14 +214,18 @@ namespace
 		return SmartObjects_LoadDefinitionAt(DefinitionPath, OutError);
 	}
 
-	/** SmartObjects_LoadDefinition, then the slot_index param, which must name one of its slots. */
+	/** SmartObjects_LoadDefinition, then the required slot_index param, which must name one of its slots. */
 	USmartObjectDefinition* SmartObjects_LoadDefinitionSlot(const TSharedPtr<FJsonObject>& Params, int32& OutSlotIndex,
 		TSharedPtr<FJsonObject>& OutError)
 	{
 		USmartObjectDefinition* Def = SmartObjects_LoadDefinition(Params, OutError);
 		if (!Def) { return nullptr; }
 		OutSlotIndex = -1;
-		{ double D = -1.0; if (Params->TryGetNumberField(TEXT("slot_index"), D)) { OutSlotIndex = static_cast<int32>(D); } }
+		if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("slot_index"), OutSlotIndex))
+		{
+			OutError = Missing;
+			return nullptr;
+		}
 		if (!Def->IsValidSlotIndex(OutSlotIndex))
 		{
 			OutError = mcp_common::MakeErrorReply(
@@ -231,11 +235,21 @@ namespace
 		return Def;
 	}
 
-	/** Marks Def's package dirty and saves it; false when the save fails. */
-	bool SmartObjects_SaveDefinition(USmartObjectDefinition* Def)
+	/** Marks Def's package dirty and saves it; false, with OutSaveError saying why, when the save fails. */
+	bool SmartObjects_SaveDefinition(USmartObjectDefinition* Def, FString& OutSaveError)
 	{
 		Def->MarkPackageDirty();
-		return mcp_common::SaveAssetPackage(Def->GetPackage(), Def);
+		return mcp_common::SaveAssetPackage(Def->GetPackage(), Def, OutSaveError);
+	}
+
+	/** The reply of an edit that leaves the definition as it was: changed and saved false, and Note. Nothing was written
+	 *  or saved, and no Modify() ran, so the call leaves no undo step. */
+	TSharedPtr<FJsonObject> SmartObjects_NoChangeReply(const TSharedPtr<FJsonObject>& Data, const TCHAR* Note)
+	{
+		Data->SetBoolField(TEXT("changed"), false);
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("note"), Note);
+		return mcp_common::MakeOkReply(Data);
 	}
 
 	/** A reply payload that starts with Def's definition_path. */
@@ -423,11 +437,11 @@ namespace UEAgentSmartObjectsImpl
 // ---------------------------------------------------------------------------
 // create_smart_object_definition
 // ---------------------------------------------------------------------------
-// MCP:create_smart_object_definition - Create a USmartObjectDefinition asset at package_path/definition_name, or load the one already there, add default slots (enabled, no tags) until it has num_activity_slots, then save it. Slots already there are kept and never taken away, so a smaller count adds nothing and a repeat call is idempotent; created says whether the asset is new. A name taken by another asset class, or a path that is not an asset path, is an error; a failed save, as during PIE, makes success false with saved=false. No undo step is recorded. Named slots: add_smart_object_slot; slot fields: set_smart_object_slot_activity_tags or set_smart_object_slot_enabled; a behavior, which register_smart_object_actor needs: add_smart_object_definition_default_behavior or add_smart_object_slot_behavior_definition; read back: get_smart_object_definition_summary.
+// MCP:create_smart_object_definition - Create a USmartObjectDefinition asset at package_path/definition_name, or load the one already there, add default slots (enabled, no tags) until it has num_activity_slots, then save it. Slots already there are kept and never taken away; created says whether the asset is new. A definition that already has at least that many slots changes and saves nothing (changed false, saved false), so a repeat call is idempotent. A name taken by another asset class, or a path that is not an asset path, is an error; a failed save, as during PIE, makes success false with saved=false and save_error. Slots added to an existing definition are one undo step; a new asset is not undoable. Named slots: add_smart_object_slot; slot fields: set_smart_object_slot_activity_tags or set_smart_object_slot_enabled; a behavior, which register_smart_object_actor needs: add_smart_object_definition_default_behavior or add_smart_object_slot_behavior_definition; read back: get_smart_object_definition_summary.
 //   @param definition_name - Name for the new Smart Object definition, also its asset name
 //   @param package_path - Content folder; defaults to /Game/MCP
 //   @param num_activity_slots - Slot count to reach, default 1: slots are added until the definition has this many, none are taken away
-//   @returns { definition_path: string, definition_name: string, num_slots: int, created: bool, saved: bool }
+//   @returns { definition_path: string, definition_name: string, num_slots: int, created: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleCreateSmartObjectDefinition(
 	const TSharedPtr<FJsonObject>& Params)
@@ -453,6 +467,22 @@ TSharedPtr<FJsonObject> HandleCreateSmartObjectDefinition(
 	// in 5.7 to append slots from outside the editor; GetMutableSlots
 	// returns a read-only TArrayView).
 	const int32 Existing = Def->GetSlots().Num();
+	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
+	Data->SetStringField(TEXT("definition_name"), Def->GetName());
+	Data->SetBoolField(TEXT("created"), bCreated);
+
+	// A definition that was already there with enough slots is what the call asks for: nothing to write or save.
+	if (!bCreated && Existing >= NumActivitySlots)
+	{
+		Data->SetNumberField(TEXT("num_slots"), Existing);
+		return SmartObjects_NoChangeReply(Data, TEXT("The definition already exists with at least that many slots; nothing changed and nothing was saved."));
+	}
+
+	// Slots added to a definition that was already there are one undo step; a new asset has no earlier state.
+	if (!bCreated)
+	{
+		Def->Modify();
+	}
 	while (Def->GetSlots().Num() < NumActivitySlots)
 	{
 		FSmartObjectSlotDefinition& NewSlot = Def->DebugAddSlot();
@@ -462,23 +492,22 @@ TSharedPtr<FJsonObject> HandleCreateSmartObjectDefinition(
 	{
 		Def->MarkPackageDirty();
 	}
-	const bool bSaved = mcp_common::SaveAssetPackage(Def->GetPackage(), Def);
+	FString SaveError;
+	const bool bSaved = mcp_common::SaveAssetPackage(Def->GetPackage(), Def, SaveError);
 
-	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
-	Data->SetStringField(TEXT("definition_name"), Def->GetName());
 	Data->SetNumberField(TEXT("num_slots"), Def->GetSlots().Num());
-	Data->SetBoolField(TEXT("created"), bCreated);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_smart_object_definition"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("create_smart_object_definition"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // add_smart_object_slot
 // ---------------------------------------------------------------------------
-// MCP:add_smart_object_slot - Append a named activity slot to a USmartObjectDefinition (idempotent on name).
+// MCP:add_smart_object_slot - Append a named activity slot, enabled, to a USmartObjectDefinition asset, in one undo step, then save it. Idempotent on name: when a slot named slot_name is already there, nothing is added, written or saved (already_existed true, changed false, saved false), and activity_tag is not applied to it. activity_tag (default Default) is added to the new slot only when it is a registered gameplay tag, though the reply echoes it either way, so read the slot back with get_smart_object_slots_detail. A missing definition is an error; a failed save makes success false with saved=false and save_error. Inverse: remove_smart_object_slot; its tags: set_smart_object_slot_activity_tags.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_name - Unique name for the new slot
 //   @param activity_tag - Optional FGameplayTag to attach to the slot; defaults to "Default"
-//   @returns { definition_path: string, slot_name: string, activity_tag: string, slot_count: int, added?: bool, already_existed?: bool, saved: bool }
+//   @returns { definition_path: string, slot_name: string, activity_tag: string, slot_count: int, added?: bool, already_existed?: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 
 TSharedPtr<FJsonObject> HandleAddSmartObjectSlot(
 	const TSharedPtr<FJsonObject>& Params)
@@ -501,13 +530,16 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectSlot(
 			Data->SetStringField(TEXT("slot_name"), SlotName);
 			Data->SetNumberField(TEXT("slot_count"), Def->GetSlots().Num());
 			Data->SetBoolField(TEXT("already_existed"), true);
-			return mcp_common::MakeOkReply(Data);
+			return SmartObjects_NoChangeReply(Data, TEXT("The definition already has a slot with that name; nothing changed and nothing was saved."));
 		}
 	}
 
 	// Add the slot via DebugAddSlot (public API; the underlying field
 	// SlotName is WITH_EDITORONLY_DATA so it is set but ignored in cooked
-	// builds — this is the engine's documented behaviour).
+	// builds -- this is the engine's documented behaviour). The definition is
+	// recorded first, so the addition is one undo step.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSmartObjectSlot", "Add Smart Object Slot (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& NewSlot = Def->DebugAddSlot();
 	NewSlot.Name = FName(*SlotName);
 	NewSlot.bEnabled = true;
@@ -520,14 +552,16 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectSlot(
 			NewSlot.ActivityTags.AddTag(Tag);
 		}
 	}
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetStringField(TEXT("slot_name"), SlotName);
 	Data->SetStringField(TEXT("activity_tag"), ActivityTag);
 	Data->SetNumberField(TEXT("slot_count"), Def->GetSlots().Num());
 	Data->SetBoolField(TEXT("added"), true);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -778,11 +812,11 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectInfo(
 //   through GetMutableSlot()/the public Set* methods, then save the package.
 // ===========================================================================
 
-// MCP:set_smart_object_slot_activity_tags - Replace a slot's activity tags (which activity it supports) on a USmartObjectDefinition, addressed by slot_index.
+// MCP:set_smart_object_slot_activity_tags - Set the activity tags of the slot at slot_index in a USmartObjectDefinition asset (which activities the slot supports), in one undo step, then save it. The list is written whole: an omitted or empty list empties the tags, and names that are not registered gameplay tags are skipped silently, so compare activity_tags in the reply. A slot that already has exactly those tags changes and saves nothing (changed false, saved false). A missing definition or an invalid slot_index is an error; a failed save makes success false with saved=false and save_error. Object-level tags: set_smart_object_definition_activity_tags; runtime tags: set_smart_object_slot_runtime_tags; read back: get_smart_object_slots_detail.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit (from get_smart_object_slots_detail)
 //   @param activity_tags - Gameplay tag names to set as the slot's activity tags; tags not registered are skipped
-//   @returns { definition_path: string, slot_index: int, activity_tags: [string], saved: bool }
+//   @returns { definition_path: string, slot_index: int, activity_tags: [string], changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -792,16 +826,25 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 	if (!Def) { return Err; }
 	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
 	Params->TryGetArrayField(TEXT("activity_tags"), TagsArr);
+	const FGameplayTagContainer NewTags = ParseTagContainer(TagsArr);
+	if (Def->GetSlots()[SlotIndex].ActivityTags == NewTags)
+	{
+		TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
+		Data->SetArrayField(TEXT("activity_tags"), mcp_common::GameplayTagsToJson(NewTags));
+		return SmartObjects_NoChangeReply(Data, TEXT("The slot already has those activity tags; nothing changed and nothing was saved."));
+	}
 
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotActivityTags", "Set Smart Object Slot Activity Tags (MCP)"));
 	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
-	Slot.ActivityTags = ParseTagContainer(TagsArr);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	Slot.ActivityTags = NewTags;
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetArrayField(TEXT("activity_tags"), mcp_common::GameplayTagsToJson(Slot.ActivityTags));
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_activity_tags"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_activity_tags"), SaveError);
 }
 
 // MCP:set_smart_object_slot_user_tag_filter - Replace the user tag filter of the slot at slot_index in a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the slot) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user, though under the Override policy the object-level filter then applies. A call that leaves the filter as it was saves nothing (changed false). A missing definition or an invalid slot_index is an error; a failed save, as during PIE, makes success false. Object-level filter: set_smart_object_definition_user_tag_filter; read slots back: get_smart_object_slots_detail.
@@ -809,7 +852,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotActivityTags(
 //   @param slot_index - Zero-based index of the slot to edit (see get_smart_object_slots_detail); out of range is an error
 //   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter
 //   @param match - Match mode: "any" (default), "all", or "none"; any other value is an error
-//   @returns { definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }
+//   @returns { definition_path: string, slot_index: int, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -824,12 +867,13 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 
 	const bool bChanged = !(Def->GetSlots()[SlotIndex].UserTagFilter == Query);
 	bool bSaved = false;
+	FString SaveError;
 	if (bChanged)
 	{
 		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotUserTagFilter", "Set Smart Object Slot User Tag Filter (MCP)"));
 		Def->Modify();
 		Def->GetMutableSlot(SlotIndex).UserTagFilter = Query;
-		bSaved = SmartObjects_SaveDefinition(Def);
+		bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 	}
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
@@ -846,14 +890,14 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotUserTagFilter(
 			: TEXT("The slot already has that filter; nothing changed and nothing was saved."));
 		return mcp_common::MakeOkReply(Data);
 	}
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_user_tag_filter"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_user_tag_filter"), SaveError);
 }
 
-// MCP:set_smart_object_slot_enabled - Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction). Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
+// MCP:set_smart_object_slot_enabled - Set the authored enabled flag (bEnabled) of the slot at slot_index in a USmartObjectDefinition asset, then save it: the initial state that smart objects built from this definition start with. enabled defaults to true when omitted. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction); a slot that already has that flag changes and saves nothing (changed false, saved false). Use remove_smart_object_slot to delete the slot instead, and get_smart_object_slots_detail to read slots back.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param enabled - Whether the slot is enabled
-//   @returns { definition_path: string, slot_index: int, enabled: bool, saved: bool }
+//   @returns { definition_path: string, slot_index: int, enabled: bool, changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotEnabled(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -863,24 +907,32 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotEnabled(
 	if (!Def) { return Err; }
 	bool bEnabled = true;
 	Params->TryGetBoolField(TEXT("enabled"), bEnabled);
+	if (Def->GetSlots()[SlotIndex].bEnabled == bEnabled)
+	{
+		TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
+		Data->SetBoolField(TEXT("enabled"), bEnabled);
+		return SmartObjects_NoChangeReply(Data, TEXT("The slot already has that enabled flag; nothing changed and nothing was saved."));
+	}
 
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotEnabled", "Set Smart Object Slot Enabled (MCP)"));
 	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.bEnabled = bEnabled;
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetBoolField(TEXT("enabled"), Slot.bEnabled);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_enabled"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_enabled"), SaveError);
 }
 
-// MCP:set_smart_object_slot_transform - Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction). Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
+// MCP:set_smart_object_slot_transform - Set the local offset and/or rotation (degrees) of the slot at slot_index in a USmartObjectDefinition asset, relative to the smart object's owner, then save it. Each of offset and rotation is written only when given with 3 numbers; otherwise it keeps its value. An invalid slot_index is an error, and a failed save returns an error with the change kept in memory. Undoable (one editor transaction); a request that leaves both as they were changes and saves nothing (changed false, saved false). Read slots back with get_smart_object_slots_detail; set_smart_object_slot_enabled and set_smart_object_slot_activity_tags edit other slot fields.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param offset - Optional [x, y, z] local offset
 //   @param rotation - Optional [pitch, yaw, roll] local rotation (degrees)
-//   @returns { definition_path: string, slot_index: int, offset: [number, number, number], rotation: [number, number, number], saved: bool }
+//   @returns { definition_path: string, slot_index: int, offset: [number, number, number], rotation: [number, number, number], changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -889,16 +941,32 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinitionSlot(Params, SlotIndex, Err);
 	if (!Def) { return Err; }
 
+	// The offset and rotation the call leaves the slot with; one not given keeps its value.
+	const FSmartObjectSlotDefinition& Current = Def->GetSlots()[SlotIndex];
+	FVector3f NewOffset = Current.Offset;
+	FRotator3f NewRotation = Current.Rotation;
+	SmartObjects_ReadOffsetRotation(Params, NewOffset, NewRotation);
+	if (NewOffset == Current.Offset && NewRotation == Current.Rotation)
+	{
+		TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
+		Data->SetArrayField(TEXT("offset"), mcp_common::VectorToJsonArray(Current.Offset));
+		Data->SetArrayField(TEXT("rotation"), mcp_common::RotatorToJsonArray(Current.Rotation));
+		return SmartObjects_NoChangeReply(Data, TEXT("The slot already has that offset and rotation; nothing changed and nothing was saved."));
+	}
+
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotTransform", "Set Smart Object Slot Transform (MCP)"));
 	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
-	SmartObjects_ReadOffsetRotation(Params, Slot.Offset, Slot.Rotation);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	Slot.Offset = NewOffset;
+	Slot.Rotation = NewRotation;
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetArrayField(TEXT("offset"), mcp_common::VectorToJsonArray(Slot.Offset));
 	Data->SetArrayField(TEXT("rotation"), mcp_common::RotatorToJsonArray(Slot.Rotation));
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_transform"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_transform"), SaveError);
 }
 
 // MCP:set_smart_object_definition_activity_tags - Replace the object-level activity tags of a USmartObjectDefinition asset with activity_tags, optionally set its activity-tag merging policy and user-tag filtering policy, in one undo step, then save it. The whole tag container is written: an omitted or empty list empties it, and names that are not registered gameplay tags are skipped silently (compare activity_tags in the reply); an omitted policy keeps its value. A missing definition or an unknown policy name is an error checked before anything is written, so the definition stays as it was. A call that leaves tags and policies as they were changes and saves nothing (changed false), and a failed save, as during PIE, makes success false. Per-slot tags: set_smart_object_slot_activity_tags; object-level user filter: set_smart_object_definition_user_tag_filter; read back: get_smart_object_definition_summary.
@@ -906,7 +974,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotTransform(
 //   @param activity_tags - Gameplay tag names for the definition's object-level activity tags; the list replaces the current tags whole
 //   @param merging_policy - Optional activity-tag merging policy: "Combine" (default) or "Override"; Combine merges slot and object tags, Override lets non-empty slot tags take their place; omitted keeps the current policy
 //   @param filtering_policy - Optional user-tag filtering policy: "NoFilter", "Combine", or "Override"; how the object and slot user filters apply to a request; omitted keeps the current policy
-//   @returns { definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, changed: bool, saved: bool, note?: string }
+//   @returns { definition_path: string, activity_tags: [string], merging_policy: string, filtering_policy: string, changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -939,6 +1007,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 		|| Def->GetActivityTagsMergingPolicy() != MergingPolicy
 		|| Def->GetUserTagsFilteringPolicy() != FilteringPolicy;
 	bool bSaved = false;
+	FString SaveError;
 	if (bChanged)
 	{
 		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectDefinitionActivityTags", "Set Smart Object Definition Activity Tags (MCP)"));
@@ -946,7 +1015,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 		Def->SetActivityTags(Tags);
 		Def->SetActivityTagsMergingPolicy(MergingPolicy);
 		Def->SetUserTagsFilteringPolicy(FilteringPolicy);
-		bSaved = SmartObjects_SaveDefinition(Def);
+		bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 	}
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
@@ -960,14 +1029,14 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionActivityTags(
 		Data->SetStringField(TEXT("note"), TEXT("The definition already has those activity tags and policies; nothing changed and nothing was saved."));
 		return mcp_common::MakeOkReply(Data);
 	}
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_activity_tags"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_activity_tags"), SaveError);
 }
 
 // MCP:set_smart_object_definition_user_tag_filter - Replace the object-level user tag filter of a USmartObjectDefinition asset (the gameplay tag query a user must pass to use the object) with one built from user_tags and match (any, all or none of the tags), in one undo step, then save it. Unregistered tag names are skipped (the reply lists the tags kept); a list of only such names, or any other match, is an error before anything changes. An empty or omitted user_tags clears the filter (cleared true): an empty filter refuses no user. A call that leaves the filter as it was saves nothing (changed false). A missing definition is an error; a failed save, as during PIE, makes success false. How it combines with slot filters: filtering_policy of set_smart_object_definition_activity_tags; per-slot filter: set_smart_object_slot_user_tag_filter; read back: get_smart_object_definition_summary.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param user_tags - Gameplay tag names the filter query matches against; unregistered names are skipped, and an empty list clears the filter
 //   @param match - Match mode: "any" (default), "all", or "none"; any other value is an error
-//   @returns { definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, note?: string }
+//   @returns { definition_path: string, user_tags: [string], match: string, filter_is_empty: bool, changed: bool, cleared: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionUserTagFilter(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -981,12 +1050,13 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionUserTagFilter(
 
 	const bool bChanged = !(Def->GetUserTagFilter() == Query);
 	bool bSaved = false;
+	FString SaveError;
 	if (bChanged)
 	{
 		const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectDefinitionUserTagFilter", "Set Smart Object Definition User Tag Filter (MCP)"));
 		Def->Modify();
 		Def->SetUserTagFilter(Query);
-		bSaved = SmartObjects_SaveDefinition(Def);
+		bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 	}
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
@@ -1003,7 +1073,7 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectDefinitionUserTagFilter(
 			: TEXT("The definition already has that filter; nothing changed and nothing was saved."));
 		return mcp_common::MakeOkReply(Data);
 	}
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_user_tag_filter"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_definition_user_tag_filter"), SaveError);
 }
 
 // MCP:get_smart_object_slots_detail - Read back per-slot detail (name, enabled, offset, rotation, activity tags, behavior/data counts) of a USmartObjectDefinition.
@@ -1091,11 +1161,11 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectDefinitionSummary(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:add_smart_object_slot_behavior_definition - Attach a behavior definition (class resolved by name) to a slot of a USmartObjectDefinition. The class must derive from USmartObjectBehaviorDefinition (e.g. GameplayBehaviorSmartObjectBehaviorDefinition). A behavior on every slot (or a default) makes the definition Validate()-valid.
+// MCP:add_smart_object_slot_behavior_definition - Add a behavior definition, a new instance of the class named by behavior_class, to the behaviors of the slot at slot_index in a USmartObjectDefinition asset, in one undo step, then save it. The class is a short native name or a /Script path and must derive from USmartObjectBehaviorDefinition, e.g. GameplayBehaviorSmartObjectBehaviorDefinition; an unknown, abstract or unrelated class is an error before anything changes. Every call adds another behavior, even of a class the slot already has. A behavior on every slot, or a default one, is what register_smart_object_actor needs. A failed save makes success false with saved=false and save_error. Inverse: remove_smart_object_slot_behavior_definition; for all slots: add_smart_object_definition_default_behavior.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to attach the behavior to
 //   @param behavior_class - Behavior class: short native name (e.g. "GameplayBehaviorSmartObjectBehaviorDefinition") or full /Script path
-//   @returns { definition_path: string, slot_index: int, behavior_class: string, behavior_count: int, saved: bool }
+//   @returns { definition_path: string, slot_index: int, behavior_class: string, behavior_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddSmartObjectSlotBehaviorDefinition(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1109,21 +1179,25 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectSlotBehaviorDefinition(
 		FString::Printf(TEXT("Behavior class not found: %s (is its plugin enabled / module loaded?)"), *BehaviorClassName), Err);
 	if (!Behavior) { return Err; }
 
+	// The definition is recorded before the behavior is added, so the addition is one undo step.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSmartObjectSlotBehavior", "Add Smart Object Slot Behavior Definition (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.BehaviorDefinitions.Add(Behavior);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetStringField(TEXT("behavior_class"), Behavior->GetClass()->GetName());
 	Data->SetNumberField(TEXT("behavior_count"), Slot.BehaviorDefinitions.Num());
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot_behavior_definition"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot_behavior_definition"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // Slot entrance annotations + component definition set/get
 // ---------------------------------------------------------------------------
 
-// MCP:add_smart_object_slot_entrance_annotation - Add an entrance (entry/exit point) annotation to a slot of a USmartObjectDefinition, including its navigation/trajectory fields.
+// MCP:add_smart_object_slot_entrance_annotation - Add an entrance annotation (an entry and/or exit point) to the slot at slot_index in a USmartObjectDefinition asset, with its offset, rotation, tags and navigation and trajectory fields, in one undo step, then save it. A field not given keeps the engine default, and every call adds another entrance. An invalid selection_priority, a missing definition or an invalid slot_index is an error before anything changes; a failed save makes success false with saved=false and save_error. entrance_count counts the slot's entrances and data_count all its definition data. Read them back with get_smart_object_slot_entrance_annotations; inverse: remove_smart_object_slot_entrance_annotation.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to add the entrance to
 //   @param offset - Optional [x, y, z] local-space offset of the entrance
@@ -1137,7 +1211,7 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectSlotBehaviorDefinition(
 //   @param trajectory_start_height_offset - Optional height offset at the start of the transition check (default 80).
 //   @param trajectory_slot_height_offset - Optional height offset at the slot for the transition check (default 40).
 //   @param transition_check_radius - Optional radius of the transition trajectory check (default 10).
-//   @returns { definition_path: string, slot_index: int, entrance_count: int, data_count: int, saved: bool }
+//   @returns { definition_path: string, slot_index: int, entrance_count: int, data_count: int, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddSmartObjectSlotEntranceAnnotation(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1179,14 +1253,18 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectSlotEntranceAnnotation(
 	double TransRadius = 0.0;
 	if (Params->TryGetNumberField(TEXT("transition_check_radius"), TransRadius)) { Entrance.TransitionCheckRadius = static_cast<float>(TransRadius); }
 
+	// The definition is recorded before the annotation is added, so the addition is one undo step.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSmartObjectSlotEntrance", "Add Smart Object Slot Entrance Annotation (MCP)"));
+	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 	Slot.DefinitionData.Add(FSmartObjectDefinitionDataProxy::Make(Entrance));
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetNumberField(TEXT("entrance_count"), SmartObjects_CountEntrances(Slot));
 	Data->SetNumberField(TEXT("data_count"), Slot.DefinitionData.Num());
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot_entrance_annotation"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_slot_entrance_annotation"), SaveError);
 }
 
 // MCP:get_smart_object_slot_entrance_annotations - List a slot's entrance annotations with all their fields (round-trip reader for add_smart_object_slot_entrance_annotation, including the navigation/trajectory fields).
@@ -1229,10 +1307,10 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectSlotEntranceAnnotations(
 	return mcp_common::MakeOkReply(Data);
 }
 
-// MCP:set_component_definition - Set (change) the USmartObjectDefinition on the USmartObjectComponent of an actor in the editor world.
+// MCP:set_component_definition - Set the USmartObjectDefinition that the USmartObjectComponent of an actor in the editor world references, found by actor_label, in one undo step when the component is transactional. The level is marked dirty and nothing is saved. A component that already references that definition is left as it is (changed false). A component bound to the Smart Object simulation is refused before anything changes, since the engine ignores the change then: unregister it with release_smart_object and actor_label first. set is read back from the component's reference and makes success false when it did not take. A missing actor, component or definition is an error. Read back with get_smart_object_component_definition; spawn one with register_smart_object_actor.
 //   @param actor_label - Editor label of the actor carrying the USmartObjectComponent
 //   @param definition_path - Path to the USmartObjectDefinition asset to assign
-//   @returns { actor_label: string, definition_path: string, definition: string, registered: bool, set: bool }
+//   @returns { actor_label: string, definition_path: string, definition: string, registered: bool, set: bool, changed: bool, note?: string }
 TSharedPtr<FJsonObject> HandleSetComponentDefinition(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1246,16 +1324,40 @@ TSharedPtr<FJsonObject> HandleSetComponentDefinition(
 	USmartObjectComponent* Comp = SmartObjects_FindComponent(World, ActorLabel, TEXT("Actor not found"), Err);
 	if (!Comp) { return Err; }
 
-	Comp->SetDefinition(Def);
-	const USmartObjectDefinition* Now = Comp->GetDefinition();
-
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("actor_label"), ActorLabel);
 	Data->SetStringField(TEXT("definition_path"), Def->GetPathName());
+
+	// The component already references that definition: nothing to write.
+	if (Comp->GetDefinitionReference().GetSmartObjectDefinition() == Def)
+	{
+		Data->SetStringField(TEXT("definition"), Def->GetPathName());
+		Data->SetBoolField(TEXT("registered"), Comp->GetRegisteredHandle().IsValid());
+		Data->SetBoolField(TEXT("set"), true);
+		Data->SetBoolField(TEXT("changed"), false);
+		Data->SetStringField(TEXT("note"), TEXT("The component already uses that definition; nothing changed."));
+		return mcp_common::MakeOkReply(Data);
+	}
+
+	// SetDefinition ignores the change while the component is bound to the Smart Object simulation, so that case
+	// is refused here, before anything is touched.
+	if (Comp->IsBoundToSimulation())
+	{
+		return mcp_common::MakeErrorReply(TEXT("The component is registered to the Smart Object simulation, and the engine ignores a ")
+			TEXT("definition change then; unregister it first with release_smart_object and actor_label. Nothing was changed."));
+	}
+
+	// The component is recorded before the write, as the details panel does, so the change is one undo step.
+	Comp->Modify();
+	Comp->SetDefinition(Def);
+	const bool bSet = Comp->GetDefinitionReference().GetSmartObjectDefinition() == Def;
+	const USmartObjectDefinition* Now = Comp->GetDefinition();
+
 	Data->SetStringField(TEXT("definition"), Now ? Now->GetPathName() : FString());
 	Data->SetBoolField(TEXT("registered"), Comp->GetRegisteredHandle().IsValid());
-	Data->SetBoolField(TEXT("set"), Now == Def);
-	return mcp_common::MakeOkReply(Data);
+	Data->SetBoolField(TEXT("set"), bSet);
+	Data->SetBoolField(TEXT("changed"), bSet);
+	return mcp_common::MakeOutcomeReply(Data, bSet, bSet ? FString() : mcp_common::MeasuredOutcomeError(TEXT("set_component_definition"), TEXT("set")));
 }
 
 // MCP:get_smart_object_component_definition - Read the USmartObjectDefinition assigned to an actor's USmartObjectComponent and whether it is registered.
@@ -1285,10 +1387,10 @@ TSharedPtr<FJsonObject> HandleGetSmartObjectComponentDefinition(
 // Definition-level default behavior + slot removal (private members)
 // ---------------------------------------------------------------------------
 
-// MCP:add_smart_object_definition_default_behavior - Attach a definition-level default behavior (applied to slots without their own) to a USmartObjectDefinition; the private DefaultBehaviorDefinitions array is reached via FArrayProperty reflection.
+// MCP:add_smart_object_definition_default_behavior - Add a definition-level default behavior, a new instance of the class named by behavior_class, to a USmartObjectDefinition asset, in one undo step, then save it: slots without a behavior of their own use the defaults. The private DefaultBehaviorDefinitions array is reached through reflection. The class is a short native name or a /Script path and must derive from USmartObjectBehaviorDefinition; an unknown, abstract or unrelated class is an error before anything changes. Every call adds another default. A failed save makes success false with saved=false and save_error. Inverse: remove_smart_object_definition_default_behavior; per slot: add_smart_object_slot_behavior_definition.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param behavior_class - Behavior class: short native name or /Script path; must derive from USmartObjectBehaviorDefinition
-//   @returns { definition_path: string, behavior_class: string, default_behavior_count: int, added: bool, saved: bool }
+//   @returns { definition_path: string, behavior_class: string, default_behavior_count: int, added: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleAddSmartObjectDefinitionDefaultBehavior(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1314,20 +1416,24 @@ TSharedPtr<FJsonObject> HandleAddSmartObjectDefinitionDefaultBehavior(
 	TArray<TObjectPtr<USmartObjectBehaviorDefinition>>* Arr =
 		P->ContainerPtrToValuePtr<TArray<TObjectPtr<USmartObjectBehaviorDefinition>>>(Def);
 	if (!Arr) { return mcp_common::MakeErrorReply(TEXT("Failed to access DefaultBehaviorDefinitions")); }
+	// The definition is recorded before the behavior is added, so the addition is one undo step.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "AddSmartObjectDefaultBehavior", "Add Smart Object Default Behavior (MCP)"));
+	Def->Modify();
 	Arr->Add(Behavior);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetStringField(TEXT("behavior_class"), Behavior->GetClass()->GetName());
 	Data->SetNumberField(TEXT("default_behavior_count"), Arr->Num());
 	Data->SetBoolField(TEXT("added"), true);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_definition_default_behavior"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("add_smart_object_definition_default_behavior"), SaveError);
 }
 
 // MCP:remove_smart_object_slot - Remove the slot at slot_index from a USmartObjectDefinition asset, together with its behaviors, tags and annotations; later slots shift down one index, so re-read indices with get_smart_object_slots_detail. Saves the asset; a failed save returns an error with the removal kept in memory. An invalid slot_index is an error. Undoable (one editor transaction). To turn a slot off while keeping indices stable use set_smart_object_slot_enabled; add_smart_object_slot appends one.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to remove
-//   @returns { definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool }
+//   @returns { definition_path: string, slot_index: int, slot_count: int, removed: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlot(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1349,23 +1455,24 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlot(
 	Def->Modify();
 	FScriptArrayHelper Helper(P, P->ContainerPtrToValuePtr<void>(Def));
 	Helper.RemoveValues(SlotIndex, 1);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetNumberField(TEXT("slot_count"), Def->GetSlots().Num());
 	Data->SetBoolField(TEXT("removed"), true);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
 // Slot behavior removal (idempotent) + slot runtime tags.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_smart_object_slot_behavior_definition - Remove a behavior definition from a slot of a USmartObjectDefinition by its index in the slot's BehaviorDefinitions array. Idempotent: a behavior_index past the end returns already_absent without error.
+// MCP:remove_smart_object_slot_behavior_definition - Remove one behavior definition, found by its position in the slot's BehaviorDefinitions, from the slot at slot_index of a USmartObjectDefinition asset loaded by path, in one undo step, then save it; later behaviors shift down one index. slot_index must name a slot: an omitted or invalid one is an error. A behavior_index outside the array is a success with removed=false, already_absent=true and saved=false, nothing touched; an omitted one is an error. Because indices shift, repeating a call with an index still in range removes the next behavior: re-read the counts with get_smart_object_slots_detail between calls. A missing definition is an error; a failed save gives success false, saved=false and save_error, with the removal kept in memory. Add one: add_smart_object_slot_behavior_definition; definition-wide defaults: remove_smart_object_definition_default_behavior; the whole slot: remove_smart_object_slot.
 //   @param definition_path - Path to the USmartObjectDefinition asset.
 //   @param slot_index - Index of the slot to edit.
 //   @param behavior_index - Index into the slot's BehaviorDefinitions to remove.
-//   @returns { definition_path: string, slot_index: int, behavior_index: int, behavior_count: int, removed: bool, already_absent: bool, saved: bool }
+//   @returns { definition_path: string, slot_index: int, behavior_index: int, behavior_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotBehaviorDefinition(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1374,7 +1481,7 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotBehaviorDefinition(
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinitionSlot(Params, SlotIndex, Err);
 	if (!Def) { return Err; }
 	int32 BehaviorIndex = -1;
-	{ double D = -1.0; if (Params->TryGetNumberField(TEXT("behavior_index"), D)) { BehaviorIndex = static_cast<int32>(D); } }
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("behavior_index"), BehaviorIndex)) { return Missing; }
 
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 
@@ -1394,21 +1501,22 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotBehaviorDefinition(
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectSlotBehavior", "Remove Smart Object Slot Behavior Definition (MCP)"));
 	Def->Modify();
 	Slot.BehaviorDefinitions.RemoveAt(BehaviorIndex);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetNumberField(TEXT("behavior_index"), BehaviorIndex);
 	Data->SetNumberField(TEXT("behavior_count"), Slot.BehaviorDefinitions.Num());
 	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetBoolField(TEXT("already_absent"), false);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot_behavior_definition"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot_behavior_definition"), SaveError);
 }
 
-// MCP:set_smart_object_slot_runtime_tags - Replace a slot's initial runtime tags (FGameplayTagContainer) on a USmartObjectDefinition, addressed by slot_index. Tags not registered in the project are skipped.
+// MCP:set_smart_object_slot_runtime_tags - Set the initial runtime tags of the slot at slot_index in a USmartObjectDefinition asset (the tags each smart object built from it starts the slot with), in one undo step, then save it. The list is written whole: an omitted or empty list empties the tags, and names that are not registered gameplay tags are skipped silently, so compare runtime_tags in the reply. A slot that already has exactly those tags changes and saves nothing (changed false, saved false). A missing definition or an invalid slot_index is an error; a failed save makes success false with saved=false and save_error. Activity tags: set_smart_object_slot_activity_tags; read back: get_smart_object_slots_detail.
 //   @param definition_path - Path to the USmartObjectDefinition asset.
 //   @param slot_index - Index of the slot to edit.
 //   @param runtime_tags - Gameplay tag names to set as the slot's runtime tags.
-//   @returns { definition_path: string, slot_index: int, runtime_tags: [string], saved: bool }
+//   @returns { definition_path: string, slot_index: int, runtime_tags: [string], changed: bool, saved: bool, save_error?: string, note?: string }
 TSharedPtr<FJsonObject> HandleSetSmartObjectSlotRuntimeTags(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1418,16 +1526,25 @@ TSharedPtr<FJsonObject> HandleSetSmartObjectSlotRuntimeTags(
 	if (!Def) { return Err; }
 	const TArray<TSharedPtr<FJsonValue>>* TagsArr = nullptr;
 	Params->TryGetArrayField(TEXT("runtime_tags"), TagsArr);
+	const FGameplayTagContainer NewTags = ParseTagContainer(TagsArr);
+	if (Def->GetSlots()[SlotIndex].RuntimeTags == NewTags)
+	{
+		TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
+		Data->SetArrayField(TEXT("runtime_tags"), mcp_common::GameplayTagsToJson(NewTags));
+		return SmartObjects_NoChangeReply(Data, TEXT("The slot already has those runtime tags; nothing changed and nothing was saved."));
+	}
 
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "SetSmartObjectSlotRuntimeTags", "Set Smart Object Slot Runtime Tags (MCP)"));
 	Def->Modify();
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
-	Slot.RuntimeTags = ParseTagContainer(TagsArr);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	Slot.RuntimeTags = NewTags;
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetArrayField(TEXT("runtime_tags"), mcp_common::GameplayTagsToJson(Slot.RuntimeTags));
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_runtime_tags"));
+	Data->SetBoolField(TEXT("changed"), true);
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("set_smart_object_slot_runtime_tags"), SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1607,10 +1724,10 @@ TSharedPtr<FJsonObject> HandleUseSmartObject(
 //   remove_smart_object_slot_entrance_annotation    <-> add_smart_object_slot_entrance_annotation
 // ---------------------------------------------------------------------------
 
-// MCP:remove_smart_object_definition_default_behavior - Remove a definition-level default behavior (by index) from a USmartObjectDefinition; the private DefaultBehaviorDefinitions array is reached via FArrayProperty reflection and resized through FScriptArrayHelper. Idempotent: a behavior_index past the end returns already_absent without error.
+// MCP:remove_smart_object_definition_default_behavior - Remove one definition-level default behavior (the ones slots without a behavior of their own use), found by its index in the private DefaultBehaviorDefinitions array, from a USmartObjectDefinition asset loaded by path, then save it. The array is reached through reflection, later entries shift down one index, and the removal is one undo step. A behavior_index outside the array is a success with removed=false, already_absent=true and saved=false, nothing touched, and an omitted one is an error; a repeat call with an index still in range removes the next default. default_behavior_count is what is left. A missing definition is an error; a failed save gives success false, saved=false and save_error, with the removal kept in memory. Add one: add_smart_object_definition_default_behavior; count them: get_smart_object_definition_summary; per-slot behaviors: remove_smart_object_slot_behavior_definition.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param behavior_index - Index into DefaultBehaviorDefinitions to remove
-//   @returns { definition_path: string, behavior_index: int, default_behavior_count: int, removed: bool, already_absent: bool, saved: bool }
+//   @returns { definition_path: string, behavior_index: int, default_behavior_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSmartObjectDefinitionDefaultBehavior(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1618,7 +1735,7 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectDefinitionDefaultBehavior(
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinition(Params, Err);
 	if (!Def) { return Err; }
 	int32 BehaviorIndex = -1;
-	{ double D = -1.0; if (Params->TryGetNumberField(TEXT("behavior_index"), D)) { BehaviorIndex = static_cast<int32>(D); } }
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("behavior_index"), BehaviorIndex)) { return Missing; }
 
 	// DefaultBehaviorDefinitions is a private UPROPERTY with no public mutator — reach it
 	// via reflection (mirror of HandleAddSmartObjectDefinitionDefaultBehavior). Resize via
@@ -1646,22 +1763,26 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectDefinitionDefaultBehavior(
 		return mcp_common::MakeOkReply(Data);
 	}
 
+	// The definition is recorded before the removal, as its add twin does, so the removal is one undo step.
+	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectDefaultBehavior", "Remove Smart Object Default Behavior (MCP)"));
+	Def->Modify();
 	Helper.RemoveValues(BehaviorIndex, 1);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewDefinitionData(Def);
 	Data->SetNumberField(TEXT("behavior_index"), BehaviorIndex);
 	Data->SetNumberField(TEXT("default_behavior_count"), Helper.Num());
 	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetBoolField(TEXT("already_absent"), false);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_definition_default_behavior"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_definition_default_behavior"), SaveError);
 }
 
-// MCP:remove_smart_object_slot_entrance_annotation - Remove an entrance annotation (by its index among the slot's entrance annotations) from a slot of a USmartObjectDefinition. entrance_index counts only FSmartObjectSlotEntranceAnnotation entries in the slot's DefinitionData (mirror of add_smart_object_slot_entrance_annotation, inverted). Idempotent: an entrance_index past the number of entrances returns already_absent without error.
+// MCP:remove_smart_object_slot_entrance_annotation - Remove one entrance annotation (an entry or exit point) from the slot at slot_index of a USmartObjectDefinition asset loaded by path, in one undo step, then save it. entrance_index counts only the entrance annotations in the slot's DefinitionData, numbered as add_smart_object_slot_entrance_annotation and get_smart_object_slot_entrance_annotations number them; other annotations are skipped and kept. slot_index must name a slot: an omitted or invalid one is an error. An entrance_index matching no entrance is a success with removed=false, already_absent=true and saved=false, nothing touched, and an omitted one is an error; a repeat call with an index still in range removes the next entrance. entrance_count and data_count are what is left. A failed save gives success false, saved=false and save_error, with the removal kept in memory. The whole slot: remove_smart_object_slot.
 //   @param definition_path - Path to the USmartObjectDefinition asset
 //   @param slot_index - Index of the slot to edit
 //   @param entrance_index - Index among the slot's entrance annotations to remove (0-based; entrances only, not all definition data)
-//   @returns { definition_path: string, slot_index: int, entrance_index: int, entrance_count: int, data_count: int, removed: bool, already_absent: bool, saved: bool }
+//   @returns { definition_path: string, slot_index: int, entrance_index: int, entrance_count: int, data_count: int, removed: bool, already_absent: bool, saved: bool, save_error?: string }
 TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotEntranceAnnotation(
 	const TSharedPtr<FJsonObject>& Params)
 {
@@ -1670,7 +1791,7 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotEntranceAnnotation(
 	USmartObjectDefinition* Def = SmartObjects_LoadDefinitionSlot(Params, SlotIndex, Err);
 	if (!Def) { return Err; }
 	int32 EntranceIndex = -1;
-	{ double D = -1.0; if (Params->TryGetNumberField(TEXT("entrance_index"), D)) { EntranceIndex = static_cast<int32>(D); } }
+	if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredNumber(Params, TEXT("entrance_index"), EntranceIndex)) { return Missing; }
 
 	FSmartObjectSlotDefinition& Slot = Def->GetMutableSlot(SlotIndex);
 
@@ -1706,7 +1827,8 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotEntranceAnnotation(
 	const FScopedTransaction Transaction(NSLOCTEXT("UEAgent", "RemoveSmartObjectSlotEntrance", "Remove Smart Object Slot Entrance Annotation (MCP)"));
 	Def->Modify();
 	Slot.DefinitionData.RemoveAt(TargetDataIndex);
-	const bool bSaved = SmartObjects_SaveDefinition(Def);
+	FString SaveError;
+	const bool bSaved = SmartObjects_SaveDefinition(Def, SaveError);
 
 	TSharedPtr<FJsonObject> Data = SmartObjects_NewSlotData(Def, SlotIndex);
 	Data->SetNumberField(TEXT("entrance_index"), EntranceIndex);
@@ -1714,7 +1836,7 @@ TSharedPtr<FJsonObject> HandleRemoveSmartObjectSlotEntranceAnnotation(
 	Data->SetNumberField(TEXT("data_count"), Slot.DefinitionData.Num());
 	Data->SetBoolField(TEXT("removed"), true);
 	Data->SetBoolField(TEXT("already_absent"), false);
-	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot_entrance_annotation"));
+	return mcp_common::MakeSavedReply(Data, bSaved, TEXT("remove_smart_object_slot_entrance_annotation"), SaveError);
 }
 
 const McpCommandFamilies::FRegistrar Registration =

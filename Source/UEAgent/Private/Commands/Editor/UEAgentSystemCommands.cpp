@@ -16,6 +16,7 @@
 #include "Engine/Font.h"
 #include "UObject/ObjectRedirector.h"
 #include "Interfaces/IProjectManager.h"
+#include "Interfaces/IPluginManager.h"
 #include "Subsystems/EditorAssetSubsystem.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/CompilerResultsLog.h"
@@ -627,20 +628,35 @@ TSharedPtr<FJsonObject> HandleFixupRedirectors(const TSharedPtr<FJsonObject>& Pa
     return Result;
 }
 
-// MCP:enable_plugin - Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. Use get_plugin_status to read the current state and disable_plugin for the inverse.
+// MCP:enable_plugin - Turn a plugin on in the .uproject and save the project file to disk. WARNING: `enabled:true` is hardcoded on the write succeeding, and the plugin's MODULES are not loaded by this call -- the editor has to be restarted before its classes, assets or MCP tools actually exist. So do not treat a following "class not found" as a failure of this command; check project_saved and then restart. A plugin the .uproject already has enabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. Use get_plugin_status to read the current state and disable_plugin for the inverse.
 //   @param plugin_name - Plugin name exactly as in its .uplugin file (e.g. 'PythonScriptPlugin'), not a path.
-//   @returns { plugin_name: string, enabled: bool (hardcoded true when the .uproject write succeeded), project_saved: bool, note: string about the required restart }
+//   @returns { plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded true when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }
 TSharedPtr<FJsonObject> HandleEnablePlugin(const TSharedPtr<FJsonObject>& Params)
 {
     FString PluginName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("plugin_name"), PluginName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // SetPluginEnabled writes any name into the .uproject without checking it, and a reference to a plugin that
+    // does not exist can stop the project from opening: an unknown name is refused before anything is written.
+    // The plugin's own name is used from here on, so the .uproject gets its exact spelling.
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
+    if (!Plugin.IsValid())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("enable_plugin: no plugin named '%s' is known to this editor (IPluginManager::FindPlugin found none); nothing was ")
+            TEXT("written to the .uproject. get_plugin_status reads a plugin by its .uplugin name."), *PluginName));
+    }
+    PluginName = Plugin->GetName();
+
     FText FailReason;
     if (!IProjectManager::Get().SetPluginEnabled(PluginName, true, FailReason))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to enable plugin '%s': %s"), *PluginName, *FailReason.ToString()));
 
-    bool bSaved = true;
-    if (IProjectManager::Get().IsCurrentProjectDirty())
+    // SetPluginEnabled dirties the project only when the .uproject changes: a project that is not dirty
+    // already has the plugin in that state, and there is nothing to save.
+    const bool bNeedsSave = IProjectManager::Get().IsCurrentProjectDirty();
+    bool bSaved = false;
+    if (bNeedsSave)
     {
         bSaved = IProjectManager::Get().SaveCurrentProjectToDisk(FailReason);
     }
@@ -649,24 +665,47 @@ TSharedPtr<FJsonObject> HandleEnablePlugin(const TSharedPtr<FJsonObject>& Params
     Result->SetStringField(TEXT("plugin_name"), PluginName);
     Result->SetBoolField(TEXT("enabled"), true);
     Result->SetBoolField(TEXT("project_saved"), bSaved);
-    Result->SetStringField(TEXT("note"), TEXT("An editor restart is usually required to load a newly-enabled plugin's modules."));
+    Result->SetStringField(TEXT("note"), bNeedsSave
+        ? TEXT("An editor restart is usually required to load a newly-enabled plugin's modules.")
+        : TEXT("The .uproject already has the plugin enabled; nothing changed, nothing saved."));
+    if (bNeedsSave && !bSaved)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("enable_plugin: the .uproject was changed in memory but not saved to disk: %s"), *FailReason.ToString()));
+    }
     return Result;
 }
 
-// MCP:disable_plugin - Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
+// MCP:disable_plugin - Turn a plugin off in the .uproject and save the project file to disk. WARNING: `enabled:false` is hardcoded on the write succeeding and the modules stay LOADED for this session -- the plugin's classes keep working until the editor restarts, so a still-functioning feature is not evidence the call failed. A plugin the .uproject already has disabled is a no-op: project_saved=false and nothing saved; a .uproject that cannot be saved makes success false. A name this editor has not discovered as a plugin is an error, and nothing is written to the .uproject. WARNING: disabling a plugin whose assets are referenced leaves those references broken on the next start; check get_plugin_status and the referencers first.
 //   @param plugin_name - Plugin name exactly as in its .uplugin file, not a path.
-//   @returns { plugin_name: string, enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart }
+//   @returns { plugin_name: string (the plugin's own spelling), enabled: bool (hardcoded false when the .uproject write succeeded), project_saved: bool, note: string about the required restart, or that nothing changed }
 TSharedPtr<FJsonObject> HandleDisablePlugin(const TSharedPtr<FJsonObject>& Params)
 {
     FString PluginName;
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("plugin_name"), PluginName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
+    // SetPluginEnabled writes any name into the .uproject without checking it, and a reference to a plugin that
+    // does not exist can stop the project from opening: an unknown name is refused before anything is written.
+    // The plugin's own name is used from here on, so the .uproject gets its exact spelling.
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
+    if (!Plugin.IsValid())
+    {
+        return mcp_common::MakeErrorReply(FString::Printf(
+            TEXT("disable_plugin: no plugin named '%s' is known to this editor (IPluginManager::FindPlugin found none); nothing was ")
+            TEXT("written to the .uproject. get_plugin_status reads a plugin by its .uplugin name."), *PluginName));
+    }
+    PluginName = Plugin->GetName();
+
     FText FailReason;
     if (!IProjectManager::Get().SetPluginEnabled(PluginName, false, FailReason))
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Failed to disable plugin '%s': %s"), *PluginName, *FailReason.ToString()));
 
-    bool bSaved = true;
-    if (IProjectManager::Get().IsCurrentProjectDirty())
+    // SetPluginEnabled dirties the project only when the .uproject changes: a project that is not dirty
+    // already has the plugin in that state, and there is nothing to save.
+    const bool bNeedsSave = IProjectManager::Get().IsCurrentProjectDirty();
+    bool bSaved = false;
+    if (bNeedsSave)
     {
         bSaved = IProjectManager::Get().SaveCurrentProjectToDisk(FailReason);
     }
@@ -675,7 +714,15 @@ TSharedPtr<FJsonObject> HandleDisablePlugin(const TSharedPtr<FJsonObject>& Param
     Result->SetStringField(TEXT("plugin_name"), PluginName);
     Result->SetBoolField(TEXT("enabled"), false);
     Result->SetBoolField(TEXT("project_saved"), bSaved);
-    Result->SetStringField(TEXT("note"), TEXT("An editor restart is usually required to fully unload a newly-disabled plugin's modules."));
+    Result->SetStringField(TEXT("note"), bNeedsSave
+        ? TEXT("An editor restart is usually required to fully unload a newly-disabled plugin's modules.")
+        : TEXT("The .uproject already has the plugin disabled; nothing changed, nothing saved."));
+    if (bNeedsSave && !bSaved)
+    {
+        Result->SetBoolField(TEXT("success"), false);
+        Result->SetStringField(TEXT("error"), FString::Printf(
+            TEXT("disable_plugin: the .uproject was changed in memory but not saved to disk: %s"), *FailReason.ToString()));
+    }
     return Result;
 }
 

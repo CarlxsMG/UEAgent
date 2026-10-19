@@ -1061,10 +1061,10 @@ TSharedPtr<FJsonObject> HandleGetBlackboardData(const TSharedPtr<FJsonObject>& P
 // Asset authoring (Blackboard + BehaviorTree)
 //----------------------------------------------------------------------//
 
-// MCP:create_blackboard_data - Create an empty UBlackboardData asset at package_path/name and save it; success requires the save. Idempotent: an existing blackboard there is returned with already_exists=true and is not re-saved. Returns blackboard_path and key_count; add keys with add_blackboard_key.
+// MCP:create_blackboard_data - Create an empty UBlackboardData asset, with no keys and no parent, at package_path/name (default folder /Game/AI), register it and save it; no undo step. Idempotent: a blackboard already at that path is returned unchanged with already_exists=true, saved=false, a message and its key_count, nothing saved. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset -- refused while PIE runs, under a read-only root, or a read-only file -- gives success false with saved=false and save_error. blackboard_path is the object path the other blackboard tools take. Add keys with add_blackboard_key and constrain them with set_blackboard_key_subsettings; read them with get_blackboard_keys_asset; bind it to a tree with create_behavior_tree.
 //   @param name - Asset name (e.g. "BB_Enemy").
 //   @param package_path - Target /Game package path (optional, default "/Game/AI")
-//   @returns { name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string? }
+//   @returns { name: string, package_path: string, blackboard_path: string, asset_path: string, key_count: number, already_exists: bool, saved: bool, save_error: string?, message: string? }
 
 TSharedPtr<FJsonObject> HandleCreateBlackboardData(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1095,7 +1095,9 @@ TSharedPtr<FJsonObject> HandleCreateBlackboardData(const TSharedPtr<FJsonObject>
         R->SetStringField(TEXT("asset_path"), Existing->GetPathName());
         R->SetNumberField(TEXT("key_count"), Existing->GetKeys().Num());
         R->SetBoolField(TEXT("already_exists"), true);
-        R->SetBoolField(TEXT("saved"), true);
+        // Returned unchanged: nothing was written, so nothing is saved.
+        R->SetBoolField(TEXT("saved"), false);
+        R->SetStringField(TEXT("message"), TEXT("BlackboardData already exists; returned it unchanged, nothing saved"));
         return mcp_common::MakeOkReply(R);
     }
 
@@ -1123,12 +1125,12 @@ TSharedPtr<FJsonObject> HandleCreateBlackboardData(const TSharedPtr<FJsonObject>
     return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_blackboard_data"), SaveError);
 }
 
-// MCP:add_blackboard_key - Append a key to a UBlackboardData asset and save it.
+// MCP:add_blackboard_key - Append one key to the own Keys of a UBlackboardData asset loaded by path, re-index its key IDs and save it; no undo step. key_type is Bool, Int, Float, Vector, Rotator, String, Name, Object, Class or Enum (case-insensitive); instance_synced defaults to false. An Object, Class or Enum key gets no base class or enum here: use set_blackboard_key_subsettings. Idempotent: a key of that name and type already there is a success with already_exists=true and saved=false, nothing added or saved (its instance_synced untouched); the same name with another type is an error. A name a parent blackboard already has is an error naming that parent, nothing added: a key of that name would shadow the parent's. verified confirms the key resolves by name. A failed save gives success false, saved=false and save_error, with the key added in memory. Inverse: remove_blackboard_key; read: get_blackboard_keys_asset; create the asset: create_blackboard_data.
 //   @param blackboard_path - Path to the UBlackboardData asset.
 //   @param key_name - New key name (must be unique on the asset).
 //   @param key_type - One of Bool|Int|Float|Vector|Rotator|String|Name|Object|Class|Enum.
 //   @param instance_synced - Whether the key is instance-synced (optional, default false)
-//   @returns { blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, keys: [{ name, type, instance_synced }] }
+//   @returns { blackboard_path: string, key_name: string, key_type: string, key_count: number, verified: bool, saved: bool, already_exists: bool?, save_error: string?, note: string?, keys: [{ name, type, instance_synced }] }
 
 TSharedPtr<FJsonObject> HandleAddBlackboardKey(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1160,14 +1162,34 @@ TSharedPtr<FJsonObject> HandleAddBlackboardKey(const TSharedPtr<FJsonObject>& Pa
 
     const FName KeyFName(*KeyName);
 
-    // Idempotent: if key already exists with the same type, return success.
+    // A name a parent blackboard already has is refused: the engine numbers the parent's keys first, so a key of
+    // the same name here would shadow it. The parent chain is walked once; a cycle stops the walk.
+    TSet<const UBlackboardData*> Visited;
+    Visited.Add(BBData);
+    for (const UBlackboardData* Ancestor = BBData->Parent; Ancestor && !Visited.Contains(Ancestor); Ancestor = Ancestor->Parent)
+    {
+        Visited.Add(Ancestor);
+        for (const FBlackboardEntry& Inherited : Ancestor->Keys)
+        {
+            if (Inherited.EntryName == KeyFName)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("Blackboard key '%s' already exists in the parent blackboard %s (type %s); a key of that name on %s ")
+                    TEXT("would shadow it. Nothing was added."),
+                    *KeyName, *Ancestor->GetPathName(), *DescribeKeyTypeClass(Inherited.KeyType), *BBData->GetName()));
+            }
+        }
+    }
+
+    // Idempotent: if key already exists with the same type, return success. The type is compared as resolved
+    // (KeyTypeClass), not as the token was spelled.
     for (const FBlackboardEntry& Existing : BBData->Keys)
     {
         if (Existing.EntryName == KeyFName)
         {
             // Check if type matches
             FString ExistingType = DescribeKeyTypeClass(Existing.KeyType);
-            if (ExistingType == KeyTypeToken)
+            if (Existing.KeyType && Existing.KeyType->GetClass() == KeyTypeClass)
             {
                 // Key already exists with same type — return success (idempotent)
                 TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -1176,8 +1198,10 @@ TSharedPtr<FJsonObject> HandleAddBlackboardKey(const TSharedPtr<FJsonObject>& Pa
                 Result->SetStringField(TEXT("key_type"), ExistingType);
                 Result->SetNumberField(TEXT("key_count"), BBData->Keys.Num());
                 Result->SetBoolField(TEXT("verified"), true);
-                Result->SetBoolField(TEXT("saved"), true);
+                // Nothing was added, so nothing is saved.
+                Result->SetBoolField(TEXT("saved"), false);
                 Result->SetBoolField(TEXT("already_exists"), true);
+                Result->SetStringField(TEXT("note"), TEXT("a key of that name and type already exists; nothing added, nothing saved"));
                 // Add 'keys' array to match the expected response format
                 TArray<TSharedPtr<FJsonValue>> KeysArray;
                 for (const FBlackboardEntry& Entry : BBData->Keys)
@@ -1194,7 +1218,7 @@ TSharedPtr<FJsonObject> HandleAddBlackboardKey(const TSharedPtr<FJsonObject>& Pa
             {
                 return mcp_common::MakeErrorReply(
                     FString::Printf(TEXT("Blackboard key '%s' already exists on %s with different type (%s vs %s)"),
-                        *KeyName, *BBData->GetName(), *ExistingType, *KeyTypeToken));
+                        *KeyName, *BBData->GetName(), *ExistingType, *KeyTypeToken.TrimStartAndEnd()));
             }
         }
     }
@@ -1359,12 +1383,12 @@ TSharedPtr<FJsonObject> HandleGetBlackboardKeysAsset(const TSharedPtr<FJsonObjec
     return mcp_common::MakeOkReply(BehaviorTree_BlackboardAssetData(BBData, TEXT("blackboard_path")));
 }
 
-// MCP:set_blackboard_key_subsettings - Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type.
+// MCP:set_blackboard_key_subsettings - Constrain an existing blackboard key's subsettings on a UBlackboardData asset and save. This is the SECOND HALF of add_blackboard_key, which only sets EntryName/KeyType/bInstanceSynced: it fills the per-type filter the editor would otherwise make you pick by hand -- BaseClass for an Object/Class key, EnumType for an Enum key. At least one of base_class / enum_type is required, and the one you supply must match the key's type. A value already in place is a no-op: already_set=true and saved=false, nothing saved.
 //   @param blackboard_path - Path to the UBlackboardData asset.
 //   @param key_name - Name of the existing key to constrain.
 //   @param base_class - Class path/name (e.g. "/Script/Engine.Actor" or "Actor") for an Object/Class key (optional).
 //   @param enum_type - Enum path/name (e.g. "/Script/Engine.ECollisionChannel") for an Enum key (optional).
-//   @returns { blackboard_path: string, key_name: string, key_type: string, base_class: string?, enum_type: string?, enum_name: string?, already_set: bool, saved: bool, save_error: string?, keys: [...] }
+//   @returns { blackboard_path: string, key_name: string, key_type: string, base_class: string?, enum_type: string?, enum_name: string?, already_set: bool, saved: bool, save_error: string?, note: string?, keys: [...] }
 
 TSharedPtr<FJsonObject> HandleSetBlackboardKeySubsettings(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1539,17 +1563,18 @@ TSharedPtr<FJsonObject> HandleSetBlackboardKeySubsettings(const TSharedPtr<FJson
     Result->SetStringField(TEXT("key_type"), KeyTypeName);
     BehaviorTree_AddKeySubsettings(Result, KeyType);
     Result->SetBoolField(TEXT("already_set"), true);
-    Result->SetBoolField(TEXT("saved"), true);
+    Result->SetBoolField(TEXT("saved"), false);
+    Result->SetStringField(TEXT("note"), TEXT("the key already has these subsettings; nothing changed, nothing saved"));
     Result->SetArrayField(TEXT("keys"), BehaviorTree_KeysToJson(BBData));
 
     return mcp_common::MakeOkReply(Result);
 }
 
-// MCP:create_behavior_tree - Create and save a new UBehaviorTree asset, optionally binding a blackboard.
+// MCP:create_behavior_tree - Create a UBehaviorTree asset at package_path/name (default folder /Game/AI), optionally bound to the UBlackboardData at blackboard_path, register it and save it; no undo step, and the tree starts with no root node (add one with set_behavior_tree_root). An existing tree at that path is returned with already_exists=true: when blackboard_path names a different blackboard it is rebound and saved (blackboard_rebound=true), otherwise it is left unchanged with saved=false and a message, nothing saved, so a repeat call is idempotent. A blackboard_path that does not load, or a name taken by an asset of another class, is an error; a failed save of a new or rebound tree gives success false with saved=false and save_error. Make the blackboard with create_blackboard_data; read the tree with get_behavior_tree_info; add nodes with add_bt_composite_child and add_bt_task_child.
 //   @param name - Asset name (e.g. "BT_Enemy").
 //   @param package_path - Target /Game package path (optional, default "/Game/AI")
 //   @param blackboard_path - Path to a UBlackboardData asset to bind to the new BT (optional)
-//   @returns { name: string, package_path: string, behavior_tree_path: string, asset_path: string, blackboard_asset: string?, already_exists: bool, saved: bool, save_error: string? }
+//   @returns { name: string, package_path: string, behavior_tree_path: string, asset_path: string, blackboard_asset: string?, already_exists: bool, blackboard_rebound: bool?, saved: bool, save_error: string?, message: string? }
 
 TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& Params)
 {
@@ -1593,10 +1618,11 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& 
             Existing->BlackboardAsset = BBData;
             bUpdated = true;
         }
-        bool bSavedExisting = true;
+        // Saved only when the blackboard binding changed; an existing tree left as it is saves nothing.
+        bool bSavedExisting = false;
+        FString SaveErr;
         if (bUpdated)
         {
-            FString SaveErr;
             bSavedExisting = mcp_common::SaveAssetPackage(Existing->GetOutermost(), Existing, SaveErr);
         }
 
@@ -1610,7 +1636,13 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& 
             R->SetStringField(TEXT("blackboard_asset"), Bound->GetPathName());
         }
         R->SetBoolField(TEXT("already_exists"), true);
-        R->SetBoolField(TEXT("saved"), bSavedExisting);
+        R->SetBoolField(TEXT("blackboard_rebound"), bUpdated);
+        if (bUpdated)
+        {
+            return mcp_common::MakeSavedReply(R, bSavedExisting, TEXT("create_behavior_tree"), SaveErr);
+        }
+        R->SetBoolField(TEXT("saved"), false);
+        R->SetStringField(TEXT("message"), TEXT("BehaviorTree already exists; returned it unchanged, nothing saved"));
         return mcp_common::MakeOkReply(R);
     }
 
@@ -1642,9 +1674,8 @@ TSharedPtr<FJsonObject> HandleCreateBehaviorTree(const TSharedPtr<FJsonObject>& 
         Result->SetStringField(TEXT("blackboard_asset"), Bound->GetPathName());
     }
     Result->SetBoolField(TEXT("already_exists"), false);
-    mcp_common::AddSaveOutcome(Result, bSaved, SaveError);
 
-    return mcp_common::MakeOkReply(Result);
+    return mcp_common::MakeSavedReply(Result, bSaved, TEXT("create_behavior_tree"), SaveError);
 }
 
 // MCP:set_behavior_tree_root - Set a BehaviorTree's RootNode to a new composite (Selector or Sequence) and save.

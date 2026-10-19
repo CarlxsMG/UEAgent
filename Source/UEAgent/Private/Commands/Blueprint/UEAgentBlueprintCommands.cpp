@@ -206,12 +206,12 @@ TSharedPtr<FJsonObject> ReadOwnComponentTemplate(const TSharedPtr<FJsonObject>& 
 
 // Asset creation, component templates, compile and spawn
 
-// MCP:create_blueprint - Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). It refuses instead of overwriting when the asset already exists on disk, and it never confirms the parent: read it back with get_blueprint_parent.
+// MCP:create_blueprint - Create a new Blueprint asset, optionally as a child of ANY parent class -- native or another Blueprint (pass its "..._C" class or asset path) -- and save it to disk immediately unless PIE is running. Also makes Blueprint Function Libraries and Macro Libraries, which have no Actor parent and which the normal path would reject. It does NOT create interfaces (create_blueprint_interface) nor the framework-class shortcuts (create_game_mode_class_bp, create_player_controller_class_bp, ...). A plain Blueprint already at the path is returned unchanged with already_exists=true and saved=false, nothing saved, parent_class and blueprint_type not applied; another asset class there (a Widget or Anim Blueprint included) is an error and nothing is created. It never confirms the parent of a new Blueprint: read it back with get_blueprint_parent.
 //   @param name - Blueprint name. Either a bare name (created under 'path' or /Game/Blueprints/) OR a full content path ("/Game/MyGame/Systems/World/BP_Foo"); an object-path form ("/Game/.../BP_Foo.BP_Foo") is also accepted.
 //   @param parent_class - Optional parent class. Accepts a native name ("Actor", "Pawn", "Character", "StaticMeshActor", "BlueprintFunctionLibrary"), a "/Script/Module.Class" path, a Blueprint generated-class path ("/Game/.../BP_X.BP_X_C"), or a Blueprint asset path ("/Game/.../BP_X"). Defaults to AActor. Passing "BlueprintFunctionLibrary" makes a Function Library.
 //   @param blueprint_type - Optional Blueprint type override: "normal" (default), "function_library" (a UBlueprintFunctionLibrary of static functions; parent_class is ignored/forced), or "macro" (a Macro Library; keeps parent_class or defaults to Actor). Function-library is also auto-detected from parent_class="BlueprintFunctionLibrary".
 //   @param path - Optional target content folder ("/Game/MyGame/Systems"). Used only when 'name' is a bare name; ignored when 'name' is already a full path.
-//   @returns { name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool, save_error?: string } -- parent_class here is what was REQUESTED and resolved, not proof the asset carries it: confirm a child's real parent with get_blueprint_parent. saved:false is honest and always carries save_error (PIE was running, or the Blueprint was already resident in memory and left untouched) -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.
+//   @returns { name: string, path: string, package_path: string, parent_class: string, generated_class: string, blueprint_type: string, already_exists: bool, saved: bool (false for a Blueprint already there: nothing saved), save_error?: string, note?: string } -- parent_class is, for a new Blueprint, what was REQUESTED and resolved, not proof the asset carries it (confirm a child's real parent with get_blueprint_parent), and for one already there its own parent. saved:false is honest: it carries save_error when PIE was running or the Blueprint already there has unsaved changes, and a note when an existing Blueprint is returned unchanged -- an unsaved Blueprint exists only in the editor and a later compile on it also returns success.
 
 TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
@@ -248,11 +248,61 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
     }
     const FString AssetName = FPackageName::GetShortName(PackageName);
 
+    // The reply: the Blueprint, the parent class it reports and whether this call saved it.
+    auto BlueprintReply = [&PackageName](UBlueprint* BP, const UClass* ParentClass, bool bAlreadyExists, bool bSaved,
+        const FString& SaveError) -> TSharedPtr<FJsonObject>
+    {
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("name"), BP->GetName());
+        ResultObj->SetStringField(TEXT("path"), BP->GetPathName());
+        ResultObj->SetStringField(TEXT("package_path"), PackageName);
+        ResultObj->SetStringField(TEXT("parent_class"), ParentClass ? ParentClass->GetPathName() : FString());
+        ResultObj->SetStringField(TEXT("generated_class"),
+            BP->GeneratedClass ? BP->GeneratedClass->GetPathName() : FString());
+        ResultObj->SetStringField(TEXT("blueprint_type"),
+            BP->BlueprintType == BPTYPE_FunctionLibrary ? TEXT("function_library") :
+            BP->BlueprintType == BPTYPE_MacroLibrary    ? TEXT("macro") :
+            BP->BlueprintType == BPTYPE_Interface       ? TEXT("interface") : TEXT("normal"));
+        ResultObj->SetBoolField(TEXT("already_exists"), bAlreadyExists);
+        ResultObj->SetBoolField(TEXT("saved"), bSaved);
+        if (!SaveError.IsEmpty())
+        {
+            ResultObj->SetStringField(TEXT("save_error"), SaveError);
+        }
+        else if (bAlreadyExists)
+        {
+            ResultObj->SetStringField(TEXT("note"), TEXT("the Blueprint already exists; returned it unchanged, nothing saved"));
+        }
+        return ResultObj;
+    };
+    // A Blueprint this call did not author is neither touched nor saved; a package with unsaved changes says so,
+    // since those changes are not on disk.
+    const auto UnsavedNote = [](const UBlueprint* BP)
+    {
+        const UPackage* ExistingPackage = BP->GetOutermost();
+        return (ExistingPackage && ExistingPackage->IsDirty())
+            ? FString(TEXT("Blueprint already existed in memory (not created by this call) and was left untouched; its ")
+                TEXT("package has unsaved changes. Call save_asset explicitly to persist it."))
+            : FString();
+    };
+
+    // Idempotent: a plain Blueprint already at the path is returned as it is -- parent_class and blueprint_type are
+    // not applied, and nothing is saved. Any other class there, a Blueprint subclass such as a Widget or Anim
+    // Blueprint included, is not the asset asked for and is refused.
     if (UEditorAssetLibrary::DoesAssetExist(PackageName))
     {
-        const FString AssetConflict = mcp_common::AssetNameConflict(PackageName, AssetName, UBlueprint::StaticClass());
-        return mcp_common::MakeErrorReply(AssetConflict.IsEmpty()
-            ? FString::Printf(TEXT("Blueprint already exists: %s"), *PackageName) : AssetConflict);
+        const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+        UBlueprint* Existing = LoadObject<UBlueprint>(nullptr, *ObjectPath);
+        if (!Existing || Existing->GetClass() != UBlueprint::StaticClass())
+        {
+            const FString AssetConflict = mcp_common::AssetNameConflict(PackageName, AssetName, UBlueprint::StaticClass());
+            return mcp_common::MakeErrorReply(!AssetConflict.IsEmpty() ? AssetConflict
+                : Existing ? FString::Printf(TEXT("'%s' already exists as a %s, not a plain Blueprint; nothing was created or saved. ")
+                    TEXT("Choose another name, or delete or rename the existing asset first."), *ObjectPath, *Existing->GetClass()->GetName())
+                : FString::Printf(TEXT("An asset already exists at '%s' but does not load as a Blueprint; nothing was created or saved."),
+                    *ObjectPath));
+        }
+        return BlueprintReply(Existing, Existing->ParentClass, /*bAlreadyExists=*/true, /*bSaved=*/false, UnsavedNote(Existing));
     }
 
     // Resolve parent class + Blueprint type with the plugin's canonical resolver -- covers native names,
@@ -374,39 +424,13 @@ TSharedPtr<FJsonObject> HandleCreateBlueprint(const TSharedPtr<FJsonObject>& Par
     }
     else
     {
-        // Found an already-resident Blueprint object for this package (see the CreatePackage call
-        // above -- this happens when a package with this name is already loaded in memory, e.g. from
-        // an earlier create_blueprint call that never got saved). We didn't author it THIS call, so we
-        // don't touch it or force a save on its behalf. Report 'saved' honestly from the package's own
-        // dirty state instead of always claiming true -- a dirty already-resident package genuinely
-        // has unsaved changes we are choosing not to persist here.
-        UPackage* ExistingPackage = NewBlueprint->GetOutermost();
-        bSaved = !(ExistingPackage && ExistingPackage->IsDirty());
-        if (!bSaved)
-        {
-            SaveError = TEXT("Blueprint already existed in memory (not created by this call) and was left ")
-                TEXT("untouched; its package has unsaved changes. Call save_asset explicitly to persist it.");
-        }
+        // A Blueprint already in this package that the registry did not list (see the CreatePackage/FullyLoad
+        // call above: one an earlier create_blueprint left only in memory): saved stays false.
+        SaveError = UnsavedNote(NewBlueprint);
     }
 
-    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-    ResultObj->SetStringField(TEXT("name"), NewBlueprint->GetName());
-    ResultObj->SetStringField(TEXT("path"), NewBlueprint->GetPathName());
-    ResultObj->SetStringField(TEXT("package_path"), PackageName);
-    ResultObj->SetStringField(TEXT("parent_class"), SelectedParentClass->GetPathName());
-    ResultObj->SetStringField(TEXT("generated_class"),
-        NewBlueprint->GeneratedClass ? NewBlueprint->GeneratedClass->GetPathName() : FString());
-    ResultObj->SetStringField(TEXT("blueprint_type"),
-        NewBlueprint->BlueprintType == BPTYPE_FunctionLibrary ? TEXT("function_library") :
-        NewBlueprint->BlueprintType == BPTYPE_MacroLibrary    ? TEXT("macro") :
-        NewBlueprint->BlueprintType == BPTYPE_Interface       ? TEXT("interface") : TEXT("normal"));
-    ResultObj->SetBoolField(TEXT("already_exists"), bAlreadyExists);
-    ResultObj->SetBoolField(TEXT("saved"), bSaved);
-    if (!SaveError.IsEmpty())
-    {
-        ResultObj->SetStringField(TEXT("save_error"), SaveError);
-    }
-    return ResultObj;
+    return BlueprintReply(NewBlueprint, bAlreadyExists ? NewBlueprint->ParentClass.Get() : SelectedParentClass,
+        bAlreadyExists, bSaved, SaveError);
 }
 
 // ---------------------------------------------------------------------------
@@ -3949,12 +3973,13 @@ TSharedPtr<FJsonObject> HandleSetBlueprintComponentProperty(const TSharedPtr<FJs
     }
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("property_name"), PropertyName, mcp_common::EAllowEmpty::Yes)) { return Missing; }
     // Pull property_value as a RAW JsonValue (numbers/bools/arrays/objects flow
-    // straight into JsonValueToUProperty) -- NOT a pre-stringified string.
-    TSharedPtr<FJsonValue> ValJson = Params->TryGetField(TEXT("property_value"));
-    if (!ValJson.IsValid())
+    // straight into JsonValueToUProperty) -- NOT a pre-stringified string. The guard
+    // on the field itself makes the catalog publish it as required (of any JSON type).
+    if (!Params->HasField(TEXT("property_value")))
     {
         return mcp_common::MissingParameterReply(TEXT("property_value"));
     }
+    TSharedPtr<FJsonValue> ValJson = Params->TryGetField(TEXT("property_value"));
 
     UBlueprint* BP = mcp_common::ResolveBlueprint(BlueprintName);
     if (!BP)

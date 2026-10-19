@@ -7,6 +7,7 @@
 #include "LevelEditorViewport.h"
 #include "ShowFlags.h"
 #include "Engine/EngineBaseTypes.h"
+#include "RenderUtils.h"                       // IsRayTracingAllowed, the editor's gate for Path Tracing
 #include "Editor/EditorPerformanceSettings.h"   // UEditorPerformanceSettings::bThrottleCPUWhenNotForeground
 
 /**
@@ -109,68 +110,167 @@ namespace
         return false;
     }
 
-    /** A view mode this API sets: the name it reports, and another spelling it also accepts (or null). */
+    /**
+     * An engine view mode: the name the readers report, another spelling the setter also accepts (or null), and
+     * why set_viewport_view_mode refuses it (null when it sets it).
+     */
     struct FViewportControl_ViewModeName
     {
         EViewModeIndex Index;
         const TCHAR* Name;
         const TCHAR* Alias;
+        const TCHAR* SetupNeeded;
     };
 
     /**
-     * The view modes set_viewport_view_mode sets, each with ONE name: the one the readers report and the
-     * setter accepts back, so a name read from get_viewport_state always selects the same mode again.
-     * Wireframe is VMI_BrushWireframe and CSGWireframe is VMI_Wireframe, as the engine's EViewModeIndex
-     * display names ("Wireframe", "CSG Wireframe") put it.
+     * Every view mode of UE 5.8's EViewModeIndex but the deprecated Lit Wireframe, each with ONE name: its engine
+     * display name (the UENUM DisplayName) without spaces or punctuation, the one the readers report and the setter takes
+     * back, so a name read from get_viewport_state always selects the same mode again. Wireframe is
+     * VMI_BrushWireframe and CSGWireframe is VMI_Wireframe, as those display names put it.
+     *
+     * The setter sets a mode the way the editor's own view mode command does, with SetViewMode alone. A mode the
+     * editor only enters together with a choice of what to show -- a buffer, a visualization, texture streaming
+     * data built for the level -- carries the reason it is refused: SetViewMode alone would show nothing useful,
+     * or keep the choice the viewport made last.
      */
     const FViewportControl_ViewModeName ViewportControl_ViewModes[] =
     {
-        { VMI_Lit,                 TEXT("Lit"),              nullptr },
-        { VMI_Unlit,               TEXT("Unlit"),            nullptr },
-        { VMI_BrushWireframe,      TEXT("Wireframe"),        TEXT("BrushWireframe") },
-        { VMI_Wireframe,           TEXT("CSGWireframe"),     nullptr },
-        { VMI_Lit_DetailLighting,  TEXT("DetailLighting"),   nullptr },
-        { VMI_LightingOnly,        TEXT("LightingOnly"),     nullptr },
-        { VMI_LightComplexity,     TEXT("LightComplexity"),  nullptr },
-        { VMI_ShaderComplexity,    TEXT("ShaderComplexity"), nullptr },
-        { VMI_LightmapDensity,     TEXT("LightmapDensity"),  nullptr },
-        { VMI_ReflectionOverride,  TEXT("Reflections"),      TEXT("ReflectionOverride") },
+        { VMI_Lit,                              TEXT("Lit"),                           nullptr,                       nullptr },
+        { VMI_Unlit,                            TEXT("Unlit"),                         nullptr,                       nullptr },
+        { VMI_BrushWireframe,                   TEXT("Wireframe"),                     TEXT("BrushWireframe"),        nullptr },
+        { VMI_Wireframe,                        TEXT("CSGWireframe"),                  nullptr,                       nullptr },
+        { VMI_Lit_DetailLighting,               TEXT("DetailLighting"),                nullptr,                       nullptr },
+        { VMI_LightingOnly,                     TEXT("LightingOnly"),                  nullptr,                       nullptr },
+        { VMI_LightComplexity,                  TEXT("LightComplexity"),               nullptr,                       nullptr },
+        { VMI_ShaderComplexity,                 TEXT("ShaderComplexity"),              nullptr,                       nullptr },
+        { VMI_LightmapDensity,                  TEXT("LightmapDensity"),               nullptr,                       nullptr },
+        { VMI_LitLightmapDensity,               TEXT("LitLightmapDensity"),            nullptr,                       nullptr },
+        { VMI_ReflectionOverride,               TEXT("Reflections"),                   TEXT("ReflectionOverride"),    nullptr },
+        { VMI_StationaryLightOverlap,           TEXT("StationaryLightOverlap"),        nullptr,                       nullptr },
+        { VMI_CollisionPawn,                    TEXT("PlayerCollision"),               nullptr,                       nullptr },
+        { VMI_CollisionVisibility,              TEXT("VisibilityCollision"),           nullptr,                       nullptr },
+        { VMI_LODColoration,                    TEXT("MeshLODColoration"),             nullptr,                       nullptr },
+        { VMI_HLODColoration,                   TEXT("HierarchicalLODColoration"),     nullptr,                       nullptr },
+        { VMI_QuadOverdraw,                     TEXT("QuadOverdraw"),                  nullptr,                       nullptr },
+        { VMI_ShaderComplexityWithQuadOverdraw, TEXT("ShaderComplexityQuads"),         nullptr,                       nullptr },
+        { VMI_LWCComplexity,                    TEXT("MaterialLWCFunctionUsage"),      nullptr,                       nullptr },
+        { VMI_PathTracing,                      TEXT("PathTracing"),                   nullptr,                       nullptr },
+        { VMI_Clay,                             TEXT("Clay"),                          nullptr,                       nullptr },
+        { VMI_FrontBackFace,                    TEXT("FrontBackFace"),                 nullptr,                       nullptr },
+        { VMI_RandomColor,                      TEXT("Random"),                        TEXT("RandomColor"),           nullptr },
+        { VMI_StreamingTextureDeficit,          TEXT("StreamingTextureDeficit"),       nullptr,                       nullptr },
+        { VMI_StreamingTextureResidency,        TEXT("StreamingTextureResidency"),     nullptr,                       nullptr },
+        { VMI_StreamingMeshLODDeficit,          TEXT("StreamingMeshLODDeficit"),       nullptr,                       nullptr },
+        { VMI_StreamingMeshLODResidency,        TEXT("StreamingMeshLODResidency"),     nullptr,                       nullptr },
+        { VMI_VisualizeBuffer,                  TEXT("BufferVisualization"),           nullptr,
+            TEXT("it shows one buffer, picked in the editor's Buffer Visualization menu") },
+        { VMI_VisualizeNanite,                  TEXT("NaniteVisualization"),           nullptr,
+            TEXT("it shows one Nanite visualization, picked in the editor's Nanite Visualization menu") },
+        { VMI_VisualizeLumen,                   TEXT("LumenVisualization"),            nullptr,
+            TEXT("it shows one Lumen visualization, picked in the editor's Lumen menu") },
+        { VMI_VisualizeMegaLights,              TEXT("MegaLightsVisualization"),       nullptr,
+            TEXT("it shows one MegaLights visualization, picked in the editor's MegaLights menu") },
+        { VMI_VisualizeSubstrate,               TEXT("SubstrateVisualization"),        nullptr,
+            TEXT("it shows one Substrate visualization, picked in the editor's Substrate menu") },
+        { VMI_VisualizeGroom,                   TEXT("GroomVisualization"),            nullptr,
+            TEXT("it shows one groom visualization, picked in the editor's Groom menu") },
+        { VMI_VisualizeVirtualShadowMap,        TEXT("VirtualShadowMapVisualization"), nullptr,
+            TEXT("it shows one virtual shadow map visualization, picked in the editor's Virtual Shadow Map menu") },
+        { VMI_ShadowCasters,                    TEXT("ShadowCastersVisualization"),    nullptr,
+            TEXT("the editor enters it as the Shadow Casters entry of its Virtual Shadow Map menu, which also picks that visualization") },
+        { VMI_VisualizeVirtualTexture,          TEXT("VirtualTextureVisualization"),   nullptr,
+            TEXT("it shows one virtual texture visualization, picked in the editor's Virtual Texture menu") },
+        { VMI_VisualizeGPUSkinCache,            TEXT("GPUSkinCacheVisualization"),     nullptr,
+            TEXT("it shows one GPU skin cache visualization, picked in the editor's GPU Skin Cache menu") },
+        { VMI_VisualizeActorColoration,         TEXT("ActorColorationVisualization"),  nullptr,
+            TEXT("it colors actors by one handler, picked in the editor's Actor Coloration menu") },
+        { VMI_RayTracingDebug,                  TEXT("RayTracingDebug"),               nullptr,
+            TEXT("it shows one ray tracing debug view, picked in the editor's Ray Tracing Debug menu") },
+        { VMI_Zebra,                            TEXT("Zebra"),                         nullptr,
+            TEXT("its stripes run horizontally or vertically, picked by the editor's two Zebra entries") },
+        { VMI_GroupLODColoration,               TEXT("GroupLODColoration"),            nullptr,
+            TEXT("it is the editor's menu entry grouping MeshLODColoration and HierarchicalLODColoration, not a mode of its own") },
+        { VMI_PrimitiveDistanceAccuracy,        TEXT("PrimitiveDistance"),             nullptr,
+            TEXT("this texture streaming accuracy mode shows the data Build Texture Streaming computes for the level") },
+        { VMI_MeshUVDensityAccuracy,            TEXT("MeshUVDensity"),                 nullptr,
+            TEXT("this texture streaming accuracy mode shows the data Build Texture Streaming computes for the level, per UV channel") },
+        { VMI_MaterialTextureScaleAccuracy,     TEXT("MaterialTextureScales"),         nullptr,
+            TEXT("this texture streaming accuracy mode rebuilds the material texture streaming bindings of the level when it is entered") },
+        { VMI_RequiredTextureResolution,        TEXT("RequiredTextureResolution"),     nullptr,
+            TEXT("it compares one texture, picked from the materials selected in the Content Browser") },
     };
 
-    /** Map a view-mode name or its alias (without case) to EViewModeIndex. Returns false if unknown. */
-    bool ViewModeNameToIndex(const FString& Name, EViewModeIndex& OutIndex)
+    /** The table entry of Index, or null for a value the table does not name. */
+    const FViewportControl_ViewModeName* ViewportControl_FindMode(EViewModeIndex Index)
+    {
+        for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
+        {
+            if (Mode.Index == Index)
+            {
+                return &Mode;
+            }
+        }
+        return nullptr;
+    }
+
+    /** The table entry whose name or alias is Name (without case), or null. */
+    const FViewportControl_ViewModeName* ViewportControl_FindModeByName(const FString& Name)
     {
         for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
         {
             if (Name.Equals(Mode.Name, ESearchCase::IgnoreCase)
                 || (Mode.Alias && Name.Equals(Mode.Alias, ESearchCase::IgnoreCase)))
             {
-                OutIndex = Mode.Index;
-                return true;
+                return &Mode;
             }
         }
-        return false;
+        return nullptr;
     }
 
-    /** The name of a view mode this API sets; ViewMode_<index> for an engine mode it does not set. */
+    /** The engine display name of an EViewModeIndex value without spaces or punctuation; empty when it has none. */
+    FString ViewportControl_ReflectedModeName(int64 Value)
+    {
+        const UEnum* Enum = StaticEnum<EViewModeIndex>();
+        const int32 EnumIndex = Enum ? Enum->GetIndexByValue(Value) : INDEX_NONE;
+        if (EnumIndex == INDEX_NONE)
+        {
+            return FString();
+        }
+        FString Name;
+        for (const TCHAR Char : Enum->GetMetaData(TEXT("DisplayName"), EnumIndex))
+        {
+            if (FChar::IsAlnum(Char))
+            {
+                Name.AppendChar(Char);
+            }
+        }
+        return Name;
+    }
+
+    /**
+     * The name of a view mode as the readers report it: the table's name, else the engine display name of a value
+     * the table does not cover (the deprecated Lit Wireframe, a value of a later engine), else ViewMode_<index>.
+     */
     FString ViewModeIndexToName(EViewModeIndex Index)
     {
-        for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
+        if (const FViewportControl_ViewModeName* Mode = ViewportControl_FindMode(Index))
         {
-            if (Mode.Index == Index)
-            {
-                return Mode.Name;
-            }
+            return Mode->Name;
         }
-        return FString::Printf(TEXT("ViewMode_%d"), (int32)Index);
+        const FString Reflected = ViewportControl_ReflectedModeName(static_cast<int64>(Index));
+        return Reflected.IsEmpty() ? FString::Printf(TEXT("ViewMode_%d"), (int32)Index) : Reflected;
     }
 
-    /** Every name ViewModeNameToIndex accepts, comma-separated, for its error. */
+    /** Every name set_viewport_view_mode sets, with the aliases, comma-separated, for its errors. */
     FString ViewportControl_ValidViewModeNames()
     {
         TArray<FString> Names;
         for (const FViewportControl_ViewModeName& Mode : ViewportControl_ViewModes)
         {
+            if (Mode.SetupNeeded)
+            {
+                continue;
+            }
             Names.Add(Mode.Name);
             if (Mode.Alias)
             {
@@ -178,6 +278,50 @@ namespace
             }
         }
         return FString::Join(Names, TEXT(", "));
+    }
+
+    /**
+     * The view mode set_viewport_view_mode sets for Name, or the error reply when it sets none: an unknown name, a
+     * mode that needs a choice the editor makes along with it, Path Tracing where ray tracing is not allowed, or a
+     * mode the engine hides. Checked before any viewport is touched.
+     */
+    TSharedPtr<FJsonObject> ViewportControl_ResolveSettableMode(const FString& Name, EViewModeIndex& OutIndex)
+    {
+        if (const FViewportControl_ViewModeName* Mode = ViewportControl_FindModeByName(Name))
+        {
+            if (Mode->SetupNeeded)
+            {
+                return mcp_common::MakeErrorReply(FString::Printf(
+                    TEXT("set_viewport_view_mode does not set '%s': %s. Nothing was changed. Modes it sets: %s"),
+                    Mode->Name, Mode->SetupNeeded, *ViewportControl_ValidViewModeNames()));
+            }
+            // The editor binds its Path Tracing command only where ray tracing is allowed.
+            if (Mode->Index == VMI_PathTracing && !IsRayTracingAllowed())
+            {
+                return mcp_common::MakeErrorReply(TEXT("view_mode 'PathTracing' needs ray tracing, which this editor does not allow ")
+                    TEXT("(r.RayTracing off or an RHI without it); the editor offers Path Tracing only then. Nothing was changed."));
+            }
+            OutIndex = Mode->Index;
+            return nullptr;
+        }
+        // A name the readers can report outside the table: refused, saying why.
+        const UEnum* Enum = StaticEnum<EViewModeIndex>();
+        for (int32 EnumIndex = 0; Enum && EnumIndex < Enum->NumEnums(); ++EnumIndex)
+        {
+            const FString Reflected = ViewportControl_ReflectedModeName(Enum->GetValueByIndex(EnumIndex));
+            if (Reflected.IsEmpty() || !Name.Equals(Reflected, ESearchCase::IgnoreCase))
+            {
+                continue;
+            }
+            return mcp_common::MakeErrorReply(FString::Printf(
+                TEXT("set_viewport_view_mode does not set '%s': it is %s. Nothing was changed. Modes it sets: %s"), *Reflected,
+                Enum->HasMetaData(TEXT("Hidden"), EnumIndex)
+                    ? TEXT("hidden by the engine (deprecated, or not a mode of its own)")
+                    : TEXT("an engine view mode this tool does not set"),
+                *ViewportControl_ValidViewModeNames()));
+        }
+        return mcp_common::MakeErrorReply(
+            FString::Printf(TEXT("Unknown view_mode '%s'. Valid: %s"), *Name, *ViewportControl_ValidViewModeNames()));
     }
 
     /** The range of the level viewport's Field of View control (the editor clamps its own FOV setters to it). */
@@ -271,8 +415,8 @@ TSharedPtr<FJsonObject> HandleSetViewportRealtime(const TSharedPtr<FJsonObject>&
 // set_viewport_view_mode
 // ---------------------------------------------------------------------------
 
-// MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case, and an unknown name is an error before anything changes. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved, no asset touched, and the previous mode is not returned. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Read it without changing it with get_viewport_state; single show flags are set_show_flag, the projection set_view_type, game view set_game_view.
-//   @param view_mode - One of Lit, Unlit, Wireframe, DetailLighting, LightingOnly, BrushWireframe, ShaderComplexity, LightComplexity, LightmapDensity, Reflections, matched without case. Wireframe and BrushWireframe select the same brush wireframe mode, read back as Wireframe; CSGWireframe (the BSP wireframe) and ReflectionOverride (read back as Reflections) are accepted too.
+// MCP:set_viewport_view_mode - Set the rendering view mode (Lit, Unlit, Wireframe, ShaderComplexity...) of the active level editor viewport, the focused one or else the first; no viewport is an error. view_mode is matched without case. An unknown name is an error before anything changes, and so is a mode the editor only enters with a choice of what to show (a buffer, a visualization, texture streaming data, a zebra direction): the error says which. The mode is stored for the viewport's current projection only (perspective and orthographic keep separate modes) and lasts for this editor session: no undo step, nothing saved. view_mode and view_mode_index are read back, view_mode as the name get_viewport_state reports and this tool takes back. Show flags: set_show_flag; projection: set_view_type; game view: set_game_view.
+//   @param view_mode - Engine view mode name, matched without case, e.g. Lit, Unlit, Wireframe, CSGWireframe, DetailLighting, LightingOnly, LightComplexity, ShaderComplexity, LightmapDensity, Reflections, PlayerCollision, MeshLODColoration, QuadOverdraw, Clay; each is the engine display name without spaces. BrushWireframe is accepted for Wireframe, ReflectionOverride for Reflections, RandomColor for Random; PathTracing only where ray tracing is allowed.
 //   @returns { applied: bool, requested: string, view_mode_index: int, view_mode: string }
 TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>& Params)
 {
@@ -280,11 +424,7 @@ TSharedPtr<FJsonObject> HandleSetViewportViewMode(const TSharedPtr<FJsonObject>&
     if (TSharedPtr<FJsonObject> Missing = mcp_common::ReadRequiredString(Params, TEXT("view_mode"), ViewModeStr, mcp_common::EAllowEmpty::Yes)) { return Missing; }
 
     EViewModeIndex DesiredIndex = VMI_Lit;
-    if (!ViewModeNameToIndex(ViewModeStr, DesiredIndex))
-    {
-        return mcp_common::MakeErrorReply(
-            FString::Printf(TEXT("Unknown view_mode '%s'. Valid: %s"), *ViewModeStr, *ViewportControl_ValidViewModeNames()));
-    }
+    if (TSharedPtr<FJsonObject> Refused = ViewportControl_ResolveSettableMode(ViewModeStr, DesiredIndex)) { return Refused; }
 
     FEditorViewportClient* Client = nullptr;
     if (TSharedPtr<FJsonObject> Error = ViewportControl_RequireClient(Client)) { return Error; }
@@ -447,7 +587,7 @@ TSharedPtr<FJsonObject> HandleSetViewportCamera(const TSharedPtr<FJsonObject>& P
 // get_viewport_state
 // ---------------------------------------------------------------------------
 
-// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime, view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags.
+// MCP:get_viewport_state - Read the active level editor viewport (the focused one, else the first) without changing it: realtime (the effective value, an override such as the background throttle included), view mode name and index, camera speed, camera location [x, y, z] and rotation [pitch, yaw, roll], and the Grid, Bounds, Collision, Wireframe and Lighting show flags, a flag this engine lacks left out. view_mode names every engine view mode by its display name without spaces (Lit, CSGWireframe, PlayerCollision...), or ViewMode_<index> for a value the engine does not name; set_viewport_view_mode takes that name back, but refuses the modes that need a choice made with them. No viewport is an error; nothing is saved or recorded for undo. Setters: set_viewport_view_mode, set_viewport_realtime, set_camera_speed, set_viewport_camera, set_show_flag.
 //   @returns { realtime: bool, view_mode_index: int, view_mode: string, camera_speed: number, location: [number], rotation: [number], show_flags: object }
 TSharedPtr<FJsonObject> HandleGetViewportState(const TSharedPtr<FJsonObject>& Params)
 {

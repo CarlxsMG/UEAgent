@@ -167,14 +167,14 @@ Rebuilds the proximity (adjacency) graph of a UGeometryCollection asset in place
 
 *Additive, idempotent.*
 
-Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset already exists it is loaded and the same payload shape is returned. Otherwise a new UFieldSystem is created, registered with the asset registry, and saved to disk.
+Create a UFieldSystem asset -- an empty list of Chaos field commands -- at package_path/field_system_name (default folder /Game/MCP), register it with the Asset Registry and save it; no undo step. Idempotent: a field system already at that path is loaded and returned unchanged in the same shape, with saved=false and a message, nothing saved; command_count tells how many commands it already holds. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset gives success false with saved=false and save_error. field_system_path is the package path (e.g. /Game/MCP/FS_Example). Add commands with add_field_node, read them with get_field_system_info, place the asset in the level with spawn_field_system_actor.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `field_system_name` | string | yes | Asset name (e.g. "FS_Example") |
 | `package_path` | string | no | Optional content folder; defaults to /Game/MCP |
 
-**Returns:** `{ field_system_path: string, field_system_name: string, command_count: int, success: bool, saved: bool, save_error?: string }`
+**Returns:** `{ field_system_path: string, field_system_name: string, command_count: int, success: bool, saved: bool, save_error?: string, message?: string }`
 
 ## `create_geometry_collection`
 
@@ -728,7 +728,7 @@ Set linear/angular drives (motors), breakable thresholds, projection, and collis
 
 *Destructive, idempotent.*
 
-Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the "Auto Convex Collision" editor action) via UStaticMeshEditorSubsystem::SetConvexDecompositionCollisionsWithNotification.  The subsystem removes any existing collision first, so this is idempotent (re-running replaces, never duplicates).  Reuses the duplicate-first logic so a read-only /Engine source is copied into dest_path first.  The subsystem returns false honestly on bad input (no valid mesh description / not on the game thread / under PIE) — surfaced as a CLEAN error, never a fake success.
+Replace the simple collision of a UStaticMesh asset, found by path, with a V-HACD convex decomposition, as the Static Mesh Editor's Auto Convex Collision does, in one undo step, then save it; re-running replaces the hulls, never adds to them. hull_count and hull_precision must be positive, checked before anything is copied. A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there; duplicated says this call created it. When the subsystem fails (no mesh description, no LOD 0 geometry with collision enabled, a PIE session), success is false: collision_changed says whether it had already cleared the old collision, left unsaved and undoable, and saved whether a new copy was saved. A failed save makes success false with save_error. K-DOP hull: set_static_mesh_kdop_collision; clear: remove_static_mesh_collision.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -738,13 +738,13 @@ Replace a UStaticMesh's simple collision with a V-HACD convex decomposition (the
 | `max_hull_verts` | number | no | Maximum vertices per generated hull (default 16). |
 | `hull_precision` | number | no | Voxel resolution used during decomposition (default 100000, must be positive). |
 
-**Returns:** `{ static_mesh_path, hull_count, max_hull_verts, hull_precision, convex_count, element_count, collision_set, duplicated_to_game, saved, save_error? }`
+**Returns:** `{ static_mesh_path, hull_count, max_hull_verts, hull_precision, convex_count, element_count, collision_set, duplicated_to_game, duplicated, saved, save_error?, collision_changed? }`
 
 ## `set_static_mesh_kdop_collision`
 
 *Additive.*
 
-Add one K-DOP simple collision hull to a UStaticMesh asset, found by path, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game, such as /Engine content, is first copied to dest_path under /Game, reusing a copy already there. An invalid shape, unknown mesh or running PIE session is an error; a failed save makes success false with saved=false and save_error. Replace all collision with a convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
+Add one K-DOP simple collision hull to a UStaticMesh asset, as the Static Mesh Editor's Add K-DOP action does, in one undo step, then save it. The hull is a convex element fitted around the LOD0 vertices: NDOP10_X, NDOP10_Y or NDOP10_Z bevels the four edges along that axis, NDOP18 (default, case-insensitive) every edge, NDOP26 every edge and corner. Existing collision is kept, so each call appends another hull (added_index). A mesh outside /Game is first copied to dest_path under /Game, reusing a copy already there (duplicated: this call created it). An invalid shape, checked before any copy, or an unknown mesh is an error; a subsystem failure, as under PIE, makes success false with collision_changed and the new copy's saved. A failed save makes success false with save_error. Convex decomposition: set_static_mesh_convex_collision; box, sphere or capsule: add_simple_collision_to_static_mesh; clear: remove_static_mesh_collision.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -752,7 +752,7 @@ Add one K-DOP simple collision hull to a UStaticMesh asset, found by path, as th
 | `dest_path` | string | no | /Game path to duplicate a read-only /Engine source mesh into first (required only when the source is not under /Game). |
 | `shape` | string | no | K-DOP hull shape: NDOP10_X \| NDOP10_Y \| NDOP10_Z \| NDOP18 \| NDOP26 (default NDOP18). |
 
-**Returns:** `{ static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, saved, save_error? }`
+**Returns:** `{ static_mesh_path, shape, added_index, simple_collision_count, element_count, collision_added, duplicated_to_game, duplicated, saved, save_error?, collision_changed? }`
 
 ## `set_vehicle_wheel_setup`
 

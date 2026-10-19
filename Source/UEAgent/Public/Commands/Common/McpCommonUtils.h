@@ -59,7 +59,10 @@ namespace mcp_common
      * Marks the package dirty and saves it to disk (.uasset) with
      * the canonical authoring flags (RF_Public|RF_Standalone,
      * SAVE_NoError, Error=GError). Returns false + fills OutError on
-     * failure.
+     * failure. A package that contains a map is saved as a .umap through
+     * the editor's own map save (UEditorLoadingAndSavingUtils::SavePackages,
+     * no dialog), which runs the world's pre-save and also writes that
+     * world's dirty external packages and its _BuiltData package.
      *
      * PIE: if a session is running this REFUSES and returns false with OutError
      * explaining why, instead of saving. Not caution: the engine guard
@@ -112,7 +115,8 @@ namespace mcp_common
      * Why PackageName (a package or object path) cannot name an asset, or empty when it can. CreatePackage,
      * and every LoadObject that has to create the package it resolves, aborts the editor with a Fatal error
      * on a name containing "//" -- what joining a folder that ends in '/', or a name that is itself a path,
-     * produces. Call it on the joined path before the first load or create.
+     * produces -- and FName's checkf aborts it on a package name of NAME_SIZE characters or more, which a folder
+     * and a name can join to although each is shorter. Call it on the joined path before the first load or create.
      */
     UEAGENT_API FString InvalidPackageName(const FString& PackageName);
 

@@ -49,11 +49,12 @@ namespace
 	}
 
 	/** The fields every saving command's reply ends with: command_count, success, and save_error when the save
-	 *  failed with a reason. */
+	 *  failed with a reason. success is whether the save reached disk, the same verdict as the reply's envelope
+	 *  (MakeSavedReply), so the payload never says success inside a failed reply. */
 	void ChaosFields_AddCountAndSaveError(const TSharedPtr<FJsonObject>& Data, const UFieldSystem& FS, bool bSaved, const FString& SaveError)
 	{
 		Data->SetNumberField(TEXT("command_count"), FS.Commands.Num());
-		Data->SetBoolField(TEXT("success"), true);
+		Data->SetBoolField(TEXT("success"), bSaved);
 		if (!bSaved && !SaveError.IsEmpty())
 		{
 			Data->SetStringField(TEXT("save_error"), SaveError);
@@ -94,10 +95,10 @@ namespace
 // ---------------------------------------------------------------------------
 // 1. create_field_system_asset
 // ---------------------------------------------------------------------------
-// MCP:create_field_system_asset - Create (or load) a saved UFieldSystem asset on /Game.  Idempotent: if the asset already exists it is loaded and the same payload shape is returned. Otherwise a new UFieldSystem is created, registered with the asset registry, and saved to disk.
+// MCP:create_field_system_asset - Create a UFieldSystem asset -- an empty list of Chaos field commands -- at package_path/field_system_name (default folder /Game/MCP), register it with the Asset Registry and save it; no undo step. Idempotent: a field system already at that path is loaded and returned unchanged in the same shape, with saved=false and a message, nothing saved; command_count tells how many commands it already holds. An invalid package name, or a name taken by an asset of another class, is an error; a failed save of the new asset gives success false with saved=false and save_error. field_system_path is the package path (e.g. /Game/MCP/FS_Example). Add commands with add_field_node, read them with get_field_system_info, place the asset in the level with spawn_field_system_actor.
 //   @param field_system_name - Asset name (e.g. "FS_Example")
 //   @param package_path - Optional content folder; defaults to /Game/MCP
-//   @returns { field_system_path: string, field_system_name: string, command_count: int, success: bool, saved: bool, save_error?: string }
+//   @returns { field_system_path: string, field_system_name: string, command_count: int, success: bool, saved: bool, save_error?: string, message?: string }
 
 TSharedPtr<FJsonObject> HandleCreateFieldSystemAsset(
 	const TSharedPtr<FJsonObject>& Params)
@@ -121,7 +122,9 @@ TSharedPtr<FJsonObject> HandleCreateFieldSystemAsset(
 		Data->SetStringField(TEXT("field_system_name"), Name);
 		Data->SetNumberField(TEXT("command_count"), Existing->Commands.Num());
 		Data->SetBoolField(TEXT("success"), true);
-		Data->SetBoolField(TEXT("saved"), true);
+		// Returned unchanged: nothing was written, so nothing is saved.
+		Data->SetBoolField(TEXT("saved"), false);
+		Data->SetStringField(TEXT("message"), TEXT("the field system already exists; returned it unchanged, nothing saved"));
 		return mcp_common::MakeOkReply(Data);
 	}
 

@@ -1256,7 +1256,7 @@ TSharedPtr<FJsonObject> HandleAssignRVTToLandscape(const TSharedPtr<FJsonObject>
 // Typed delete RVT + unassign + region introspection.
 // ---------------------------------------------------------------------------
 
-// MCP:remove_rvt_asset - Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
+// MCP:remove_rvt_asset - Destroy a URuntimeVirtualTexture asset (mirror of create_rvt_asset). Typed-delete: it loads the asset and REFUSES to delete it if it is not a URuntimeVirtualTexture, so it cannot wipe the wrong asset the way the generic delete_asset can; that refusal, and a delete the engine does not carry out, make success false with deleted false. Idempotent on missing assets. It deletes the ASSET, not any binding: unassign_rvt_from_landscape is what detaches it from a landscape first.
 //   @param asset_path - Full /Game/... asset path of the RVT.
 //   @returns { asset_path, deleted, already_existed, asset_class?, note? }
 //   NOTE (impl): delegates the actual delete to UEditorAssetLibrary::DeleteAsset once the type check passes.
@@ -1284,10 +1284,10 @@ TSharedPtr<FJsonObject> HandleRemoveRVTAsset(const TSharedPtr<FJsonObject>& Para
 
     // URuntimeVirtualTexture is the typed-delete target (the same UClass that
     // create_rvt_asset returns). Anything else (e.g. a UTexture2D accidentally
-    // passed) is rejected with a clean payload.
+    // passed) is refused: success false, nothing deleted.
     if (!Asset->IsA<URuntimeVirtualTexture>())
     {
-        return mcp_common::MakeOkReply(AssetCommandHelpers::WrongTypeRefusal(AssetPath, *Asset, TEXT("URuntimeVirtualTexture")));
+        return AssetCommandHelpers::WrongTypeRefusal(TEXT("remove_rvt_asset"), AssetPath, *Asset, TEXT("URuntimeVirtualTexture"));
     }
 
     const FString AssetClassName = Asset->GetClass()->GetName();
@@ -1298,7 +1298,7 @@ TSharedPtr<FJsonObject> HandleRemoveRVTAsset(const TSharedPtr<FJsonObject>& Para
     Resp->SetStringField(TEXT("asset_class"), AssetClassName);
     Resp->SetBoolField(TEXT("deleted"), bDeleted);
     Resp->SetBoolField(TEXT("already_existed"), true);
-    return mcp_common::MakeOkReply(Resp);
+    return AssetCommandHelpers::DeleteOutcomeReply(TEXT("remove_rvt_asset"), Resp, bDeleted, AssetPath);
 }
 
 // MCP:unassign_rvt_from_landscape - Inverse of assign_rvt_to_landscape: clears ONE slot of a landscape's RuntimeVirtualTextures array, breaking the binding without leaving a dangling entry behind. It unbinds only -- the RVT asset itself survives (remove_rvt_asset destroys that). Reports the asset path that was in the slot, so the operation is reversible.
