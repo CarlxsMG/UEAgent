@@ -601,6 +601,7 @@ TSharedPtr<FJsonObject> HandleCreateSoundModulationPatch(
 	Params->TryGetStringField(TEXT("package_path"), PackagePath);
 
 	const FString FullPath = PackagePath / PatchName;
+	if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
 	// Both outcomes report the patch's settings as they stand.
 	auto BuildPayload = [](const USoundModulationPatch* Patch, bool bCreated) -> TSharedPtr<FJsonObject>

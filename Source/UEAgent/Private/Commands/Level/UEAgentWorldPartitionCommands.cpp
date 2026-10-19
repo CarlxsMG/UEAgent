@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Asset/AssetCommandHelpers.h"            // MapPathTooLongForExternalPackages (create_world_partition_map)
 #include "Commands/Common/UEAgentGraphUtils.h"             // FUEAgentGraphUtils::ResolveClass (filter_class resolution)
 #include "Commands/Data/DataAuthoringUtils.h"
 #include "UObject/TopLevelAssetPath.h"                           // FTopLevelAssetPath (native/base class of an actor descriptor)
@@ -243,7 +244,13 @@ TSharedPtr<FJsonObject> HandleCreateWorldPartitionMap(const TSharedPtr<FJsonObje
     Params->TryGetBoolField(TEXT("enable_streaming"), bEnableStreaming);
 
     const FString FullPath = FString::Printf(TEXT("%s/%s"), *PackagePath, *MapName);
-    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
+    // The world creation below names the world's objects after the object path (":PersistentLevel.WorldSettings", the
+    // minimap actor and its sprite) and packages its actors after the package name: a path that fits an FName can still
+    // take one of those past the limit, which aborts the editor.
+    if (const FString TooLong = AssetCommandHelpers::MapPathTooLongForExternalPackages(FullPath); !TooLong.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TooLong);
+    }
 
     // Idempotent: a map already there is returned unchanged and nothing is saved; world_partition_enabled reads
     // whether it has World Partition. An asset of another class there is not a map.

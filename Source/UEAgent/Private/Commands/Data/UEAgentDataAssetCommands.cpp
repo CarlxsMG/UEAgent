@@ -64,7 +64,8 @@ namespace UEAgentDataAssetCommands
 namespace UEAgentDataAssetCommandsImpl
 {
 
-    /** "<Folder>/<Name>": the package a create_* command writes. */
+    /** "<Folder>/<Name>": the package a create_* command writes. Its callers check it with InvalidPackageNameReply
+     *  before the first lookup: the two pieces fit an FName and can still join past one. */
     FString JoinPackagePath(const FString& Folder, const FString& AssetName)
     {
         return Folder + TEXT("/") + AssetName;
@@ -410,6 +411,7 @@ TSharedPtr<FJsonObject> HandleCreateDataAsset(const TSharedPtr<FJsonObject>& Par
     }
 
     const FString TargetPath = Impl::JoinPackagePath(Folder, NewName);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(TargetPath)) { return Invalid; }
     // The registry is asked first; the load is only attempted when it knows nothing at that path.
     if (UEditorAssetLibrary::DoesAssetExist(TargetPath) || Impl::LoadDataAssetAt(TargetPath) != nullptr)
     {
@@ -820,6 +822,7 @@ TSharedPtr<FJsonObject> HandleCreateDataTable(const TSharedPtr<FJsonObject>& Par
     }
 
     const FString TargetPath = Impl::JoinPackagePath(Folder, NewName);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(TargetPath)) { return Invalid; }
 
     // Idempotent: a table already at this path with the SAME row struct is this very call re-run, so it
     // succeeds with already_existed=true, unchanged and not saved. A different row struct is a real conflict and
@@ -906,6 +909,7 @@ TSharedPtr<FJsonObject> HandleCreateCompositeDataTable(const TSharedPtr<FJsonObj
     bool bIncludeRowSources = false;
     Params->TryGetBoolField(TEXT("include_row_sources"), bIncludeRowSources);
     const FString FullPath = UEAgentDataAssetCommandsImpl::JoinPackagePath(PackagePath, TableName);
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(FullPath)) { return Invalid; }
 
     // ---------------------------------------------------------------------- //
     // STEP 1 -- resolve the requested parents. Nothing is assigned yet.

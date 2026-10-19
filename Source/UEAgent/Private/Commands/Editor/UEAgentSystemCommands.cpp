@@ -1569,6 +1569,17 @@ TSharedPtr<FJsonObject> HandleImportFontFile(const TSharedPtr<FJsonObject>& Para
     bool bCreateFontAsset = true;
     Params->TryGetBoolField(TEXT("create_font_asset"), bCreateFontAsset);
 
+    // The factory names the companion UFont's package after the face's, "<folder>/<name>_Font", and makes an FName of
+    // it during the import: a face name that fits can still make one past the limit.
+    if (bCreateFontAsset)
+    {
+        const FString FaceName = AssetName.IsEmpty() ? FPaths::GetBaseFilename(SourceFilePath) : AssetName;
+        if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(DestinationPath / FaceName + TEXT("_Font")))
+        {
+            return Invalid;
+        }
+    }
+
     UFontFileImportFactory* FontFactory = NewObject<UFontFileImportFactory>();
     FontFactory->bEditorImport = true;
     // WITHOUT this the factory opens a modal and the editor hangs waiting (see the note above).

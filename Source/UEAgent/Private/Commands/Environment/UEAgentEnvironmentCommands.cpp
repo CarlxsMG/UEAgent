@@ -66,7 +66,7 @@ namespace UEAgentEnvironmentImpl
 }
 
 // MCP:spawn_sky_atmosphere - Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_sky_atmosphere_properties.
-//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& Params)
@@ -90,7 +90,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyAtmosphere(const TSharedPtr<FJsonObject>& 
 }
 
 // MCP:spawn_volumetric_cloud - Spawn a new VolumetricCloud actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one; nothing is saved. Returns actor_name (the label), actor_internal_name, actor_class and has_component. Tune it with set_volumetric_cloud_properties.
-//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }
 
 TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>& Params)
@@ -115,7 +115,7 @@ TSharedPtr<FJsonObject> HandleSpawnVolumetricCloud(const TSharedPtr<FJsonObject>
 }
 
 // MCP:spawn_exponential_height_fog - Spawn a new ExponentialHeightFog actor in the editor world at location (no rotation) as one undoable transaction, without checking for an existing one, so each call adds another fog actor (not idempotent); nothing is saved (save_level). fog_density, when given, is written to its UExponentialHeightFogComponent with SetFogDensity and density_set turns true; either way the reply reads fog_density back from the component, so without the param it shows the class default. No editor world, or a failed spawn, is an error. actor_name is the label and actor_internal_name the object name. Tune or inspect an existing fog with set_exponential_height_fog_properties and get_exponential_height_fog_properties; other atmosphere actors: spawn_sky_atmosphere, spawn_volumetric_cloud or spawn_sky_light.
-//   @param location - Optional [X, Y, Z] world location in cm (defaults to origin); fewer than 3 numbers also means the origin
+//   @param location - Optional [X, Y, Z] world location in cm (defaults to origin); any other value is an error and nothing is spawned
 //   @param fog_density - Optional fog density multiplier; if supplied, applied to the component and read back
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }
 
@@ -207,7 +207,7 @@ TSharedPtr<FJsonObject> HandleSpawnSkyLight(const TSharedPtr<FJsonObject>& Param
 }
 
 // MCP:spawn_post_process_volume - Spawn a new PostProcessVolume actor in the editor world at location as one undoable transaction, unbound (affecting the whole world) by default; nothing is saved. Returns actor_name (the label), actor_internal_name, unbound and enabled. Configure it with set_post_process_setting or set_post_process_color_grading.
-//   @param location - [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given.
+//   @param location - [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned.
 //   @param unbound - true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space.
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }
 

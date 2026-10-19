@@ -1750,6 +1750,8 @@ TSharedPtr<FJsonObject> HandleGetAttributeMetaOnSetClass(const TSharedPtr<FJsonO
         DataTablePath = FString::Printf(TEXT("/Game/UEAgent/AttributeMeta/%s_Meta.%s_Meta"),
             *AttributeSetClass->GetName(), *AttributeSetClass->GetName());
     }
+    // The default joins a folder to the class name, and the load creates a package of the path it cannot find.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(DataTablePath)) { return Invalid; }
 
     UDataTable* DataTable = GameplayAbilities_LoadDataTableAt(DataTablePath);
     if (!DataTable)

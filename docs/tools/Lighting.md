@@ -489,7 +489,7 @@ Spawn a new ExponentialHeightFog actor in the editor world at location (no rotat
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location in cm (defaults to origin); fewer than 3 numbers also means the origin |
+| `location` | array | no | Optional [X, Y, Z] world location in cm (defaults to origin); any other value is an error and nothing is spawned |
 | `fog_density` | number | no | Optional fog density multiplier; if supplied, applied to the component and read back |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, density_set: bool, fog_density: number, spawned: bool }`
@@ -502,7 +502,7 @@ Spawn a new PostProcessVolume actor in the editor world at location as one undoa
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned. |
 | `unbound` | boolean | no | true (default) makes the volume affect the whole world; false limits it to its brush, which this spawn leaves without geometry, so it then covers no space. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, unbound: bool, enabled: bool, spawned: bool }`
@@ -515,7 +515,7 @@ Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never int
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | Optional [X, Y, Z] world location; missing or shorter than three numbers means the origin |
+| `location` | array | no | Optional [X, Y, Z] world location; missing means the origin, and any other value is an error and nothing is spawned |
 | `rotation` | array | no | Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {"pitch", "yaw", "roll"} by name (defaults to zero) |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, has_render_target: bool, spawned: bool }`
@@ -528,7 +528,7 @@ Spawn a new SkyAtmosphere actor in the editor world at location (no rotation) as
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }`
 
@@ -568,7 +568,7 @@ Spawn a new VolumetricCloud actor in the editor world at location (no rotation) 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin, also when fewer than 3 numbers are given. |
+| `location` | array | no | [X, Y, Z] world location in cm; defaults to the origin. Any other value (an object, another length) is an error and nothing is spawned. |
 
 **Returns:** `{ actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, spawned: bool }`
 

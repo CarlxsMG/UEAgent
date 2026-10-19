@@ -1836,6 +1836,7 @@ TSharedPtr<FJsonObject> HandleScaffoldLocomotionAnimBp(
 
     PackagePath.RemoveFromEnd(TEXT("/"));
     const FString AnimBPPath = PackagePath / AssetName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AnimBPPath)) { return Invalid; }
 
     UAnimBlueprint* AnimBP = mcp_common::LoadAssetOrSoftPath<UAnimBlueprint>(AnimBPPath);
     const bool bAlreadyExistedABP = (AnimBP != nullptr);
@@ -2021,6 +2022,7 @@ TSharedPtr<FJsonObject> HandleWireAimOffset(
 
     PackagePath.RemoveFromEnd(TEXT("/"));
     const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetObjectPath)) { return Invalid; }
 
     UBlendSpace1D* BS = LoadObject<UBlendSpace1D>(nullptr, *AssetObjectPath);
     const bool bAlreadyExisted = (BS != nullptr);
@@ -2097,6 +2099,7 @@ static TSharedPtr<FJsonObject> ScaffoldBlendSpaceAssetImpl(
     FString AssetName = AssetNameIn;
     PackagePath.RemoveFromEnd(TEXT("/"));
     const FString AssetObjectPath = PackagePath / AssetName + TEXT(".") + AssetName;
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(AssetObjectPath)) { return Invalid; }
 
     // Idempotent: if the asset already exists, just save with the new params
     // and report already_existed=true. We do NOT mutate the sample set

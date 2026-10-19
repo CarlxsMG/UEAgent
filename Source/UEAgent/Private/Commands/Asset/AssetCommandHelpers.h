@@ -78,4 +78,38 @@ namespace AssetCommandHelpers
      * superseded) with a live CDO -- the CDOs the engine's asset-rename modal checks for references. Null otherwise.
      */
     UObject* NativeClassDefault(UClass* Class);
+
+    /**
+     * How many characters the longest package name the engine derives from a map's package name adds to it, for a
+     * map whose actors live in their own packages (World Partition, One File Per Actor). Each actor is packaged at
+     * <mount>/__ExternalActors__/<rest of the map path>/<2>/<2>/<21> (ULevel::GetActorPackageName: 47 more) and each
+     * actor folder at <mount>/__ExternalObjects__/<rest>/<1>/<2>/<22> (FExternalPackageHelper::GetExternalPackageName:
+     * 48 more), the last three parts being a 25-character base-36 GUID.
+     */
+    constexpr int32 MapExternalPackageOverhead = 48;
+
+    /**
+     * Why MapPackageName (a package or object path) cannot name a map whose actors live in their own packages, or empty
+     * when it can. Two kinds of names derived from it reach NAME_SIZE first, and FName's checkf aborts the editor on
+     * either: the paths of the world's objects (":PersistentLevel.WorldSettings", the minimap actor and its sprite,
+     * each placed actor and its components), which mcp_common::InvalidPackageName limits through the object path; and
+     * the packages of the actors and actor folders, MapExternalPackageOverhead past the package name, which that limit
+     * already keeps under NAME_SIZE. So the longest map object path accepted is NAME_SIZE - 1 -
+     * mcp_common::ObjectPathSubobjectMargin, or less for a long map name (InvalidPackageName says how much).
+     */
+    FString MapPathTooLongForExternalPackages(const FString& MapPackageName);
+
+    /**
+     * How many characters the path of the deepest object inside the loaded Asset reaches past Asset's own object path,
+     * measured over every live object outered to it, recursively (a world's persistent level, its loaded actors and
+     * their components included); OutDeepestSuffix, when given, gets that object's path past the object path. 0 for null.
+     */
+    int32 DeepestSubobjectPathDepth(const UObject* Asset, FString* OutDeepestSuffix = nullptr);
+
+    /**
+     * Why copying or renaming the loaded Asset to NewObjectPath (a package or object path) would name one of the objects
+     * it carries past the FName limit, or empty: mcp_common::InvalidPackageName(NewObjectPath) as the floor, then the
+     * destination's object path plus Asset's measured DeepestSubobjectPathDepth. Without Asset, the floor only.
+     */
+    FString CopiedObjectPathsTooLong(const UObject* Asset, const FString& NewObjectPath);
 }

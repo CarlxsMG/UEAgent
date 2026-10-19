@@ -283,7 +283,7 @@ Spawn an ANavLinkProxy actor (with its class-default point link) in the editor w
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the nav link proxy in cm; missing or shorter than 3 numbers spawns at the origin |
+| `location` | array | no | [x, y, z] world location for the nav link proxy in cm; missing spawns at the origin, and any other value is an error and nothing is spawned |
 
 **Returns:** `{ actor_name, actor_label, actor_path, actor_class, success }`
 
@@ -295,7 +295,7 @@ Spawn an ANavModifierVolume in the editor world at location, give it a real box 
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `location` | array | no | [x, y, z] world location for the volume in cm; missing or shorter than 3 numbers spawns at the origin |
+| `location` | array | no | [x, y, z] world location for the volume in cm; missing spawns at the origin, and any other value is an error and nothing is spawned |
 | `area_class` | string | no | Optional UNavArea subclass name to apply via SetAreaClass, e.g. NavArea_Null; unresolved names are ignored with area_class_applied false |
 | `extent` | array | no | Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100 |
 

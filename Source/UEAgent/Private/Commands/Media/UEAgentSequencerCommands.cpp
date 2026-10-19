@@ -2381,6 +2381,16 @@ ULevelSequence* LoadOrCreateInnerSequence(const FString& InnerPath, FString* Out
     {
         PackagePath = FString::Printf(TEXT("/Game/%s"), *PackagePath);
     }
+    // The /Game prefix, or the suffix of a sibling's default name, can join a path past the FName limit, and the load
+    // below creates a package of a path it cannot find.
+    if (const FString Invalid = mcp_common::InvalidPackageName(PackagePath); !Invalid.IsEmpty())
+    {
+        if (OutError)
+        {
+            *OutError = Invalid;
+        }
+        return nullptr;
+    }
 
     // Already on disk / in memory -> load (idempotent).
     if (ULevelSequence* Existing = Cast<ULevelSequence>(

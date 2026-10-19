@@ -196,7 +196,7 @@ namespace UEAgentNavigationCommandsImpl
 // NAVIGATIONSYSTEM_API).
 // ----------------------------------------------------------------------------
 // MCP:spawn_nav_modifier_volume - Spawn an ANavModifierVolume in the editor world at location, give it a real box brush of half-extent extent (a spawned volume has none) and optionally set its nav area class, in one undo step, then label it with its internal name so label lookups find it. area_class names a UNavArea subclass already loaded (e.g. NavArea_Null or NavArea_Obstacle; a Blueprint area by its _C name); a name that does not resolve to one is not an error: area_class_applied comes back false and the default area stays. Each call adds a new actor (not idempotent). The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error. Navmesh bounds: spawn_navmesh_bounds_volume; jump or drop links: spawn_nav_link_proxy; inverse: delete_actor.
-//   @param location - [x, y, z] world location for the volume in cm; missing or shorter than 3 numbers spawns at the origin
+//   @param location - [x, y, z] world location for the volume in cm; missing spawns at the origin, and any other value is an error and nothing is spawned
 //   @param area_class - Optional UNavArea subclass name to apply via SetAreaClass, e.g. NavArea_Null; unresolved names are ignored with area_class_applied false
 //   @param extent - Optional [x, y, z] box half-extent in cm (default 100,100,100, a 200 cm box); a component of 0 or less becomes 100
 //   @returns { actor_name, actor_label, actor_path, actor_class, brush_built, area_class_applied, area_class, success }
@@ -274,7 +274,7 @@ TSharedPtr<FJsonObject> HandleSpawnNavModifierVolume(const TSharedPtr<FJsonObjec
 // so a straight editor-actor spawn is all that's needed.
 // ----------------------------------------------------------------------------
 // MCP:spawn_nav_link_proxy - Spawn an ANavLinkProxy actor (with its class-default point link) in the editor world at location through the editor actor subsystem, in one undo step, and label it with its internal name so label lookups find it. Each call adds a new actor (not idempotent); the link endpoints are not set here. The level is not saved (save_level) and navigation is not rebuilt (rebuild_navigation). During PIE the editor refuses the spawn and the call is an error, as it is without an editor world. Move it with set_actor_transform; inverse: delete_actor. An area that changes path cost or blocks: spawn_nav_modifier_volume; the navmesh bounds: spawn_navmesh_bounds_volume.
-//   @param location - [x, y, z] world location for the nav link proxy in cm; missing or shorter than 3 numbers spawns at the origin
+//   @param location - [x, y, z] world location for the nav link proxy in cm; missing spawns at the origin, and any other value is an error and nothing is spawned
 //   @returns { actor_name, actor_label, actor_path, actor_class, success }
 TSharedPtr<FJsonObject> HandleSpawnNavLinkProxy(const TSharedPtr<FJsonObject>& Params)
 {

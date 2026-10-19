@@ -152,101 +152,6 @@ namespace UEAgent::UsdCommon
 		return EUsdListPosition::BackOfPrependList;
 	}
 
-	/**
-	 * The FVtValue a {"type"?, "value"} object describes. An explicit "type" picks the UE type: bool/boolean,
-	 * int/integer/int32, int64, float/double/number (as double), string, token/name (as FName) or asset (the
-	 * raw string; resolving it needs the USD asset resolver context). Without one, the JSON type of "value"
-	 * does: bool, number (as double) or string. False, with OutError, for a null object, a missing "value", a
-	 * token of NAME_SIZE characters or more, or a value no rule converts. Setting a value whose UE type does not
-	 * match the USD type of the field fails silently in pxr::, so the caller checks what Set returns; an
-	 * attribute value is built with VtValueForDeclaredType instead.
-	 */
-	inline bool VtValueFromJson(const TSharedPtr<FJsonObject>& TypedValue, UE::FVtValue& Out, FString& OutError)
-	{
-		OutError.Reset();
-		if (!TypedValue.IsValid())
-		{
-			OutError = TEXT("value object is null");
-			return false;
-		}
-
-		FString Type;
-		TypedValue->TryGetStringField(TEXT("type"), Type);
-
-		TSharedPtr<FJsonValue> RawVal = TypedValue->TryGetField(TEXT("value"));
-		if (!RawVal.IsValid())
-		{
-			OutError = TEXT("missing 'value' field");
-			return false;
-		}
-
-		const FString TypeLow = Type.ToLower();
-		if (TypeLow == TEXT("bool") || TypeLow == TEXT("boolean"))
-		{
-			Out.Set(RawVal->AsBool());
-			return true;
-		}
-		if (TypeLow == TEXT("int") || TypeLow == TEXT("integer") || TypeLow == TEXT("int32"))
-		{
-			Out.Set(static_cast<int32>(RawVal->AsNumber()));
-			return true;
-		}
-		if (TypeLow == TEXT("int64"))
-		{
-			Out.Set(static_cast<int64>(RawVal->AsNumber()));
-			return true;
-		}
-		if (TypeLow == TEXT("float") || TypeLow == TEXT("double") || TypeLow == TEXT("number"))
-		{
-			Out.Set(RawVal->AsNumber());
-			return true;
-		}
-		if (TypeLow == TEXT("string"))
-		{
-			Out.Set(RawVal->AsString());
-			return true;
-		}
-		if (TypeLow == TEXT("token") || TypeLow == TEXT("name"))
-		{
-			const FString Token = RawVal->AsString();
-			// An FName of NAME_SIZE characters or more fails a check() and kills the editor.
-			if (Token.Len() >= NAME_SIZE)
-			{
-				OutError = FString::Printf(TEXT("a token is limited to %d characters, got %d"), NAME_SIZE - 1, Token.Len());
-				return false;
-			}
-			Out.Set(FName(*Token));
-			return true;
-		}
-		if (TypeLow == TEXT("asset"))
-		{
-			Out.Set(RawVal->AsString());
-			return true;
-		}
-
-		// A string stays a USD "string": a token has to be asked for with {"type": "token"}.
-		switch (RawVal->Type)
-		{
-			case EJson::Boolean:
-				Out.Set(RawVal->AsBool());
-				return true;
-			case EJson::Number:
-				Out.Set(RawVal->AsNumber());
-				return true;
-			case EJson::String:
-				Out.Set(RawVal->AsString());
-				return true;
-			case EJson::Null:
-			case EJson::None:
-			case EJson::Array:
-			case EJson::Object:
-			default:
-				OutError = FString::Printf(
-					TEXT("unsupported value type (type='%s', json=%d)"), *Type, (int32)RawVal->Type);
-				return false;
-		}
-	}
-
 	/** The name of a JSON value type, for error messages. */
 	inline const TCHAR* JsonTypeName(EJson Type)
 	{
@@ -676,33 +581,46 @@ namespace UEAgent::UsdCommon
 	 * number (half and float within their range); string, token and asset a string. A vector, color, point, normal,
 	 * texCoord or quaternion type takes an array of exactly its count of such numbers (a quaternion x, y, z, then the real
 	 * part w), a matrix an array of rows, and an array type ("float3[]") a JSON array of values of its element type;
-	 * those are built by the engine's UnrealToUsd::ConvertValue. False, with OutError, for opaque, group or
-	 * pathExpression, an unknown type, or a value of another shape or that does not fit.
+	 * those are built by the engine's UnrealToUsd::ConvertValue. False, with OutError, for opaque or group (USD gives
+	 * them no value to author), pathExpression (the wrapper has no way to build one from its text), an unknown type, or a
+	 * value of another shape or that does not fit. Holder names what holds the value in the messages ("an attribute").
 	 */
 	inline bool VtValueForDeclaredType(const FString& DeclaredType, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out,
-		FString& OutError)
+		FString& OutError, const TCHAR* Holder = TEXT("an attribute"))
 	{
 		OutError.Reset();
+		const FString Type = DeclaredType.ToLower();
+		if (Type == TEXT("opaque") || Type == TEXT("group"))
+		{
+			OutError = FString::Printf(TEXT("%s of type %s is not one this tool can author: opaque and group types hold no value by design, ")
+				TEXT("USD gives them none to author"), Holder, *DeclaredType);
+			return false;
+		}
+		if (Type == TEXT("pathexpression") || Type == TEXT("pathexpression[]"))
+		{
+			OutError = FString::Printf(TEXT("%s of type %s is not one this tool can author: the engine's USD wrapper has no way to build a ")
+				TEXT("path expression from its text (a path expression is read as its text)"), Holder, *DeclaredType);
+			return false;
+		}
 		if (!RawVal.IsValid() || RawVal->IsNull())
 		{
 			OutError = TEXT("the value is missing or null");
 			return false;
 		}
-		const FString Type = DeclaredType.ToLower();
 
-		const auto Mismatch = [&RawVal, &DeclaredType, &OutError](const TCHAR* Wanted)
+		const auto Mismatch = [&RawVal, &DeclaredType, &OutError, Holder](const TCHAR* Wanted)
 		{
-			OutError = FString::Printf(TEXT("an attribute of type %s takes %s, not %s"), *DeclaredType, Wanted, JsonTypeName(RawVal->Type));
+			OutError = FString::Printf(TEXT("%s of type %s takes %s, not %s"), Holder, *DeclaredType, Wanted, JsonTypeName(RawVal->Type));
 			return false;
 		};
 		// A whole JSON number in [Min, MaxExclusive): the range of the integer type it is stored as.
-		const auto ReadWhole = [&RawVal, &DeclaredType, &OutError](double Min, double MaxExclusive, double& OutNumber)
+		const auto ReadWhole = [&RawVal, &DeclaredType, &OutError, Holder](double Min, double MaxExclusive, double& OutNumber)
 		{
 			OutNumber = RawVal->AsNumber();
 			if (OutNumber != FMath::FloorToDouble(OutNumber) || OutNumber < Min || OutNumber >= MaxExclusive)
 			{
-				OutError = FString::Printf(TEXT("%.17g does not fit an attribute of type %s: it takes a whole number in the range of that type"),
-					OutNumber, *DeclaredType);
+				OutError = FString::Printf(TEXT("%.17g does not fit %s of type %s: it takes a whole number in the range of that type"),
+					OutNumber, Holder, *DeclaredType);
 				return false;
 			}
 			return true;
@@ -810,9 +728,9 @@ namespace UEAgent::UsdCommon
 		if (Shape == nullptr)
 		{
 			OutError = FString::Printf(
-				TEXT("an attribute of type %s is not one this tool can author: the declared type must be a scalar (bool, uchar, int, uint, ")
+				TEXT("%s of type %s is not one this tool can author: the declared type must be a scalar (bool, uchar, int, uint, ")
 				TEXT("int64, uint64, half, float, double, timecode, string, token, asset), a vector, point, normal, color or texCoord, ")
-				TEXT("a quaternion, a matrix, or an array of one of them"), *DeclaredType);
+				TEXT("a quaternion, a matrix, or an array of one of them"), Holder, *DeclaredType);
 			return false;
 		}
 
@@ -820,7 +738,7 @@ namespace UEAgent::UsdCommon
 		Converted.SourceType = Shape->BasicType;
 		Converted.bIsArrayValued = bArray;
 		Converted.bIsEmpty = false;
-		const auto Subject = [&DeclaredType]() { return FString::Printf(TEXT("an attribute of type %s"), *DeclaredType); };
+		const auto Subject = [&DeclaredType, Holder]() { return FString::Printf(TEXT("%s of type %s"), Holder, *DeclaredType); };
 		if (bArray)
 		{
 			if (RawVal->Type != EJson::Array) { return Mismatch(TEXT("a JSON array of values")); }
@@ -851,83 +769,849 @@ namespace UEAgent::UsdCommon
 		return true;
 	}
 
+	// ---------------------------------------------------------------------------------------------------------------
+	// Dictionaries and list ops: the names of their types and the JSON forms they are written from.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/** The items a list op holds, which decides how their texts are checked and converted. */
+	enum class EUsdListOpItems : uint8 { Token, String, Path, Arc };
+
 	/**
-	 * Writes Value into Out as "type" (the type name USD gives the held value) and "value" and returns true: a
-	 * scalar as a bool, number or string; a vector or quaternion as an array of numbers (a quaternion x, y, z, then the
-	 * real part w); a matrix as an array of rows; an array as a JSON array of those, plus "length" (its element count)
-	 * and "truncated" (true when only its first elements were read: MaxArrayElementsRead, fewer for strings past
-	 * MaxArrayStringCharsRead); an Sdf enum such as
-	 * SdfSpecifier as its number. An empty value is "type": "empty" with a null "value". A value of any other type (a
-	 * dictionary, a list op, a path) only gets its "type", and this returns false so the caller says how to show it.
+	 * One list op type the engine's value conversion handles: the Sdf name of its metadata type, the name USD gives the
+	 * held C++ type (the engine keys the conversion on it, FConvertedVtValue::ExtraTypeInfo) and its items. Any other
+	 * SdfListOp (of int, uint...) has no conversion in the engine, so it has no JSON form here.
+	 */
+	struct FUsdListOpKind
+	{
+		const TCHAR* SdfName;
+		const TCHAR* TypeName;
+		EUsdListOpItems Items;
+	};
+
+	inline TConstArrayView<FUsdListOpKind> UsdListOpKinds()
+	{
+		static const FUsdListOpKind Kinds[] = {
+			{ TEXT("tokenlistop"), TEXT("SdfListOp<TfToken>"), EUsdListOpItems::Token },
+			{ TEXT("stringlistop"), TEXT("SdfListOp<string>"), EUsdListOpItems::String },  // the name a clipSets read reports
+			{ TEXT("pathlistop"), TEXT("SdfListOp<SdfPath>"), EUsdListOpItems::Path },
+			{ TEXT("referencelistop"), TEXT("SdfListOp<SdfReference>"), EUsdListOpItems::Arc },
+			{ TEXT("payloadlistop"), TEXT("SdfListOp<SdfPayload>"), EUsdListOpItems::Arc },
+		};
+		return TConstArrayView<FUsdListOpKind>(Kinds);
+	}
+
+	/** The items of the list op held as TypeName: those of its kind, else (a name only a read gave) strings. */
+	inline EUsdListOpItems UsdListOpItemsOf(const FString& TypeName)
+	{
+		for (const FUsdListOpKind& Kind : UsdListOpKinds())
+		{
+			if (TypeName.Equals(Kind.TypeName, ESearchCase::CaseSensitive))
+			{
+				return Kind.Items;
+			}
+		}
+		return EUsdListOpItems::String;
+	}
+
+	/** The lists of a list op as indices into the engine's converted entries, in SdfListOpType's order. */
+	constexpr int32 UsdListOpExplicit = 0;
+	constexpr int32 UsdListOpAdded = 1;
+	constexpr int32 UsdListOpDeleted = 2;
+	constexpr int32 UsdListOpOrdered = 3;
+	constexpr int32 UsdListOpPrepended = 4;
+	constexpr int32 UsdListOpAppended = 5;
+	constexpr int32 UsdListOpListCount = 6;
+
+	/** The JSON name of the list List, one of the UsdListOp* indices. */
+	inline const TCHAR* UsdListOpListName(int32 List)
+	{
+		static const TCHAR* const Names[UsdListOpListCount] = {
+			TEXT("explicit"), TEXT("added"), TEXT("deleted"), TEXT("ordered"), TEXT("prepended"), TEXT("appended") };
+		return Names[List];
+	}
+
+	/** The most dictionaries one value nests, read or written: a deeper one reads empty and is refused on write. */
+	constexpr int32 MaxUsdDictionaryDepth = 8;
+
+	/**
+	 * The spelling the converters take for the USD type Name names (compared ignoring case): an Sdf value type name as
+	 * it is ("float3", "token[]"); an alias (boolean for bool, integer and int32 for int, number for double, name for
+	 * token); the name of a held C++ type as get_usd_attribute_value and get_usd_prim_metadata report it ("TfToken",
+	 * "pxr_half::half", "unsigned __int64", "SdfAssetPath", "GfVec3f", "GfQuatd", "GfMatrix4d", "VtArray<float>") as its
+	 * Sdf value type; "dictionary" for VtDictionary; a list op as the held type name of its kind ("tokenlistop" and
+	 * "SdfListOp<TfToken>" both give "SdfListOp<TfToken>"), and any other SdfListOp name as it is. Any other name comes
+	 * back lowercased, for the converter to refuse.
+	 */
+	inline FString CanonicalUsdTypeName(const FString& Name)
+	{
+		const FString Trimmed = Name.TrimStartAndEnd();
+		const FString Lower = Trimmed.ToLower();
+		for (const FUsdListOpKind& Kind : UsdListOpKinds())
+		{
+			if (Lower.Equals(Kind.SdfName, ESearchCase::CaseSensitive) || Trimmed.Equals(Kind.TypeName, ESearchCase::IgnoreCase))
+			{
+				return Kind.TypeName;
+			}
+		}
+		if (Lower.StartsWith(TEXT("sdflistop<"), ESearchCase::CaseSensitive))
+		{
+			return Trimmed;
+		}
+		if (Lower.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive) || Lower.Equals(TEXT("vtdictionary"), ESearchCase::CaseSensitive))
+		{
+			return TEXT("dictionary");
+		}
+		if (Lower.StartsWith(TEXT("vtarray<"), ESearchCase::CaseSensitive) && Lower.EndsWith(TEXT(">"), ESearchCase::CaseSensitive))
+		{
+			return CanonicalUsdTypeName(Trimmed.Mid(8, Trimmed.Len() - 9)) + TEXT("[]");
+		}
+		static const TCHAR* const Aliases[][2] = {
+			{ TEXT("boolean"), TEXT("bool") }, { TEXT("integer"), TEXT("int") }, { TEXT("int32"), TEXT("int") },
+			{ TEXT("number"), TEXT("double") }, { TEXT("name"), TEXT("token") }, { TEXT("unsigned char"), TEXT("uchar") },
+			{ TEXT("unsigned int"), TEXT("uint") }, { TEXT("__int64"), TEXT("int64") }, { TEXT("unsigned __int64"), TEXT("uint64") },
+			{ TEXT("pxr_half::half"), TEXT("half") }, { TEXT("sdftimecode"), TEXT("timecode") }, { TEXT("sdfassetpath"), TEXT("asset") },
+			{ TEXT("tftoken"), TEXT("token") }, { TEXT("sdfpathexpression"), TEXT("pathexpression") } };
+		for (const auto& Alias : Aliases)
+		{
+			if (Lower.Equals(Alias[0], ESearchCase::CaseSensitive))
+			{
+				return Alias[1];
+			}
+		}
+		// GfVec<2-4><d|f|h|i>, GfQuat<d|f|h> and GfMatrix<2-4>d: the vector, quaternion and matrix value types.
+		const auto Scalar = [](TCHAR Suffix) -> const TCHAR*
+		{
+			return Suffix == TEXT('d') ? TEXT("double") : Suffix == TEXT('f') ? TEXT("float") : Suffix == TEXT('h') ? TEXT("half")
+				: Suffix == TEXT('i') ? TEXT("int") : nullptr;
+		};
+		const auto IsSize = [](TCHAR Digit) { return Digit >= TEXT('2') && Digit <= TEXT('4'); };
+		if (Lower.Len() == 7 && Lower.StartsWith(TEXT("gfvec"), ESearchCase::CaseSensitive) && IsSize(Lower[5]) && Scalar(Lower[6]) != nullptr)
+		{
+			return FString::Printf(TEXT("%s%c"), Scalar(Lower[6]), Lower[5]);
+		}
+		if (Lower.Len() == 7 && Lower.StartsWith(TEXT("gfquat"), ESearchCase::CaseSensitive) && Lower[6] != TEXT('i') && Scalar(Lower[6]) != nullptr)
+		{
+			return FString::Printf(TEXT("quat%c"), Lower[6]);
+		}
+		if (Lower.Len() == 10 && Lower.StartsWith(TEXT("gfmatrix"), ESearchCase::CaseSensitive) && IsSize(Lower[8]) && Lower[9] == TEXT('d'))
+		{
+			return FString::Printf(TEXT("matrix%cd"), Lower[8]);
+		}
+		return Lower;
+	}
+
+	/** The type a JSON value is authored in when nothing names one: bool, double, string, or a dictionary for an object; empty for an array or null. */
+	inline FString UsdTypeOfJson(const TSharedPtr<FJsonValue>& RawVal)
+	{
+		switch (RawVal.IsValid() ? RawVal->Type : EJson::None)
+		{
+			case EJson::Boolean: return TEXT("bool");
+			case EJson::Number: return TEXT("double");
+			case EJson::String: return TEXT("string");
+			case EJson::Object: return TEXT("dictionary");
+			default: return FString();
+		}
+	}
+
+	/** Whether Text is exactly one number (a sign, digits with an optional fraction, an optional exponent): its value in OutNumber. */
+	inline bool TryParseUsdNumber(const FString& Text, double& OutNumber)
+	{
+		const int32 Len = Text.Len();
+		int32 Index = 0;
+		const auto SkipDigits = [&Text, Len, &Index]()
+		{
+			const int32 Start = Index;
+			while (Index < Len && FChar::IsDigit(Text[Index]))
+			{
+				++Index;
+			}
+			return Index - Start;
+		};
+		if (Index < Len && (Text[Index] == TEXT('+') || Text[Index] == TEXT('-')))
+		{
+			++Index;
+		}
+		int32 Digits = SkipDigits();
+		if (Index < Len && Text[Index] == TEXT('.'))
+		{
+			++Index;
+			Digits += SkipDigits();
+		}
+		if (Digits == 0)
+		{
+			return false;
+		}
+		if (Index < Len && (Text[Index] == TEXT('e') || Text[Index] == TEXT('E')))
+		{
+			++Index;
+			if (Index < Len && (Text[Index] == TEXT('+') || Text[Index] == TEXT('-')))
+			{
+				++Index;
+			}
+			if (SkipDigits() == 0)
+			{
+				return false;
+			}
+		}
+		if (Index != Len)
+		{
+			return false;
+		}
+		OutNumber = FCString::Atod(*Text);
+		return FMath::IsFinite(OutNumber);
+	}
+
+	/**
+	 * The delimiter of the engine's text of a reference or payload, between its asset path, prim path, layer offset and
+	 * scale (UsdToUnreal::ConvertValue writes it, UnrealToUsd::ConvertValue reads it).
+	 */
+	inline const TCHAR* UsdArcDelimiter()
+	{
+		return TEXT("\x1c");
+	}
+
+	/**
+	 * The text of a reference or payload from the engine's text of it: as a .usda file writes one,
+	 * @asset@</prim/path> (offset = 10; scale = 2), each part only when it is set (an asset path holding @ between @@@,
+	 * the offset and scale with the engine's six decimals, trailing zeros dropped). Not the engine's form: as it is.
+	 */
+	inline FString UsdArcText(const FString& EngineText)
+	{
+		TArray<FString> Parts;
+		EngineText.ParseIntoArray(Parts, UsdArcDelimiter(), false);
+		if (Parts.Num() != 4)
+		{
+			return EngineText;
+		}
+		FString Text;
+		if (!Parts[0].IsEmpty())
+		{
+			Text += Parts[0].Contains(TEXT("@")) ? TEXT("@@@") + Parts[0] + TEXT("@@@") : TEXT("@") + Parts[0] + TEXT("@");
+		}
+		if (!Parts[1].IsEmpty())
+		{
+			Text += TEXT("<") + Parts[1] + TEXT(">");
+		}
+		const auto Short = [](FString Number)
+		{
+			if (Number.Contains(TEXT(".")))
+			{
+				while (Number.EndsWith(TEXT("0")))
+				{
+					Number.LeftChopInline(1);
+				}
+				Number.RemoveFromEnd(TEXT("."));
+			}
+			return Number;
+		};
+		TArray<FString> LayerOffset;
+		if (FCString::Atod(*Parts[2]) != 0.0)
+		{
+			LayerOffset.Add(TEXT("offset = ") + Short(Parts[2]));
+		}
+		if (FCString::Atod(*Parts[3]) != 1.0)
+		{
+			LayerOffset.Add(TEXT("scale = ") + Short(Parts[3]));
+		}
+		if (LayerOffset.Num() > 0)
+		{
+			Text += (Text.IsEmpty() ? TEXT("(") : TEXT(" (")) + FString::Join(LayerOffset, TEXT("; ")) + TEXT(")");
+		}
+		return Text;
+	}
+
+	/**
+	 * The engine's text of the reference or payload Text gives in UsdArcText's syntax, [@asset@][</prim/path>]
+	 * [(offset = N; scale = M)] with every part optional (no asset path: the same layer stack; no prim path: the default
+	 * prim). False, with OutError, for a delimiter left open, an invalid prim path, a layer offset that is not offset = N
+	 * and scale = M, or anything after it.
+	 */
+	inline bool UsdArcFromText(const FString& Text, FString& OutEngineText, FString& OutError)
+	{
+		FString Rest = Text.TrimStartAndEnd();
+		FString Asset;
+		static const TCHAR* const Delimiters[] = { TEXT("@@@"), TEXT("@") };
+		for (const TCHAR* Delimiter : Delimiters)
+		{
+			if (Rest.StartsWith(Delimiter, ESearchCase::CaseSensitive))
+			{
+				const int32 Open = FCString::Strlen(Delimiter);
+				const int32 Close = Rest.Find(Delimiter, ESearchCase::CaseSensitive, ESearchDir::FromStart, Open);
+				if (Close == INDEX_NONE)
+				{
+					OutError = FString::Printf(TEXT("the asset path opened with %s is not closed"), Delimiter);
+					return false;
+				}
+				Asset = Rest.Mid(Open, Close - Open);
+				Rest = Rest.Mid(Close + Open).TrimStart();
+				break;
+			}
+		}
+		FString PrimPath;
+		if (Rest.StartsWith(TEXT("<"), ESearchCase::CaseSensitive))
+		{
+			const int32 Close = Rest.Find(TEXT(">"), ESearchCase::CaseSensitive);
+			if (Close == INDEX_NONE)
+			{
+				OutError = TEXT("the prim path opened with < is not closed");
+				return false;
+			}
+			PrimPath = Rest.Mid(1, Close - 1);
+			Rest = Rest.Mid(Close + 1).TrimStart();
+			FString PathError;
+			if (!PrimPath.IsEmpty() && !UE::FSdfPath::IsValidPathString(*PrimPath, &PathError))
+			{
+				OutError = FString::Printf(TEXT("<%s> is not a valid prim path: %s"), *PrimPath, *PathError);
+				return false;
+			}
+		}
+		double Offset = 0.0;
+		double Scale = 1.0;
+		if (!Rest.IsEmpty())
+		{
+			if (!Rest.StartsWith(TEXT("("), ESearchCase::CaseSensitive) || !Rest.EndsWith(TEXT(")"), ESearchCase::CaseSensitive))
+			{
+				OutError = FString::Printf(TEXT("'%s' follows the asset and prim paths, where only a layer offset (offset = N; scale = M) may"), *Rest);
+				return false;
+			}
+			TArray<FString> Settings;
+			Rest.Mid(1, Rest.Len() - 2).ParseIntoArray(Settings, TEXT(";"), true);
+			for (const FString& Setting : Settings)
+			{
+				FString Name;
+				FString Number;
+				double Parsed = 0.0;
+				const bool bSplit = Setting.Split(TEXT("="), &Name, &Number);
+				Name.TrimStartAndEndInline();
+				const bool bOffset = Name.Equals(TEXT("offset"), ESearchCase::CaseSensitive);
+				if (!bSplit || !(bOffset || Name.Equals(TEXT("scale"), ESearchCase::CaseSensitive))
+					|| !TryParseUsdNumber(Number.TrimStartAndEnd(), Parsed))
+				{
+					OutError = FString::Printf(TEXT("'%s' in the layer offset is not offset = N or scale = M"), *Setting.TrimStartAndEnd());
+					return false;
+				}
+				(bOffset ? Offset : Scale) = Parsed;
+			}
+		}
+		if (Asset.Contains(UsdArcDelimiter()))
+		{
+			OutError = TEXT("the asset path holds the control character 0x1C, which the engine's conversion splits on");
+			return false;
+		}
+		OutEngineText = FString::Join(TArray<FString>{ Asset, PrimPath, FString::Printf(TEXT("%.17g"), Offset),
+			FString::Printf(TEXT("%.17g"), Scale) }, UsdArcDelimiter());
+		return true;
+	}
+
+	/** The engine's text of one list op item of Items from its JSON text: an arc as UsdArcFromText reads it, a valid path, a non-empty token, any string. */
+	inline bool UsdListOpItemFromText(EUsdListOpItems Items, const FString& Text, FString& OutEngineText, FString& OutError)
+	{
+		if (Items == EUsdListOpItems::Arc)
+		{
+			return UsdArcFromText(Text, OutEngineText, OutError);
+		}
+		FString PathError;
+		if (Items == EUsdListOpItems::Path && !UE::FSdfPath::IsValidPathString(*Text, &PathError))
+		{
+			OutError = FString::Printf(TEXT("not a valid path: %s"), *PathError);
+			return false;
+		}
+		if (Items == EUsdListOpItems::Token && Text.IsEmpty())
+		{
+			OutError = TEXT("a token cannot be empty");
+			return false;
+		}
+		OutEngineText = Text;
+		return true;
+	}
+
+	/**
+	 * The list op held as TypeName (an SdfListOp name, see UsdListOpKinds) that the JSON object RawVal gives: "explicit"
+	 * alone, or any of "prepended", "appended", "deleted", "ordered" and "added"; each an array of item texts as
+	 * get_usd_prim_metadata reads them (a token, string or path; a reference or payload in UsdArcText's syntax). The
+	 * engine's UnrealToUsd::ConvertValue builds it. False, with OutError, for another shape, a list of another name,
+	 * explicit beside another list, an item twice in one list (SdfListOp would drop it unsaid), an invalid item, a list op
+	 * without items (the engine's conversion builds none, an explicit empty one included), or a value USD does not hold
+	 * as TypeName.
+	 */
+	inline bool UsdListOpFromJson(const FString& TypeName, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out, FString& OutError)
+	{
+		if (!RawVal.IsValid() || RawVal->Type != EJson::Object)
+		{
+			OutError = FString::Printf(TEXT("a list op of type %s takes an object of item lists, {\"explicit\": [...]} or {\"prepended\": [...], ")
+				TEXT("\"appended\": [...], \"deleted\": [...], \"ordered\": [...], \"added\": [...]}, not %s"), *TypeName, *JsonShapeName(RawVal));
+			return false;
+		}
+		const EUsdListOpItems Items = UsdListOpItemsOf(TypeName);
+		UsdUtils::FConvertedVtValue Converted;
+		Converted.SourceType = Items == EUsdListOpItems::Token ? UsdUtils::EUsdBasicDataTypes::Token : UsdUtils::EUsdBasicDataTypes::String;
+		Converted.ExtraTypeInfo = TypeName;
+		Converted.bIsArrayValued = true;
+		Converted.bIsEmpty = false;
+		Converted.Entries.SetNum(UsdListOpListCount);
+
+		bool bExplicitGiven = false;
+		bool bOtherItems = false;
+		int32 ItemCount = 0;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Member : RawVal->AsObject()->Values)
+		{
+			int32 List = INDEX_NONE;
+			for (int32 Candidate = 0; Candidate < UsdListOpListCount; ++Candidate)
+			{
+				if (Member.Key.Equals(UsdListOpListName(Candidate), ESearchCase::CaseSensitive))
+				{
+					List = Candidate;
+				}
+			}
+			if (List == INDEX_NONE)
+			{
+				OutError = FString::Printf(TEXT("a list op has no list '%s': its lists are explicit, prepended, appended, deleted, ordered and added"),
+					*Member.Key);
+				return false;
+			}
+			if (!Member.Value.IsValid() || Member.Value->Type != EJson::Array)
+			{
+				OutError = FString::Printf(TEXT("list '%s' takes an array of strings, not %s"), *Member.Key, *JsonShapeName(Member.Value));
+				return false;
+			}
+			const TArray<TSharedPtr<FJsonValue>>& Values = Member.Value->AsArray();
+			bExplicitGiven |= List == UsdListOpExplicit;
+			bOtherItems |= List != UsdListOpExplicit && Values.Num() > 0;
+			TSet<FString> Seen;
+			for (int32 Index = 0; Index < Values.Num(); ++Index)
+			{
+				if (!Values[Index].IsValid() || Values[Index]->Type != EJson::String)
+				{
+					OutError = FString::Printf(TEXT("item %d of list '%s' takes a string, not %s"), Index, *Member.Key, *JsonShapeName(Values[Index]));
+					return false;
+				}
+				const FString Text = Values[Index]->AsString();
+				FString EngineText;
+				FString ItemError;
+				if (!UsdListOpItemFromText(Items, Text, EngineText, ItemError))
+				{
+					OutError = FString::Printf(TEXT("item %d of list '%s' ('%s'): %s"), Index, *Member.Key, *Text, *ItemError);
+					return false;
+				}
+				bool bAlreadySeen = false;
+				Seen.Add(EngineText, &bAlreadySeen);
+				if (bAlreadySeen)
+				{
+					OutError = FString::Printf(TEXT("item %d of list '%s' ('%s') is already in that list: a list op holds an item once per list"),
+						Index, *Member.Key, *Text);
+					return false;
+				}
+				Converted.Entries[List].Emplace(TInPlaceType<FString>(), EngineText);
+				++ItemCount;
+			}
+		}
+		if (bExplicitGiven && bOtherItems)
+		{
+			OutError = TEXT("explicit replaces the whole list, so it cannot stand beside prepended, appended, deleted, ordered or added items");
+			return false;
+		}
+		if (ItemCount == 0)
+		{
+			OutError = TEXT("a list op without items cannot be authored here: the engine's conversion builds none, not even an explicit empty one");
+			return false;
+		}
+
+		Out = UE::FVtValue();
+		if (!UnrealToUsd::ConvertValue(Converted, Out) || !Out.GetTypeName().Equals(TypeName, ESearchCase::CaseSensitive))
+		{
+			OutError = FString::Printf(TEXT("the items could not be converted to a list op of type %s (the conversion gave %s)"), *TypeName,
+				Out.IsEmpty() ? TEXT("nothing") : *Out.GetTypeName());
+			return false;
+		}
+		return true;
+	}
+
+	inline bool VtValueForMetadataType(const FString& Type, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out, FString& OutError, int32 Depth);
+	inline bool UsdDictionaryEntryFromJson(const TSharedPtr<FJsonValue>& RawVal, int32 Depth, UE::FVtValue& Out, FString& OutError);
+
+	/**
+	 * The VtDictionary the JSON object RawVal gives, Depth dictionaries down: each member an entry, converted by
+	 * UsdDictionaryEntryFromJson. False, with OutError naming the entry, for another JSON type, a dictionary nested deeper
+	 * than MaxUsdDictionaryDepth, or an entry that does not convert.
+	 */
+	inline bool UsdDictionaryFromJson(const TSharedPtr<FJsonValue>& RawVal, int32 Depth, UE::FVtValue& Out, FString& OutError)
+	{
+		if (!RawVal.IsValid() || RawVal->Type != EJson::Object)
+		{
+			OutError = FString::Printf(TEXT("a dictionary takes a JSON object of entries, not %s"), *JsonShapeName(RawVal));
+			return false;
+		}
+		if (Depth >= MaxUsdDictionaryDepth)
+		{
+			OutError = FString::Printf(TEXT("dictionaries nest at most %d deep"), MaxUsdDictionaryDepth);
+			return false;
+		}
+		TMap<FString, UE::FVtValue> Entries;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Member : RawVal->AsObject()->Values)
+		{
+			UE::FVtValue Entry;
+			FString EntryError;
+			if (!UsdDictionaryEntryFromJson(Member.Value, Depth + 1, Entry, EntryError))
+			{
+				OutError = FString::Printf(TEXT("entry '%s': %s"), *Member.Key, *EntryError);
+				return false;
+			}
+			Entries.Add(Member.Key, MoveTemp(Entry));
+		}
+		Out = UE::FVtValue();
+		Out.Set(Entries);
+		return true;
+	}
+
+	/**
+	 * The value of one dictionary entry, Depth dictionaries down, that the JSON value RawVal gives: a boolean as bool, a
+	 * number as double, a string as string; an object with a "value" member as {type?, value} (the shape
+	 * get_usd_prim_metadata reads an entry in), its value converted to its type by VtValueForMetadataType or, without
+	 * one, by these rules (an object as a dictionary); any other object as a nested dictionary. False, with OutError, for
+	 * null, an array without a type (it names no element type), or a {type?, value} marked truncated (a cut read).
+	 */
+	inline bool UsdDictionaryEntryFromJson(const TSharedPtr<FJsonValue>& RawVal, int32 Depth, UE::FVtValue& Out, FString& OutError)
+	{
+		Out = UE::FVtValue();
+		switch (RawVal.IsValid() ? RawVal->Type : EJson::None)
+		{
+			case EJson::Boolean:
+				Out.Set(RawVal->AsBool());
+				return true;
+			case EJson::Number:
+				Out.Set(RawVal->AsNumber());
+				return true;
+			case EJson::String:
+				Out.Set(RawVal->AsString());
+				return true;
+			case EJson::Array:
+				OutError = TEXT("an array needs its type, as {\"type\": \"double[]\", \"value\": [...]}");
+				return false;
+			case EJson::Object:
+			{
+				const TSharedPtr<FJsonObject> Object = RawVal->AsObject();
+				const TSharedPtr<FJsonValue> Inner = Object->TryGetField(TEXT("value"));
+				if (!Inner.IsValid())
+				{
+					return UsdDictionaryFromJson(RawVal, Depth, Out, OutError);
+				}
+				bool bTruncated = false;
+				if (Object->TryGetBoolField(TEXT("truncated"), bTruncated) && bTruncated)
+				{
+					OutError = TEXT("it is marked truncated, a cut read that cannot be written back whole");
+					return false;
+				}
+				FString Type;
+				if (Object->TryGetStringField(TEXT("type"), Type) && !Type.IsEmpty())
+				{
+					return VtValueForMetadataType(Type, Inner, Out, OutError, Depth);
+				}
+				if (Inner->Type == EJson::Object)
+				{
+					return UsdDictionaryFromJson(Inner, Depth, Out, OutError);
+				}
+				return UsdDictionaryEntryFromJson(Inner, Depth, Out, OutError);
+			}
+			default:
+				OutError = TEXT("null has no USD value");
+				return false;
+		}
+	}
+
+	/**
+	 * The FVtValue a metadata field or dictionary entry of type Type (any spelling CanonicalUsdTypeName takes) holds for
+	 * the JSON value RawVal, Depth dictionaries down: a dictionary from a JSON object (UsdDictionaryFromJson), a list op
+	 * from an object of item lists (UsdListOpFromJson), any other type through VtValueForDeclaredType. False, with
+	 * OutError, as those are.
+	 */
+	inline bool VtValueForMetadataType(const FString& Type, const TSharedPtr<FJsonValue>& RawVal, UE::FVtValue& Out, FString& OutError,
+		int32 Depth)
+	{
+		OutError.Reset();
+		const FString Canonical = CanonicalUsdTypeName(Type);
+		if (Canonical.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive))
+		{
+			return UsdDictionaryFromJson(RawVal, Depth, Out, OutError);
+		}
+		if (Canonical.StartsWith(TEXT("SdfListOp<"), ESearchCase::IgnoreCase))
+		{
+			return UsdListOpFromJson(Canonical, RawVal, Out, OutError);
+		}
+		return VtValueForDeclaredType(Canonical, RawVal, Out, OutError, Depth == 0 ? TEXT("a metadata field") : TEXT("a value"));
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// Values read: the JSON form of any value, within the size one reply may take.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/**
+	 * The characters the values of one reply may take in the bridge's pretty-printed JSON, shared by every value the reply
+	 * converts: the entries of a dictionary, the items of a list op, the fields of a whole-prim metadata read. The bridge
+	 * offloads a reply past 40000 characters (McpOversize) and keeps only its top-level scalars, so this leaves 10000 for
+	 * the rest of the reply. One array alone stays within its own caps first (MaxArrayValuesRead numbers take 28200
+	 * characters, MaxArrayStringCharsRead is 24000), so the budget binds only where one reply holds several values.
+	 */
+	constexpr int32 MaxReplyValueChars = 30000;
+
+	/** What is left of MaxReplyValueChars while one reply is built. */
+	struct FUsdJsonBudget
+	{
+		int32 Chars = MaxReplyValueChars;
+
+		/** Takes Cost characters when that many are left: false, with nothing taken, when they are not. */
+		bool Take(int32 Cost)
+		{
+			if (Cost > Chars)
+			{
+				return false;
+			}
+			Chars -= Cost;
+			return true;
+		}
+
+		/** Takes Cost characters of what is left, for a value that is sent whole anyway. */
+		void Spend(int32 Cost)
+		{
+			Chars = FMath::Max(0, Chars - Cost);
+		}
+	};
+
+	/** The characters one number takes Depth dictionaries down: 47 at the top (see MaxArrayValuesRead), two tabs more per level. */
+	inline int32 UsdJsonNumberCost(int32 Depth)
+	{
+		return 47 + 2 * Depth;
+	}
+
+	/**
+	 * The characters a dictionary entry or a metadata field named Key, holding a value of type TypeName, takes Depth
+	 * dictionaries down before its value: the key, the braces of its {type, value} object, the type name, and the length
+	 * and truncated a container adds.
+	 */
+	inline int32 UsdJsonEntryCost(const FString& Key, const FString& TypeName, int32 Depth)
+	{
+		return UsdJsonStringCost(Key) + UsdJsonStringCost(TypeName) + 80 + 6 * Depth;
+	}
+
+	/** How UsdValueToJson ended. */
+	enum class EUsdJsonRead : uint8
+	{
+		Converted,   // "value" holds the value, or its first part with "truncated" true
+		NoJsonForm,  // "value" is null and a "note" says the type has no JSON form
+		OverBudget,  // a value sent only whole did not fit what is left of the budget: Out is to be dropped
+	};
+
+	inline EUsdJsonRead UsdValueToJson(const UE::FVtValue& Value, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth, bool bWholeMustFit);
+
+	/** Writes the null "value" and the "note" saying TypeName has no JSON form into Out. */
+	inline EUsdJsonRead UsdNoJsonForm(FJsonObject& Out, const FString& TypeName, FUsdJsonBudget& Budget)
+	{
+		const FString Note = FString::Printf(TEXT("type '%s' has no JSON form here: scalars, vectors, quaternions, matrices and arrays ")
+			TEXT("of those, dictionaries, list ops of tokens, strings, paths, references or payloads, and single path expressions are converted"),
+			*TypeName);
+		Budget.Spend(UsdJsonStringCost(Note));
+		Out.SetField(TEXT("value"), MakeShared<FJsonValueNull>());
+		Out.SetStringField(TEXT("note"), Note);
+		return EUsdJsonRead::NoJsonForm;
+	}
+
+	/**
+	 * Writes the list op Value, which the engine converted into Converted (its six item lists), into Out: "value" is
+	 * {explicit} for an explicit list op, else {prepended, appended, deleted} plus ordered and added when they hold items,
+	 * each an array of item texts (a reference or payload as UsdArcText writes it); "length" counts their items and
+	 * "truncated" says whether all were sent. The items are cut, in that order, at MaxArrayValuesRead items,
+	 * MaxArrayStringCharsRead characters, or what is left of Budget.
+	 */
+	inline void UsdListOpToJson(const UE::FVtValue& Value, const UsdUtils::FConvertedVtValue& Converted, FJsonObject& Out,
+		FUsdJsonBudget& Budget, int32 Depth)
+	{
+		const auto ItemCount = [&Converted](int32 List) { return Converted.Entries.IsValidIndex(List) ? Converted.Entries[List].Num() : 0; };
+		int32 AllItems = 0;
+		for (int32 List = 0; List < UsdListOpListCount; ++List)
+		{
+			AllItems += ItemCount(List);
+		}
+		// The engine fills only the explicit list of an explicit list op, so one without items is told apart by USD's own
+		// text of the value, "SdfTokenListOp(Explicit Items: [])".
+		const bool bExplicit = ItemCount(UsdListOpExplicit) > 0
+			|| (AllItems == 0 && Value.Get<FString>().Contains(TEXT("(Explicit Items: ["), ESearchCase::CaseSensitive));
+
+		TArray<int32, TInlineAllocator<UsdListOpListCount>> Lists;
+		if (bExplicit)
+		{
+			Lists.Add(UsdListOpExplicit);
+		}
+		else
+		{
+			Lists.Append({ UsdListOpPrepended, UsdListOpAppended, UsdListOpDeleted });
+			for (const int32 Optional : { UsdListOpOrdered, UsdListOpAdded })
+			{
+				if (ItemCount(Optional) > 0)
+				{
+					Lists.Add(Optional);
+				}
+			}
+		}
+
+		const bool bArcs = UsdListOpItemsOf(Converted.ExtraTypeInfo) == EUsdListOpItems::Arc;
+		TSharedPtr<FJsonObject> ListsJson = MakeShared<FJsonObject>();
+		int32 Total = 0;
+		int32 Shown = 0;
+		int32 StringChars = 0;
+		bool bCut = false;
+		for (const int32 List : Lists)
+		{
+			Total += ItemCount(List);
+			Budget.Spend(20 + 2 * Depth);  // the list's name and brackets
+			TArray<TSharedPtr<FJsonValue>> Items;
+			for (int32 Index = 0; !bCut && Index < ItemCount(List); ++Index)
+			{
+				const FString* Raw = Converted.Entries[List][Index].TryGet<FString>();
+				const FString Item = Raw == nullptr ? FString() : bArcs ? UsdArcText(*Raw) : *Raw;
+				const int32 Cost = UsdJsonStringCost(Item) + 2 * Depth;
+				if (Shown >= MaxArrayValuesRead || StringChars + Cost > MaxArrayStringCharsRead || !Budget.Take(Cost))
+				{
+					bCut = true;
+					break;
+				}
+				StringChars += Cost;
+				++Shown;
+				Items.Add(MakeShared<FJsonValueString>(Item));
+			}
+			ListsJson->SetArrayField(UsdListOpListName(List), Items);
+		}
+		Out.SetObjectField(TEXT("value"), ListsJson);
+		Out.SetNumberField(TEXT("length"), Total);
+		Out.SetBoolField(TEXT("truncated"), Shown < Total);
+	}
+
+	/**
+	 * Writes the dictionary Value, Depth dictionaries down, into Out: "value" is an object of its entries in key order,
+	 * each {type, value} as UsdValueToJson writes it one level down; "length" counts the entries and "truncated" says
+	 * whether all were sent. Entries stop at the first that does not fit what is left of Budget; one nested deeper than
+	 * MaxUsdDictionaryDepth is sent without entries.
+	 */
+	inline void UsdDictionaryToJson(const UE::FVtValue& Value, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth)
+	{
+		const TMap<FString, UE::FVtValue> Entries = Value.Get<TMap<FString, UE::FVtValue>>();
+		TSharedPtr<FJsonObject> EntriesJson = MakeShared<FJsonObject>();
+		int32 Shown = 0;
+		if (Depth < MaxUsdDictionaryDepth)
+		{
+			for (const TPair<FString, UE::FVtValue>& Entry : Entries)
+			{
+				TSharedPtr<FJsonObject> EntryJson = MakeShared<FJsonObject>();
+				if (!Budget.Take(UsdJsonEntryCost(Entry.Key, Entry.Value.GetTypeName(), Depth + 1))
+					|| UsdValueToJson(Entry.Value, *EntryJson, Budget, Depth + 1, true) == EUsdJsonRead::OverBudget)
+				{
+					break;
+				}
+				EntriesJson->SetObjectField(Entry.Key, EntryJson);
+				++Shown;
+			}
+		}
+		Out.SetObjectField(TEXT("value"), EntriesJson);
+		Out.SetNumberField(TEXT("length"), Entries.Num());
+		Out.SetBoolField(TEXT("truncated"), Shown < Entries.Num());
+	}
+
+	/**
+	 * Writes Value into Out as "type" (the type name USD gives the held value) and "value", Depth dictionaries down: a
+	 * scalar as a bool, number or string; a path expression as its text; a vector or quaternion as an array of numbers
+	 * (a quaternion x, y, z, then the real part w); a matrix as an array of rows; an Sdf enum such as SdfSpecifier as its
+	 * number; an array as a JSON array of those; a dictionary as an object of {type, value} entries (UsdDictionaryToJson);
+	 * a list op as its item lists (UsdListOpToJson). A container adds "length" and "truncated": an array is cut at
+	 * MaxArrayElementsRead elements, fewer for strings past MaxArrayStringCharsRead, and every container at what is left
+	 * of Budget. An empty value is "type": "empty" with a null "value"; any other type gets a null "value" and a "note"
+	 * (NoJsonForm). A value sent whole (a scalar, one vector or matrix) takes its characters from Budget: with
+	 * bWholeMustFit only when they are left (else OverBudget), without it always.
 	 *
 	 * Each scalar type is read with its own C++ type: FVtValue::Get<T> of a T the value does not hold raises a USD
 	 * coding error and returns a default T, so a float read as a double comes back 0. The type name is the
 	 * demangled C++ type of the held value ("float", "pxr_half::half", "__int64", "TfToken"), not the Sdf
 	 * value type name; both spellings are accepted, as the engine's own USD metadata translation does. Every other
-	 * type goes through the engine's UsdToUnreal::ConvertValue, which dispatches on the held type itself.
+	 * type but a dictionary and a path expression goes through the engine's UsdToUnreal::ConvertValue, which dispatches on
+	 * the held type itself.
 	 */
-	inline bool VtValueToJson(const UE::FVtValue& Value, FJsonObject& Out)
+	inline EUsdJsonRead UsdValueToJson(const UE::FVtValue& Value, FJsonObject& Out, FUsdJsonBudget& Budget, int32 Depth, bool bWholeMustFit)
 	{
 		if (Value.IsEmpty())
 		{
 			Out.SetStringField(TEXT("type"), TEXT("empty"));
 			Out.SetField(TEXT("value"), MakeShared<FJsonValueNull>());
-			return true;
+			return EUsdJsonRead::Converted;
 		}
 
 		const FString TypeName = Value.GetTypeName();
 		Out.SetStringField(TEXT("type"), TypeName);
 
+		// A value sent whole and the characters it takes.
+		TSharedPtr<FJsonValue> Whole;
+		int32 Cost = UsdJsonNumberCost(Depth);
+		const auto SetText = [&Whole, &Cost, Depth](const FString& Text)
+		{
+			Whole = MakeShared<FJsonValueString>(Text);
+			Cost = UsdJsonStringCost(Text) + 2 * Depth;
+		};
 		if (TypeName == TEXT("bool"))
 		{
-			Out.SetBoolField(TEXT("value"), Value.Get<bool>());
+			Whole = MakeShared<FJsonValueBoolean>(Value.Get<bool>());
 		}
 		else if (TypeName == TEXT("unsigned char") || TypeName == TEXT("uchar"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<uint8>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<uint8>()));
 		}
 		else if (TypeName == TEXT("int") || TypeName == TEXT("int32"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<int32>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<int32>()));
 		}
 		else if (TypeName == TEXT("unsigned int") || TypeName == TEXT("uint"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<uint32>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<uint32>()));
 		}
 		else if (TypeName == TEXT("__int64") || TypeName == TEXT("int64"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<int64>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<int64>()));
 		}
 		else if (TypeName == TEXT("unsigned __int64") || TypeName == TEXT("uint64"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<uint64>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<uint64>()));
 		}
 		else if (TypeName == TEXT("pxr_half::half") || TypeName == TEXT("half"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<FFloat16>().GetFloat()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<FFloat16>().GetFloat()));
 		}
 		else if (TypeName == TEXT("float"))
 		{
-			Out.SetNumberField(TEXT("value"), static_cast<double>(Value.Get<float>()));
+			Whole = MakeShared<FJsonValueNumber>(static_cast<double>(Value.Get<float>()));
 		}
 		else if (TypeName == TEXT("double"))
 		{
-			Out.SetNumberField(TEXT("value"), Value.Get<double>());
+			Whole = MakeShared<FJsonValueNumber>(Value.Get<double>());
 		}
 		else if (TypeName == TEXT("SdfTimeCode") || TypeName == TEXT("timecode"))
 		{
-			Out.SetNumberField(TEXT("value"), Value.Get<FSdfTimeCode>().Time);
+			Whole = MakeShared<FJsonValueNumber>(Value.Get<FSdfTimeCode>().Time);
 		}
 		else if (TypeName == TEXT("SdfAssetPath") || TypeName == TEXT("asset"))
 		{
 			// The authored path; the string form of the value would wrap it in @ delimiters.
-			Out.SetStringField(TEXT("value"), Value.Get<FSdfAssetPath>().AssetPath);
+			SetText(Value.Get<FSdfAssetPath>().AssetPath);
 		}
 		else if (TypeName == TEXT("string") || TypeName == TEXT("TfToken") || TypeName == TEXT("token"))
 		{
 			// Get<FString> reads a string as it is and writes any other value, a token included, in its
 			// USD string form, so a token keeps its exact case (an FName would not).
-			Out.SetStringField(TEXT("value"), Value.Get<FString>());
+			SetText(Value.Get<FString>());
+		}
+		else if (TypeName == TEXT("SdfPathExpression"))
+		{
+			// The engine has no conversion for a path expression; Get<FString> writes it in its USD text form, the expression.
+			SetText(Value.Get<FString>());
+		}
+		else if (TypeName == TEXT("VtDictionary"))
+		{
+			UsdDictionaryToJson(Value, Out, Budget, Depth);
+			return EUsdJsonRead::Converted;
 		}
 		else
 		{
@@ -945,13 +1629,18 @@ namespace UEAgent::UsdCommon
 				}
 			}
 
-			// Vectors, quaternions, matrices and arrays: the engine converts the value into one entry of components per
-			// value (per element of an array). A non-empty ExtraTypeInfo marks a list op (apiSchemas, references...),
-			// whose entries are its six item lists rather than values, so it is left unconverted.
+			// Vectors, quaternions, matrices, Sdf enums and arrays: the engine converts the value into one entry of
+			// components per value (per element of an array). A non-empty ExtraTypeInfo marks a list op (apiSchemas,
+			// references...), whose entries are its six item lists rather than values.
 			UsdUtils::FConvertedVtValue Converted;
-			if (!UsdToUnreal::ConvertValue(Head.IsEmpty() ? Value : Head, Converted) || Converted.bIsEmpty || !Converted.ExtraTypeInfo.IsEmpty())
+			if (!UsdToUnreal::ConvertValue(Head.IsEmpty() ? Value : Head, Converted) || Converted.bIsEmpty)
 			{
-				return false;
+				return UsdNoJsonForm(Out, TypeName, Budget);
+			}
+			if (!Converted.ExtraTypeInfo.IsEmpty())
+			{
+				UsdListOpToJson(Value, Converted, Out, Budget, Depth);
+				return EUsdJsonRead::Converted;
 			}
 			if (Converted.bIsArrayValued)
 			{
@@ -967,38 +1656,135 @@ namespace UEAgent::UsdCommon
 				for (; Shown < Limit; ++Shown)
 				{
 					const UsdUtils::FConvertedVtValueEntry& Entry = Converted.Entries[Shown];
+					int32 EntryCost = Entry.Num() * UsdJsonNumberCost(Depth);
 					if (bStrings)
 					{
-						int32 Cost = 0;
+						EntryCost = 0;
 						for (const UsdUtils::FConvertedVtValueComponent& Component : Entry)
 						{
 							if (const FString* Text = Component.TryGet<FString>())
 							{
-								Cost += UsdJsonStringCost(*Text);
+								EntryCost += UsdJsonStringCost(*Text) + 2 * Depth;
 							}
 						}
-						if (StringChars + Cost > MaxArrayStringCharsRead)
+						if (StringChars + EntryCost > MaxArrayStringCharsRead)
 						{
 							break;
 						}
-						StringChars += Cost;
 					}
+					if (!Budget.Take(EntryCost))
+					{
+						break;
+					}
+					StringChars += EntryCost;
 					Items.Add(UsdEntryToJson(Entry, Converted.SourceType));
 				}
 				Out.SetArrayField(TEXT("value"), Items);
 				Out.SetNumberField(TEXT("length"), Total);
 				Out.SetBoolField(TEXT("truncated"), Shown < Total);
+				return EUsdJsonRead::Converted;
 			}
-			else if (Converted.Entries.Num() == 1)
+			if (Converted.Entries.Num() != 1)
 			{
-				Out.SetField(TEXT("value"), UsdEntryToJson(Converted.Entries[0], Converted.SourceType));
+				return UsdNoJsonForm(Out, TypeName, Budget);
 			}
-			else
+			Whole = UsdEntryToJson(Converted.Entries[0], Converted.SourceType);
+			Cost = FMath::Max(1, Converted.Entries[0].Num()) * UsdJsonNumberCost(Depth);
+		}
+
+		if (bWholeMustFit)
+		{
+			if (!Budget.Take(Cost))
 			{
-				return false;
+				return EUsdJsonRead::OverBudget;
 			}
 		}
-		return true;
+		else
+		{
+			Budget.Spend(Cost);
+		}
+		Out.SetField(TEXT("value"), Whole);
+		return EUsdJsonRead::Converted;
+	}
+
+	/**
+	 * Writes Value into Out as UsdValueToJson does for the one value of a reply, with the whole budget: a scalar is
+	 * always sent. True, unless its type has no JSON form (a null "value" and a "note").
+	 */
+	inline bool VtValueToJson(const UE::FVtValue& Value, FJsonObject& Out)
+	{
+		FUsdJsonBudget Budget;
+		return UsdValueToJson(Value, Out, Budget, 0, false) != EUsdJsonRead::NoJsonForm;
+	}
+
+	/**
+	 * The type the held Value is authored back in, spelled as VtValueForMetadataType takes it: a scalar, vector,
+	 * quaternion, matrix or array as its Sdf value type ("token", "double3", "string[]"), a dictionary as "dictionary", a
+	 * list op the engine converts as its held type name ("SdfListOp<TfToken>"). Empty for an empty value or any other
+	 * type (an Sdf enum such as SdfSpecifier, a path expression).
+	 */
+	inline FString UsdDeclaredTypeOf(const UE::FVtValue& Value)
+	{
+		if (Value.IsEmpty())
+		{
+			return FString();
+		}
+		const FString Canonical = CanonicalUsdTypeName(Value.GetTypeName());
+		if (Canonical.Equals(TEXT("dictionary"), ESearchCase::CaseSensitive))
+		{
+			return Canonical;
+		}
+		if (Canonical.StartsWith(TEXT("SdfListOp<"), ESearchCase::IgnoreCase))
+		{
+			// Only a list op the engine converts can be written back; its ExtraTypeInfo is the name the converters key on.
+			UsdUtils::FConvertedVtValue Converted;
+			return UsdToUnreal::ConvertValue(Value, Converted) ? Converted.ExtraTypeInfo : FString();
+		}
+		FString Base = Canonical;
+		Base.RemoveFromEnd(TEXT("[]"));
+		if (FindUsdValueShape(Base) != nullptr)
+		{
+			return Canonical;
+		}
+		// The Sdf value type USD finds for the held type, for a C++ name CanonicalUsdTypeName has no spelling for.
+		const FString Implied = UsdUtils::GetImpliedTypeName(Value).ToLower();
+		FString ImpliedBase = Implied;
+		ImpliedBase.RemoveFromEnd(TEXT("[]"));
+		return !ImpliedBase.IsEmpty() && FindUsdValueShape(ImpliedBase) != nullptr ? Implied : FString();
+	}
+
+	/**
+	 * The type USD registers for a standard prim metadata field, which a prim resolves to nothing until it is authored
+	 * (no prim definition gives these fields a fallback): the Sdf prim fields as SdfPrimSpec types them (kind, typeName
+	 * and symmetryFunction tokens; comment, documentation, displayName, prefix, suffix and symmetricPeer strings; active,
+	 * hidden and instanceable bools; the dictionaries; the list ops of tokens, strings, paths and arcs) and the prim
+	 * fields the shipped plugins register (apiSchemas, sdrMetadata, uiHints, payloadAssetDependencies). Fields the
+	 * converters cannot author (specifier and permission enums, primOrder and propertyOrder token vectors, int list ops)
+	 * are left out. Empty for any other field.
+	 */
+	inline FString UsdWellKnownMetadataType(const FString& Key)
+	{
+		static const TCHAR* const Fields[][2] = {
+			{ TEXT("active"), TEXT("bool") }, { TEXT("hidden"), TEXT("bool") }, { TEXT("instanceable"), TEXT("bool") },
+			{ TEXT("kind"), TEXT("token") }, { TEXT("typeName"), TEXT("token") }, { TEXT("symmetryFunction"), TEXT("token") },
+			{ TEXT("comment"), TEXT("string") }, { TEXT("documentation"), TEXT("string") }, { TEXT("displayName"), TEXT("string") },
+			{ TEXT("prefix"), TEXT("string") }, { TEXT("suffix"), TEXT("string") }, { TEXT("symmetricPeer"), TEXT("string") },
+			{ TEXT("customData"), TEXT("dictionary") }, { TEXT("assetInfo"), TEXT("dictionary") }, { TEXT("clips"), TEXT("dictionary") },
+			{ TEXT("prefixSubstitutions"), TEXT("dictionary") }, { TEXT("suffixSubstitutions"), TEXT("dictionary") },
+			{ TEXT("symmetryArguments"), TEXT("dictionary") }, { TEXT("sdrMetadata"), TEXT("dictionary") },
+			{ TEXT("uiHints"), TEXT("dictionary") }, { TEXT("payloadAssetDependencies"), TEXT("asset[]") },
+			{ TEXT("apiSchemas"), TEXT("SdfListOp<TfToken>") }, { TEXT("clipSets"), TEXT("SdfListOp<string>") },
+			{ TEXT("variantSetNames"), TEXT("SdfListOp<string>") }, { TEXT("references"), TEXT("SdfListOp<SdfReference>") },
+			{ TEXT("payload"), TEXT("SdfListOp<SdfPayload>") }, { TEXT("inheritPaths"), TEXT("SdfListOp<SdfPath>") },
+			{ TEXT("specializes"), TEXT("SdfListOp<SdfPath>") } };
+		for (const auto& Field : Fields)
+		{
+			if (Key.Equals(Field[0], ESearchCase::CaseSensitive))
+			{
+				return Field[1];
+			}
+		}
+		return FString();
 	}
 
 	/**

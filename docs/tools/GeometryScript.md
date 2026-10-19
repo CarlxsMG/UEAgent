@@ -410,14 +410,14 @@ Read the per-triangle MaterialID distribution of a DynamicMeshActor's live dynam
 
 *Read-only.*
 
-Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), so each hole or open rim counts once and a closed mesh gives 0. Computed on a transient dynamic-mesh copy with build settings applied; read-only. A chain the engine cannot close into a loop, at a bowtie vertex, is left out of the count, and ambiguous_topology does not flag it: with the engine's default loop settings it stays false. lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry, as a reduced one, is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or one with no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
+Count the open border loops of a UStaticMesh asset: closed chains of boundary edges (edges with one adjacent triangle), one per hole or open rim, 0 for a closed mesh. Read-only, on a transient dynamic-mesh copy with build settings applied. A chain the engine cannot close into a loop, as across mismatched winding, counts in open_border_spans instead. ambiguous_topology is true when there is a span or a boundary vertex with more than two boundary edges (a bowtie, split as the engine chooses). lod_index picks the LOD (default 0), and one the mesh lacks is an error; a LOD without source geometry is read from its render data, split at UV and normal seams (read_render_data). A path that is not a static mesh, or has no geometry, is an error. Yes or no: get_mesh_is_closed; a DynamicMeshActor in the level: get_num_open_border_edges.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `static_mesh_path` | string | yes | Content path to the UStaticMesh asset |
 | `lod_index` | number | no | LOD to read (default 0), from 0 to the mesh's last LOD, echoed as requested_lod_index; a LOD the mesh does not have is an error and nothing is read. |
 
-**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, ambiguous_topology }`
+**Returns:** `{ static_mesh_path, lod_index, requested_lod_index, read_hi_res_source, read_render_data, open_border_loops, open_border_spans, ambiguous_topology }`
 
 ## `get_mesh_selection_bounds`
 

@@ -1,5 +1,6 @@
 #include "Mcp/McpCommandFamilies.h"
 #include "Commands/Common/McpCommonUtils.h"
+#include "Commands/Asset/AssetCommandHelpers.h"  // MapPathTooLongForExternalPackages (save_level, load_level)
 #include "Editor.h"
 #include "EditorViewportClient.h"
 #include "LevelEditorViewport.h"
@@ -685,9 +686,9 @@ TSharedPtr<FJsonObject> HandleFindActorsByName(const TSharedPtr<FJsonObject>& Pa
 // MCP:spawn_actor - Place a BUILT-IN engine actor (StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor) into the editor level or a live PIE world, at an optional location/rotation/scale, and return the created actor's JSON. Only these types: for a Blueprint class use spawn_blueprint_actor. Refuses when an actor of that name already exists, and the spawn is undoable. It creates the actor in MEMORY only -- save_level (with the .umap writable) is what puts it on disk. WARNING: with 2+ PIE clients world='pie' can land in the CLIENT world, producing an actor the authority never sees -- ask for world='server' instead, and check the reply's world_package/net_mode to see where the actor actually went.
 //   @param type - One of StaticMeshActor, PointLight, SpotLight, DirectionalLight, CameraActor. Anything else is a clean error; Blueprints go through spawn_blueprint_actor.
 //   @param name - Internal name for the new actor; must be unused in the target world or the call is refused.
-//   @param location - Optional world location, ARRAY form only: [x, y, z]. An object or a shorter array is silently read as the origin.
+//   @param location - Optional world location, ARRAY form only: [x, y, z]; the origin when omitted. Any other value (an object, another length) is an error and nothing is spawned.
 //   @param rotation - Optional world rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form. Defaults to zero.
-//   @param scale - Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; a malformed value silently becomes 0,0,0 (an invisible actor).
+//   @param scale - Optional world scale, ARRAY form only: [x, y, z]. Defaults to 1,1,1; any other value (an object, another length) is an error and nothing is spawned.
 //   @param static_mesh - Optional UStaticMesh asset path, only honoured for type=StaticMeshActor (e.g. /Engine/BasicShapes/Cube).
 //   @param world - Optional world selector for WHERE the actor is spawned: absent/'editor' (default) | 'pie' (ambiguous: PlayWorld, else the first PIE context) | 'game' (alias of 'pie') | 'server' (the PIE world with authority -- what you want for anything replicated) | 'client' | 'pie:N'. Case-insensitive; an unrecognised value is a clean error listing the worlds present, never a silent spawn into the editor world.
 //   @returns { actor JSON via DescribeActorObject: name, class, location, rotation, scale, plus world: string (the normalized selector that resolved), world_name: string, world_package: string (the UEDPIE_N prefix lives HERE), world_type: string, net_mode: string, pie_instance: int }
@@ -876,9 +877,9 @@ TSharedPtr<FJsonObject> HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)
 // MCP:set_actor_transform - Move, rotate and/or scale ONE actor (omitted components are left as they are) and return the actor's re-read transform plus the identity of the world that was written. Undoable, and it calls Modify() first -- which matters, because moving an actor from Python does NOT dirty its OFPA package and then save_level reports success while writing nothing. Takes a `world` selector, so it also reaches a LIVE PIE pawn (an editor-only lookup would answer "Actor not found" for an actor that exists in another world). Use batch_set_actor_transform for many actors, place_actor_on_terrain to drop one onto the landscape.
 //   @param name - Actor's internal name (GetName) or editor label (GetActorLabel), case-insensitive whole-string match.
 //   @param world - Optional: "editor" (default) | "pie" | "server" | "client" | "pie:N". In co-op the authoritative pawn lives on the server, and a move written to the client world will be corrected by replication.
-//   @param location - Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; an object or a shorter array is silently read as the origin, which teleports the actor to 0,0,0.
+//   @param location - Optional new WORLD location, ARRAY form only: [x, y, z]. Absolute, not a delta; any other value (an object, another length) is an error and the actor is not touched.
 //   @param rotation - Optional new WORLD rotation as the array [pitch, yaw, roll] -- note index 2 is ROLL, not yaw -- or, unambiguously, the object {"pitch":..,"yaw":..,"roll":..}, which is the recommended form.
-//   @param scale - Optional new WORLD scale, ARRAY form only: [x, y, z]. A malformed value silently becomes 0,0,0 and the actor disappears.
+//   @param scale - Optional new WORLD scale, ARRAY form only: [x, y, z]. Any other value (an object, another length) is an error and the actor is not touched.
 //   @returns { actor JSON via DescribeActorObject, transform RE-READ off the actor after the write }
 
 TSharedPtr<FJsonObject> HandleSetActorTransform(const TSharedPtr<FJsonObject>& Params)
@@ -1209,7 +1210,7 @@ TSharedPtr<FJsonObject> HandleCopyActors(const TSharedPtr<FJsonObject>& Params)
 }
 
 // MCP:paste_actors - Drop whatever copy_actors left on the editor clipboard into the current level (edactPasteSelected), optionally re-centring the whole group on a world location while KEEPING each actor's relative offset -- that is the point of the copy/paste pair versus duplicate_actor. The pasted actors end up selected and are returned with their new names and transforms. Editor world only; they live in memory until save_level writes the .umap.
-//   @param location - Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; a malformed array silently means the origin.
+//   @param location - Optional world point to centre the pasted group on, ARRAY form only [x, y, z] (the group's average is moved there, each actor's offset preserved). Omit to paste where the originals were; any other value (an object, another length) is an error and nothing is pasted.
 //   @returns { pasted_actors: [actor JSON with the new auto-assigned names], pasted_count: int, success: bool }
 
 TSharedPtr<FJsonObject> HandlePasteActors(const TSharedPtr<FJsonObject>& Params)
@@ -1364,6 +1365,18 @@ TSharedPtr<FJsonObject> HandleSaveLevel(const TSharedPtr<FJsonObject>& Params)
         {
             TargetDiskPath = LevelFilename;
             FPackageName::TryConvertFilenameToLongPackageName(LevelFilename, TargetPackageName);
+        }
+    }
+
+    // The SaveAs creates the target package and names the copied world's objects after it (and, for a level whose
+    // actors live in their own packages, one package per actor). filename is not checked against the FName limit
+    // before the handler runs (it may be a disk path), so a name past that limit is refused here: the save would
+    // abort the editor.
+    if (!TargetPackageName.IsEmpty())
+    {
+        if (const FString TooLong = AssetCommandHelpers::MapPathTooLongForExternalPackages(TargetPackageName); !TooLong.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TooLong);
         }
     }
 
@@ -1871,6 +1884,17 @@ TSharedPtr<FJsonObject> HandleLoadLevel(const TSharedPtr<FJsonObject>& Params)
     if (!FEditorFileUtils::IsValidMapFilename(LevelFilename, InvalidReason))
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("Invalid map filename: %s"), *InvalidReason.ToString()));
+    }
+
+    // filename is not checked against the FName limit before the handler runs (it may be a disk path), and the load
+    // makes an FName of the map's package name. A map is also refused at a path too long for the objects the editor
+    // names after it: it would abort as soon as an actor or an actor folder is added to the world.
+    if (!TargetPackageName.IsEmpty())
+    {
+        if (const FString TooLong = AssetCommandHelpers::MapPathTooLongForExternalPackages(TargetPackageName); !TooLong.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TooLong);
+        }
     }
 
     bool bForce = false;

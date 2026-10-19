@@ -497,6 +497,13 @@ TSharedPtr<FJsonObject> HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Para
     // The copy is created next to the original, under the new name.
     const FString Folder = FPaths::GetPath(Source.PackageName.ToString());
     const FString CopyObjectPath = (Folder / CopyName) + TEXT(".") + CopyName;
+    // The copy's package joins the folder to new_asset_name, and DuplicateAsset aborts the editor on one past the FName
+    // limit, or on the path of an object it copies under the copy's object path: the original's deepest object is
+    // measured (a map's actors are packaged after its package name too, which the floor covers).
+    if (const FString TooLong = AssetCommandHelpers::CopiedObjectPathsTooLong(Original, CopyObjectPath); !TooLong.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TooLong);
+    }
     UObject* Copy = UEAgentManagementCommandsImpl::AssetTools().DuplicateAsset(CopyName, Folder, Original);
 
     TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
@@ -592,6 +599,21 @@ TSharedPtr<FJsonObject> HandleDuplicateDirectory(const TSharedPtr<FJsonObject>& 
     if (SourceAssets.Num() == 0)
     {
         return mcp_common::MakeErrorReply(FString::Printf(TEXT("No assets found under source_path: %s"), *SourcePath));
+    }
+
+    // Each copy's package joins dest_path to the asset's path under source_path, and DuplicateAsset aborts the editor on
+    // one past the FName limit, or on the path of an object it copies under the copy's object path: the whole set is
+    // checked before anything is copied, each asset by its measured deepest object (pass 1 loads them all anyway).
+    for (const FAssetData& AD : SourceAssets)
+    {
+        const FString SrcPkg = AD.PackageName.ToString();
+        if (!SrcPkg.StartsWith(SourcePath)) { continue; }
+        const FString DestPkg = DestPath + SrcPkg.Mid(SourcePath.Len());
+        if (const FString TooLong = AssetCommandHelpers::CopiedObjectPathsTooLong(AD.GetAsset(),
+                DestPkg + TEXT(".") + AD.AssetName.ToString()); !TooLong.IsEmpty())
+        {
+            return mcp_common::MakeErrorReply(TooLong);
+        }
     }
 
     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
@@ -718,6 +740,13 @@ TSharedPtr<FJsonObject> HandleRenameAsset(const TSharedPtr<FJsonObject>& Params)
     const FString Folder = FPaths::GetPath(OriginalPackage);
     const FString NewPackage = Folder / NewName;
     const FString NewObjectPath = NewPackage + TEXT(".") + NewName;
+    // The new package joins the folder to new_asset_name, and the rename aborts the editor on one past the FName limit,
+    // or on the new path of an object it carries under the new object path: the asset's deepest object is measured (a
+    // map's actors are repackaged after its package name too, which the floor covers).
+    if (const FString TooLong = AssetCommandHelpers::CopiedObjectPathsTooLong(Original, NewObjectPath); !TooLong.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TooLong);
+    }
 
     TArray<FAssetRenameData> Renames;
     Renames.Emplace(MakeWeakObjectPtr(Original), Folder, NewName);
@@ -785,6 +814,11 @@ TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
     const TArray<FString> ReadOnlyRoots = mcp_common::ParseReadonlyRoots(Params);
     const FString SourcePackageName = Source.PackageName.ToString();
     const FString DestPackageName = TargetFolder / FPaths::GetBaseFilename(SourcePackageName);
+    // The new package joins new_folder_path to the asset's name, and the readback of the move aborts the editor on one
+    // past the FName limit; the move itself aborts on the new path of an object it moves (named after the new object
+    // path; a map's actors are repackaged after its package name too, which that limit covers). The asset's measured
+    // depth is checked once it is loaded, below.
+    if (TSharedPtr<FJsonObject> Invalid = mcp_common::InvalidPackageNameReply(DestPackageName)) { return Invalid; }
     const bool bSourceProtected = mcp_common::IsUnderReadOnlyRoot(SourcePackageName, ReadOnlyRoots);
     const bool bDestProtected = mcp_common::IsUnderReadOnlyRoot(DestPackageName, ReadOnlyRoots);
     if (bSourceProtected || bDestProtected)
@@ -802,6 +836,13 @@ TSharedPtr<FJsonObject> HandleMoveAsset(const TSharedPtr<FJsonObject>& Params)
     if (Original == nullptr)
     {
         return UEAgentManagementCommandsImpl::AssetLoadFailedReply(SourcePath);
+    }
+    // The move carries the asset's objects under the new object path: its deepest object, measured now that it is
+    // loaded, must stay under the FName limit there.
+    if (const FString TooLong = AssetCommandHelpers::CopiedObjectPathsTooLong(Original,
+            DestPackageName + TEXT(".") + Source.AssetName.ToString()); !TooLong.IsEmpty())
+    {
+        return mcp_common::MakeErrorReply(TooLong);
     }
 
     // Modal pre-check -- identical to rename_asset's (same engine code path underneath).

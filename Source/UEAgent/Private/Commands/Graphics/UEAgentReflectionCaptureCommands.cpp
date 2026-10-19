@@ -266,7 +266,7 @@ TSharedPtr<FJsonObject> HandleSpawnBoxReflectionCapture(const TSharedPtr<FJsonOb
 }
 
 // MCP:spawn_scene_capture_2d - Spawn a SceneCapture2D actor in the editor world (also while PIE runs, never into PIE) at location and rotation, in one undo step; the level is marked dirty but not saved. Each call spawns another actor (not idempotent) under the engine default label: actor_name is that label, actor_internal_name the object name to address it by later. A fresh capture has no render target, so has_render_target is false until one is assigned. Set its TextureTarget, capture source, projection and FOV with set_scene_capture_2d_properties (a target comes from create_render_target_2d), read them back with get_scene_capture_2d_properties. A reflection probe is spawn_sphere_reflection_capture or spawn_box_reflection_capture; any other actor class: spawn_actor.
-//   @param location - Optional [X, Y, Z] world location; missing or shorter than three numbers means the origin
+//   @param location - Optional [X, Y, Z] world location; missing means the origin, and any other value is an error and nothing is spawned
 //   @param rotation - Optional world rotation in degrees, as [Pitch, Yaw, Roll] or {"pitch", "yaw", "roll"} by name (defaults to zero)
 //   @returns { actor_name: string, actor_internal_name: string, actor_class: string, has_component: bool, has_render_target: bool, spawned: bool }
 

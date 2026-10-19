@@ -841,6 +841,51 @@ namespace mcp_common
                 TEXT("an FName, which holds at most %d characters (the engine aborts the editor on a longer one). Use a shorter ")
                 TEXT("folder or asset name."), *PackageName.Left(64), PackageLength, NAME_SIZE - 1);
         }
+        // The objects inside the asset are named after its object path, and the transaction buffer makes an FName of the
+        // full path of each one it records: their paths, not the package name, reach the limit first.
+        FString AssetName;
+        int32 Dot = INDEX_NONE;
+        if (PackageName.FindChar(TEXT('.'), Dot))
+        {
+            AssetName = PackageName.Mid(Dot + 1);
+            // A subobject path ("Asset:Sub", "Asset.Sub") is measured by its asset.
+            int32 Cut = AssetName.Len();
+            for (int32 Index = 0; Index < AssetName.Len(); ++Index)
+            {
+                if (AssetName[Index] == TEXT(':') || AssetName[Index] == TEXT('.'))
+                {
+                    Cut = Index;
+                    break;
+                }
+            }
+            AssetName.LeftInline(Cut);
+        }
+        else
+        {
+            AssetName = FPackageName::GetShortName(PackageName);
+        }
+        const int32 ObjectPathLength = PackageLength + 1 + AssetName.Len();
+        if (ObjectPathLength + ObjectPathSubobjectMargin >= NAME_SIZE)
+        {
+            return FString::Printf(TEXT("Invalid asset path '%s...': its object path (package.asset) is %d characters long, and the ")
+                TEXT("engine makes an FName of the path of each object it creates inside the asset, up to %d characters longer (a ")
+                TEXT("state machine of an anim blueprint, an actor and its component in a World Partition map, a sequence's track and ")
+                TEXT("section); an FName holds at most %d characters and the engine aborts the editor on a longer one. The longest ")
+                TEXT("object path accepted is %d. Use a shorter folder or asset name."),
+                *PackageName.Left(64), ObjectPathLength, ObjectPathSubobjectMargin, NAME_SIZE - 1,
+                NAME_SIZE - 1 - ObjectPathSubobjectMargin);
+        }
+        if (ObjectPathLength + AssetName.Len() + NamedSubobjectPathMargin >= NAME_SIZE)
+        {
+            return FString::Printf(TEXT("Invalid asset path '%s...': its object path (package.asset) is %d characters long and its ")
+                TEXT("asset name %d, and the engine names some objects inside an asset after the asset too ('<object path>:<asset>")
+                TEXT("EditorOnlyData' in a material, '<object path>:PersistentLevel.<asset>...' for a map's level blueprint), up to the ")
+                TEXT("asset name plus %d characters past the object path; an FName holds at most %d characters and the engine aborts ")
+                TEXT("the editor on a longer one. With this asset name the longest object path accepted is %d. Use a shorter folder ")
+                TEXT("or asset name."),
+                *PackageName.Left(64), ObjectPathLength, AssetName.Len(), NamedSubobjectPathMargin, NAME_SIZE - 1,
+                NAME_SIZE - 1 - NamedSubobjectPathMargin - AssetName.Len());
+        }
         return FString();
     }
 
@@ -3296,6 +3341,74 @@ namespace mcp_common
             }
         }
         return Color;
+    }
+
+    TSharedPtr<FJsonObject> ReadJsonLinearColor(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key,
+        const FLinearColor& Default, FLinearColor& OutColor)
+    {
+        const TSharedPtr<FJsonValue> Value = Params.IsValid() ? Params->TryGetField(Key) : nullptr;
+        if (!Value.IsValid() || Value->IsNull())
+        {
+            OutColor = Default;
+            return nullptr;
+        }
+
+        // A channel is stored as a float: AsNumber would lex a string, read a bool as 0 or 1 and anything else as 0,
+        // and a number past the float range would become infinite.
+        auto IsChannel = [](const TSharedPtr<FJsonValue>& Item)
+        {
+            return Item.IsValid() && Item->Type == EJson::Number && FMath::IsFinite(Item->AsNumber())
+                && FMath::Abs(Item->AsNumber()) <= static_cast<double>(TNumericLimits<float>::Max());
+        };
+        // What a value that is not a color, or an element that is not a channel, is.
+        auto Describe = [](const TSharedPtr<FJsonValue>& Item) -> FString
+        {
+            if (!Item.IsValid() || Item->IsNull())
+            {
+                return TEXT("null");
+            }
+            switch (Item->Type)
+            {
+            case EJson::String:  return TEXT("a string");
+            case EJson::Boolean: return TEXT("a boolean");
+            case EJson::Object:  return TEXT("an object");
+            case EJson::Array:
+            {
+                const int32 Count = Item->AsArray().Num();
+                return FString::Printf(TEXT("an array of %d element%s"), Count, Count == 1 ? TEXT("") : TEXT("s"));
+            }
+            case EJson::Number:
+            {
+                const double Number = Item->AsNumber();
+                return FMath::IsNaN(Number) ? TEXT("NaN") : !FMath::IsFinite(Number) ? TEXT("an infinite number")
+                    : FMath::Abs(Number) > static_cast<double>(TNumericLimits<float>::Max()) ? TEXT("a number outside the float range")
+                    : TEXT("a number");
+            }
+            default:             return TEXT("a value of no JSON type");
+            }
+        };
+
+        FString Problem;
+        const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+        if (!Value->TryGetArray(Items) || !Items || Items->Num() < 3 || Items->Num() > 4)
+        {
+            Problem = TEXT("got ") + Describe(Value);
+        }
+        for (int32 Index = 0; Problem.IsEmpty() && Index < Items->Num(); ++Index)
+        {
+            if (!IsChannel((*Items)[Index]))
+            {
+                Problem = FString::Printf(TEXT("element %d is %s"), Index, *Describe((*Items)[Index]));
+            }
+        }
+        if (!Problem.IsEmpty())
+        {
+            return MakeErrorReply(FString::Printf(
+                TEXT("%s must be an array of 3 or 4 finite numbers, [R, G, B] or [R, G, B, A] (%s). Nothing was changed."),
+                Key, *Problem));
+        }
+        OutColor = LinearColorFromJsonArray(Items, Default);
+        return nullptr;
     }
 
     TSharedPtr<FJsonObject> BlueprintNotFoundReply(const FString& Requested)
